@@ -609,6 +609,25 @@ async fn start_terminal(server: &Server, link: &mut NodeLink, conversation_id: U
 }
 
 #[tokio::test]
+async fn a_returning_client_lists_the_open_terminals_with_what_they_printed() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    let terminal_id = start_terminal(&server, &mut link, conversation.id).await;
+    link.send(NodeToControl::TerminalOutput { terminal_id, data: "bHM=".into() }).await;
+
+    let listed = common::eventually("the output to be kept", || async {
+        let (_, open) = server.user.json(server.user.get(&format!("/api/v1/conversations/{}/terminals", conversation.id))).await;
+
+        (open[0]["scrollback"] == "bHM=").then_some(open)
+    })
+    .await;
+
+    assert_eq!(listed[0]["terminal_id"], json!(terminal_id));
+}
+
+#[tokio::test]
 async fn terminal_output_and_its_end_are_streamed_only_to_the_person_who_opened_it() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

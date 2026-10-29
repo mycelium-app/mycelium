@@ -5,7 +5,7 @@ enum class SplitDirection { Right, Down }
 sealed interface TerminalLayout {
     data class Pane(val id: String) : TerminalLayout
 
-    data class Split(val direction: SplitDirection, val first: TerminalLayout, val second: TerminalLayout) : TerminalLayout
+    data class Split(val direction: SplitDirection, val first: TerminalLayout, val second: TerminalLayout, val ratio: Float = 0.5f) : TerminalLayout
 }
 
 data class TerminalTab(val id: String, val number: Int, val layout: TerminalLayout, val focused: String) {
@@ -52,6 +52,8 @@ data class TerminalTabs(val tabs: List<TerminalTab> = emptyList(), val selected:
         return copy(tabs = tabs.map { if (it.id == tab.id) it.copy(layout = remaining, focused = focused) else it })
     }
 
+    fun resize(tabId: String, path: List<Boolean>, ratio: Float): TerminalTabs = copy(tabs = tabs.map { if (it.id == tabId) it.copy(layout = it.layout.withRatio(path, ratio)) else it })
+
     fun closeFocused(): TerminalTabs = current?.let { closePane(it.focused) } ?: this
 
     fun closeTab(tabId: String): TerminalTabs = tabs.firstOrNull { it.id == tabId }?.layout?.paneIds()?.fold(this) { result, pane -> result.closePane(pane) } ?: this
@@ -86,7 +88,40 @@ data class PaneRect(val x: Float, val y: Float, val width: Float, val height: Fl
 fun TerminalLayout.rects(within: PaneRect = PaneRect(0f, 0f, 1f, 1f)): Map<String, PaneRect> = when (this) {
     is TerminalLayout.Pane -> mapOf(id to within)
     is TerminalLayout.Split -> when (direction) {
-        SplitDirection.Right -> first.rects(within.copy(width = within.width / 2)) + second.rects(within.copy(x = within.x + within.width / 2, width = within.width / 2))
-        SplitDirection.Down -> first.rects(within.copy(height = within.height / 2)) + second.rects(within.copy(y = within.y + within.height / 2, height = within.height / 2))
+        SplitDirection.Right -> first.rects(within.copy(width = within.width * ratio)) + second.rects(within.copy(x = within.x + within.width * ratio, width = within.width * (1 - ratio)))
+        SplitDirection.Down -> first.rects(within.copy(height = within.height * ratio)) + second.rects(within.copy(y = within.y + within.height * ratio, height = within.height * (1 - ratio)))
+    }
+}
+
+data class Divider(val path: List<Boolean>, val direction: SplitDirection, val area: PaneRect, val ratio: Float)
+
+fun TerminalLayout.dividers(within: PaneRect = PaneRect(0f, 0f, 1f, 1f), path: List<Boolean> = emptyList()): List<Divider> = when (this) {
+    is TerminalLayout.Pane -> emptyList()
+    is TerminalLayout.Split -> {
+        val (firstArea, secondArea) = when (direction) {
+            SplitDirection.Right -> within.copy(width = within.width * ratio) to within.copy(x = within.x + within.width * ratio, width = within.width * (1 - ratio))
+            SplitDirection.Down -> within.copy(height = within.height * ratio) to within.copy(y = within.y + within.height * ratio, height = within.height * (1 - ratio))
+        }
+
+        listOf(Divider(path, direction, within, ratio)) + first.dividers(firstArea, path + false) + second.dividers(secondArea, path + true)
+    }
+}
+
+const val MinSplitRatio = 0.15f
+
+fun TerminalLayout.withRatio(path: List<Boolean>, ratio: Float): TerminalLayout = when (this) {
+    is TerminalLayout.Pane -> this
+    is TerminalLayout.Split -> when {
+        path.isEmpty() -> copy(ratio = ratio.coerceIn(MinSplitRatio, 1 - MinSplitRatio))
+        path.first() -> copy(second = second.withRatio(path.drop(1), ratio))
+        else -> copy(first = first.withRatio(path.drop(1), ratio))
+    }
+}
+
+data class TerminalWorkspace(val tabs: TerminalTabs = TerminalTabs(), val panes: Map<String, String> = emptyMap()) {
+    fun adopting(terminalIds: List<String>): TerminalWorkspace = terminalIds.fold(this) { workspace, terminalId ->
+        val opened = workspace.tabs.open()
+
+        workspace.copy(tabs = opened, panes = workspace.panes + (opened.current!!.focused to terminalId))
     }
 }

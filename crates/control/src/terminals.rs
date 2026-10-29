@@ -6,7 +6,8 @@ use crate::store::find_owned;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{ResizeTerminalRequest, StartTerminalRequest, StartTerminalResponse, TerminalInputRequest};
+use base64::Engine;
+use mycelium_proto::api::{OpenTerminal, ResizeTerminalRequest, StartTerminalRequest, StartTerminalResponse, TerminalInputRequest};
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
 use uuid::Uuid;
@@ -34,6 +35,19 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path
     }
 
     Ok(Json(StartTerminalResponse { terminal_id }))
+}
+
+pub async fn open(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<OpenTerminal>>> {
+    find_owned(&state.pool, id, user.id).await?;
+
+    let open = state
+        .hub
+        .terminals_of_conversation(id)
+        .into_iter()
+        .map(|terminal_id| OpenTerminal { terminal_id, scrollback: base64::engine::general_purpose::STANDARD.encode(state.hub.terminal_scrollback(terminal_id).unwrap_or_default()) })
+        .collect();
+
+    Ok(Json(open))
 }
 
 pub async fn input(State(state): State<AppState>, user: AuthUser, Path(terminal_id): Path<Uuid>, Json(request): Json<TerminalInputRequest>) -> ApiResult<StatusCode> {

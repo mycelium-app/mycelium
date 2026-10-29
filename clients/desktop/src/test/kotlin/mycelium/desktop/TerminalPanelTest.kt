@@ -3,6 +3,9 @@ package mycelium.desktop
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performClick
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.ImageComposeScene
@@ -39,6 +42,8 @@ private const val ConversationJson = """{"id":"c1","owner":"u","node_id":"n","ag
 class TerminalPanelTest {
     @get:Rule
     val scopes = TestScopes()
+    @get:Rule
+    val compose = createComposeRule()
     private val requests = CopyOnWriteArrayList<String>()
     private val bodies = CopyOnWriteArrayList<String>()
 
@@ -82,7 +87,21 @@ class TerminalPanelTest {
 
         repeat(10) { scene.render(it * 16_000_000L + 10_000_000_000L) }
         scene.close()
-        waitFor(null, "the terminal to stop") { requests.contains("DELETE /api/v1/terminals/t1") }
+        Thread.sleep(300)
+
+        assertTrue(!requests.contains("DELETE /api/v1/terminals/t1"), "leaving the panel must not stop the terminal")
+    }
+
+    @Test
+    fun closingATerminalExplicitlyStopsIt() {
+        val conversation = MyceliumJson.decodeFromString(Conversation.serializer(), ConversationJson)
+        val store = store()
+        compose.setContent { MyceliumTheme(true) { TerminalPanel(store, AppState(), conversation, Modifier.width(440.dp).fillMaxHeight()) } }
+
+        compose.waitUntil(5_000) { requests.any { it == "POST /api/v1/conversations/c1/terminal" } }
+        compose.onNodeWithContentDescription("Close terminal").performClick()
+
+        compose.waitUntil(5_000) { requests.contains("DELETE /api/v1/terminals/t1") }
     }
 
     @Test

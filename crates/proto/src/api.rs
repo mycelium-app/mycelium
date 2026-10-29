@@ -209,6 +209,12 @@ pub struct StartTerminalResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpenTerminal {
+    pub terminal_id: Uuid,
+    pub scrollback: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TerminalInputRequest {
     pub data: String,
 }

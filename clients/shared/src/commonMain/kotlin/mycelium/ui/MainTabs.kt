@@ -26,7 +26,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 
-class MainTab(val key: String, val title: String, val closeLabel: String? = null)
+class MainTab(val key: String, val title: String, val closeLabel: String? = null, val badge: MyIcon? = null, val badgeLabel: String? = null)
 
 @Composable
 fun MainTabStrip(tabs: List<MainTab>, selected: String, onSelect: (String) -> Unit, onClose: (String) -> Unit, groupLabel: String, modifier: Modifier = Modifier) {
@@ -58,7 +58,13 @@ fun MainTabStrip(tabs: List<MainTab>, selected: String, onSelect: (String) -> Un
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    Label(tab.title, style = if (on) Tokens.Type.UiStrong else Tokens.Type.Ui, color = if (on) colors.text else colors.textMuted, maxLines = 1)
+                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                        Label(tab.title, style = if (on) Tokens.Type.UiStrong else Tokens.Type.Ui, color = if (on) colors.text else colors.textMuted, maxLines = 1)
+
+                        if (tab.badge != null) {
+                            Icon(tab.badge, colors.statusWorking, Tokens.Size.IconSm, Modifier.semantics { contentDescription = tab.badgeLabel.orEmpty() })
+                        }
+                    }
                     Box(Modifier.width(Tokens.Space.S6).height(Tokens.Size.FocusRing).background(if (on) colors.text else Color.Transparent))
                 }
 

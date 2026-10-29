@@ -244,6 +244,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/git/town/sync", post(git::town_sync))
         .route("/api/v1/conversations/{id}/git/town/propose", post(git::town_propose))
         .route("/api/v1/conversations/{id}/terminal", post(terminals::start))
+        .route("/api/v1/conversations/{id}/terminals", get(terminals::open))
         .route("/api/v1/terminals/{terminal_id}/input", post(terminals::input))
         .route("/api/v1/terminals/{terminal_id}/resize", post(terminals::resize))
         .route("/api/v1/terminals/{terminal_id}", delete(terminals::stop))

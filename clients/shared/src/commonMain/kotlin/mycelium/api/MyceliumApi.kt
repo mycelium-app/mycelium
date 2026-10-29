@@ -218,6 +218,9 @@ class MyceliumApi(
     suspend fun startTerminal(conversationId: String, cols: Int, rows: Int): StartTerminalResponse =
         call("/conversations/$conversationId/terminal") { client.post(it) { authorise(); json(StartTerminalRequest(cols, rows)) } }.body()
 
+    suspend fun openTerminals(conversationId: String): List<OpenTerminal> =
+        call("/conversations/$conversationId/terminals") { client.get(it) { authorise() } }.body()
+
     suspend fun terminalInput(terminalId: String, data: String) {
         call("/terminals/$terminalId/input") { client.post(it) { authorise(); json(TerminalInputRequest(data)) } }
     }
