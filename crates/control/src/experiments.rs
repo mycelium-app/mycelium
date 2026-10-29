@@ -30,10 +30,11 @@ pub struct Experiments {
     pub memory_banks: bool,
     pub chat_across_groups: bool,
     pub voice: bool,
+    pub kubernetes_nodes: bool,
 }
 
 impl Experiments {
-    pub fn graduated(voice: bool) -> Self {
+    pub fn graduated(voice: bool, kubernetes_nodes: bool) -> Self {
         Self {
             tasks: true,
             workflows: true,
@@ -48,6 +49,7 @@ impl Experiments {
             memory_banks: true,
             chat_across_groups: true,
             voice,
+            kubernetes_nodes,
         }
     }
 
@@ -69,9 +71,10 @@ pub fn refusal(experiment: Experiment) -> ApiError {
 }
 
 pub async fn of(state: &AppState, owner: Uuid) -> ApiResult<Experiments> {
-    let voice = sqlx::query_scalar::<_, bool>("select experiment_voice from user_settings where owner = $1").bind(owner).fetch_optional(&state.pool).await?;
+    let settings = sqlx::query_as::<_, (bool, bool)>("select experiment_voice, experiment_kubernetes_nodes from user_settings where owner = $1").bind(owner).fetch_optional(&state.pool).await?;
+    let (voice, kubernetes_nodes) = settings.unwrap_or((false, false));
 
-    Ok(Experiments::graduated(voice.unwrap_or(false)))
+    Ok(Experiments::graduated(voice, kubernetes_nodes))
 }
 
 pub async fn get(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Experiments>> {
@@ -80,13 +83,14 @@ pub async fn get(State(state): State<AppState>, user: AuthUser) -> ApiResult<Jso
 
 pub async fn save(State(state): State<AppState>, user: AuthUser, Json(request): Json<Experiments>) -> ApiResult<Json<Experiments>> {
     user.require_full_access()?;
-    sqlx::query("insert into user_settings (owner, experiment_voice) values ($1, $2) on conflict (owner) do update set experiment_voice = excluded.experiment_voice")
+    sqlx::query("insert into user_settings (owner, experiment_voice, experiment_kubernetes_nodes) values ($1, $2, $3) on conflict (owner) do update set experiment_voice = excluded.experiment_voice, experiment_kubernetes_nodes = excluded.experiment_kubernetes_nodes")
         .bind(user.id)
         .bind(request.voice)
+        .bind(request.kubernetes_nodes)
         .execute(&state.pool)
         .await?;
 
-    Ok(Json(Experiments::graduated(request.voice)))
+    Ok(Json(Experiments::graduated(request.voice, request.kubernetes_nodes)))
 }
 
 fn gated_by(route: &str) -> Option<Experiment> {

@@ -2,8 +2,8 @@ use crate::common::Server;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-fn flags(voice: bool) -> Value {
-    json!({"tasks": true, "workflows": true, "instructions": true, "details": true, "subagents": true, "walkthrough": true, "move_chats": true, "groups": true, "continue_elsewhere": true, "assistants": true, "memory_banks": true, "chat_across_groups": true, "voice": voice})
+fn flags(voice: bool, kubernetes_nodes: bool) -> Value {
+    json!({"tasks": true, "workflows": true, "instructions": true, "details": true, "subagents": true, "walkthrough": true, "move_chats": true, "groups": true, "continue_elsewhere": true, "assistants": true, "memory_banks": true, "chat_across_groups": true, "voice": voice, "kubernetes_nodes": kubernetes_nodes})
 }
 
 async fn mcp(server: &Server, token: &str, method: &str, params: Value) -> (u16, Value) {
@@ -16,15 +16,15 @@ async fn mcp(server: &Server, token: &str, method: &str, params: Value) -> (u16,
 async fn voice_is_off_by_default_is_isolated_per_person_and_survives_a_restart() {
     let server = Server::start().await;
     let (status, defaults) = server.user.json(server.user.get("/api/v1/experiments")).await;
-    assert_eq!((status, defaults), (200, flags(false)));
+    assert_eq!((status, defaults), (200, flags(false, false)));
     let other = server.second_user("other@example.com").await;
     let (status, saved) = server.user.json(server.user.put("/api/v1/experiments").json(&json!({"voice": true}))).await;
     let (_, theirs) = other.json(other.get("/api/v1/experiments")).await;
-    assert_eq!((status, saved), (200, flags(true)));
-    assert_eq!(theirs, flags(false));
+    assert_eq!((status, saved), (200, flags(true, false)));
+    assert_eq!(theirs, flags(false, false));
     let restarted = Server::start_on(server.database_url.clone(), |_| {}).await;
     let (_, persisted) = restarted.user.json(restarted.user.get("/api/v1/experiments")).await;
-    assert_eq!(persisted, flags(true));
+    assert_eq!(persisted, flags(true, false));
 }
 
 #[tokio::test]
@@ -68,4 +68,17 @@ async fn multi_step_workflows_can_be_read_without_any_experiment() {
     let (status, read) = mcp(&server, &token, "tools/call", json!({"name": "get_workflow", "arguments": {"id": multi}})).await;
 
     assert_eq!((status, read["result"]["isError"].clone()), (200, json!(false)), "{read}");
+}
+
+#[tokio::test]
+async fn kubernetes_nodes_is_off_by_default_and_saved_beside_voice() {
+    let server = Server::start().await;
+    let (_, defaults) = server.user.json(server.user.get("/api/v1/experiments")).await;
+    assert_eq!(defaults, flags(false, false));
+
+    let (status, saved) = server.user.json(server.user.put("/api/v1/experiments").json(&json!({"kubernetes_nodes": true}))).await;
+    let (_, persisted) = server.user.json(server.user.get("/api/v1/experiments")).await;
+
+    assert_eq!((status, saved), (200, flags(false, true)));
+    assert_eq!(persisted, flags(false, true));
 }
