@@ -7,7 +7,7 @@ on:
       - Cargo.lock
       - clients/gradle/libs.versions.toml
       - clients/gradle/wrapper/gradle-wrapper.properties
-      - editor/pnpm-lock.yaml
+      - clients/editor/pnpm-lock.yaml
       - mise.toml
       - .github/workflows/release.yml
       - .github/workflows/warm-cache.yml

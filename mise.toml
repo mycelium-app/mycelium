@@ -36,7 +36,7 @@ run = "./gradlew :shared:jvmTest :desktop:test :web:compileKotlinWasmJs :android
 
 [tasks.test-editor]
 description = "Design editor unit tests"
-dir = "editor"
+dir = "clients/editor"
 run = "pnpm install && pnpm test"
 
 [tasks.test]

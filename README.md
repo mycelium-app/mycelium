@@ -155,8 +155,7 @@ The desktop and Android apps sign in with a device code, the same way a node joi
 | Path | Contents |
 |---|---|
 | `crates/` | The control plane, node daemon, CLI and wire protocol, in Rust on axum and tokio |
-| `clients/` | The web, desktop and Android clients, in Kotlin Multiplatform with Compose |
-| `editor/` | The design editor for artefacts |
+| `clients/` | The web, desktop and Android clients, in Kotlin Multiplatform with Compose, and `clients/editor`, the design editor for artefacts, in TypeScript with Vite |
 | `site/` | The landing page |
 | `docs/` | [`DESIGN.md`](docs/DESIGN.md) for the architecture, [`STAGE1.md`](docs/STAGE1.md) for the API and config contract |
 

@@ -129,7 +129,7 @@ Rust: `crates/proto/src/api.rs` (2485 lines, 229 types, one job) is dominant; `c
 - God files over about 1500 lines that mix jobs: `control/mcp.rs` (1712, job 5). Large but single-job: `crates/proto/src/api.rs` (2485), `api/Models.kt` (1804, split in job 15), `control/assistants.rs` (1252), `ui/ThreadView.kt` (1181), `control/imports.rs` (1146), `node/acp.rs` (1153), `state/Store.kt` (1096), `ui/Composer.kt` (1031), `ui/Shell.kt` (1013).
 - Production `expect`: `control/provider_usage.rs:105` (`expect("finite spend")`). No production `unwrap` remains in control or node.
 - Row mapping: 117 tuple `query_as::<_, (…)>` against 47 `FromRow` structs. Tuples are dominant for short rows; a tuple of six or more fields becomes a `FromRow` struct.
-- Editor (`editor/src/lib/store.svelte.ts`): a parenthesised `await` feeding `??` (`:399`) and a chain of inline `if`/`else if` statements without braces (`:330-334`).
+- Editor (`clients/editor/src/lib/store.svelte.ts`): a parenthesised `await` feeding `??` (`:399`) and a chain of inline `if`/`else if` statements without braces (`:330-334`).
 - Test harness: 109 desktop test files each build their own `MockEngine` fake control plane, and seven define their own `render`/`everywhere`. A shared fake is a later transition; it touches every test file and changes no product code.
 - Client data loading: 208 `store.api.…` calls in UI files, most loading into screen-local state the stream never updates (ConversationScreen 45, GitPanel 35, AssistantSettings 25, AssistantActions 21). Moving them into `Store` changes when data refreshes; not in this round.
 

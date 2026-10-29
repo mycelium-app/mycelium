@@ -25,7 +25,7 @@ RUN gradle --no-daemon :web:wasmJsBrowserDistribution \
 FROM node:22-alpine AS editor
 RUN corepack enable
 WORKDIR /src/editor
-COPY editor ./
+COPY clients/editor ./
 RUN pnpm install --frozen-lockfile \
  && pnpm build
 
