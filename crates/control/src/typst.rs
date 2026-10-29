@@ -15,6 +15,9 @@ use uuid::Uuid;
 const SOURCE_FILE: &str = "main.typ";
 const MOST_COMPILE_TIME: Duration = Duration::from_secs(30);
 const MOST_SOURCE_BYTES: usize = 1024 * 1024;
+const MOST_CONCURRENT_COMPILES: usize = 4;
+
+static COMPILE_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(MOST_CONCURRENT_COMPILES);
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Diagnostic {
@@ -76,6 +79,7 @@ pub async fn compile(binary: &str, scratch: &FilePath, source: &str, format: For
         return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "source_too_large", "The document is larger than 1 MB. Split it up."));
     }
 
+    let slot = COMPILE_SLOTS.acquire().await.map_err(ApiError::internal)?;
     let directory = scratch.join(Uuid::new_v4().to_string());
 
     tokio::fs::create_dir_all(&directory).await.map_err(ApiError::internal)?;
@@ -83,6 +87,8 @@ pub async fn compile(binary: &str, scratch: &FilePath, source: &str, format: For
     let outcome = compile_in(binary, &directory, source, format).await;
 
     let _ = tokio::fs::remove_dir_all(&directory).await;
+
+    drop(slot);
 
     outcome
 }
@@ -233,6 +239,33 @@ mod tests {
             Outcome::Failed(diagnostics) => assert_eq!(diagnostics, vec![Diagnostic { line: 16, column: 24, message: "unclosed delimiter".into() }]),
             Outcome::Compiled(_) => panic!("compiled"),
         }
+    }
+
+    #[tokio::test]
+    async fn only_a_few_documents_compile_at_the_same_time() {
+        let directory = tempfile::tempdir().unwrap();
+        let log = directory.path().join("overlap.log");
+        let binary = directory.path().join("slow-typst");
+
+        std::fs::write(&binary, format!("#!/bin/sh\necho start >> {log}\nsleep 0.3\necho end >> {log}\nprintf '%%PDF' > out.pdf\n", log = log.display())).unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let binary = binary.to_string_lossy().into_owned();
+        let compiles = (0..MOST_CONCURRENT_COMPILES * 2).map(|_| compile(&binary, directory.path(), "= Title", Format::Pdf));
+
+        for outcome in futures_util::future::join_all(compiles).await {
+            outcome.unwrap();
+        }
+
+        let mut running = 0;
+        let mut most = 0;
+
+        for line in std::fs::read_to_string(&log).unwrap().lines() {
+            running += if line == "start" { 1 } else { -1 };
+            most = most.max(running);
+        }
+
+        assert!(most <= MOST_CONCURRENT_COMPILES as i32, "{most} compiles ran at once");
     }
 
     #[tokio::test]
