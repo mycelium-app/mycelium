@@ -562,3 +562,39 @@ async fn setting_up_a_conversations_folder_as_a_project_binds_every_conversation
         assert_eq!(after["project_id"], listed[0]["id"]);
     }
 }
+
+#[tokio::test]
+async fn a_project_is_cloned_onto_a_node_that_lacks_it_and_reused_once_it_is_there() {
+    let server = Server::start().await;
+    let github = fake_forge("github").await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let mut atlas = server.online_node("atlas").await;
+    let mut orion = server.online_node("orion").await;
+    let ((_, project), _) = create_project(&server, &mut atlas, json!({"forge_id": forge_id, "repository": "acme-org/acme-backups"}), Ok(json!({"path": "/home/sam/projects/acme-org/acme-backups"}))).await;
+    let user = server.user.clone();
+    let url = format!("/api/v1/projects/{}/checkout", project["id"].as_str().unwrap());
+    let orion_id = orion.id;
+    let asking = tokio::spawn(async move { user.json(user.post(&url).json(&json!({"node_id": orion_id}))).await });
+
+    let (cwd, command) = answer_next(&mut orion, Ok(json!({"path": "/srv/projects/acme-org/acme-backups"}))).await;
+    let (status, checkout) = asking.await.unwrap();
+
+    assert_eq!((status, cwd.as_str()), (201, "projects/acme-org/acme-backups"));
+    assert!(matches!(command, GitCommand::Clone { .. }));
+    assert_eq!((checkout["node_id"].clone(), checkout["path"].clone()), (json!(orion.id), json!("/srv/projects/acme-org/acme-backups")));
+
+    let (again_status, again) = server.user.json(server.user.post(&format!("/api/v1/projects/{}/checkout", project["id"].as_str().unwrap())).json(&json!({"node_id": orion.id}))).await;
+    assert_eq!((again_status, again["id"].clone()), (200, checkout["id"].clone()));
+}
+
+#[tokio::test]
+async fn a_project_without_a_forge_repository_cannot_be_cloned_onto_another_node() {
+    let server = Server::start().await;
+    let mut atlas = server.online_node("atlas").await;
+    let orion = server.online_node("orion").await;
+    let project = project_on(&server, &mut atlas).await;
+
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/projects/{}/checkout", project["id"].as_str().unwrap())).json(&json!({"node_id": orion.id}))).await;
+
+    assert_eq!((status, body["error"].clone()), (400, json!("project_not_cloneable")));
+}

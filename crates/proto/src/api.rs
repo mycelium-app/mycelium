@@ -1554,6 +1554,11 @@ pub struct CreateProjectRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CheckoutProjectRequest {
+    pub node_id: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Worktree {
     pub id: Uuid,
     pub project_id: Uuid,

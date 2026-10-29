@@ -11,7 +11,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::body::Bytes;
 use axum::http::{HeaderMap, StatusCode};
-use mycelium_proto::api::{CreateProjectRequest, PatchProjectRequest, Project};
+use mycelium_proto::api::{CheckoutProjectRequest, CreateProjectRequest, PatchProjectRequest, Project};
 use mycelium_proto::link::GitCommand;
 use mycelium_proto::stream::StreamMessage;
 use serde_json::Value;
@@ -219,6 +219,24 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         Err(sqlx::Error::Database(cause)) if cause.is_unique_violation() => Err(ApiError::conflict("project_exists", "This folder is already a project on this node.")),
         Err(cause) => Err(cause.into()),
     }
+}
+
+pub async fn checkout(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<CheckoutProjectRequest>) -> ApiResult<(StatusCode, Json<Project>)> {
+    let project = find_owned(&state, id, user.id).await?;
+
+    if project.node_id == request.node_id {
+        return Ok((StatusCode::OK, Json(project.to_proto())));
+    }
+
+    let (Some(forge_id), Some(repository)) = (project.forge_id, project.repository.clone()) else {
+        return Err(ApiError::bad_request("project_not_cloneable", "This project has no forge repository to clone. Register its folder on that node instead."));
+    };
+
+    if let Ok(existing) = sibling_on(&state, user.id, &project, request.node_id).await {
+        return Ok((StatusCode::OK, Json(existing.to_proto())));
+    }
+
+    create(State(state), user, Json(CreateProjectRequest { node_id: request.node_id, forge_id: Some(forge_id), repository: Some(repository), path: None, new_repository: false })).await
 }
 
 pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchProjectRequest>) -> ApiResult<Json<Project>> {
