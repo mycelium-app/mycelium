@@ -557,6 +557,7 @@ pub struct SearchHit {
 pub enum ForgeKind {
     Github,
     Gitlab,
+    Forgejo,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1569,6 +1570,19 @@ pub struct Issue {
     pub body: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pull_requests: Option<Vec<PullRequest>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<ForgePerson>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assignees: Vec<ForgePerson>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ForgePerson {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1585,6 +1599,55 @@ pub struct PullRequest {
     pub label: String,
     pub url: String,
     pub state: PullRequestState,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PullRequestItem {
+    pub forge_id: Uuid,
+    pub repository: String,
+    pub number: i64,
+    pub label: String,
+    pub title: String,
+    pub url: String,
+    pub body: String,
+    pub state: PullRequestState,
+    pub draft: bool,
+    pub source_branch: String,
+    pub target_branch: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<ForgePerson>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assignees: Vec<ForgePerson>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PullRequests {
+    pub pull_requests: Vec<PullRequestItem>,
+    pub failures: Vec<ForgeFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PullRequestComment {
+    pub author: Option<ForgePerson>,
+    pub body: String,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PullRequestDetail {
+    pub pull_request: PullRequestItem,
+    pub timeline: Vec<PullRequestComment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PullRequestDiff {
+    pub diff: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

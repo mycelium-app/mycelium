@@ -150,6 +150,8 @@ pub struct Conversation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pull_request_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_request_state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assistant_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub teach_me: bool,

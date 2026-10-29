@@ -1892,4 +1892,36 @@ async fn the_branch_of_a_project_conversation_carries_its_open_pull_request() {
     answer_head(&mut link, Some("topic")).await;
     let recorded = branch_of(&server, id, Some("topic")).await;
     assert_eq!((recorded["pull_request_label"].clone(), recorded["pull_request_url"].clone()), (json!("PR #12"), json!("https://forge.example/acme-org/acme-backups/pull/12")));
+    assert_eq!((recorded["pull_request_state"].clone(), recorded["archived_at"].clone()), (json!("open"), serde_json::Value::Null));
+}
+
+async fn fake_github_with_merged_pull_request() -> String {
+    use axum::Json;
+    use axum::routing::get;
+
+    let pulls = || async { Json(json!([{"number": 12, "title": "Rework", "state": "closed", "draft": false, "merged_at": "2026-10-01T10:00:00Z", "html_url": "https://forge.example/acme-org/acme-backups/pull/12", "head": {"ref": "topic", "repo": {"full_name": "acme-org/acme-backups"}}}])) };
+    let router = axum::Router::new()
+        .route("/api/v3/user", get(|| async { Json(json!({"login": "samexample"})) }))
+        .route("/api/v3/user/orgs", get(|| async { Json(json!([])) }))
+        .route("/api/v3/repos/{owner}/{name}/pulls", get(pulls));
+
+    common::serve(router).await
+}
+
+#[tokio::test]
+async fn a_conversation_whose_pull_request_was_merged_is_archived_with_the_state_recorded() {
+    let server = Server::start().await;
+    let github = fake_github_with_merged_pull_request().await;
+    let mut link = server.online_node_as("laptop", "v0.10.0").await;
+    let (_, forge) = server.user.json(server.user.post("/api/v1/forges").json(&json!({"kind": "github", "base_url": github, "token": "ghp_0123456789abcdefghijklmnopqrstuvwxyz"}))).await;
+    let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+    let forge_id: Uuid = forge["id"].as_str().unwrap().parse().unwrap();
+    sqlx::query("insert into projects (owner, node_id, name, path, forge_id, repository) values ($1, $2, 'backups', '/work/app', $3, 'acme-org/acme-backups')").bind(owner).bind(link.id).bind(forge_id).execute(&server.pool).await.unwrap();
+    let id = started_conversation(&server, &mut link, None).await;
+
+    answer_head(&mut link, Some("topic")).await;
+    let recorded = branch_of(&server, id, Some("topic")).await;
+
+    assert_eq!(recorded["pull_request_state"], "merged");
+    assert!(recorded["archived_at"].is_string(), "{recorded}");
 }

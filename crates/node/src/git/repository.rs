@@ -48,7 +48,7 @@ pub(super) fn register(folder: &Path) -> Result<Value> {
     Ok(json!({"path": canonical.to_string_lossy(), "repository": repository, "remotes": remotes}))
 }
 
-pub(super) fn add_worktree(project: &Path, branch: &str) -> Result<Value> {
+fn worktree_folder(project: &Path, branch: &str) -> Result<std::path::PathBuf> {
     if branch.starts_with('-') || git(project, &["check-ref-format", "--branch", branch], &[]).is_err() {
         bail!("{branch} is not a valid branch name. Use letters, numbers, dashes and slashes.");
     }
@@ -60,8 +60,24 @@ pub(super) fn add_worktree(project: &Path, branch: &str) -> Result<Value> {
         bail!("{} already exists. Choose another branch name.", folder.display());
     }
 
+    Ok(folder)
+}
+
+pub(super) fn add_worktree(project: &Path, branch: &str) -> Result<Value> {
+    let folder = worktree_folder(project, branch)?;
     let folder_text = folder.to_string_lossy();
     git(project, &["worktree", "add", "-b", branch, &folder_text], &[])?;
+
+    Ok(json!({"path": folder_text, "branch": branch}))
+}
+
+pub(super) fn add_remote_worktree(project: &Path, branch: &str) -> Result<Value> {
+    let folder = worktree_folder(project, branch)?;
+    let folder_text = folder.to_string_lossy();
+    let tracking = format!("origin/{branch}");
+
+    git(project, &["fetch", "origin", &format!("+refs/heads/{branch}:refs/remotes/origin/{branch}")], &[])?;
+    git(project, &["worktree", "add", "--track", "-B", branch, &folder_text, &tracking], &[])?;
 
     Ok(json!({"path": folder_text, "branch": branch}))
 }
@@ -192,6 +208,23 @@ mod tests {
         assert_eq!((added["path"].as_str(), added["branch"].as_str()), (folder.to_str(), Some("issue/12-fix")));
         assert_eq!(std::fs::read_to_string(folder.join("a.txt")).unwrap(), "one\n");
         assert_eq!(run(&folder, GitCommand::Status).unwrap()["branch"], "issue/12-fix");
+    }
+
+    #[test]
+    fn a_remote_worktree_checks_out_the_branch_of_the_remote_and_tracks_it() {
+        let origin = bare_origin_with_a_commit();
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("projects/org/app");
+        std::fs::create_dir_all(project.parent().unwrap()).unwrap();
+        git(root.path(), &["clone", "--", origin.path().to_str().unwrap(), project.to_str().unwrap()], &[]).unwrap();
+        git(&project, &["push", "origin", "HEAD:refs/heads/topic"], &[]).unwrap();
+
+        let added = run_in(root.path(), project.to_str().unwrap(), GitCommand::AddRemoteWorktree { branch: "topic".into() }).unwrap();
+
+        let folder = root.path().join("projects/org/app-worktrees/topic");
+        assert_eq!((added["path"].as_str(), added["branch"].as_str()), (folder.to_str(), Some("topic")));
+        assert_eq!(run(&folder, GitCommand::Status).unwrap()["branch"], "topic");
+        assert!(run_in(root.path(), project.to_str().unwrap(), GitCommand::AddRemoteWorktree { branch: "missing".into() }).is_err());
     }
 
     #[test]

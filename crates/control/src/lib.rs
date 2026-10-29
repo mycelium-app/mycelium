@@ -41,6 +41,7 @@ mod error;
 mod experiments;
 mod file_arguments;
 mod forge_cache;
+mod forge_sync;
 mod forges;
 mod imports;
 mod learned;
@@ -53,6 +54,7 @@ mod integration_policy;
 mod integration_proxy;
 mod integrations;
 mod issues;
+mod pulls;
 mod link;
 mod mcp;
 mod mcp_client;
@@ -149,6 +151,7 @@ pub async fn run(config: Config, listener: TcpListener) -> Result<()> {
     tokio::spawn(usage_limits::resume_regularly(state.clone()));
     tokio::spawn(activity_sweep::sweep_regularly(state.clone()));
     tokio::spawn(goals::nudge_regularly(state.clone()));
+    tokio::spawn(forge_sync::sync_regularly(state.clone()));
     tokio::spawn(wellness::announce_boundaries(state.clone()));
     axum::serve(listener, router(state).into_make_service_with_connect_info::<SocketAddr>()).await?;
 
@@ -470,6 +473,10 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/schedule-runs", get(schedules::runs))
         .route("/api/v1/issues", get(issues::list))
         .route("/api/v1/projects/{id}/issues/{number}/workspace", post(issues::start_workspace))
+        .route("/api/v1/pulls", get(pulls::list))
+        .route("/api/v1/forges/{id}/pulls/{number}", get(pulls::detail))
+        .route("/api/v1/forges/{id}/pulls/{number}/diff", get(pulls::diff))
+        .route("/api/v1/projects/{id}/pulls/{number}/workspace", post(pulls::start_workspace))
         .route("/api/v1/imports", get(imports::list).post(imports::create))
         .route("/api/v1/imports/jobs", get(imports::jobs))
         .route("/api/v1/indexing", get(search::indexing))

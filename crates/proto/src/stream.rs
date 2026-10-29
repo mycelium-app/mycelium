@@ -91,6 +91,7 @@ pub enum StreamMessage {
         route: String,
     },
     IntegrationsChanged,
+    ForgeChanged,
     WellnessChanged,
     Device {
         user_code: String,

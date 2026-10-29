@@ -70,6 +70,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/ssh-access-requests/{id}/decline",
     "POST /api/v1/ssh-access-requests/{id}/revoke",
     "POST /api/v1/projects/{id}/issues/{number}/workspace",
+    "POST /api/v1/projects/{id}/pulls/{number}/workspace",
     "PATCH /api/v1/conversations/{id}",
     "DELETE /api/v1/conversations/{id}",
     "POST /api/v1/conversations/{id}/close",
