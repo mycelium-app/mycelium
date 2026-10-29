@@ -814,7 +814,12 @@ async fn a_restarted_daemon_reattaches_to_the_live_keeper_and_can_cancel_the_tur
     let working = first.next_matching(|message| update_text(message).as_deref() == Some("working")).await;
     let working_seq = seq_of(&working).unwrap();
     first.send(ControlToNode::Ack { conversation_id: conversation, seq: working_seq });
-    first.nothing_more().await;
+    let acked_file = fixture.config.sessions_dir().join(conversation.to_string()).join("acked");
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while std::fs::read_to_string(&acked_file).ok().and_then(|text| text.trim().parse::<i64>().ok()) != Some(working_seq) {
+        assert!(tokio::time::Instant::now() < deadline, "the node never recorded the acknowledgement");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 
     daemon.crash();
 
