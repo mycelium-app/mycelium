@@ -90,8 +90,8 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 }
                 _ => false,
             };
-            let rows = search(&state.pool, Some(query), (!everywhere).then_some(visible.as_slice()), Some(open_bank_ids.as_slice()), limit).await?;
-            let omitted = if everywhere { Vec::new() } else { omitted_groups(&state.pool, query, &visible).await? };
+            let rows = search(&state.pool, owner, Some(query), (!everywhere).then_some(visible.as_slice()), Some(open_bank_ids.as_slice()), limit).await?;
+            let omitted = if everywhere { Vec::new() } else { omitted_groups(&state.pool, owner, query, &visible).await? };
             let note = if omitted.is_empty() {
                 String::new()
             } else {
@@ -196,10 +196,9 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             };
             let facts = facts.unwrap_or_default();
             let tool_call_id = params["_meta"]["claudecode/toolUseId"].as_str().map(String::from).or_else(|| caller.headers.get("x-mycelium-tool-call").and_then(|value| value.to_str().ok()).map(String::from));
+            let owner = caller.owner().await?;
             let (bank_id, shared_with) = match arguments.get("bank").and_then(Value::as_str).map(str::trim).filter(|name| !name.is_empty()) {
                 Some(bank_name) => {
-                    let owner = caller.owner().await?;
-
                     let model_class = caller.model_class().await?;
                     let open_banks = usable_banks(&state.pool, owner, model_class, group.as_ref().map(|(group_id, _)| *group_id)).await?;
                     let Some((bank_id, name)) = open_banks.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(bank_name)) else {
@@ -211,8 +210,8 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 None => (None, shared_with),
             };
             let memory = sqlx::query_as::<_, MemoryRow>(sqlx::AssertSqlSafe(format!(
-                "insert into memories (text, scopes, created_by, conversation_id, model, agent, node_id, node_name, account, project_id, project_name, message_seq, tool_call_id, bank_id)
-                 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) returning {MEMORY_COLUMNS}"
+                "insert into memories (text, scopes, created_by, conversation_id, model, agent, node_id, node_name, account, project_id, project_name, message_seq, tool_call_id, bank_id, owner)
+                 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) returning {MEMORY_COLUMNS}"
             )))
                 .bind(crate::store::text_without_nul(&text))
                 .bind(&scopes)
@@ -228,11 +227,12 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 .bind(facts.message_seq)
                 .bind(tool_call_id)
                 .bind(bank_id)
+                .bind(owner)
                 .fetch_one(&state.pool)
                 .await?
                 .to_proto();
             let memory_id = memory.id;
-            state.publish(None, StreamMessage::Memory(memory));
+            state.publish(Some(owner), StreamMessage::Memory(memory));
 
             ToolReply::text(&format!("Remembered as {memory_id}, shared with {shared_with}."), false)
         }

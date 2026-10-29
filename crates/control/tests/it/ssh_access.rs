@@ -321,6 +321,21 @@ async fn a_person_mints_a_short_token_for_their_node_and_it_opens_a_session_with
 }
 
 #[tokio::test]
+async fn a_token_is_not_minted_for_a_node_another_person_registered_or_by_a_scoped_token() {
+    let fixture = fixture().await;
+    let other = fixture.server.second_user("other@example.com").await;
+    let path = format!("/api/v1/nodes/{}/ssh-tokens", fixture.target.id);
+    let secret = Uuid::new_v4().to_string();
+    sqlx::query("insert into client_tokens (user_id, label, token_hash, scopes) values ((select id from users where email = 'dev@example.com'), 'Test', $1, $2)").bind(crate::common::hash(&secret)).bind(vec!["nodes:read".to_string()]).execute(&fixture.server.pool).await.unwrap();
+
+    let (by_another_person, _) = other.json(other.post(&path)).await;
+    let anonymous = fixture.server.anonymous();
+    let (by_a_scoped_token, _) = anonymous.json(anonymous.post(&path).header("authorization", format!("Bearer myc_client_{secret}"))).await;
+
+    assert_eq!((by_another_person, by_a_scoped_token), (404, 403));
+}
+
+#[tokio::test]
 async fn a_token_for_a_node_that_does_not_exist_is_not_minted() {
     let fixture = fixture().await;
     let (status, _) = fixture.server.user.json(fixture.server.user.post(&format!("/api/v1/nodes/{}/ssh-tokens", Uuid::new_v4()))).await;

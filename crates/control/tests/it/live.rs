@@ -331,14 +331,43 @@ async fn exchange(server: &Server, started: &Value) -> Value {
 }
 
 #[tokio::test]
-async fn a_new_device_code_is_streamed_as_pending() {
+async fn a_pending_device_code_is_streamed_to_nobody_and_only_the_approver_sees_what_follows() {
     let server = Server::start().await;
-    let mut stream = server.user.stream().await;
-
+    let other = server.second_user("other@example.com").await;
+    let mut approver_stream = server.user.stream().await;
+    let mut other_stream = other.stream().await;
     let started = start_device(&server, "node", "laptop").await;
-    let (kind, label, hostname, result_id) = device_message(&mut stream, started["user_code"].as_str().unwrap(), DeviceState::Pending).await;
+    let user_code = started["user_code"].as_str().unwrap();
 
-    assert_eq!((kind, label.as_str(), hostname.as_str(), result_id), (DeviceKind::Node, "laptop", "box", None));
+    server.user.json(server.user.post(&format!("/api/v1/device/{user_code}/approve"))).await;
+    device_message(&mut approver_stream, user_code, DeviceState::Approved).await;
+    exchange(&server, &started).await;
+    device_message(&mut approver_stream, user_code, DeviceState::Consumed).await;
+
+    let seen = tokio::time::timeout(Duration::from_millis(500), async {
+        loop {
+            if let StreamMessage::Device { .. } = other_stream.next().await {
+                return true;
+            }
+        }
+    })
+    .await;
+
+    assert!(seen.is_err());
+}
+
+#[tokio::test]
+async fn a_scoped_token_cannot_deny_a_device_code() {
+    let server = Server::start().await;
+    let started = start_device(&server, "node", "laptop").await;
+    let user_code = started["user_code"].as_str().unwrap();
+    let secret = Uuid::new_v4().to_string();
+    sqlx::query("insert into client_tokens (user_id, label, token_hash, scopes) values ((select id from users limit 1), 'Test', $1, $2)").bind(common::hash(&secret)).bind(vec!["conversations:read".to_string()]).execute(&server.pool).await.unwrap();
+
+    let anonymous = server.anonymous();
+    let (status, _) = anonymous.json(anonymous.post(&format!("/api/v1/device/{user_code}/deny")).header("authorization", format!("Bearer myc_client_{secret}"))).await;
+
+    assert_eq!(status, 403);
 }
 
 #[tokio::test]
@@ -373,8 +402,10 @@ async fn a_device_code_that_runs_out_is_streamed_as_expired() {
     let server = Server::start_with(|config| config.device_code_lifetime = Duration::from_secs(1)).await;
     let mut stream = server.user.stream().await;
     let started = start_device(&server, "node", "laptop").await;
+    let user_code = started["user_code"].as_str().unwrap();
 
-    device_message(&mut stream, started["user_code"].as_str().unwrap(), DeviceState::Expired).await;
+    server.user.json(server.user.post(&format!("/api/v1/device/{user_code}/approve"))).await;
+    device_message(&mut stream, user_code, DeviceState::Expired).await;
 }
 
 #[tokio::test]

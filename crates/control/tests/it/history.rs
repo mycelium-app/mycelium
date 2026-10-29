@@ -197,6 +197,20 @@ async fn importing_a_claude_transcript_creates_a_done_conversation_with_events_a
 }
 
 #[tokio::test]
+async fn another_person_cannot_import_or_see_the_transcripts_of_a_node_they_did_not_register() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    mirror(&server, link.id, ".claude/projects/-work-app/aaaa.jsonl", &claude_transcript("aaaa", "One", "Reply one.")).await;
+    let other = server.second_user("other@example.com").await;
+
+    let (started, _) = other.json(other.post("/api/v1/imports").json(&json!({"node_id": link.id, "agent": "claude"}))).await;
+    let (_, statuses) = other.json(other.get("/api/v1/imports")).await;
+    let conversations = sqlx::query_scalar::<_, i64>("select count(*) from conversations").fetch_one(&server.pool).await.unwrap();
+
+    assert_eq!((started, statuses, conversations), (404, json!([]), 0));
+}
+
+#[tokio::test]
 async fn importing_twice_adds_nothing_and_the_counts_follow() {
     let server = Server::start().await;
     let link = server.online_node("laptop").await;

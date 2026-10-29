@@ -31,8 +31,8 @@ struct DeviceIdentity {
     hostname: String,
 }
 
-fn publish_device(state: &AppState, identity: &DeviceIdentity, device_state: DeviceState, result_id: Option<Uuid>) -> ApiResult<()> {
-    state.publish(None, StreamMessage::Device { user_code: identity.user_code.clone(), kind: parse_enum(&identity.kind)?, label: identity.label.clone(), hostname: identity.hostname.clone(), state: device_state, result_id });
+fn publish_device(state: &AppState, owner: Uuid, identity: &DeviceIdentity, device_state: DeviceState, result_id: Option<Uuid>) -> ApiResult<()> {
+    state.publish(Some(owner), StreamMessage::Device { user_code: identity.user_code.clone(), kind: parse_enum(&identity.kind)?, label: identity.label.clone(), hostname: identity.hostname.clone(), state: device_state, result_id });
 
     Ok(())
 }
@@ -40,10 +40,10 @@ fn publish_device(state: &AppState, identity: &DeviceIdentity, device_state: Dev
 async fn publish_expiry_when_due(state: AppState, identity: DeviceIdentity) {
     tokio::time::sleep(state.config.device_code_lifetime).await;
 
-    let unfinished = sqlx::query_scalar::<_, bool>("select exists (select 1 from device_codes where user_code = $1 and consumed_at is null and denied_at is null)").bind(&identity.user_code).fetch_one(&state.pool).await;
+    let approver = sqlx::query_scalar::<_, Option<Uuid>>("select approved_by from device_codes where user_code = $1 and consumed_at is null and denied_at is null").bind(&identity.user_code).fetch_optional(&state.pool).await;
 
-    if unfinished.is_ok_and(|unfinished| unfinished) {
-        let _ = publish_device(&state, &identity, DeviceState::Expired, None);
+    if let Ok(Some(Some(approver))) = approver {
+        let _ = publish_device(&state, approver, &identity, DeviceState::Expired, None);
     }
 }
 
@@ -113,7 +113,6 @@ async fn start_allowed(state: AppState, address: IpAddr, request: DeviceRequest,
             let verification_uri = format!("{}/approve", state.config.public_url);
             let identity = DeviceIdentity { user_code: user_code.clone(), kind: enum_text(&request.kind), label: label.clone(), hostname: request.hostname.clone() };
 
-            publish_device(&state, &identity, DeviceState::Pending, None)?;
             tokio::spawn(publish_expiry_when_due(state.clone(), identity));
 
             let return_to = if returns_to_app { "&return_to=mycelium%3A%2F%2Fsigned-in" } else { "" };
@@ -229,7 +228,7 @@ async fn token_allowed(state: AppState, request: DeviceTokenRequest) -> ApiResul
         publish_node(&state, id).await?;
     }
 
-    publish_device(&state, &row.identity, DeviceState::Consumed, Some(id))?;
+    publish_device(&state, approver, &row.identity, DeviceState::Consumed, Some(id))?;
 
     let prefix = match kind {
         DeviceKind::Node => "myc_node_",
@@ -283,22 +282,24 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(user_co
         .fetch_optional(&state.pool)
         .await?;
 
-    resolved(&state, updated, DeviceState::Approved)
+    resolved(&state, user.id, updated, DeviceState::Approved)
 }
 
-pub async fn deny(State(state): State<AppState>, _user: AuthUser, Path(user_code): Path<String>) -> ApiResult<StatusCode> {
+pub async fn deny(State(state): State<AppState>, user: AuthUser, Path(user_code): Path<String>) -> ApiResult<StatusCode> {
+    user.require_full_access()?;
+
     let updated = sqlx::query_as::<_, DeviceIdentity>(sqlx::AssertSqlSafe(format!("update device_codes set denied_at = now() where {PENDING_FILTER} returning user_code, kind, label, hostname")))
         .bind(normalise(&user_code))
         .fetch_optional(&state.pool)
         .await?;
 
-    resolved(&state, updated, DeviceState::Denied)
+    resolved(&state, user.id, updated, DeviceState::Denied)
 }
 
-fn resolved(state: &AppState, updated: Option<DeviceIdentity>, device_state: DeviceState) -> ApiResult<StatusCode> {
+fn resolved(state: &AppState, owner: Uuid, updated: Option<DeviceIdentity>, device_state: DeviceState) -> ApiResult<StatusCode> {
     let identity = updated.ok_or_else(|| ApiError::not_found("That code"))?;
 
-    publish_device(state, &identity, device_state, None)?;
+    publish_device(state, owner, &identity, device_state, None)?;
 
     Ok(StatusCode::NO_CONTENT)
 }

@@ -149,7 +149,9 @@ pub async fn request(state: &AppState, conversation_id: Uuid, node: &str, minute
 }
 
 pub async fn mint_for_person(State(state): State<AppState>, user: AuthUser, Path(node_id): Path<Uuid>) -> ApiResult<Json<SshToken>> {
-    let exists = sqlx::query_scalar::<_, bool>("select exists (select 1 from nodes where id = $1 and revoked_at is null)").bind(node_id).fetch_one(&state.pool).await?;
+    user.require_full_access()?;
+
+    let exists = sqlx::query_scalar::<_, bool>("select exists (select 1 from nodes where id = $1 and created_by = $2 and revoked_at is null)").bind(node_id).bind(user.id).fetch_one(&state.pool).await?;
 
     if !exists {
         return Err(ApiError::not_found("That node"));

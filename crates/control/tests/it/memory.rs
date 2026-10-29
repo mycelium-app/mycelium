@@ -145,7 +145,7 @@ async fn remember_refuses_empty_text_and_bad_params_are_json_rpc_errors() {
 async fn recall_only_sees_global_memories() {
     let server = Server::start().await;
     let (_, token) = server.join("node", "laptop").await;
-    sqlx::query("insert into memories (text, scopes, created_by) values ('Only for the payments group', '{group:payments}', 'someone')").execute(&server.pool).await.unwrap();
+    sqlx::query("insert into memories (text, scopes, created_by, owner) values ('Only for the payments group', '{group:payments}', 'someone', (select id from users limit 1))").execute(&server.pool).await.unwrap();
 
     let body = call(&server, &token, None, "recall", json!({"query": "payments"})).await;
 
@@ -166,6 +166,23 @@ async fn memories_are_listed_newest_first_and_searched_by_words() {
     let (_, found) = server.user.json(server.user.get("/api/v1/memories?query=deploy")).await;
     assert_eq!(found.as_array().unwrap().len(), 1);
     assert_eq!(found[0]["text"], "Deploys run on Fridays");
+}
+
+#[tokio::test]
+async fn another_person_neither_lists_nor_edits_nor_deletes_a_memory_they_did_not_write() {
+    let server = Server::start().await;
+    let (_, token) = server.join("node", "laptop").await;
+    call(&server, &token, None, "remember", json!({"text": "The deploy key lives in the vault"})).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/memories")).await;
+    let id = listed[0]["id"].as_str().unwrap().to_string();
+    let other = server.second_user("other@example.com").await;
+
+    let (_, theirs) = other.json(other.get("/api/v1/memories")).await;
+    let (edited, _) = other.json(other.patch(&format!("/api/v1/memories/{id}")).json(&json!({"text": "Replaced"}))).await;
+    let (deleted, _) = other.json(other.delete(&format!("/api/v1/memories/{id}"))).await;
+    let (_, mine) = server.user.json(server.user.get("/api/v1/memories")).await;
+
+    assert_eq!((theirs, edited, deleted, mine[0]["text"].clone()), (json!([]), 404, 404, json!("The deploy key lives in the vault")));
 }
 
 #[tokio::test]

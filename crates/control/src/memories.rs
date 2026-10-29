@@ -96,12 +96,12 @@ pub async fn usable_banks(pool: &PgPool, owner: Uuid, model_class: ModelClass, g
         .collect())
 }
 
-pub async fn search(pool: &PgPool, query: Option<&str>, visible_scopes: Option<&[String]>, banks: Option<&[Uuid]>, limit: i64) -> Result<Vec<MemoryRow>, sqlx::Error> {
+pub async fn search(pool: &PgPool, owner: Uuid, query: Option<&str>, visible_scopes: Option<&[String]>, banks: Option<&[Uuid]>, limit: i64) -> Result<Vec<MemoryRow>, sqlx::Error> {
     let query = query.map(str::trim).filter(|query| !query.is_empty());
 
     sqlx::query_as::<_, MemoryRow>(sqlx::AssertSqlSafe(format!(
         "select {MEMORY_COLUMNS} from memories
-         where ($1::text is null or to_tsvector('english', text) @@ websearch_to_tsquery('english', $1))
+         where owner = $5 and ($1::text is null or to_tsvector('english', text) @@ websearch_to_tsquery('english', $1))
            and ($2::text[] is null or bank_id is not null or scopes && $2)
            and ($4::uuid[] is null or bank_id is null or bank_id = any($4))
          order by case when $1::text is null then 0 else ts_rank(to_tsvector('english', text), websearch_to_tsquery('english', $1)) end desc, created_at desc
@@ -111,25 +111,27 @@ pub async fn search(pool: &PgPool, query: Option<&str>, visible_scopes: Option<&
     .bind(visible_scopes)
     .bind(limit)
     .bind(banks)
+    .bind(owner)
     .fetch_all(pool)
     .await
 }
 
-pub async fn omitted_groups(pool: &PgPool, query: &str, visible_scopes: &[String]) -> Result<Vec<(String, i64)>, sqlx::Error> {
+pub async fn omitted_groups(pool: &PgPool, owner: Uuid, query: &str, visible_scopes: &[String]) -> Result<Vec<(String, i64)>, sqlx::Error> {
     sqlx::query_as::<_, (String, i64)>(
         "select g.name, count(distinct m.id) from memories m
          join groups g on 'group:' || g.id = any(m.scopes)
-         where to_tsvector('english', m.text) @@ websearch_to_tsquery('english', $1) and not (m.scopes && $2) and m.bank_id is null
+         where to_tsvector('english', m.text) @@ websearch_to_tsquery('english', $1) and not (m.scopes && $2) and m.bank_id is null and m.owner = $3
          group by g.name order by g.name",
     )
     .bind(query.trim())
     .bind(visible_scopes)
+    .bind(owner)
     .fetch_all(pool)
     .await
 }
 
-pub async fn list(State(state): State<AppState>, _user: AuthUser, Query(query): Query<ListQuery>) -> ApiResult<Json<Vec<Memory>>> {
-    let rows = search(&state.pool, query.query.as_deref(), None, None, i64::MAX).await?;
+pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Query<ListQuery>) -> ApiResult<Json<Vec<Memory>>> {
+    let rows = search(&state.pool, user.id, query.query.as_deref(), None, None, i64::MAX).await?;
     let titles: HashMap<Uuid, String> = sqlx::query_as::<_, (Uuid, String)>("select id, title from conversations where id = any($1)")
         .bind(rows.iter().filter_map(|row| row.conversation_id).collect::<Vec<Uuid>>())
         .fetch_all(&state.pool)
@@ -150,33 +152,34 @@ pub async fn list(State(state): State<AppState>, _user: AuthUser, Query(query): 
     Ok(Json(memories))
 }
 
-pub async fn update(State(state): State<AppState>, _user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<UpdateMemoryRequest>) -> ApiResult<Json<Memory>> {
+pub async fn update(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<UpdateMemoryRequest>) -> ApiResult<Json<Memory>> {
     let text = request.text.trim();
 
     if text.is_empty() {
         return Err(ApiError::bad_request("text_required", "Enter what to remember."));
     }
 
-    let row = sqlx::query_as::<_, MemoryRow>(sqlx::AssertSqlSafe(format!("update memories set text = $2, updated_at = now() where id = $1 returning {MEMORY_COLUMNS}")))
+    let row = sqlx::query_as::<_, MemoryRow>(sqlx::AssertSqlSafe(format!("update memories set text = $2, updated_at = now() where id = $1 and owner = $3 returning {MEMORY_COLUMNS}")))
         .bind(id)
         .bind(text)
+        .bind(user.id)
         .fetch_optional(&state.pool)
         .await?;
 
     let memory = row.ok_or_else(|| ApiError::not_found("That memory"))?.to_proto();
-    state.publish(None, StreamMessage::Memory(memory.clone()));
+    state.publish(Some(user.id), StreamMessage::Memory(memory.clone()));
 
     Ok(Json(memory))
 }
 
-pub async fn delete(State(state): State<AppState>, _user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
-    let deleted = sqlx::query("delete from memories where id = $1").bind(id).execute(&state.pool).await?;
+pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+    let deleted = sqlx::query("delete from memories where id = $1 and owner = $2").bind(id).bind(user.id).execute(&state.pool).await?;
 
     if deleted.rows_affected() == 0 {
         return Err(ApiError::not_found("That memory"));
     }
 
-    state.publish(None, StreamMessage::MemoryRemoved { memory_id: id });
+    state.publish(Some(user.id), StreamMessage::MemoryRemoved { memory_id: id });
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -262,13 +265,14 @@ pub async fn move_to_bank(State(state): State<AppState>, user: AuthUser, Path(id
         }
     }
 
-    let row = sqlx::query_as::<_, MemoryRow>(sqlx::AssertSqlSafe(format!("update memories set bank_id = $2 where id = $1 returning {MEMORY_COLUMNS}")))
+    let row = sqlx::query_as::<_, MemoryRow>(sqlx::AssertSqlSafe(format!("update memories set bank_id = $2 where id = $1 and owner = $3 returning {MEMORY_COLUMNS}")))
         .bind(id)
         .bind(request.bank_id)
+        .bind(user.id)
         .fetch_optional(&state.pool)
         .await?;
     let memory = row.ok_or_else(|| ApiError::not_found("That memory"))?.to_proto();
-    state.publish(None, StreamMessage::Memory(memory.clone()));
+    state.publish(Some(user.id), StreamMessage::Memory(memory.clone()));
 
     Ok(Json(memory))
 }

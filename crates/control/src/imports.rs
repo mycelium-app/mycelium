@@ -529,8 +529,8 @@ pub async fn repair_import_usage(state: &AppState) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn list(State(state): State<AppState>, _user: AuthUser) -> ApiResult<Json<Vec<ImportStatus>>> {
-    let nodes = sqlx::query_scalar::<_, Uuid>("select id from nodes where revoked_at is null order by name").fetch_all(&state.pool).await?;
+pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<ImportStatus>>> {
+    let nodes = sqlx::query_scalar::<_, Uuid>("select id from nodes where created_by = $1 and revoked_at is null order by name").bind(user.id).fetch_all(&state.pool).await?;
     let mut statuses = Vec::new();
 
     for node_id in nodes {
@@ -543,10 +543,11 @@ pub async fn list(State(state): State<AppState>, _user: AuthUser) -> ApiResult<J
     Ok(Json(statuses))
 }
 
-pub async fn jobs(State(state): State<AppState>, _user: AuthUser) -> ApiResult<Json<Vec<ImportJob>>> {
+pub async fn jobs(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<ImportJob>>> {
     let rows = sqlx::query_as::<_, JobRow>(sqlx::AssertSqlSafe(format!(
-        "select distinct on (node_id, agent) {JOB_COLUMNS} from import_jobs where node_id in (select id from nodes where revoked_at is null) order by node_id, agent, started_at desc"
+        "select distinct on (node_id, agent) {JOB_COLUMNS} from import_jobs where node_id in (select id from nodes where created_by = $1 and revoked_at is null) order by node_id, agent, started_at desc"
     )))
+    .bind(user.id)
     .fetch_all(&state.pool)
     .await?;
 
@@ -554,7 +555,7 @@ pub async fn jobs(State(state): State<AppState>, _user: AuthUser) -> ApiResult<J
 }
 
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<ImportRequest>) -> ApiResult<(StatusCode, Json<ImportJob>)> {
-    let exists = sqlx::query_scalar::<_, bool>("select exists (select 1 from nodes where id = $1 and revoked_at is null)").bind(request.node_id).fetch_one(&state.pool).await?;
+    let exists = sqlx::query_scalar::<_, bool>("select exists (select 1 from nodes where id = $1 and created_by = $2 and revoked_at is null)").bind(request.node_id).bind(user.id).fetch_one(&state.pool).await?;
 
     if !exists {
         return Err(ApiError::not_found("That node"));
