@@ -1,8 +1,8 @@
 # Changelog
 
-## v0.16.0
+## v0.16.1
 
-Every screen change in this release was designed in the canonical design artefact first.
+v0.16.0 was tagged but not published. Every screen change in this release was designed in the canonical design artefact first.
 
 - New conversation starts from the composer: project and place sit beside the account and model controls, the project picker searches and lists recent projects first, the place menu chooses the node and an existing checkout or a new worktree with its branch, and a folder is only asked for when there is no project. The composer starts on your most recent project and stays usable with no node online.
 - The folder browser has the path first and a single primary action, Choose this folder.
