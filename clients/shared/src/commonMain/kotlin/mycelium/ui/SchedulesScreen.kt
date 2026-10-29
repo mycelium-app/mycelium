@@ -33,15 +33,16 @@ import mycelium.state.AppState
 import mycelium.state.Choice
 import mycelium.state.DefaultAccountId
 import mycelium.state.RoutingPrefix
-import mycelium.state.accountChoices
-import mycelium.state.accountMenuTitle
 import mycelium.state.accountsOn
-import mycelium.state.groupedByAgent
 import mycelium.state.routingButtonText
-import mycelium.state.routingChoices
 import mycelium.state.scheduleAccountChoice
 import mycelium.state.scheduleInGroup
+import mycelium.api.Routing
+import mycelium.state.PickerAccount
 import mycelium.state.Store
+import mycelium.state.accountChoiceId
+import mycelium.state.anyAccountId
+import mycelium.state.loginUsage
 import mycelium.state.Cadence
 import mycelium.state.WhenKind
 import mycelium.state.Weekdays
@@ -242,7 +243,7 @@ internal fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = 
     var inputValues by remember { mutableStateOf(editing?.actionInputs.orEmpty()) }
     var actionError by remember { mutableStateOf<String?>(null) }
     var accountPick by remember { mutableStateOf<String?>(null) }
-    val agentSettings = rememberAgentSettings(store)
+    val favourites = rememberFavouriteModels(store)
     val forAssistant = runsIn == RunsInAssistant
     val actions = chosenAssistant?.let { state.assistantActions[it] }.orEmpty()
     val action = actions.firstOrNull { it.id == chosenAction } ?: actions.firstOrNull()
@@ -394,9 +395,25 @@ internal fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = 
                     val shown = scheduleAccountChoice(target.node, target.agent, accountPick)
 
                     if (signedIn.isNotEmpty()) {
-                        val choices = routingChoices(target.node.logins, agentSettings.anyModel, "starts on") + groupedByAgent(accountChoices(signedIn, emptyList(), target.node.name), target.agent)
+                        val rows = signedIn.map { PickerAccount(accountChoiceId(it), target.agent, it.account, target.node, true, loginUsage(it)) }
+                        val pinned = rows.firstOrNull { it.id == shown }
 
-                        OptionMenu("Account", choices, shown, { accountPick = it }, title = accountMenuTitle(target.agent), icon = MyIcon.Person, buttonText = routingButtonText(shown))
+                        ModelPicker(
+                            ModelPickerControls(
+                                label = routingButtonText(shown) ?: pinned?.label ?: "Any model",
+                                options = emptyList(),
+                                favourites = favourites.list,
+                                providers = emptyList(),
+                                onPickModel = {},
+                                onPickAny = { accountPick = "$RoutingPrefix${Routing.AnyModel}" },
+                                onFavourite = favourites.toggle,
+                                chosen = null,
+                                anyChosen = shown == "$RoutingPrefix${Routing.AnyModel}",
+                                accounts = rows,
+                                account = pinned?.id,
+                                onPickAccount = { picked, done -> accountPick = picked ?: anyAccountId(target.agent); done(null) },
+                            ),
+                        )
                     }
                 }
             } else {

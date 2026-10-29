@@ -12,7 +12,6 @@ import mycelium.state.PickerAccount
 import mycelium.state.continueAccountId
 import mycelium.state.pickerAccounts
 import mycelium.state.reachableLogins
-import mycelium.state.routingChoices
 import mycelium.state.newChatAccounts
 import mycelium.state.currentContinueLabel
 import mycelium.state.currentContinueId
@@ -49,16 +48,6 @@ class PickerAccountsTest {
         assertEquals(listOf("claude", "claude", "codex"), listed.map { it.agent })
         assertEquals("Claude Code · work@example.org", listed[1].label)
         assertEquals(listOf(true, true, true), listed.map { it.here })
-    }
-
-    @Test
-    fun theRoutingChoicesSayWhereTheyWouldMoveTo() {
-        val choices = routingChoices(reachableLogins(listOf(Node)).map { it.second }, emptyList(), "moves to")
-
-        assertEquals(listOf("routing:claude_any", "routing:codex_any", "routing:any_model"), choices.map { it.id })
-        assertEquals("moves to work@example.org", choices.first { it.id == "routing:claude_any" }.description)
-        assertEquals("moves to codex@example.com", choices.first { it.id == "routing:codex_any" }.description)
-        assertEquals("Add models in Settings, Agents", choices.first { it.id == "routing:any_model" }.description)
     }
 
     @Test

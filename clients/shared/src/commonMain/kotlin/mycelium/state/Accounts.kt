@@ -282,12 +282,6 @@ fun nextUsageTick(windows: List<UsageWindow>, now: Instant = Clock.System.now())
     return minOf(untilReset, UsageTickCeiling).coerceAtLeast(UsageTickFloor)
 }
 
-fun accountMenuTitle(agent: String): String = when (agent) {
-    "claude" -> "Claude account"
-    "codex" -> "Codex account"
-    else -> "Account"
-}
-
 fun newAccountName(): String = "account-${Random.nextInt(1000, 10000)}"
 
 private val AgentOrder = listOf("claude", "codex")
