@@ -108,17 +108,17 @@ class AppearanceTest {
     @Test
     fun theChatWidthSetsHowWideTheConversationReads() {
         show()
-        val standard = messageWidth()
+        val comfortable = messageWidth()
 
-        choose("Narrow")
+        choose("Wide")
         rule.waitForIdle()
-        val narrow = messageWidth()
+        val wide = messageWidth()
 
         choose("Full")
         rule.waitForIdle()
 
-        assertTrue(narrow < standard)
-        assertTrue(messageWidth() > standard)
+        assertTrue(wide > comfortable)
+        assertTrue(messageWidth() > wide)
     }
 
     @Test
