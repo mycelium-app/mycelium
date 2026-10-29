@@ -45,6 +45,36 @@ async fn an_embedded_view_signs_in_with_the_client_token_as_a_cookie() {
     assert_eq!((with_cookie.status().as_u16(), with_a_wrong_cookie.status().as_u16()), (200, 401));
 }
 
+#[tokio::test]
+async fn a_scoped_token_sent_as_a_cookie_reaches_only_what_its_scopes_cover() {
+    let server = Server::start().await;
+    let (_, token) = insert_token(&server, Some(READ), None).await;
+    let any = Uuid::new_v4();
+    let anonymous = server.anonymous();
+    let cookie = format!("mycelium_client={token}");
+    let mut statuses = Vec::new();
+
+    for path in [format!("/api/v1/api-access-requests/{any}/approve"), format!("/api/v1/nodes/{any}/ssh-tokens"), "/api/v1/device/ABCD-EFGH/approve".to_string()] {
+        let response = anonymous.http.post(format!("{}{path}", server.base)).header("cookie", &cookie).json(&json!({})).send().await.unwrap();
+        statuses.push(response.status().as_u16());
+    }
+
+    let reading = anonymous.http.get(format!("{}/api/v1/conversations", server.base)).header("cookie", &cookie).send().await.unwrap();
+
+    assert_eq!((statuses, reading.status().as_u16()), (vec![403, 403, 403], 200));
+}
+
+#[tokio::test]
+async fn a_planted_client_cookie_does_not_override_the_session_cookie() {
+    let server = Server::start().await;
+    let (_, token) = insert_token(&server, Some(READ), None).await;
+    let cookie = format!("mycelium_client={token}; {}", server.user.cookie);
+
+    let response = server.anonymous().http.post(format!("{}/api/v1/api-access-requests/{}/approve", server.base, Uuid::new_v4())).header("cookie", cookie).json(&json!({})).send().await.unwrap();
+
+    assert_eq!(response.status().as_u16(), 404);
+}
+
 async fn tool(server: &Server, link: &NodeLink, conversation: Uuid, name: &str, arguments: Value) -> Value {
     let anonymous = server.anonymous();
     let request = anonymous

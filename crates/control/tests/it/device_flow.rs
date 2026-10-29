@@ -291,3 +291,16 @@ async fn an_app_sign_in_asks_the_approval_page_to_return_to_the_app_and_no_other
         assert_eq!((status, refused["error"].as_str()), (400, Some("return_to_not_allowed")), "{target}");
     }
 }
+
+#[tokio::test]
+async fn a_session_cookie_cannot_approve_a_device_from_another_origin() {
+    let server = Server::start().await;
+    let started = start_device(&server, "node", "laptop").await;
+    let user_code = started["user_code"].as_str().unwrap();
+    let path = format!("/api/v1/device/{user_code}/approve");
+
+    let from_an_artefact = server.user.post(&path).header("origin", "https://page.artifacts.example.com").send().await.unwrap();
+    let from_the_control_plane = server.user.post(&path).header("origin", &server.base).send().await.unwrap();
+
+    assert_eq!((from_an_artefact.status().as_u16(), from_the_control_plane.status().as_u16()), (403, 204));
+}

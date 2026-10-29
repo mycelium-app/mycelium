@@ -158,6 +158,17 @@ pub struct StreamClient {
 }
 
 impl StreamClient {
+    pub async fn closed(&mut self) -> bool {
+        loop {
+            let frame = tokio::time::timeout(WAIT, self.socket.next()).await.expect("timed out waiting for the stream to close");
+
+            match frame {
+                None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return true,
+                Some(Ok(_)) => {}
+            }
+        }
+    }
+
     pub async fn next(&mut self) -> StreamMessage {
         loop {
             let frame = tokio::time::timeout(WAIT, self.socket.next()).await.expect("timed out waiting for a stream message").unwrap().unwrap();
@@ -344,6 +355,7 @@ impl Server {
             oidc: None,
             dev_login: Some("dev@example.com".into()),
             allowed_emails: Vec::new(),
+            operators: Vec::new(),
             web_dir: web_dir.clone(),
             editor_dir: directory.path().join("editor"),
             artifact_domain: None,
@@ -365,6 +377,7 @@ impl Server {
             steer_timeout: mycelium_control::STEER_TIMEOUT,
             database_pool_size: 30,
             database_acquire_timeout: std::time::Duration::from_secs(30),
+            stream_recheck_interval: mycelium_control::STREAM_RECHECK_INTERVAL,
         };
         configure(&mut config);
         let has_dev_login = config.dev_login.is_some();

@@ -61,7 +61,8 @@ release binaries are static musl.
 | `MYCELIUM_OIDC_CLIENT_ID` | required unless dev login | |
 | `MYCELIUM_OIDC_CLIENT_SECRET` | empty | Public clients use PKCE only |
 | `MYCELIUM_DEV_LOGIN` | empty | An email; signs every browser in as that user. Refused unless `MYCELIUM_PUBLIC_URL` is `http://localhost` or `http://127.0.0.1` |
-| `MYCELIUM_ALLOWED_EMAILS` | empty | Comma-separated email addresses allowed to sign in through OIDC (case-insensitive, the provider must not report the address as unverified). Empty allows every account at the identity provider, and the control plane logs a warning at startup. The dev login ignores it |
+| `MYCELIUM_ALLOWED_EMAILS` | empty | Comma-separated email addresses allowed to sign in through OIDC (case-insensitive, the provider must report the address as verified). Empty allows every account at the identity provider, and the control plane logs a warning at startup. The dev login ignores it |
+| `MYCELIUM_OPERATORS` | the first allowed email, or the dev login | Comma-separated email addresses of the people who can change the global instructions and where they come from, and run dashboard queries against Prometheus |
 | `MYCELIUM_WEB_DIR` | `/usr/share/mycelium/web` | The built web client, served at `/` |
 | `MYCELIUM_EDITOR_DIR` | `/usr/share/mycelium/editor` | The built Design editor, served at `/design/` to signed-in users (anyone else is sent to `/auth/login`) |
 | `MYCELIUM_ARTIFACT_DOMAIN` | empty | Domain the artifact host serves `https://{slug}.<domain>` on; an artifact's `url` is null without it |

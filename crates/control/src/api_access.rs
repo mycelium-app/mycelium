@@ -1,4 +1,4 @@
-use crate::auth::AuthUser;
+use crate::auth::{AuthUser, client_token};
 use crate::error::{ApiError, ApiResult};
 use crate::integration_proxy;
 use crate::prompts;
@@ -6,7 +6,7 @@ use crate::state::{AppState, hash_token, new_token};
 use crate::token_delivery;
 use axum::Json;
 use axum::extract::{MatchedPath, Path, Request, State};
-use axum::http::{Method, StatusCode, header::AUTHORIZATION};
+use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use mycelium_proto::api::{ApiAccessRequest, ApiAccessState, ApproveApiAccessRequest};
@@ -94,8 +94,7 @@ fn need(method: &Method, route: &str) -> Need {
 }
 
 pub async fn gate_scoped_tokens(State(state): State<AppState>, request: Request, next: Next) -> Response {
-    let token = request.headers().get(AUTHORIZATION).and_then(|value| value.to_str().ok()).and_then(|value| value.strip_prefix("Bearer ")).and_then(|value| value.strip_prefix("myc_client_"));
-    let Some(token) = token else {
+    let Some(token) = client_token(request.headers()) else {
         return next.run(request).await;
     };
     let grant = sqlx::query_as::<_, (Uuid, Option<Vec<String>>)>("select id, scopes from client_tokens where token_hash = $1 and revoked_at is null and (expires_at is null or expires_at > now())")

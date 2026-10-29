@@ -16,6 +16,7 @@ use tokio::net::TcpListener;
 struct Provider {
     challenge: Mutex<String>,
     nonce: Mutex<String>,
+    leaves_email_unverified: std::sync::atomic::AtomicBool,
 }
 
 async fn start_provider() -> (String, Arc<Provider>) {
@@ -38,7 +39,7 @@ async fn start_provider() -> (String, Arc<Provider>) {
                         return (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": "invalid_grant"})));
                     }
 
-                    let claims = json!({
+                    let mut claims = json!({
                         "iss": issuer,
                         "aud": "mycelium",
                         "sub": "user-1",
@@ -47,6 +48,10 @@ async fn start_provider() -> (String, Arc<Provider>) {
                         "nonce": provider.nonce.lock().unwrap().clone(),
                         "exp": chrono::Utc::now().timestamp() + 600,
                     });
+                    if !provider.leaves_email_unverified.load(std::sync::atomic::Ordering::Relaxed) {
+                        claims["email_verified"] = json!(true);
+                    }
+
                     let id_token = format!("e30.{}.sig", URL_SAFE_NO_PAD.encode(claims.to_string()));
 
                     (axum::http::StatusCode::OK, Json(json!({"id_token": id_token})))
@@ -104,7 +109,7 @@ async fn login_ignores_a_next_address_that_leaves_the_site() {
     let server = Server::start().await;
     let anonymous = server.anonymous();
 
-    for next in ["//evil.example", "https://evil.example", "/\\evil.example"] {
+    for next in ["//evil.example", "https://evil.example", "/\\evil.example", "/\t/evil.example", "/\n/evil.example"] {
         let login = anonymous.get("/auth/login").query(&[("next", next)]).send().await.unwrap();
 
         assert_eq!(login.headers()["location"], "/", "{next}");
@@ -120,6 +125,16 @@ async fn logout_ends_the_session() {
 
     let (status, _) = server.user.json(server.user.get("/api/v1/me")).await;
     assert_eq!(status, 401);
+}
+
+#[tokio::test]
+async fn a_live_stream_closes_once_its_session_is_signed_out() {
+    let server = Server::start_with(|config| config.stream_recheck_interval = std::time::Duration::from_millis(100)).await;
+    let mut stream = server.user.stream().await;
+
+    server.user.post("/auth/logout").send().await.unwrap();
+
+    assert!(stream.closed().await);
 }
 
 #[tokio::test]
@@ -247,7 +262,12 @@ async fn oidc_callback_rejects_an_id_token_issued_for_another_login() {
 }
 
 async fn sign_in_as_ada(allowed_emails: &[&str]) -> (reqwest::Response, Server) {
+    sign_in_as_ada_with_email_verification(allowed_emails, true).await
+}
+
+async fn sign_in_as_ada_with_email_verification(allowed_emails: &[&str], verified: bool) -> (reqwest::Response, Server) {
     let (issuer, provider) = start_provider().await;
+    provider.leaves_email_unverified.store(!verified, std::sync::atomic::Ordering::Relaxed);
     let allowed: Vec<String> = allowed_emails.iter().map(|email| email.to_string()).collect();
     let server = Server::start_with(|config| {
         config.dev_login = None;
@@ -277,6 +297,13 @@ async fn an_account_missing_from_the_allowed_emails_cannot_sign_in() {
     assert_eq!(body["error"], "not_allowed");
     let users = sqlx::query_scalar::<_, i64>("select count(*) from users").fetch_one(&server.pool).await.unwrap();
     assert_eq!(users, 0);
+}
+
+#[tokio::test]
+async fn an_allowed_email_the_identity_provider_does_not_vouch_for_cannot_sign_in() {
+    let (callback, _server) = sign_in_as_ada_with_email_verification(&["ada@example.com"], false).await;
+
+    assert_eq!(callback.status(), 403);
 }
 
 #[tokio::test]

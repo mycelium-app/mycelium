@@ -113,7 +113,7 @@ mod tandoor;
 mod zulip;
 
 pub use forge_cache::FORGE_CACHE_TTL;
-pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, OidcConfig, SCHEDULER_TICK, STEER_TIMEOUT, VERSION_CHECK_INTERVAL};
+pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, OidcConfig, SCHEDULER_TICK, STEER_TIMEOUT, STREAM_RECHECK_INTERVAL, VERSION_CHECK_INTERVAL};
 
 use anyhow::Result;
 use axum::Router;
@@ -476,6 +476,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/stream", get(stream::connect))
         .route("/api/v1/node/connect", get(link::connect))
         .route("/api/{*unknown}", any(web::unknown_api))
+        .route_layer(axum::middleware::from_fn_with_state(state.clone(), auth::refuse_cross_site_session_writes))
         .route_layer(axum::middleware::from_fn_with_state(state.clone(), experiments::gate))
         .route_layer(axum::middleware::from_fn_with_state(state.clone(), api_access::gate_scoped_tokens))
         .fallback_service(web::single_page_app(&web_dir))

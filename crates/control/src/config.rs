@@ -9,6 +9,7 @@ pub const SCHEDULER_TICK: Duration = Duration::from_secs(15);
 pub const STEER_TIMEOUT: Duration = Duration::from_secs(5);
 pub const DATABASE_POOL_SIZE: u32 = 10;
 pub const DATABASE_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(3);
+pub const STREAM_RECHECK_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 pub struct OidcConfig {
@@ -61,6 +62,7 @@ pub struct Config {
     pub oidc: Option<OidcConfig>,
     pub dev_login: Option<String>,
     pub allowed_emails: Vec<String>,
+    pub operators: Vec<String>,
     pub web_dir: PathBuf,
     pub editor_dir: PathBuf,
     pub artifact_domain: Option<String>,
@@ -82,6 +84,7 @@ pub struct Config {
     pub steer_timeout: Duration,
     pub database_pool_size: u32,
     pub database_acquire_timeout: Duration,
+    pub stream_recheck_interval: Duration,
 }
 
 type Lookup<'a> = &'a dyn Fn(&str) -> Option<String>;
@@ -133,6 +136,7 @@ impl Config {
             oidc,
             dev_login,
             allowed_emails: optional(lookup, "MYCELIUM_ALLOWED_EMAILS").map(|emails| emails.split(',').map(|email| email.trim().to_lowercase()).filter(|email| !email.is_empty()).collect()).unwrap_or_default(),
+            operators: optional(lookup, "MYCELIUM_OPERATORS").map(|emails| emails.split(',').map(|email| email.trim().to_lowercase()).filter(|email| !email.is_empty()).collect()).unwrap_or_default(),
             web_dir: optional(lookup, "MYCELIUM_WEB_DIR").unwrap_or_else(|| "/usr/share/mycelium/web".into()).into(),
             editor_dir: optional(lookup, "MYCELIUM_EDITOR_DIR").unwrap_or_else(|| "/usr/share/mycelium/editor".into()).into(),
             artifact_domain: optional(lookup, "MYCELIUM_ARTIFACT_DOMAIN").map(|domain| domain.trim().trim_matches('.').to_lowercase()).filter(|domain| !domain.is_empty()),
@@ -157,7 +161,20 @@ impl Config {
             steer_timeout: STEER_TIMEOUT,
             database_pool_size: optional(lookup, "MYCELIUM_DATABASE_POOL_SIZE").map(|size| size.trim().parse()).transpose()?.unwrap_or(DATABASE_POOL_SIZE),
             database_acquire_timeout: optional(lookup, "MYCELIUM_DATABASE_ACQUIRE_TIMEOUT_SECONDS").map(|seconds| seconds.trim().parse().map(Duration::from_secs)).transpose()?.unwrap_or(DATABASE_ACQUIRE_TIMEOUT),
+            stream_recheck_interval: STREAM_RECHECK_INTERVAL,
         })
+    }
+
+    pub fn is_operator(&self, email: &str) -> bool {
+        let email = email.to_lowercase();
+
+        if !self.operators.is_empty() {
+            return self.operators.contains(&email);
+        }
+
+        let default = self.allowed_emails.first().or(self.dev_login.as_ref());
+
+        default.is_some_and(|operator| operator.to_lowercase() == email)
     }
 }
 
@@ -194,6 +211,25 @@ mod tests {
 
         assert!(config.oidc.is_none());
         assert_eq!(config.dev_login.as_deref(), Some("me@example.com"));
+    }
+
+    #[test]
+    fn the_first_allowed_email_is_the_operator_unless_operators_are_listed() {
+        let base = [("MYCELIUM_DATABASE_URL", "postgres://x"), ("MYCELIUM_PUBLIC_URL", "http://127.0.0.1:8080"), ("MYCELIUM_DEV_LOGIN", "dev@example.com")];
+        assert!(config_from(&base).unwrap().is_operator("Dev@Example.com"));
+
+        let mut allowed = base.to_vec();
+        allowed.push(("MYCELIUM_ALLOWED_EMAILS", "Sam@example.com, alex@example.com"));
+        let config = config_from(&allowed).unwrap();
+
+        assert!(config.is_operator("sam@example.com"));
+        assert!(!config.is_operator("alex@example.com"));
+
+        allowed.push(("MYCELIUM_OPERATORS", "alex@example.com"));
+        let config = config_from(&allowed).unwrap();
+
+        assert!(config.is_operator("Alex@example.com"));
+        assert!(!config.is_operator("sam@example.com"));
     }
 
     #[test]

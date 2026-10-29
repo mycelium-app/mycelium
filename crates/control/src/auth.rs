@@ -1,12 +1,14 @@
 use crate::config::{OidcConfig, is_localhost};
 use crate::error::{ApiError, ApiResult};
 use crate::device::client_address;
+use crate::stream::check_origin;
 use crate::state::{AppState, hash_token, new_token};
 use axum::Json;
-use axum::extract::{ConnectInfo, FromRequestParts, Query, State};
+use axum::extract::{ConnectInfo, FromRequestParts, Query, Request, State};
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, COOKIE, SET_COOKIE, USER_AGENT};
 use axum::http::request::Parts;
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Redirect, Response};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -40,6 +42,14 @@ impl AuthUser {
 
         Ok(())
     }
+
+    pub fn require_operator(&self, state: &AppState) -> ApiResult<()> {
+        if !state.config.is_operator(&self.email) {
+            return Err(ApiError::new(StatusCode::FORBIDDEN, "operator_only", "Only an operator of this control plane can do that. Ask one to do it, or to list your email address in MYCELIUM_OPERATORS."));
+        }
+
+        Ok(())
+    }
 }
 
 pub struct AuthNode {
@@ -54,6 +64,13 @@ fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     let header = headers.get(COOKIE)?.to_str().ok()?;
 
     header.split(';').filter_map(|pair| pair.trim().split_once('=')).find(|(key, _)| *key == name).map(|(_, value)| value)
+}
+
+pub fn client_token(headers: &HeaderMap) -> Option<&str> {
+    let planted = || cookie(headers, SESSION_COOKIE).is_none().then(|| cookie(headers, CLIENT_COOKIE)).flatten();
+    let value = bearer(headers).or_else(planted);
+
+    value?.strip_prefix("myc_client_")
 }
 
 #[derive(sqlx::FromRow)]
@@ -72,7 +89,7 @@ impl FromRequestParts<AppState> for AuthUser {
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<AuthUser, ApiError> {
         let address = parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|ConnectInfo(peer)| client_address(state, &parts.headers, *peer).to_string()).unwrap_or_default();
 
-        if let Some(token) = bearer(&parts.headers).or_else(|| cookie(&parts.headers, CLIENT_COOKIE)).and_then(|value| value.strip_prefix("myc_client_")) {
+        if let Some(token) = client_token(&parts.headers) {
             let row = sqlx::query_as::<_, ClientTokenRow>(
                 "select users.id as user_id, users.email, users.name, client_tokens.id as session, client_tokens.scopes, client_tokens.expires_at from client_tokens join users on users.id = client_tokens.user_id
                  where client_tokens.token_hash = $1 and client_tokens.revoked_at is null and (client_tokens.expires_at is null or client_tokens.expires_at > now())",
@@ -118,6 +135,20 @@ impl FromRequestParts<AppState> for AuthUser {
 
         row.map(|(id, email, name, session)| AuthUser { id, email, name, session: Some(session), scopes: None, expires_at: None }).ok_or_else(ApiError::unauthorised)
     }
+}
+
+pub async fn refuse_cross_site_session_writes(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let reading = request.method() == Method::GET || request.method() == Method::HEAD || request.method() == Method::OPTIONS;
+
+    if !reading && cookie(request.headers(), SESSION_COOKIE).is_some() {
+        let checked = check_origin(&state, request.headers());
+
+        if let Err(error) = checked {
+            return error.into_response();
+        }
+    }
+
+    next.run(request).await
 }
 
 impl FromRequestParts<AppState> for AuthNode {
@@ -178,7 +209,7 @@ fn header_value(value: &str) -> ApiResult<HeaderValue> {
 
 fn safe_next(next: Option<String>) -> String {
     match next {
-        Some(next) if next.starts_with('/') && !next.starts_with("//") && !next.contains('\\') => next,
+        Some(next) if next.starts_with('/') && !next.starts_with("//") && !next.contains('\\') && !next.chars().any(char::is_control) => next,
         _ => "/".into(),
     }
 }
@@ -291,7 +322,7 @@ pub async fn callback(State(state): State<AppState>, headers: HeaderMap, Query(q
     }
 
     let allowed_emails = &state.config.allowed_emails;
-    let verified = claims["email_verified"].as_bool() != Some(false);
+    let verified = claims["email_verified"].as_bool() == Some(true);
     let listed = claims["email"].as_str().is_some_and(|email| allowed_emails.contains(&email.to_lowercase()));
 
     if !allowed_emails.is_empty() && !(listed && verified) {
