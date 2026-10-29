@@ -12,6 +12,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.onAllNodesWithText
@@ -62,7 +63,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-private val holdsOneCitationMarker = SemanticsMatcher("holds one citation marker") { it.config.getOrNull(SemanticsProperties.EditableText)?.text?.length == 1 }
+private val holdsTheCitationChip = SemanticsMatcher("holds the citation chip") { it.config.getOrNull(SemanticsProperties.EditableText)?.text?.contains("The retry delay is read from RESTORE_BACKOFF_MS") == true }
 
 class AnnotationsTest {
     @get:Rule
@@ -358,7 +359,7 @@ class AnnotationsTest {
         }
         waitForOffer()
         rule.onNodeWithText("Cite").performClick()
-        rule.onNode(hasSetTextAction()).assert(holdsOneCitationMarker)
+        rule.onNode(hasSetTextAction()).assert(holdsTheCitationChip)
 
         status = "working"
         events = events + chunk(2, " and it is 500")
@@ -371,7 +372,7 @@ class AnnotationsTest {
         runBlocking { store.refresh() }
         rule.waitForIdle()
 
-        rule.onNode(hasSetTextAction()).assert(holdsOneCitationMarker)
+        rule.onNode(hasSetTextAction()).assert(holdsTheCitationChip)
     }
 
     private fun chunk(seq: Int, text: String) =
