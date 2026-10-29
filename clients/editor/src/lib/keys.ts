@@ -26,3 +26,8 @@ export function commandForKey(input: KeyInput): Command | null
 
   return tool ? { kind: 'tool', tool } : null;
 }
+
+export function submitsComment(input: { key: string; shiftKey: boolean; isComposing?: boolean }): boolean
+{
+  return input.key === 'Enter' && !input.shiftKey && !input.isComposing;
+}

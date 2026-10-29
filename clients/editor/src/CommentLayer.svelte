@@ -2,6 +2,7 @@
   import type { ArtifactComment, CommentAnchor } from './lib/api';
   import { findItem, itemBounds } from './lib/doc';
   import { editor } from './lib/instance';
+  import { submitsComment } from './lib/keys';
 
   let draft = $state('');
 
@@ -44,6 +45,14 @@
     await editor.addComment(draft);
     draft = '';
   }
+
+  function submitOnEnter(event: KeyboardEvent)
+  {
+    if (!submitsComment(event)) return;
+
+    event.preventDefault();
+    (event.currentTarget as HTMLTextAreaElement).form?.requestSubmit();
+  }
 </script>
 
 {#each pins as { comment, position } (comment.id)}
@@ -67,7 +76,7 @@
   <form class="pin-anchor thread new-thread" style:left={`${pending.left}px`} style:top={`${pending.top}px`} onsubmit={post} aria-label="New comment">
     <label>
       <span class="visually-hidden">Comment</span>
-      <textarea bind:value={draft} rows="3" use:focusOnMount placeholder="Add a comment"></textarea>
+      <textarea bind:value={draft} rows="3" onkeydown={submitOnEnter} use:focusOnMount placeholder="Add a comment"></textarea>
     </label>
     <div class="thread-actions">
       <button class="text-button primary" type="submit">Post comment</button>
