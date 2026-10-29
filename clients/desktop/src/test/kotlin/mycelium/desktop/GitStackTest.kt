@@ -32,6 +32,10 @@ import mycelium.api.MyceliumJson
 import mycelium.state.Store
 import mycelium.ui.GitPanel
 import mycelium.ui.MyceliumTheme
+import androidx.compose.ui.graphics.asSkiaBitmap
+import androidx.compose.ui.test.captureToImage
+import org.jetbrains.skia.EncodedImageFormat
+import org.jetbrains.skia.Image
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -84,6 +88,12 @@ class GitStackTest {
     private val opened = CopyOnWriteArrayList<String>()
 
     private fun open(fake: StackFake) {
+        render(fake)
+        rule.onNodeWithText("Stack").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Current branch").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    private fun render(fake: StackFake) {
         val conversation = MyceliumJson.decodeFromString<Conversation>(StackConversationJson)
         val store = Store(fake.api, scopes.create())
         val handler = object : UriHandler {
@@ -99,8 +109,6 @@ class GitStackTest {
                 }
             }
         }
-        rule.onNodeWithText("Stack").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Current branch").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -168,5 +176,28 @@ class GitStackTest {
         rule.waitUntil(5_000) { fake.sent("/git/town/propose") }
 
         assertTrue(rule.onAllNodes(hasContentDescription("Propose two")).fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun walkthroughAsksTheAgentToWalkThroughTheUncommittedChanges() {
+        val fake = StackFake(stackJson(townAvailable = true))
+        render(fake)
+
+        rule.onNodeWithText("Walkthrough").performClick()
+        rule.waitUntil(5_000) { fake.sent("/conversations/c1/prompt") }
+
+        assertTrue(fake.bodyOf("/conversations/c1/prompt").contains("the uncommitted changes in the working tree"))
+    }
+
+    @Test
+    fun theChangesRowRendersForComparisonWithTheArtboard() {
+        render(StackFake(stackJson(townAvailable = true)))
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Walkthrough").fetchSemanticsNodes().isNotEmpty() }
+        val png = Image.makeFromBitmap(rule.onRoot().captureToImage().asSkiaBitmap()).encodeToData(EncodedImageFormat.PNG)!!.bytes
+        val out = java.io.File("build/screens/git-changes-walkthrough-dark.png")
+        out.parentFile.mkdirs()
+        out.writeBytes(png)
+
+        assertTrue(out.length() > 5_000)
     }
 }

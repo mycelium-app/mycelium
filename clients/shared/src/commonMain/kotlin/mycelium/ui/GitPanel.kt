@@ -49,6 +49,7 @@ import mycelium.state.ChangeRow
 import mycelium.state.DiffTab
 import mycelium.state.Store
 import mycelium.state.ToolStatus
+import mycelium.state.WalkthroughScope
 import mycelium.state.changeRows
 import mycelium.state.changesTab
 import mycelium.state.commitDiffTab
@@ -250,6 +251,10 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                                 runner { diff = store.api.gitDiff(id, file.path, diffIsStaged(file)) }
                             }
                         },
+                        onWalkthrough = {
+                            store.chooseWalkthroughScope(id, WalkthroughScope.Uncommitted)
+                            store.iterateWalkthrough(id, "")
+                        },
                         onStageAll = { runner { store.api.gitStageAll(id); refresh() } },
                         onToggle = { file ->
                             runner {
@@ -362,7 +367,7 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
 }
 
 @Composable
-private fun ChangesList(files: List<GitFile>, shownPath: String?, onViewDiff: (GitFile) -> Unit, onStageAll: () -> Unit, onToggle: (GitFile) -> Unit) {
+private fun ChangesList(files: List<GitFile>, shownPath: String?, onViewDiff: (GitFile) -> Unit, onWalkthrough: () -> Unit, onStageAll: () -> Unit, onToggle: (GitFile) -> Unit) {
     val colors = MyTheme.colors
     val additions = files.sumOf { it.additions }
     val deletions = files.sumOf { it.deletions }
@@ -377,6 +382,7 @@ private fun ChangesList(files: List<GitFile>, shownPath: String?, onViewDiff: (G
             MyButton({ first?.let(onViewDiff) }, text = "View diff", icon = MyIcon.Diff, size = ButtonSize.Sm)
             Label("+$additions", style = Tokens.Type.Code, color = colors.diffAdd)
             Label("−$deletions", style = Tokens.Type.Code, color = colors.diffDel)
+            MyButton(onWalkthrough, text = "Walkthrough", icon = MyIcon.List, size = ButtonSize.Sm)
         }
 
         MyButton(onStageAll, text = "Stage all", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
