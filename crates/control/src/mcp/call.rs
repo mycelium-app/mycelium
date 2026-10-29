@@ -61,7 +61,7 @@ impl Caller<'_> {
             return Ok(None);
         };
 
-        Ok(sqlx::query_as::<_, (Uuid, String)>(sqlx::AssertSqlSafe(format!("select g.id, g.name from conversations c join groups g on g.id = {CONVERSATION_GROUP_SQL} where c.id = $1"))).bind(conversation_id).fetch_optional(&self.state.pool).await?)
+        Ok(sqlx::query_as::<_, (Uuid, String)>(sqlx::AssertSqlSafe(format!("select g.id, g.name from groups g where g.id = (select {CONVERSATION_GROUP_SQL} from conversations where id = $1)"))).bind(conversation_id).fetch_optional(&self.state.pool).await?)
     }
 
     pub async fn group_id(&self) -> ApiResult<Option<Uuid>> {

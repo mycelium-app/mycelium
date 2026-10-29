@@ -171,7 +171,7 @@ async fn record(state: &AppState, owner: Uuid, layer: &Layer, text: &str, forge_
         .bind(owner)
         .execute(&state.pool)
         .await?;
-    instruction_proposals::republish_layer(state, owner, &layer.key).await?;
+    instruction_proposals::republish_layer(state, &layer.key).await?;
 
     Ok(())
 }
@@ -305,6 +305,10 @@ pub async fn apply(state: &AppState, user: &AuthUser, layer: &Layer, text: &str)
         return Ok(());
     }
 
+    if layer.key == GLOBAL {
+        user.require_operator(state)?;
+    }
+
     let unchanged = latest(state, &layer.key).await?.is_some_and(|version| version.text == text);
 
     if !unchanged {
@@ -372,6 +376,8 @@ pub async fn pull(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
 }
 
 pub async fn set_source(State(state): State<AppState>, user: AuthUser, Json(request): Json<SetInstructionSourceRequest>) -> ApiResult<Json<Instructions>> {
+    user.require_operator(&state)?;
+
     let repository = request.repository.trim();
     let path = request.path.as_deref().map(str::trim).filter(|path| !path.is_empty()).unwrap_or(DEFAULT_PATH);
 
@@ -398,7 +404,9 @@ pub async fn set_source(State(state): State<AppState>, user: AuthUser, Json(requ
     Ok(Json(describe(&state, &user).await?))
 }
 
-pub async fn clear_source(State(state): State<AppState>, _user: AuthUser) -> ApiResult<StatusCode> {
+pub async fn clear_source(State(state): State<AppState>, user: AuthUser) -> ApiResult<StatusCode> {
+    user.require_operator(&state)?;
+
     sqlx::query("delete from instruction_source").execute(&state.pool).await?;
 
     Ok(StatusCode::NO_CONTENT)

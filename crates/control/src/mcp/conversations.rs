@@ -159,7 +159,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                     let Some(node_id) = sqlx::query_scalar::<_, Uuid>("select id from nodes where created_by = $1 and name = $2 and revoked_at is null").bind(owner).bind(node_name).fetch_optional(&state.pool).await? else {
                         return Ok(nothing(format!("None of the person's nodes is named {node_name}.")));
                     };
-                    let folder_group = sqlx::query_scalar::<_, Option<Uuid>>("select conversation_group($1, $2, null)").bind(folder).bind(node_id).fetch_one(&state.pool).await?;
+                    let folder_group = sqlx::query_scalar::<_, Option<Uuid>>("select conversation_group($1, $2, null, $3)").bind(folder).bind(node_id).bind(owner).fetch_one(&state.pool).await?;
 
                     if folder_group != Some(target_group) {
                         return Ok(nothing(format!("The folder {folder} is not in the {target_name} group.")));

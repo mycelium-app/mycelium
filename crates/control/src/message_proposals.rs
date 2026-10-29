@@ -14,8 +14,8 @@ const LISTED: i64 = 100;
 fn proposal_columns() -> String {
     format!("p.id, p.conversation_id, p.target_id, t.title as target_title, coalesce(n.name, '') as target_node, pr.name as target_project, p.message, p.reason, p.state, p.created_at, p.decided_at,
     s.title as source_title, t.archived_at is not null as target_archived,
-    (select g.name from conversations x join groups g on g.id = {CONVERSATION_GROUP_SQL} where x.id = p.conversation_id) as source_group,
-    (select g.name from conversations x join groups g on g.id = {CONVERSATION_GROUP_SQL} where x.id = p.target_id) as target_group")
+    (select g.name from groups g where g.id = (select {CONVERSATION_GROUP_SQL} from conversations where id = p.conversation_id)) as source_group,
+    (select g.name from groups g where g.id = (select {CONVERSATION_GROUP_SQL} from conversations where id = p.target_id)) as target_group")
 }
 
 const PROPOSAL_JOINS: &str = "message_proposals p join conversations t on t.id = p.target_id left join nodes n on n.id = t.node_id left join projects pr on pr.id = t.project_id left join conversations s on s.id = p.conversation_id";

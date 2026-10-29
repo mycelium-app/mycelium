@@ -87,16 +87,11 @@ fn publish(state: &AppState, owner: Uuid, row: ProposalRow) -> InstructionPropos
     proposal
 }
 
-pub async fn republish_layer(state: &AppState, owner: Uuid, layer: &str) -> ApiResult<()> {
-    let rows = sqlx::query_as::<_, ProposalRow>(sqlx::AssertSqlSafe(format!(
-        "select {PROPOSAL_COLUMNS} from instruction_proposals p left join conversations c on c.id = p.conversation_id where p.layer = $1 and p.state = 'proposed'",
-    )))
-    .bind(layer)
-    .fetch_all(&state.pool)
-    .await?;
+pub async fn republish_layer(state: &AppState, layer: &str) -> ApiResult<()> {
+    let proposals = sqlx::query_as::<_, (Uuid, Uuid)>("select id, owner from instruction_proposals where layer = $1 and state = 'proposed'").bind(layer).fetch_all(&state.pool).await?;
 
-    for row in rows {
-        publish(state, owner, row);
+    for (id, owner) in proposals {
+        publish(state, owner, find_owned(state, id, owner).await?);
     }
 
     Ok(())
@@ -115,7 +110,7 @@ pub async fn layer_text(state: &AppState, conversation_id: Uuid, requested: Opti
             }
         }
         None => {
-            let group = sqlx::query_as::<_, (Uuid, String)>(sqlx::AssertSqlSafe(format!("select g.id, g.name from conversations c join groups g on g.id = {CONVERSATION_GROUP_SQL} where c.id = $1"))).bind(conversation_id).fetch_optional(&state.pool).await?;
+            let group = sqlx::query_as::<_, (Uuid, String)>(sqlx::AssertSqlSafe(format!("select g.id, g.name from groups g where g.id = (select {CONVERSATION_GROUP_SQL} from conversations where id = $1)"))).bind(conversation_id).fetch_optional(&state.pool).await?;
 
             match group {
                 Some((id, name)) => (id.to_string(), name),

@@ -14,7 +14,7 @@ pub type Tx<'a> = Transaction<'a, Postgres>;
 
 macro_rules! conversation_group_sql {
     () => {
-        "coalesce((select a.group_id from assistants a where a.id = assistant_id), conversation_group(cwd, node_id, project_id))"
+        "coalesce((select a.group_id from assistants a where a.id = assistant_id), conversation_group(cwd, node_id, project_id, owner))"
     };
 }
 

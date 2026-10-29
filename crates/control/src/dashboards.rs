@@ -69,6 +69,8 @@ pub fn series_from_prometheus(response: &Value, legend: Option<&str>) -> Vec<Ser
 }
 
 pub async fn panel_data(State(state): State<AppState>, user: AuthUser, Path((id, panel_id)): Path<(Uuid, i64)>, Query(query): Query<RangeQuery>) -> ApiResult<Json<PanelData>> {
+    user.require_operator(&state)?;
+
     let seconds = range_seconds(query.range.as_deref().unwrap_or("24h"))?;
     let dashboard = artifacts::dashboard_of(&state, id, user.id).await?;
     let panels = dashboard["panels"].as_array().cloned().unwrap_or_default();

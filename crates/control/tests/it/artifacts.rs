@@ -813,6 +813,18 @@ async fn a_dashboard_panel_says_so_when_no_data_source_is_configured() {
 }
 
 #[tokio::test]
+async fn only_an_operator_can_run_a_dashboard_panels_queries_against_the_data_source() {
+    let server = Server::start_with(|config| config.prometheus_url = Some("http://127.0.0.1:1".into())).await;
+    let other = server.second_user("other@example.com").await;
+    let dashboard = created(&other, "dashboard", "Mine", r#"{"title":"Mine","panels":[{"type":"stat","id":1,"datasource":{"type":"prometheus","uid":"x"},"targets":[{"expr":"up"}]}]}"#).await;
+    let id = dashboard["id"].as_str().unwrap();
+
+    let (status, body) = other.json(other.get(&format!("/api/v1/artifacts/{id}/panels/1/data?range=7d"))).await;
+
+    assert_eq!((status, body["error"].as_str()), (403, Some("operator_only")), "{body}");
+}
+
+#[tokio::test]
 async fn a_design_made_with_a_design_system_gets_its_tokens_in_every_artboard_an_agent_saves() {
     let server = Server::start().await;
     let (link, conversation) = started(&server).await;
