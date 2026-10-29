@@ -130,12 +130,12 @@ class AssistantThreadTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("needs JELLYFIN_KEY", substring = true).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Set secret JELLYFIN_KEY").performClick()
-        rule.onNodeWithContentDescription("Value of JELLYFIN_KEY").performTextInput("abc123def")
-        rule.onNodeWithContentDescription("Save secret JELLYFIN_KEY").performClick()
+        rule.onNodeWithContentDescription("Value").performTextInput("abc123def")
+        rule.onNodeWithText("Save secret").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/assistants/a1/secrets/JELLYFIN_KEY" } }
         assertEquals("""{"value":"abc123def"}""", requests.last { it.first.startsWith("PUT") }.second)
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Save secret JELLYFIN_KEY").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Save secret").fetchSemanticsNodes().isEmpty() }
         assertEquals(0, present("abc123def"))
     }
 }

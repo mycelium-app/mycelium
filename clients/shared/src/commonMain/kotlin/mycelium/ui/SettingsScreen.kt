@@ -44,11 +44,12 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
     TimeAndFocus("Time and focus", MyIcon.Clock),
     Privacy("Privacy", MyIcon.Mode, "Voice, wake phrase and where speech is processed"),
     Experiments("Experiments", MyIcon.Sliders),
+    Schedules("Schedules", MyIcon.Calendar, "Prompts that start conversations on a timetable"),
     Ides("IDEs", MyIcon.Code, "Where Open in IDE opens a folder"),
     Accounts("Providers", MyIcon.Person, "Agent harness accounts, usage and chat models"),
     Agents("Agents", MyIcon.ClaudeMark),
     Import("Import", MyIcon.Archive, "Past agent transcripts and Claude chats"),
-    Groups("Groups", MyIcon.Layers, "Instructions, folders and projects for each kind of work"),
+    Groups("Groups", MyIcon.Group, "Instructions, folders and projects for each kind of work"),
     Instructions("Instructions", MyIcon.File, "The AGENTS.md every conversation starts with"),
     Memories("Memories", MyIcon.Info),
     Sessions("Sessions", MyIcon.Key, "Clients and nodes signed in to your account"),
@@ -61,7 +62,7 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
 
 internal val SettingsGroups = listOf(
     "General" to listOf(SettingsSection.Appearance, SettingsSection.TimeAndFocus, SettingsSection.Privacy, SettingsSection.Experiments, SettingsSection.Ides),
-    "Agents and models" to listOf(SettingsSection.Accounts, SettingsSection.Agents, SettingsSection.Connections),
+    "Agents and models" to listOf(SettingsSection.Accounts, SettingsSection.Agents, SettingsSection.Schedules, SettingsSection.Connections),
     "Knowledge" to listOf(SettingsSection.Groups, SettingsSection.Instructions, SettingsSection.Memories, SettingsSection.Import, SettingsSection.Indexing),
     "Services" to listOf(SettingsSection.ChatTools, SettingsSection.Forges),
     "Your account" to listOf(SettingsSection.Sessions, SettingsSection.Account),
@@ -178,6 +179,16 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
 
 @Composable
 private fun SettingsContent(section: SettingsSection, store: Store, me: Me, controlPlane: String, onSignOut: () -> Unit, openGroup: String?, onOpenGroup: (String?) -> Unit, showGroup: ((String) -> Unit)?, links: GroupLinks, modifier: Modifier) {
+    if (section == SettingsSection.Schedules) {
+        val state by store.state.collectAsState()
+
+        Box(modifier.fillMaxHeight()) {
+            SchedulesScreen(store, state, embedded = true)
+        }
+
+        return
+    }
+
     Column(
         modifier.fillMaxHeight().verticalScrollWithBar().padding(horizontal = Tokens.Space.S6, vertical = Tokens.Space.S4),
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6),
@@ -187,6 +198,7 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
             SettingsSection.TimeAndFocus -> TimeAndFocusSettings(store, links.openHours)
             SettingsSection.Privacy -> PrivacySettings(store, LocalPlatform.current)
             SettingsSection.Experiments -> ExperimentsSettings(store)
+            SettingsSection.Schedules -> Unit
             SettingsSection.Ides -> LocalPlatform.current?.let { IdesSettings(it) }
             SettingsSection.Accounts -> {
                 AccountsSettings(store)

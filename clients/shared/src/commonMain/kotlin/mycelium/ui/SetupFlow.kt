@@ -482,10 +482,8 @@ fun SetupFlow(
 
         when (title) {
             "Address" -> if (kind == "zulip") {
-                Label("Chats and agents can read and search your Zulip messages and, with your approval, send them.", style = Tokens.Type.Meta, color = colors.textMuted)
                 TextInput(address, { address = it }, label = "Zulip server address", placeholder = "https://example.zulipchat.com", mono = true, onSubmit = ::next)
             } else if (kind == "email") {
-                Label("Chats and agents can read and search your mail and, with your approval, send it.", style = Tokens.Type.Meta, color = colors.textMuted)
                 TextInput(imapHost, { imapHost = it }, label = "IMAP server", placeholder = "imap.example.com", mono = true)
                 TextInput(imapPort, { imapPort = it }, label = "IMAP port, if not the usual one", placeholder = if (imapSecurity == Tls) "993" else "143", mono = true)
                 Segmented(listOf(Tls, StartTls), imapSecurity, { imapSecurity = it }, "IMAP security")
@@ -496,15 +494,12 @@ fun SetupFlow(
                 Label("Actual Budget has no HTTP API of its own. Mycelium talks to the actual-http-api bridge, which you run beside your Actual server. Set it up first, then enter its address.", style = Tokens.Type.Meta, color = colors.textMuted)
                 TextInput(address, { address = it }, label = "Actual HTTP API address", placeholder = "http://localhost:5007", mono = true, onSubmit = ::next)
             } else if (kind == "paperless") {
-                Label("Chats and agents can search your documents and read their text and, with your approval, change their tags and correspondent.", style = Tokens.Type.Meta, color = colors.textMuted)
                 TextInput(address, { address = it }, label = "Paperless-ngx address", placeholder = "https://paperless.example.com", mono = true, onSubmit = ::next)
             } else if (kind == "stoat") {
-                Label("Chats and agents can read and search Stoat messages and, with your approval, send them.", style = Tokens.Type.Meta, color = colors.textMuted)
                 TextInput(address, { address = it }, label = "Stoat API address", placeholder = StoatAddress, mono = true, onSubmit = ::next)
             } else if (caldav) {
                 TextInput(address, { address = it }, label = "Server address", placeholder = "https://cal.example.com", mono = true, onSubmit = ::next)
                 Label("The base address is enough. Mycelium finds your calendars from it.", style = Tokens.Type.Meta, color = colors.textMuted)
-                Label("Works with any CalDAV server, such as Nextcloud, Radicale, Fastmail or iCloud.", style = Tokens.Type.Meta, color = colors.textMuted)
             } else {
                 TextInput(address, { address = it }, label = if (kind == "mcp") "Server address" else "$product address", placeholder = "https://example.com/mcp", mono = true, onSubmit = ::next)
                 Label(if (kind == "mcp") "The address the server's documentation gives for MCP over HTTP." else "Mycelium checks whether the server offers sign-in before asking for a credential.", style = Tokens.Type.Meta, color = colors.textMuted)
@@ -521,7 +516,6 @@ fun SetupFlow(
                     TextInput(sender, { sender = it }, label = "Send from address, if it differs from the username", mono = true, onSubmit = ::next)
                     Label("Your provider may need an app password instead of your usual one.", style = Tokens.Type.Meta, color = colors.textMuted)
                 } else if (kind == "discord") {
-                    Label("Chats and agents can read and search the servers your bot is in and, with your approval, send messages. Each one opens with a line saying the Mycelium agent posted it on your behalf.", style = Tokens.Type.Meta, color = colors.textMuted)
                     TextInput(username, { username = it }, label = "Your name on Discord", mono = true)
                     TextInput(token, { token = it }, label = "Discord bot token", mono = true, masked = true, onSubmit = ::next)
                     Label("Create a bot in the Discord Developer Portal, turn on Message Content Intent, and invite it to your server.", style = Tokens.Type.Meta, color = colors.textMuted)

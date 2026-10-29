@@ -64,7 +64,7 @@ private const val RunsAction = "Runs an action"
 private const val SendsPrompt = "Sends a prompt"
 
 @Composable
-fun SchedulesScreen(store: Store, state: AppState) {
+fun SchedulesScreen(store: Store, state: AppState, embedded: Boolean = false) {
     val colors = MyTheme.colors
     val stamp = timestamper()
     var creating by remember { mutableStateOf(false) }
@@ -85,11 +85,13 @@ fun SchedulesScreen(store: Store, state: AppState) {
     val runs = state.scheduleRuns.filter { it.scheduleId in shownIds }
 
     Column(Modifier.fillMaxSize()) {
-        Bar {
-            OpenListButton()
-            BarTitle("Schedules")
-            Box(Modifier.weight(1f))
-            MyButton({ creating = true }, text = "New schedule", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
+        if (!embedded) {
+            Bar {
+                OpenListButton()
+                BarTitle("Schedules")
+                Box(Modifier.weight(1f))
+                MyButton({ creating = true }, text = "New schedule", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
+            }
         }
 
         FlowRow(
@@ -100,6 +102,10 @@ fun SchedulesScreen(store: Store, state: AppState) {
         ) {
             ListSearch(query, { query = it }, "schedules")
             ProjectFilter(inGroup.mapNotNull { schedule -> schedule.projectId?.let { id -> state.projects[id]?.let { Choice(id, it.name) } } }.distinctBy { it.id }.sortedBy { it.name.lowercase() }, projectId) { projectId = it }
+
+            if (embedded) {
+                MyButton({ creating = true }, text = "New schedule", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
+            }
         }
 
         Hairline()

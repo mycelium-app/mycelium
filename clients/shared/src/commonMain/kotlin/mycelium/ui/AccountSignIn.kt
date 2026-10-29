@@ -25,6 +25,7 @@ fun AccountSignInDialog(store: Store, session: LoginSession, onClose: () -> Unit
             onOpenUrl = { url -> platform?.openUrl(url) },
             onCopy = { code -> platform?.copyToClipboard(code) },
             onInput = { text -> store.act { store.api.loginInput(session.loginId, text) } },
+            framed = false,
             onClose = {
                 if (finished == null) {
                     store.act { store.api.stopLogin(session.loginId) }

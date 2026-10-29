@@ -147,6 +147,36 @@ fun wordleKeyMarks(guesses: List<WordleGuess>): Map<Char, String> {
     return best
 }
 
+fun wordleHardModeProblem(guesses: List<WordleGuess>, next: String): String? {
+    for (guess in guesses) {
+        for (index in guess.word.indices) {
+            if (guess.marks[index] == "correct" && next.getOrNull(index) != guess.word[index]) {
+                return "${ordinal(index + 1)} letter must be ${guess.word[index].uppercaseChar()}"
+            }
+        }
+    }
+
+    for (guess in guesses) {
+        val wanted = guess.word.indices.filter { guess.marks[it] != "absent" }.map { guess.word[it] }
+        val available = next.toMutableList()
+
+        for (letter in wanted) {
+            if (!available.remove(letter)) {
+                return "Guess must contain ${letter.uppercaseChar()}"
+            }
+        }
+    }
+
+    return null
+}
+
+private fun ordinal(number: Int): String = when (number) {
+    1 -> "1st"
+    2 -> "2nd"
+    3 -> "3rd"
+    else -> "${number}th"
+}
+
 sealed interface RecordInput {
     data class Valid(val result: PuzzleResult) : RecordInput
 

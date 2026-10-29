@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -743,6 +744,7 @@ fun MenuPopup(onDismiss: () -> Unit, modifier: Modifier = Modifier, width: Dp = 
                 .shadow(Tokens.Space.S2, FloatShape, ambientColor = colors.shadowFloat, spotColor = colors.shadowFloat)
                 .background(colors.bgRaised, FloatShape)
                 .border(Tokens.Size.Hairline, colors.border, FloatShape)
+                .verticalScroll(rememberScrollState())
                 .padding(Tokens.Space.S1),
         ) {
             content()

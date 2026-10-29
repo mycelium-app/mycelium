@@ -362,7 +362,7 @@ private fun StepDetail(
             continue
         }
 
-        val actions = remember(index, file.path) { AnnotateActions(onAttach = { annotate(file, diff, it) }, onAsk = outer?.onAsk ?: { _, _ -> }) }
+        val actions = remember(index, file.path) { AnnotateActions(onAttach = { annotate(file, diff, it) }, onAsk = outer?.onAsk ?: { _, _ -> }, withComment = true) }
 
         CompositionLocalProvider(LocalAnnotate provides actions) {
             DiffCard(diff, ToolStatus.Done)

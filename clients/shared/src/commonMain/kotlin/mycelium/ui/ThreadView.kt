@@ -41,6 +41,9 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.runtime.staticCompositionLocalOf
+import mycelium.state.isFilePath
+import mycelium.state.BadgeGap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
@@ -643,7 +646,9 @@ private fun inlineText(text: String, color: Color): AnnotatedString {
 
     val mono = LocalFonts.current.mono
 
-    return remember(text, color, colors.accent, mono, platform) { inlineMarkup(text, color, colors.accent, mono, platform?.let { { url -> it.openUrl(url) } }) }
+    val openPath = LocalPathOpener.current
+
+    return remember(text, color, colors.accent, colors.bgSelected, mono, platform, openPath) { inlineMarkup(text, color, colors.accent, mono, platform?.let { { url -> it.openUrl(url) } }, PathBadges(colors.bgSelected, openPath)) }
 }
 
 @Composable
@@ -719,10 +724,14 @@ private val FootnoteReference = Regex("\\[\\^([^\\]\\s]+)]")
 private val BareUrl = Regex("<(https?://[^>\\s]+)>|https?://[^\\s<>]+")
 private const val UrlTrailing = ".,;:!?)]}'\""
 
-fun inlineMarkup(text: String, color: Color, codeColor: Color, codeFont: FontFamily? = Tokens.Type.Code.fontFamily, open: ((String) -> Unit)? = null): AnnotatedString =
+class PathBadges(val background: Color, val open: ((String) -> Unit)?)
+
+val LocalPathOpener = staticCompositionLocalOf<((String) -> Unit)?> { null }
+
+fun inlineMarkup(text: String, color: Color, codeColor: Color, codeFont: FontFamily? = Tokens.Type.Code.fontFamily, open: ((String) -> Unit)? = null, badges: PathBadges? = null): AnnotatedString =
     buildAnnotatedString {
         withStyle(SpanStyle(color = color)) {
-            appendInline(text, codeColor, codeFont, open)
+            appendInline(text, codeColor, codeFont, open, badges)
         }
     }
 
@@ -733,7 +742,7 @@ private fun AnnotatedString.Builder.appendLink(url: String, codeColor: Color, op
     withLink(annotation) { label() }
 }
 
-private fun AnnotatedString.Builder.appendInline(text: String, codeColor: Color, codeFont: FontFamily?, open: ((String) -> Unit)?) {
+private fun AnnotatedString.Builder.appendInline(text: String, codeColor: Color, codeFont: FontFamily?, open: ((String) -> Unit)?, badges: PathBadges? = null) {
     var index = 0
 
     while (index < text.length) {
@@ -794,7 +803,18 @@ private fun AnnotatedString.Builder.appendInline(text: String, codeColor: Color,
         val inner = text.substring(index + marker.length, close)
 
         when (marker) {
-            "`" -> withStyle(SpanStyle(color = codeColor, fontFamily = codeFont, fontSize = Tokens.Type.Code.fontSize)) { append(inner) }
+            "`" -> if (badges != null && isFilePath(inner)) {
+                val style = SpanStyle(color = codeColor, fontFamily = codeFont, fontSize = Tokens.Type.Code.fontSize, background = badges.background)
+                val openPath = badges.open
+
+                if (openPath == null) {
+                    withStyle(style) { append("$BadgeGap$inner$BadgeGap") }
+                } else {
+                    withLink(LinkAnnotation.Clickable(inner, TextLinkStyles(style)) { openPath(inner) }) { append("$BadgeGap$inner$BadgeGap") }
+                }
+            } else {
+                withStyle(SpanStyle(color = codeColor, fontFamily = codeFont, fontSize = Tokens.Type.Code.fontSize)) { append(inner) }
+            }
             "~~" -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { appendInline(inner, codeColor, codeFont, open) }
             "^" -> withStyle(SpanStyle(baselineShift = BaselineShift.Superscript, fontSize = 0.75.em)) { appendInline(inner, codeColor, codeFont, open) }
             "~" -> withStyle(SpanStyle(baselineShift = BaselineShift.Subscript, fontSize = 0.75.em)) { appendInline(inner, codeColor, codeFont, open) }

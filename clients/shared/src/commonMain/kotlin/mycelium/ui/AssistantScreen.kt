@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -141,15 +142,13 @@ private fun WaitingSecret(store: Store, assistant: Assistant, name: String, desc
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             Label("${assistant.name} needs $name${description?.let { ": $it" }.orEmpty()}", Modifier.weight(1f))
 
-            if (!setting) {
-                MyButton({ setting = true }, text = "Set secret", description = "Set secret $name", variant = ButtonVariant.Outline)
-            }
+            MyButton({ setting = true }, text = "Set secret", description = "Set secret $name", variant = ButtonVariant.Outline)
         }
 
         runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         if (setting) {
-            SecretValueForm(name, onSave = { value -> runner { store.api.putAssistantSecret(assistant.id, name, PutAssistantSecretRequest(value = value)); setting = false } }, onCancel = { setting = false })
+            SecretDialog(name, description, valueRequired = true, onSave = { _, _, value -> runner { store.api.putAssistantSecret(assistant.id, name, PutAssistantSecretRequest(value = value)); setting = false } }, onCancel = { setting = false })
         }
     }
 
@@ -157,14 +156,37 @@ private fun WaitingSecret(store: Store, assistant: Assistant, name: String, desc
 }
 
 @Composable
-internal fun SecretValueForm(name: String, onSave: (String) -> Unit, onCancel: () -> Unit) {
+internal fun SecretDialog(name: String?, description: String?, valueRequired: Boolean, onSave: (name: String, description: String, value: String) -> Unit, onCancel: () -> Unit) {
+    var newName by remember(name) { mutableStateOf(name.orEmpty()) }
+    var newDescription by remember(name) { mutableStateOf(description.orEmpty()) }
     var value by remember(name) { mutableStateOf("") }
-    var missing by remember(name) { mutableStateOf<String?>(null) }
+    var nameMissing by remember(name) { mutableStateOf<String?>(null) }
+    var valueMissing by remember(name) { mutableStateOf<String?>(null) }
 
-    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Top) {
-        TextInput(value, { value = it; missing = null }, label = "Value of $name", masked = true, error = missing, modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
-        MyButton({ if (value.isEmpty()) missing = "Enter the value of $name." else onSave(value) }, text = "Save secret", description = "Save secret $name")
-        MyButton(onCancel, text = "Cancel", muted = true)
+    fun save() {
+        if (newName.isBlank()) {
+            nameMissing = "Enter the name of the secret, for example GITHUB_TOKEN."
+        } else if (valueRequired && value.isEmpty()) {
+            valueMissing = "Enter the value of ${newName.trim()}."
+        } else {
+            onSave(newName.trim(), newDescription.trim(), value)
+        }
+    }
+
+    Dialog(onCancel) {
+        Label(if (name == null) "Add secret" else if (valueRequired) "Set ${name}" else "Edit ${name}", Modifier.semantics { heading() }, Tokens.Type.Title)
+
+        if (name == null) {
+            TextInput(newName, { newName = it; nameMissing = null }, label = "Name", placeholder = "GITHUB_TOKEN", mono = true, error = nameMissing)
+        }
+
+        TextInput(newDescription, { newDescription = it }, label = "What it is for", placeholder = "Pushes to the repository")
+        TextInput(value, { value = it; valueMissing = null }, label = if (name != null && !valueRequired) "New value, leave empty to keep the current one" else "Value", masked = true, error = valueMissing, onSubmit = ::save)
+
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+            MyButton(onCancel, text = "Cancel", muted = true)
+            MyButton(::save, text = "Save secret", variant = ButtonVariant.Outline)
+        }
     }
 }
 

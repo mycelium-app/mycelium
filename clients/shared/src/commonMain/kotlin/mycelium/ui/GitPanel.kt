@@ -379,10 +379,19 @@ private fun ChangesList(files: List<GitFile>, shownPath: String?, onViewDiff: (G
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-            MyButton({ first?.let(onViewDiff) }, text = "View diff", icon = MyIcon.Diff, size = ButtonSize.Sm)
+            SplitButton(
+                "View diff",
+                { first?.let(onViewDiff) },
+                listOf(
+                    SplitAlternative("View staged", { (files.firstOrNull { it.staged } ?: first)?.let(onViewDiff) }),
+                    SplitAlternative("Walk me through changes", onWalkthrough),
+                ),
+                icon = MyIcon.Diff,
+                size = ButtonSize.Sm,
+                variant = ButtonVariant.Outline,
+            )
             Label("+$additions", style = Tokens.Type.Code, color = colors.diffAdd)
             Label("−$deletions", style = Tokens.Type.Code, color = colors.diffDel)
-            MyButton(onWalkthrough, text = "Walkthrough", icon = MyIcon.List, size = ButtonSize.Sm)
         }
 
         MyButton(onStageAll, text = "Stage all", variant = ButtonVariant.Outline, size = ButtonSize.Sm)

@@ -14,4 +14,6 @@ data class Extensions(
 data class Experiments(
     val voice: Boolean = false,
     @SerialName("kubernetes_nodes") val kubernetesNodes: Boolean = false,
+    @SerialName("tasks_and_workflows") val tasksAndWorkflows: Boolean = false,
+    val history: Boolean = false,
 )

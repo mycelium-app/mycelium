@@ -183,7 +183,8 @@ class GitStackTest {
         val fake = StackFake(stackJson(townAvailable = true))
         render(fake)
 
-        rule.onNodeWithText("Walkthrough").performClick()
+        rule.onNodeWithContentDescription("More ways to view diff").performClick()
+        rule.onNodeWithText("Walk me through changes").performClick()
         rule.waitUntil(5_000) { fake.sent("/conversations/c1/prompt") }
 
         assertTrue(fake.bodyOf("/conversations/c1/prompt").contains("the uncommitted changes in the working tree"))
@@ -192,7 +193,7 @@ class GitStackTest {
     @Test
     fun theChangesRowRendersForComparisonWithTheArtboard() {
         render(StackFake(stackJson(townAvailable = true)))
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Walkthrough").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("View diff").fetchSemanticsNodes().isNotEmpty() }
         val png = Image.makeFromBitmap(rule.onRoot().captureToImage().asSkiaBitmap()).encodeToData(EncodedImageFormat.PNG)!!.bytes
         val out = java.io.File("build/screens/git-changes-walkthrough-dark.png")
         out.parentFile.mkdirs()

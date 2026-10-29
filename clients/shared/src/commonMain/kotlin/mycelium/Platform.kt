@@ -57,6 +57,10 @@ interface Platform {
 
     fun openUrl(url: String)
 
+    fun revealPath(path: String) = Unit
+
+    fun localNodeId(): String? = null
+
     fun openSignIn(url: String, onCancelled: () -> Unit) = openUrl(url)
 
     fun copyToClipboard(text: String)

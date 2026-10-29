@@ -41,6 +41,7 @@ data class Group(
     @SerialName("closes_at") val closesAt: String? = null,
     @SerialName("opens_at") val opensAt: String? = null,
     @SerialName("opened_until") val openedUntil: String? = null,
+    val icon: String? = null,
 )
 
 @Serializable
@@ -50,7 +51,7 @@ data class GroupFolder(val id: String, @SerialName("node_id") val nodeId: String
 data class GroupFolderRequest(val prefix: String, @SerialName("node_id") val nodeId: String? = null)
 
 @Serializable
-data class GroupRequest(val name: String)
+data class GroupRequest(val name: String, val icon: String? = null)
 
 @Serializable
 data class CreateProjectRequest(

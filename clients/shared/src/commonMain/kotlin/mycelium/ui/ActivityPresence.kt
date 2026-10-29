@@ -16,7 +16,6 @@ private fun elsewhereLabel(route: Route): String = when (route) {
     Route.Nodes, is Route.Node -> "Nodes"
     Route.Tasks -> "Tasks"
     Route.Workflows, is Route.Workflow -> "Workflows"
-    Route.Schedules -> "Schedules"
     Route.Wellness -> "Wellness & Learning"
     Route.Projects -> "Projects"
     Route.Issues -> "Issues"

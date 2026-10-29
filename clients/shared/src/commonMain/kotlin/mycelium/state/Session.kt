@@ -24,7 +24,7 @@ data class SlashCommand(val name: String, val description: String, val hint: Str
 val SideChatCommands = listOf(
     SlashCommand("btw", "Ask without changing this conversation", null),
     SlashCommand("side", "Run a side task", null),
-    SlashCommand("fork", "Copy into a new conversation", null),
+    SlashCommand("fork", "Copy this conversation into a new one and leave this one as it is", null),
 )
 
 private val sideChatCommand = Regex("""^/(btw|side|fork)(?:\s+(.*))?$""", RegexOption.DOT_MATCHES_ALL)

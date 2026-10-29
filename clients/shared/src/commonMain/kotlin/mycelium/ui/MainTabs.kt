@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -37,7 +38,7 @@ fun MainTabStrip(tabs: List<MainTab>, selected: String, onSelect: (String) -> Un
             val on = tab.key == selected
             val closing = rememberUpdatedState { tab.closeLabel?.let { onClose(tab.key) } }
 
-            Row(Modifier.pointerInput(tab.key) {
+            Row(Modifier.clip(ControlShape).hoverHighlight().pointerInput(tab.key) {
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)

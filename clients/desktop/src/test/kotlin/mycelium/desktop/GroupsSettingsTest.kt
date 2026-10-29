@@ -146,7 +146,7 @@ class GroupsSettingsTest {
         rule.onNodeWithContentDescription("Group name").performTextInput("homelab")
         rule.onNodeWithText("Save").performClick()
 
-        assertEquals("""{"name":"homelab"}""", requestTo(HttpMethod.Post, "/groups").third)
+        assertEquals("""{"name":"homelab","icon":"group"}""", requestTo(HttpMethod.Post, "/groups").third)
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Group sections").fetchSemanticsNodes().isNotEmpty() }
     }
 
@@ -156,11 +156,23 @@ class GroupsSettingsTest {
 
         rule.onNodeWithContentDescription("More for slop group").performClick()
         rule.onNodeWithText("Rename").performClick()
-        rule.onNodeWithContentDescription("New group name").performTextClearance()
-        rule.onNodeWithContentDescription("New group name").performTextInput("homelab")
+        rule.onNodeWithContentDescription("Group name").performTextClearance()
+        rule.onNodeWithContentDescription("Group name").performTextInput("homelab")
         rule.onNodeWithText("Save").performClick()
 
-        assertEquals("""{"name":"homelab"}""", requestTo(HttpMethod.Patch, "/groups/g1").third)
+        assertEquals("""{"name":"homelab","icon":"group"}""", requestTo(HttpMethod.Patch, "/groups/g1").third)
+    }
+
+    @Test
+    fun aNewGroupCanBeGivenOneOfTheFixedIcons() {
+        show()
+
+        rule.onNodeWithText("New group").performClick()
+        rule.onNodeWithContentDescription("Group name").performTextInput("homelab")
+        rule.onNodeWithContentDescription("Briefcase icon").performClick()
+        rule.onNodeWithText("Save").performClick()
+
+        assertEquals("""{"name":"homelab","icon":"briefcase"}""", requestTo(HttpMethod.Post, "/groups").third)
     }
 
     @Test

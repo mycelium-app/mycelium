@@ -31,6 +31,7 @@ mod freeagent;
 mod git;
 mod goals;
 mod group_connections;
+mod groups;
 mod health;
 mod history;
 mod hours;

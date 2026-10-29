@@ -53,11 +53,10 @@ import mycelium.state.Annotation
 class AnnotateActions(
     val onAttach: (Annotation) -> Unit,
     val onAsk: (quote: String, question: String) -> Unit,
+    val withComment: Boolean = false,
 )
 
 val LocalAnnotate = staticCompositionLocalOf<AnnotateActions?> { null }
-
-private enum class Intent { Attach, Ask }
 
 @Composable
 fun Annotatable(content: @Composable () -> Unit) {
@@ -74,7 +73,8 @@ fun Annotatable(content: @Composable () -> Unit) {
     val state = remember { SelectionState() }
     var manager by remember { mutableStateOf<SelectionManager?>(null) }
     var offered by remember { mutableStateOf<String?>(null) }
-    var composing by remember { mutableStateOf<Pair<Intent, String>?>(null) }
+    var asking by remember { mutableStateOf<String?>(null) }
+    var commenting by remember { mutableStateOf<String?>(null) }
     var draft by remember { mutableStateOf("") }
     val selected = manager?.takeIf { it.selection != null }?.getSelectedText()?.text?.takeIf { it.isNotBlank() }
 
@@ -94,9 +94,22 @@ fun Annotatable(content: @Composable () -> Unit) {
         }
     }
 
-    fun compose(intent: Intent, quote: String) {
-        composing = intent to quote
+    fun ask(quote: String) {
+        asking = quote
         draft = ""
+    }
+
+    fun cite(quote: String) {
+        if (actions.withComment) {
+            commenting = quote
+            draft = ""
+
+            return
+        }
+
+        actions.onAttach(Annotation(quote, ""))
+        offered = null
+        state.clear()
     }
 
     Box(
@@ -110,7 +123,7 @@ fun Annotatable(content: @Composable () -> Unit) {
 
                 true
             } else if (event.type == KeyEventType.KeyDown && event.key == Key.A && command && event.isShiftPressed && quote != null) {
-                compose(Intent.Attach, quote)
+                cite(quote)
 
                 true
             } else {
@@ -124,7 +137,7 @@ fun Annotatable(content: @Composable () -> Unit) {
 
         val quote = offered
 
-        if (quote != null && composing == null) {
+        if (quote != null && asking == null && commenting == null) {
             val start = manager?.startHandlePosition
             val end = manager?.endHandlePosition
             val top = listOfNotNull(start, end).filter { it.isSpecified }.minOfOrNull { it.y }?.toInt() ?: 0
@@ -139,51 +152,79 @@ fun Annotatable(content: @Composable () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    MyButton({ compose(Intent.Attach, quote) }, text = "Add to message", description = "Add to message, Ctrl+Shift+A", size = ButtonSize.Sm, muted = true)
-                    MyButton({ compose(Intent.Ask, quote) }, text = "Ask in a side chat", size = ButtonSize.Sm, muted = true)
+                    MyButton({ cite(quote) }, text = if (actions.withComment) "Add to message" else "Cite", description = if (actions.withComment) "Add to message, Ctrl+Shift+A" else "Cite, Ctrl+Shift+A", size = ButtonSize.Sm, muted = true)
+                    MyButton({ ask(quote) }, text = "Ask in a side chat", size = ButtonSize.Sm, muted = true)
                     MyButton({ clipboard.setText(AnnotatedString(quote)); offered = null; state.clear() }, text = "Copy", size = ButtonSize.Sm, muted = true)
                 }
             }
         }
 
-        val pending = composing
+        val noting = commenting
 
-        if (pending != null) {
-            val (intent, quote) = pending
-
-            fun finish() {
-                if (intent == Intent.Attach) {
-                    actions.onAttach(Annotation(quote, draft.trim()))
-                } else if (draft.isNotBlank()) {
-                    actions.onAsk(quote, draft.trim())
-                }
-
-                composing = null
+        if (noting != null) {
+            fun finishNote() {
+                actions.onAttach(Annotation(noting, draft.trim()))
+                commenting = null
                 offered = null
                 state.clear()
             }
 
-            Popup(alignment = Alignment.Center, onDismissRequest = { composing = null }, properties = PopupProperties(focusable = true)) {
+            Popup(alignment = Alignment.Center, onDismissRequest = { commenting = null }, properties = PopupProperties(focusable = true)) {
                 Column(
                     Modifier
                         .width(Tokens.Size.Popover)
                         .background(colors.bgRaised, FloatShape)
                         .border(Tokens.Size.Hairline, colors.border, FloatShape)
                         .padding(Tokens.Space.S3)
-                        .semantics { contentDescription = if (intent == Intent.Attach) "Add to message" else "Ask in a side chat" },
+                        .semantics { contentDescription = "Add to message" },
+                    verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                ) {
+                    Label(annotationLabel(Annotation(noting, "")), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 2)
+                    TextInput(draft, { draft = it }, label = "Comment", placeholder = "Add a comment, or leave empty to quote only", onSubmit = ::finishNote)
+                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                        MyButton(::finishNote, text = "Add", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+                        MyButton({ commenting = null }, text = "Cancel", size = ButtonSize.Sm, muted = true)
+                    }
+                }
+            }
+        }
+
+        val pending = asking
+
+        if (pending != null) {
+            val quote = pending
+
+            fun finish() {
+                if (draft.isNotBlank()) {
+                    actions.onAsk(quote, draft.trim())
+                }
+
+                asking = null
+                offered = null
+                state.clear()
+            }
+
+            Popup(alignment = Alignment.Center, onDismissRequest = { asking = null }, properties = PopupProperties(focusable = true)) {
+                Column(
+                    Modifier
+                        .width(Tokens.Size.Popover)
+                        .background(colors.bgRaised, FloatShape)
+                        .border(Tokens.Size.Hairline, colors.border, FloatShape)
+                        .padding(Tokens.Space.S3)
+                        .semantics { contentDescription = "Ask in a side chat" },
                     verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                 ) {
                     Label(annotationLabel(Annotation(quote, "")), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 2)
                     TextInput(
                         draft,
                         { draft = it },
-                        label = if (intent == Intent.Attach) "Comment" else "Question",
-                        placeholder = if (intent == Intent.Attach) "Add a comment, or leave empty to quote only" else "What do you want to ask about this?",
+                        label = "Question",
+                        placeholder = "What do you want to ask about this?",
                         onSubmit = ::finish,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                        MyButton(::finish, text = if (intent == Intent.Attach) "Add" else "Ask", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
-                        MyButton({ composing = null }, text = "Cancel", size = ButtonSize.Sm, muted = true)
+                        MyButton(::finish, text = "Ask", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+                        MyButton({ asking = null }, text = "Cancel", size = ButtonSize.Sm, muted = true)
                     }
                 }
             }

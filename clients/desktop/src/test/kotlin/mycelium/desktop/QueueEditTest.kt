@@ -95,7 +95,6 @@ class QueueEditTest {
 
         editSecond()
 
-        rule.onNodeWithText("Editing in the composer").assertIsDisplayed()
         rule.onNode(hasContentDescription("Message").and(hasText("The header draws over the clock", substring = true))).assertIsDisplayed()
         rule.onNode(hasContentDescription("Message").and(hasText("Image · phone.png", substring = true))).assertIsDisplayed()
         assertEquals(0, rule.onAllNodesWithContentDescription("Queue message").fetchSemanticsNodes().size)

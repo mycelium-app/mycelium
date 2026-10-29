@@ -72,10 +72,9 @@ class ExperimentGatesTest {
     private fun present(description: String) = rule.onAllNodesWithContentDescription(description).fetchSemanticsNodes().size
 
     @Test
-    fun withEveryExperimentOffTheDetailsAndSubagentsPanelsAreOffered() {
+    fun withEveryExperimentOffTheSubagentsPanelIsOffered() {
         shell(AllOff)
 
-        assertEquals(1, present("Open details"))
         assertEquals(1, present("Open subagents"))
         assertEquals(1, present("Open git"))
     }
@@ -91,19 +90,27 @@ class ExperimentGatesTest {
     }
 
     @Test
-    fun withEveryExperimentOffTheSidebarHasTasksAndWorkflows() {
+    fun withEveryExperimentOffTheSidebarHidesTasksWorkflowsAndHistory() {
         shell(AllOff)
+
+        assertEquals(0, rule.onAllNodesWithText("Tasks").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("Workflows").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("History").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun turningOnTheTasksAndWorkflowsAndHistoryExperimentsShowsThemInTheSidebar() {
+        shell("""{"tasks_and_workflows":true,"history":true}""")
 
         assertEquals(1, rule.onAllNodesWithText("Tasks").fetchSemanticsNodes().size)
         assertEquals(1, rule.onAllNodesWithText("Workflows").fetchSemanticsNodes().size)
-        assertEquals(1, rule.onAllNodesWithText("Schedules").fetchSemanticsNodes().size)
+        assertEquals(1, rule.onAllNodesWithText("History").fetchSemanticsNodes().size)
     }
 
     @Test
     fun afterAFailedExperimentsFetchTheRestOfTheShellStillLoads() {
         shell(null)
 
-        assertEquals(1, present("Open details"))
-        assertTrue(rule.onAllNodesWithText("Schedules").fetchSemanticsNodes().isNotEmpty())
+        assertTrue(rule.onAllNodesWithText("Artefacts").fetchSemanticsNodes().isNotEmpty())
     }
 }

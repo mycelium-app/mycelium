@@ -193,11 +193,7 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("Group", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-            OptionMenu("Group", groupChoices, group, { group = it }, title = "Group", icon = MyIcon.Layers)
-
-            if (groupName != null) {
-                Label("Group instructions apply to its sessions, and the sidebar group filter shows it under $groupName.", style = Tokens.Type.Meta, color = colors.textMuted)
-            }
+            OptionMenu("Group", groupChoices, group, { group = it }, title = "Group", icon = MyIcon.Group)
         }
 
         if (isVoice) {
@@ -249,7 +245,6 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
 
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 Label("Archive", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                Label("Archived assistants keep their thread, files and secrets, and stop waking for schedules. Restore one from Assistants, state Archived.", style = Tokens.Type.Meta, color = colors.textMuted)
 
                 Row {
                     MyButton({ confirmingArchive = true }, text = "Archive assistant", icon = MyIcon.Archive, variant = ButtonVariant.Outline)
@@ -542,9 +537,8 @@ private fun StorageSection(store: Store, assistantId: String) {
 private fun SecretsSection(store: Store, assistantId: String) {
     val colors = MyTheme.colors
     var secrets by remember(assistantId) { mutableStateOf(emptyList<AssistantSecret>()) }
-    var setting by remember(assistantId) { mutableStateOf<String?>(null) }
-    var newName by remember(assistantId) { mutableStateOf("") }
-    var newDescription by remember(assistantId) { mutableStateOf("") }
+    var editing by remember(assistantId) { mutableStateOf<AssistantSecret?>(null) }
+    var adding by remember(assistantId) { mutableStateOf(false) }
     val runner = rememberAction(assistantId)
 
     suspend fun reload() {
@@ -580,7 +574,7 @@ private fun SecretsSection(store: Store, assistantId: String) {
                         3 -> TableCell.Text(secret.setBy.orEmpty(), color = colors.textMuted)
                         else -> TableCell.Slot {
                             RowMenu(secret.name) { close ->
-                                MenuItem("Set value", onClick = { close(); setting = secret.name }, leading = MyIcon.Pencil)
+                                MenuItem("Edit", onClick = { close(); editing = secret }, leading = MyIcon.Pencil)
                                 MenuItem("Delete", onClick = { close(); runner { store.api.deleteAssistantSecret(assistantId, secret.name); reload() } }, leading = MyIcon.Close)
                             }
                         }
@@ -589,26 +583,37 @@ private fun SecretsSection(store: Store, assistantId: String) {
             )
         }
 
-        setting?.let { name ->
-            SecretValueForm(name, onSave = { value -> runner { store.api.putAssistantSecret(assistantId, name, PutAssistantSecretRequest(value = value)); setting = null; reload() } }, onCancel = { setting = null })
-        }
+        MyButton({ adding = true }, text = "Add secret", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
 
-        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Bottom) {
-            TextInput(newName, { newName = it }, label = "New secret name", placeholder = "GITHUB_TOKEN", mono = true, modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
-            TextInput(newDescription, { newDescription = it }, label = "What it is for", placeholder = "Pushes to the repository", modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
-            MyButton(
-                {
+        if (adding) {
+            SecretDialog(
+                null,
+                null,
+                valueRequired = false,
+                onSave = { name, description, value ->
                     runner {
-                        store.api.putAssistantSecret(assistantId, newName.trim(), PutAssistantSecretRequest(description = newDescription.ifBlank { null }))
-                        setting = newName.trim()
-                        newName = ""
-                        newDescription = ""
+                        store.api.putAssistantSecret(assistantId, name, PutAssistantSecretRequest(value = value.ifEmpty { null }, description = description.ifBlank { null }))
+                        adding = false
                         reload()
                     }
                 },
-                text = "Add secret",
-                icon = MyIcon.Plus,
-                variant = ButtonVariant.Outline,
+                onCancel = { adding = false },
+            )
+        }
+
+        editing?.let { secret ->
+            SecretDialog(
+                secret.name,
+                secret.description,
+                valueRequired = false,
+                onSave = { _, description, value ->
+                    runner {
+                        store.api.putAssistantSecret(assistantId, secret.name, PutAssistantSecretRequest(value = value.ifEmpty { null }, description = description))
+                        editing = null
+                        reload()
+                    }
+                },
+                onCancel = { editing = null },
             )
         }
     }

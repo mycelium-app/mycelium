@@ -67,6 +67,8 @@ import mycelium.state.hasOlderEvents
 import mycelium.state.mediaTypeOf
 import mycelium.state.AppState
 import mycelium.state.messageWithAnnotations
+import mycelium.state.pathWithoutLine
+import mycelium.state.parentFolder
 import mycelium.state.Store
 import mycelium.state.ThreadItem
 import mycelium.state.continueAccountId
@@ -189,19 +191,18 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     }
 
     val draft = store.composerDrafts[id]
-    var annotations by remember(id) { mutableStateOf(draft.annotations) }
+    var citations by remember(id) { mutableStateOf(emptyList<Annotation>()) }
 
     val attached = rememberAttachmentDrafts(id, draft.attachments)
 
     LaunchedEffect(id) {
-        snapshotFlow { annotations to attached.drafts }.collect { (current, files) ->
-            store.composerDrafts.update(id) { copy(annotations = current, attachments = files) }
+        snapshotFlow { attached.drafts }.collect { files ->
+            store.composerDrafts.update(id) { copy(attachments = files) }
         }
     }
 
     fun send(text: String) {
-        store.send(id, messageWithAnnotations(annotations, store.withWalkthroughNotes(id, text)), attached.drafts.map { it.file })
-        annotations = emptyList()
+        store.send(id, store.withWalkthroughNotes(id, text), attached.drafts.map { it.file })
         attached.clear()
     }
 
@@ -366,7 +367,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
             return
         }
 
-        annotations = editing.stash.annotations
         attached.replace(editing.stash.attachments)
         store.composerDrafts.update(id) { editing.stash.copy(attachments = attached.drafts) }
         queueEditing = null
@@ -402,7 +402,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
     val annotate = remember(id) {
         AnnotateActions(
-            onAttach = { added -> annotations = annotations + added },
+            onAttach = { added -> citations = citations + added },
             onAsk = { quote, question -> store.act { onOpenConversation(api.startSideChat(id, sideKind("btw"), messageWithAnnotations(listOf(Annotation(quote, "")), question)).id) } },
         )
     }
@@ -437,14 +437,29 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
     val agentOpener: (String) -> (() -> Unit)? = { agentId -> state.conversations.values.firstOrNull { it.parentId == id && it.agentId == agentId }?.let { agentConversation -> { onOpenConversation(agentConversation.id) } } }
 
-    CompositionLocalProvider(LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAgentOpener provides agentOpener, LocalConversationWorkflows provides conversationWorkflows, LocalOutlineOpener provides showOutline, LocalOutlinePage provides (outlinePage ?: liveOutline), LocalIdeTarget provides ideTarget) {
+    var browsingPath by remember(id) { mutableStateOf<String?>(null) }
+    val pathOpener: ((String) -> Unit)? = if (chat || node == null) null else { path ->
+        val rooted = path.startsWith("/") || path.startsWith("~")
+        val full = if (rooted) path else conversation.cwd.trimEnd('/') + "/" + path.removePrefix("./")
+
+        if (platform?.localNodeId() == node.id) {
+            platform.revealPath(pathWithoutLine(full))
+        } else {
+            browsingPath = full
+        }
+    }
+
+    browsingPath?.let { path ->
+        node?.let { FolderBrowserDialog(store, it.id, it.name, parentFolder(path), onChoose = { browsingPath = null }, onDismiss = { browsingPath = null }) }
+    }
+
+    CompositionLocalProvider(LocalPathOpener provides pathOpener, LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAgentOpener provides agentOpener, LocalConversationWorkflows provides conversationWorkflows, LocalOutlineOpener provides showOutline, LocalOutlinePage provides (outlinePage ?: liveOutline), LocalIdeTarget provides ideTarget) {
         val walkthrough = state.walkthroughs[id]?.takeIf { !it.dismissed && !chat }
 
         val density = LocalDensity.current
 
         val panelContent: @Composable () -> Unit = {
             when (panel) {
-                SidePanel.Details -> Inspector(conversation, node, groupName)
                 SidePanel.Subagents -> SubagentsPanel(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation, store::closeSession)
                 SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize(), onExited = { openPanel(null) }) }
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
@@ -481,7 +496,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     onOpenNodes = onOpenNodes,
                     moveSheet = { dismiss -> MoveSheet(store, state, conversation, dismiss, onOpenConversation) },
                     ide = ideControls,
-                    onDetails = { openPanel(SidePanel.Details) },
                     onTerminal = { openPanel(SidePanel.Terminal) },
                     onGit = { openPanel(SidePanel.Git) },
                     onEnvironment = { phoneEnvironment = true },
@@ -622,8 +636,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             queue = shownQueue.map { if (it.id == queueEditing?.queueId) it.copy(editing = true) else it },
                             sending = sending.drop(delivering.size),
                             onSend = ::send,
-                            annotations = annotations,
-                            onRemoveAnnotation = { removed -> annotations = annotations - removed },
+                            pendingCitations = citations,
+                            onCitationPlaced = { placed -> citations = citations - placed },
                             attachments = attached.controls(),
                             assistantActions = assistantActions,
                             dictation = dictation,
@@ -640,9 +654,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                                     val files = item.attachments.map { held -> PickedFile(held.name, held.mediaType, loadAttachmentBytes(held.sha256) ?: error("${held.name} could not be loaded. Try again.")) }
                                     api.editQueued(id, item.id, PatchQueueRequest(editing = true))
 
-                                    val stash = store.composerDrafts[id].copy(annotations = annotations, attachments = attached.drafts)
+                                    val stash = store.composerDrafts[id].copy(attachments = attached.drafts)
 
-                                    annotations = emptyList()
                                     attached.replace(emptyList())
                                     attached.add(files)
                                     store.composerDrafts.update(id) { ComposerDraft(text = item.text, cursor = item.text.length, attachments = attached.drafts) }
@@ -721,7 +734,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     if (compact && !chat && panels && panel != null) {
         BottomSheet(onDismiss = { openPanel(null) }) {
             when (panel) {
-                SidePanel.Details -> InspectorContent(conversation, node, groupName)
                 SidePanel.Subagents -> SubagentsList(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation, store::closeSession)
                 SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet), onExited = { openPanel(null) }) }
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
@@ -761,7 +773,6 @@ private fun ConversationHeader(
     onOpenNodes: () -> Unit,
     moveSheet: @Composable (onDismiss: () -> Unit) -> Unit,
     ide: IdeControls?,
-    onDetails: () -> Unit,
     onTerminal: () -> Unit,
     onGit: () -> Unit,
     onEnvironment: () -> Unit,
@@ -858,8 +869,6 @@ private fun ConversationHeader(
             }
 
             MyButton(onEnvironment, icon = MyIcon.Desktop, description = "Environment", muted = true)
-
-            MyButton(onDetails, icon = MyIcon.Info, description = "Details", muted = true)
         } else {
             if (!placeInMore) {
                 Row(Modifier.onSizeChanged { placeWidth = with(density) { it.width.toDp() } }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
@@ -999,7 +1008,7 @@ fun iconOf(status: ConversationStatus): MyIcon = when (status) {
 private const val ConversationTab = "Conversation"
 private const val WalkthroughTab = "Walkthrough"
 
-private enum class SidePanel { Details, Subagents, Terminal, Git, Artefacts, Outline, Environment }
+private enum class SidePanel { Subagents, Terminal, Git, Artefacts, Outline, Environment }
 
 @Composable
 private fun Rail(open: SidePanel?, outlineOpen: Boolean, environmentOnly: Boolean, onToggle: (SidePanel) -> Unit) {
@@ -1013,7 +1022,6 @@ private fun Rail(open: SidePanel?, outlineOpen: Boolean, environmentOnly: Boolea
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (!environmentOnly) {
-                MyButton({ onToggle(SidePanel.Details) }, icon = MyIcon.Info, description = if (open == SidePanel.Details) "Close details" else "Open details", muted = true, selected = open == SidePanel.Details)
                 MyButton({ onToggle(SidePanel.Subagents) }, icon = MyIcon.Agent, description = if (open == SidePanel.Subagents) "Close subagents" else "Open subagents", muted = true, selected = open == SidePanel.Subagents)
 
                 MyButton({ onToggle(SidePanel.Terminal) }, icon = MyIcon.Terminal, description = if (open == SidePanel.Terminal) "Close terminal" else "Open terminal", muted = true, selected = open == SidePanel.Terminal)
@@ -1026,21 +1034,6 @@ private fun Rail(open: SidePanel?, outlineOpen: Boolean, environmentOnly: Boolea
             if (outlineOpen) {
                 MyButton({ onToggle(SidePanel.Outline) }, icon = MyIcon.Globe, description = if (open == SidePanel.Outline) "Close Outline page" else "Open Outline page", muted = true, selected = open == SidePanel.Outline)
             }
-        }
-    }
-}
-
-@Composable
-private fun Inspector(conversation: Conversation, node: NodeSummary?, groupName: String?) {
-    val colors = MyTheme.colors
-
-    Column(Modifier.fillMaxSize().background(colors.bgPanel).semantics { contentDescription = "Conversation details" }) {
-        Bar {
-            PanelTitle("Details")
-        }
-
-        Column(Modifier.weight(1f).verticalScrollWithBar().padding(top = Tokens.Space.S2, bottom = Tokens.Space.S4)) {
-            InspectorContent(conversation, node, groupName)
         }
     }
 }
@@ -1110,33 +1103,6 @@ private fun SubagentsList(sections: List<SubagentSection>, currentId: String, pa
             }
         }
     }
-}
-
-@Composable
-private fun InspectorContent(conversation: Conversation, node: NodeSummary?, groupName: String?) {
-    val agentInfo = node?.agents?.firstOrNull { it.agent == conversation.agent }
-    val login: LoginInfo? = node?.logins?.firstOrNull { it.agent == conversation.agent }
-
-    InspectorSection(
-        "Runs on",
-        listOf(
-            "Node" to (node?.name ?: "Unknown"),
-            "Agent" to listOfNotNull(agentName(conversation.agent), agentInfo?.version).joinToString(" "),
-            "Account" to (login?.account ?: "Not signed in"),
-            "Login" to (login?.let { loginMethodName(it.method) } ?: "None"),
-        ),
-    )
-    InspectorSection(
-        "Conversation",
-        listOf(
-            "Folder" to conversation.cwd,
-            "Group" to (groupName ?: "None"),
-            "Status" to statusSectionName(conversation.status),
-            "Mode" to (conversation.mode ?: "Default"),
-            "Model" to (conversation.model ?: "Not set"),
-            "Started" to timestamp(conversation.createdAt, ago = true),
-        ),
-    )
 }
 
 @Composable

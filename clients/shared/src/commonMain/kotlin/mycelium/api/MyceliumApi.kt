@@ -554,11 +554,11 @@ class MyceliumApi(
     suspend fun groupInstructions(id: String): InstructionLayer =
         call("/groups/$id/instructions") { client.get(it) { authorise() } }.body()
 
-    suspend fun createGroup(name: String): Group =
-        call("/groups") { client.post(it) { authorise(); json(GroupRequest(name)) } }.body()
+    suspend fun createGroup(name: String, icon: String? = null): Group =
+        call("/groups") { client.post(it) { authorise(); json(GroupRequest(name, icon)) } }.body()
 
-    suspend fun renameGroup(id: String, name: String): Group =
-        call("/groups/$id") { client.patch(it) { authorise(); json(GroupRequest(name)) } }.body()
+    suspend fun renameGroup(id: String, name: String, icon: String? = null): Group =
+        call("/groups/$id") { client.patch(it) { authorise(); json(GroupRequest(name, icon)) } }.body()
 
     suspend fun saveGroupHours(id: String, hours: Hours): Group =
         call("/groups/$id/hours") { client.put(it) { authorise(); json(hours) } }.body()

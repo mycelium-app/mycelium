@@ -1,5 +1,8 @@
 package mycelium.ui
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -173,9 +176,9 @@ private fun CardGrid(items: List<Integration>, actions: IntegrationActions) {
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             for (row in items.chunked(columns)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                     for (integration in row) {
-                        IntegrationCard(integration, actions, Modifier.weight(1f))
+                        IntegrationCard(integration, actions, Modifier.weight(1f).fillMaxHeight())
                     }
 
                     repeat(columns - row.size) {

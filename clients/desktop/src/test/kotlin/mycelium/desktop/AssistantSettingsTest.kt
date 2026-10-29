@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -165,19 +166,53 @@ class AssistantSettingsTest {
     }
 
     @Test
-    fun aSecretIsSetFromItsRowWithoutShowingTheValue() {
+    fun aSecretIsEditedInAModalWithoutShowingTheValue() {
         shell()
         openSection("Storage and secrets")
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for GITHUB_TOKEN").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("More for GITHUB_TOKEN").performScrollTo().performClick()
-        rule.onNodeWithText("Set value").performClick()
-        rule.onNodeWithContentDescription("Value of GITHUB_TOKEN").performScrollTo().performTextInput("ghp_abcdef")
-        rule.onNodeWithContentDescription("Save secret GITHUB_TOKEN").performScrollTo().performClick()
+        rule.onNodeWithText("Edit").performClick()
+        rule.onNodeWithContentDescription("What it is for").performTextClearance()
+        rule.onNodeWithContentDescription("What it is for").performTextInput("Pushes to the repository")
+        rule.onNodeWithContentDescription("New value, leave empty to keep the current one").performTextInput("ghp_abcdef")
+        rule.onNodeWithText("Save secret").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/assistants/a1/secrets/GITHUB_TOKEN" } }
-        assertEquals("""{"value":"ghp_abcdef"}""", requests.last { it.first.startsWith("PUT") }.second)
+        assertEquals("""{"value":"ghp_abcdef","description":"Pushes to the repository"}""", requests.last { it.first.startsWith("PUT") }.second)
         rule.waitUntil(5_000) { rule.onAllNodesWithText("ghp_abcdef").fetchSemanticsNodes().isEmpty() }
+    }
+
+    @Test
+    fun aSecretsDescriptionChangesWithoutSendingAValue() {
+        shell()
+        openSection("Storage and secrets")
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for GITHUB_TOKEN").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("More for GITHUB_TOKEN").performScrollTo().performClick()
+        rule.onNodeWithText("Edit").performClick()
+        rule.onNodeWithContentDescription("What it is for").performTextClearance()
+        rule.onNodeWithContentDescription("What it is for").performTextInput("Pushes releases")
+        rule.onNodeWithText("Save secret").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/assistants/a1/secrets/GITHUB_TOKEN" } }
+        assertEquals("""{"description":"Pushes releases"}""", requests.last { it.first.startsWith("PUT") }.second)
+    }
+
+    @Test
+    fun aNewSecretTakesItsNameDescriptionAndValueInOneModal() {
+        shell()
+        openSection("Storage and secrets")
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Add secret").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Add secret").performScrollTo().performClick()
+        rule.onNodeWithContentDescription("Name").performTextInput("NPM_TOKEN")
+        rule.onNodeWithContentDescription("What it is for").performTextInput("Publishes packages")
+        rule.onNodeWithContentDescription("Value").performTextInput("npm_abcdef")
+        rule.onNodeWithText("Save secret").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/assistants/a1/secrets/NPM_TOKEN" } }
+        assertEquals("""{"value":"npm_abcdef","description":"Publishes packages"}""", requests.last { it.first.startsWith("PUT") }.second)
     }
 
     @Test

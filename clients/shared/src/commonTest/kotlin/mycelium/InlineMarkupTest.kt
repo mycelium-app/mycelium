@@ -6,6 +6,9 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import mycelium.state.isFilePath
+import mycelium.state.parentFolder
+import mycelium.ui.PathBadges
 import mycelium.ui.inlineMarkup
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -89,5 +92,27 @@ class InlineMarkupTest {
 
         assertEquals("Claim1.", text.text)
         assertEquals(listOf("1"), text.spanStyles.filter { it.item.baselineShift == BaselineShift.Superscript }.map { text.text.substring(it.start, it.end) })
+    }
+
+    @Test
+    fun aFilePathInCodeBecomesAClickableBadgeThatOpensThePath() {
+        val opened = mutableListOf<String>()
+        val text = inlineMarkup("see `src/main.rs:12` and `x`", Color.Black, Color.Blue, null, null, PathBadges(Color.Gray) { opened += it })
+
+        text.getLinkAnnotations(0, text.length).forEach { (it.item as LinkAnnotation.Clickable).linkInteractionListener?.onClick(it.item) }
+
+        assertEquals(listOf("src/main.rs:12"), opened)
+        assertTrue(text.text.endsWith(" and x"))
+    }
+
+    @Test
+    fun filePathsAreToldApartFromOtherCode() {
+        assertTrue(isFilePath("/etc/hosts"))
+        assertTrue(isFilePath("src/main.rs:12:3"))
+        assertTrue(isFilePath("~/code/app"))
+        assertTrue(!isFilePath("a / b"))
+        assertTrue(!isFilePath("https://example.com/a.html"))
+        assertTrue(!isFilePath("foo.bar"))
+        assertEquals("/work/src", parentFolder("/work/src/main.rs:4"))
     }
 }

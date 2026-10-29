@@ -4,7 +4,6 @@ data class ComposerDraft(
     val text: String = "",
     val cursor: Int = 0,
     val images: Map<Char, Int> = emptyMap(),
-    val annotations: List<Annotation> = emptyList(),
     val attachments: List<DraftAttachment> = emptyList(),
 )
 

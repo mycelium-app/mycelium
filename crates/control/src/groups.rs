@@ -12,12 +12,15 @@ use uuid::Uuid;
 
 const NAME_LIMIT: usize = 40;
 
+const ICONS: [&str; 9] = ["group", "folder", "briefcase", "home", "book", "code", "heart", "star", "leaf"];
+
 #[derive(sqlx::FromRow)]
 pub struct GroupRow {
     pub id: Uuid,
     pub name: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub always_open: bool,
+    pub icon: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -37,7 +40,7 @@ impl GroupRow {
         let opened_until = wellness::group_opened_until(state, owner, self.id).await?;
         let status = wellness::status_of(&app, Some(&hours), opened_until, zone, Utc::now());
 
-        Ok(Group { id: self.id, name: self.name, folders, created_at: self.created_at, hours, open_now: status.open_now, closes_at: status.closes_at, opens_at: status.opens_at, opened_until: status.opened_until })
+        Ok(Group { id: self.id, name: self.name, folders, created_at: self.created_at, hours, open_now: status.open_now, closes_at: status.closes_at, opens_at: status.opens_at, opened_until: status.opened_until, icon: self.icon })
     }
 }
 
@@ -46,7 +49,7 @@ async fn folders_of(state: &AppState, owner: Uuid) -> ApiResult<Vec<FolderRow>> 
 }
 
 pub async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<GroupRow> {
-    let row = sqlx::query_as::<_, GroupRow>("select id, name, created_at, always_open from groups where id = $1 and owner = $2").bind(id).bind(owner).fetch_optional(&state.pool).await?;
+    let row = sqlx::query_as::<_, GroupRow>("select id, name, created_at, always_open, icon from groups where id = $1 and owner = $2").bind(id).bind(owner).fetch_optional(&state.pool).await?;
 
     row.ok_or_else(|| ApiError::not_found("That group"))
 }
@@ -65,12 +68,20 @@ fn valid_name(request: &GroupRequest) -> ApiResult<String> {
     Ok(name.to_string())
 }
 
+fn valid_icon(request: &GroupRequest) -> ApiResult<Option<String>> {
+    match request.icon.as_deref() {
+        None | Some("group") => Ok(None),
+        Some(icon) if ICONS.contains(&icon) => Ok(Some(icon.to_string())),
+        Some(_) => Err(ApiError::bad_request("icon_invalid", "Choose one of the icons in the list for the group.")),
+    }
+}
+
 fn exists() -> ApiError {
     ApiError::conflict("group_exists", "You already have a group with this name. Choose another name.")
 }
 
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<Group>>> {
-    let rows = sqlx::query_as::<_, GroupRow>("select id, name, created_at, always_open from groups where owner = $1 order by lower(name), id").bind(user.id).fetch_all(&state.pool).await?;
+    let rows = sqlx::query_as::<_, GroupRow>("select id, name, created_at, always_open, icon from groups where owner = $1 order by lower(name), id").bind(user.id).fetch_all(&state.pool).await?;
 
     let folders = folders_of(&state, user.id).await?;
 
@@ -85,7 +96,8 @@ pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
 
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<GroupRequest>) -> ApiResult<(StatusCode, Json<Group>)> {
     let name = valid_name(&request)?;
-    let inserted = sqlx::query_as::<_, GroupRow>("insert into groups (owner, name) values ($1, $2) returning id, name, created_at, always_open").bind(user.id).bind(&name).fetch_one(&state.pool).await;
+    let icon = valid_icon(&request)?;
+    let inserted = sqlx::query_as::<_, GroupRow>("insert into groups (owner, name, icon) values ($1, $2, $3) returning id, name, created_at, always_open, icon").bind(user.id).bind(&name).bind(&icon).fetch_one(&state.pool).await;
 
     match inserted {
         Ok(row) => Ok((StatusCode::CREATED, Json(row.to_proto(&state, user.id, &[]).await?))),
@@ -96,7 +108,8 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 
 pub async fn rename(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<GroupRequest>) -> ApiResult<Json<Group>> {
     let name = valid_name(&request)?;
-    let updated = sqlx::query_as::<_, GroupRow>("update groups set name = $3 where id = $1 and owner = $2 returning id, name, created_at, always_open").bind(id).bind(user.id).bind(&name).fetch_optional(&state.pool).await;
+    let icon = valid_icon(&request)?;
+    let updated = sqlx::query_as::<_, GroupRow>("update groups set name = $3, icon = $4 where id = $1 and owner = $2 returning id, name, created_at, always_open, icon").bind(id).bind(user.id).bind(&name).bind(&icon).fetch_optional(&state.pool).await;
 
     match updated {
         Ok(Some(row)) => Ok(Json(row.to_proto(&state, user.id, &folders_of(&state, user.id).await?).await?)),
