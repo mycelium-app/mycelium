@@ -92,7 +92,7 @@ fun NewAssistantDialog(store: Store, state: AppState, onDismiss: () -> Unit, onC
             Label("What it is for and how it should work. You can change this later.", style = Tokens.Type.Meta, color = colors.textMuted)
         }
 
-        Label("It starts on your default model, on any node that is online. Set models, nodes, storage, secrets, actions and schedules in its settings afterwards.", style = Tokens.Type.Meta, color = colors.textMuted)
+        Label("It starts on any model from your favourites, on any node that is online. Set models, nodes, storage, secrets, actions and schedules in its settings afterwards.", style = Tokens.Type.Meta, color = colors.textMuted)
 
         runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 

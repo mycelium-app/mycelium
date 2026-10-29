@@ -24,6 +24,7 @@ data class LimitActions(
     val onResume: () -> Unit,
     val onRetryNow: () -> Unit,
     val onCancelResume: () -> Unit,
+    val continueOn: ModelPickerControls? = null,
 )
 
 internal class PausedWorkflow(val agent: String, val actions: LimitActions)
@@ -77,7 +78,23 @@ internal fun LimitNote(limit: UsageLimitNote, agent: String, actions: LimitActio
                     MyButton(actions.onResume, text = "Resume at $resumeTime", description = "Resume this conversation at $resumeTime", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
                 }
 
-                MyButton(actions.onRetryNow, text = "Retry now", description = "Retry this conversation now", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Size.Hairline), verticalAlignment = Alignment.CenterVertically) {
+                    MyButton(actions.onRetryNow, text = "Retry now", description = "Retry this conversation now", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+
+                    actions.continueOn?.let { choices ->
+                        ModelPicker(choices) { open, expanded ->
+                            MyButton(
+                                open,
+                                icon = MyIcon.ChevronDown,
+                                description = "Continue on another model",
+                                size = ButtonSize.Sm,
+                                variant = ButtonVariant.Outline,
+                                selected = expanded,
+                                stateDescription = if (expanded) "Expanded" else "Collapsed",
+                            )
+                        }
+                    }
+                }
             }
         }
     }

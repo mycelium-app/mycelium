@@ -1,5 +1,6 @@
 package mycelium.state
 
+import mycelium.api.LoginState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -1213,12 +1214,19 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
             choice.startsWith(ContinueAccountPrefix) -> accountRequest(conversation.agent, choice.removePrefix(ContinueAccountPrefix))
             choice.startsWith(ContinueAgentPrefix) -> choice.removePrefix(ContinueAgentPrefix).let { accountRequest(it.substringBefore(':'), it.substringAfter(':')) }
             choice.startsWith(ContinueNodePrefix) -> choice.removePrefix(ContinueNodePrefix).split(':', limit = 3).let { accountRequest(it[1], it[2]).copy(nodeId = it[0]) }
+            choice.startsWith(ContinueModelPrefix) -> choice.removePrefix(ContinueModelPrefix).let { modelRequest(conversation, it.substringBefore(':'), it.substringAfter(':')) }
             choice.startsWith(ContinueChatPrefix) -> choice.removePrefix(ContinueChatPrefix).let { ContinueRequest("chat", providerId = it.substringBefore(':'), model = it.substringAfter(':')) }
             else -> return
         }
         val continued = api.continueConversation(id, request)
 
         mutableState.update { it.copy(conversations = it.conversations + (continued.id to continued)) }
+    }
+
+    private fun modelRequest(conversation: Conversation, agent: String, model: String): ContinueRequest {
+        val named = mutableState.value.nodes[conversation.nodeId]?.logins.orEmpty().any { it.agent == agent && it.state == LoginState.SignedIn && it.account != null }
+
+        return if (named) ContinueRequest(agent, model = model.ifEmpty { null }, routing = anyAccountId(agent).removePrefix(RoutingPrefix)) else ContinueRequest(agent, model = model.ifEmpty { null }, useDefaultAccount = true)
     }
 
     private fun accountRequest(agent: String, account: String): ContinueRequest =

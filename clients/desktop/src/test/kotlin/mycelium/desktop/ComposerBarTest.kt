@@ -29,6 +29,7 @@ import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.ModelProvider
 import mycelium.api.MyceliumApi
+import mycelium.state.ModelOption
 import mycelium.state.PickerAccount
 import mycelium.state.Choice
 import mycelium.state.IdeLauncher
@@ -36,7 +37,7 @@ import mycelium.state.SessionOptions
 import mycelium.state.Store
 import mycelium.ui.BarControl
 import mycelium.ui.Composer
-import mycelium.ui.AccountPickerControls
+import mycelium.ui.ModelPickerControls
 import mycelium.ui.ConversationKind
 import mycelium.ui.ConversationScreen
 import mycelium.ui.GoalControls
@@ -53,7 +54,7 @@ import kotlin.test.assertTrue
 
 private const val Now = "2026-10-22T10:00:00Z"
 
-private val BarLabels = listOf("Attach files", "Dictate", "Teach me", "Set a goal", "Account: ", "Model: ", "Mode: ", "Conversation usage", "Stop the agent")
+private val BarLabels = listOf("Attach files", "Dictate", "Teach me", "Set a goal", "Model: ", "Mode: ", "Conversation usage", "Stop the agent")
 
 private val SilentDictation = object : Dictation {
     override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit) = Unit
@@ -93,10 +94,11 @@ class ComposerBarTest {
                     onSendQueuedNow = {}, onEditQueued = {}, onRemoveQueued = {},
                     options = SessionOptions(listOf(Choice("default", "Default"), Choice("auto", "Auto")), "auto", listOf(Choice("opus", "Opus 5.5")), "opus", emptyList()),
                     commands = emptyList(), onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },
-                    accountPicker = AccountPickerControls(
-                        "Continue on", { _, done -> done(null) },
-                        label = if (chatModel) "Ollama · llama3" else "Claude Code · sam@example.com",
-                        accounts = accounts, current = "account:sam", providers = providers, providerId = "p1".takeIf { chatModel }, model = "llama3".takeIf { chatModel },
+                    accountPicker = ModelPickerControls(
+                        label = if (chatModel) "llama3" else "Claude Opus 5.5",
+                        options = listOf(ModelOption("claude", null, "opus", "Claude Opus 5.5"), ModelOption(null, "p1", "llama3", "llama3")),
+                        favourites = emptyList(), providers = providers, onPickModel = {}, onFavourite = { _, _ -> },
+                        accounts = accounts, onPickAccount = { _, done -> done(null) },
                     ),
                     goal = GoalControls(null, { _, _ -> }, {}, {}, {}, {}),
                     dictation = SilentDictation,
@@ -122,14 +124,14 @@ class ComposerBarTest {
     fun aWorkspaceConversationAtRestShowsTheFullBarWithoutStop() {
         showBar(conversation())
 
-        assertBar("Attach files", "Dictate", "Teach me", "Set a goal", "Account: ", "Model: ", "Mode: ", "Conversation usage", "Send")
+        assertBar("Attach files", "Dictate", "Teach me", "Set a goal", "Model: ", "Mode: ", "Conversation usage", "Send")
     }
 
     @Test
     fun aWorkspaceConversationWorkingAddsStopAndSendQueues() {
         showBar(conversation(status = ConversationStatus.Working), working = true)
 
-        assertBar("Attach files", "Dictate", "Teach me", "Set a goal", "Account: ", "Model: ", "Mode: ", "Conversation usage", "Stop the agent", "Send")
+        assertBar("Attach files", "Dictate", "Teach me", "Set a goal", "Model: ", "Mode: ", "Conversation usage", "Stop the agent", "Send")
         rule.onNodeWithContentDescription("Queue message").assertExists()
     }
 
@@ -137,47 +139,47 @@ class ComposerBarTest {
     fun aFailedWorkspaceConversationKeepsTheAccountControlSoThePersonCanSwitch() {
         showBar(conversation(status = ConversationStatus.Failed))
 
-        assertBar("Attach files", "Dictate", "Teach me", "Set a goal", "Account: ", "Model: ", "Mode: ", "Conversation usage", "Send")
+        assertBar("Attach files", "Dictate", "Teach me", "Set a goal", "Model: ", "Mode: ", "Conversation usage", "Send")
     }
 
     @Test
     fun aChatOnAnAgentHasNoGoal() {
         showBar(conversation(scratch = true))
 
-        assertBar("Attach files", "Dictate", "Teach me", "Account: ", "Model: ", "Mode: ", "Conversation usage", "Send")
+        assertBar("Attach files", "Dictate", "Teach me", "Model: ", "Mode: ", "Conversation usage", "Send")
     }
 
     @Test
-    fun aChatOnAChatModelHasOneModelControlAndItIsTheAccount() {
+    fun aChatOnAChatModelHasOneModelControlThatOffersEveryHarness() {
         showBar(conversation(agent = "chat", scratch = false))
 
-        assertBar("Attach files", "Dictate", "Teach me", "Account: ", "Conversation usage", "Send")
-        rule.onNodeWithContentDescription("Account: Ollama · llama3").performClick()
-        rule.onNodeWithText("Claude Code · work@example.com").assertExists()
+        assertBar("Attach files", "Dictate", "Teach me", "Model: ", "Conversation usage", "Send")
+        rule.onNodeWithContentDescription("Model: llama3").performClick()
+        rule.onNodeWithText("Claude Opus 5.5").assertExists()
     }
 
     @Test
     fun anAssistantHasNeitherGoalModelNorMode() {
         showBar(conversation(assistantId = "a1"))
 
-        assertBar("Attach files", "Dictate", "Teach me", "Account: ", "Conversation usage", "Send")
+        assertBar("Attach files", "Dictate", "Teach me", "Model: ", "Conversation usage", "Send")
     }
 
     @Test
     fun theControlsKeepTheDocumentedOrder() {
         showBar(conversation(status = ConversationStatus.Working), working = true)
 
-        val order = listOf("Attach files", "Dictate", "Teach me", "Set a goal", "Account: ", "Model: ", "Mode: ", "Conversation usage", "Stop the agent", "Queue message")
+        val order = listOf("Attach files", "Dictate", "Teach me", "Set a goal", "Model: ", "Mode: ", "Conversation usage", "Stop the agent", "Queue message")
         val lefts = order.map { rule.onNode(described(it)).getBoundsInRoot().left.value }
 
         assertEquals(lefts.sorted(), lefts)
     }
 
     @Test
-    fun aNewConversationFoldsAgentAndAccountIntoOneControlAndKeepsModel() {
+    fun aNewConversationHasOneModelControlWithNoSeparateAccount() {
         val everything = HarnessReport(voice = true, working = true, models = true, modes = true, settings = true)
 
-        assertEquals(listOf(BarControl.Attach, BarControl.Project, BarControl.Place, BarControl.Account, BarControl.Model, BarControl.Send), barControls(ConversationKind.NewConversation, everything))
+        assertEquals(listOf(BarControl.Attach, BarControl.Project, BarControl.Place, BarControl.Model, BarControl.Send), barControls(ConversationKind.NewConversation, everything))
     }
 
     @Test
@@ -187,10 +189,10 @@ class ComposerBarTest {
     }
 
     @Test
-    fun aNewChatHasOnlyAttachAccountAndSend() {
+    fun aNewChatHasOnlyAttachModelAndSend() {
         val everything = HarnessReport(voice = true, working = true, models = true, modes = true, settings = true)
 
-        assertEquals(listOf(BarControl.Attach, BarControl.Account, BarControl.Send), barControls(ConversationKind.NewChat, everything))
+        assertEquals(listOf(BarControl.Attach, BarControl.Model, BarControl.Send), barControls(ConversationKind.NewChat, everything))
     }
 
     @Test

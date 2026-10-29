@@ -900,14 +900,14 @@ fun RenameDialog(title: String, label: String, value: String, onValueChange: (St
 }
 
 @Composable
-fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint: String? = null, leading: MyIcon? = null, meter: Int? = null, trailing: (@Composable () -> Unit)? = null, leadingContent: (@Composable () -> Unit)? = null, description: String? = null, hintContent: (@Composable () -> Unit)? = null, checkSlot: Boolean = false) {
+fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint: String? = null, leading: MyIcon? = null, meter: Int? = null, trailing: (@Composable () -> Unit)? = null, leadingContent: (@Composable () -> Unit)? = null, description: String? = null, hintContent: (@Composable () -> Unit)? = null, checkSlot: Boolean = false, greyed: Boolean = false) {
     val colors = MyTheme.colors
 
     Row(
         Modifier
             .fillMaxWidth()
             .heightIn(min = rowHeight())
-            .pressable(onClick, role = Role.RadioButton, description = description, shape = ControlShape, stateDescription = if (checked) "Selected" else null)
+            .pressable(if (greyed) ({}) else onClick, role = Role.RadioButton, description = description, shape = ControlShape, stateDescription = if (greyed) "Unavailable" else if (checked) "Selected" else null)
             .semantics { selected = checked }
             .padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
@@ -919,7 +919,7 @@ fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint:
             Icon(leading, colors.textMuted)
         }
 
-        Label(label, maxLines = 1, overflow = TextOverflow.Visible)
+        Label(label, color = if (greyed) colors.textFaint else colors.text, maxLines = 1, overflow = TextOverflow.Visible)
 
         if (meter != null) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {

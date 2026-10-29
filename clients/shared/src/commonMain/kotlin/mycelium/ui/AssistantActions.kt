@@ -41,8 +41,6 @@ import mycelium.state.until
 import kotlin.time.Clock
 
 private val ChipShape = RoundedCornerShape(percent = 50)
-private const val NoModel = ""
-private const val AnyNode = ""
 private val InputKinds = listOf(Choice("text", "Text"), Choice("date", "Date"), Choice("choice", "Choice"))
 
 private fun today(): String = Clock.System.now().toString().take(10)
@@ -198,28 +196,11 @@ internal fun RunActionDialog(action: AssistantAction, onDismiss: () -> Unit, onR
     }
 }
 
-private fun modelChoices(providers: List<ModelProvider>): List<Choice> =
-    listOf(Choice("agent:claude", "Claude Code"), Choice("agent:codex", "Codex")) + providers.flatMap { provider -> provider.models.map { Choice("provider:${provider.id}:$it", "${provider.name} · $it") } }
-
-private fun modelKey(model: ModelChoice?): String = when {
-    model == null -> NoModel
-    model.agent != null -> "agent:${model.agent}"
-    else -> "provider:${model.providerId}:${model.model}"
-}
-
-private fun modelFromKey(key: String): ModelChoice? = when {
-    key.startsWith("agent:") -> ModelChoice(agent = key.removePrefix("agent:"))
-    key.startsWith("provider:") -> key.removePrefix("provider:").split(":", limit = 2).let { ModelChoice(providerId = it[0], model = it.getOrNull(1)) }
-    else -> null
-}
-
 @Composable
-internal fun ActionDialog(title: String, initial: SaveActionRequest?, state: AppState, providers: List<ModelProvider>, onDismiss: () -> Unit, onSave: suspend (SaveActionRequest) -> Unit) {
+internal fun ActionDialog(title: String, initial: SaveActionRequest?, onDismiss: () -> Unit, onSave: suspend (SaveActionRequest) -> Unit) {
     var name by remember { mutableStateOf(initial?.name.orEmpty()) }
     var prompt by remember { mutableStateOf(initial?.prompt.orEmpty()) }
     var inputs by remember { mutableStateOf(initial?.inputs.orEmpty()) }
-    var model by remember { mutableStateOf(initial?.model) }
-    var nodeId by remember { mutableStateOf(initial?.nodeId) }
     var pinned by remember { mutableStateOf(initial?.pinned ?: false) }
     var nameError by remember { mutableStateOf<String?>(null) }
     var promptError by remember { mutableStateOf<String?>(null) }
@@ -234,7 +215,7 @@ internal fun ActionDialog(title: String, initial: SaveActionRequest?, state: App
         }
 
         runner {
-            onSave(SaveActionRequest(name.trim(), prompt.trim(), inputs, model, nodeId, pinned))
+            onSave(SaveActionRequest(name.trim(), prompt.trim(), inputs, initial?.model, initial?.nodeId, pinned))
             onDismiss()
         }
     }
@@ -257,16 +238,6 @@ internal fun ActionDialog(title: String, initial: SaveActionRequest?, state: App
                 Row {
                     MyButton({ inputs = inputs + ActionInput(name = "input${inputs.size + 1}") }, text = "Add input", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
                 }
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                Label("Model", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
-                OptionMenu("Model", listOf(Choice(NoModel, "Assistant's models")) + modelChoices(providers), modelKey(model), { picked -> model = modelFromKey(picked) }, title = "Model")
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                Label("Node", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
-                OptionMenu("Node", listOf(Choice(AnyNode, "Assistant's nodes")) + state.nodes.values.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) }, nodeId ?: AnyNode, { nodeId = it.ifEmpty { null } }, title = "Node")
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
@@ -346,7 +317,7 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
 
             if (actions.isNotEmpty()) {
                 Table(
-                    listOf(Col("Action", 120.dp, weight = 1f), Col("Asks for", 88.dp, priority = 1), Col("Model", 120.dp, priority = 1), Col("Pinned", 64.dp, preferred = 64.dp), ActionColumn),
+                    listOf(Col("Action", 120.dp, weight = 1f), Col("Asks for", 88.dp, priority = 1), Col("Pinned", 64.dp, preferred = 64.dp), ActionColumn),
                     actions.size,
                     { row, column ->
                         val action = actions[row]
@@ -363,8 +334,7 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
                             }
 
                             1 -> TableCell.Text(askedFor(action.inputs), color = colors.textMuted)
-                            2 -> TableCell.Text(action.model?.let { it.agent?.let { agent -> if (agent == "codex") "Codex" else "Claude Code" } ?: it.model.orEmpty() } ?: "Assistant's models", color = colors.textMuted)
-                            3 -> TableCell.Slot {
+                            2 -> TableCell.Slot {
                                 Checkbox(
                                     action.pinned,
                                     "Pinned: ${action.name}",
@@ -437,15 +407,13 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
     }
 
     if (creating) {
-        ActionDialog("New action", null, state, providers, onDismiss = { creating = false }, onSave = { request -> store.api.createAssistantAction(assistant.id, request); store.refreshAssistantActions(assistant.id) })
+        ActionDialog("New action", null, onDismiss = { creating = false }, onSave = { request -> store.api.createAssistantAction(assistant.id, request); store.refreshAssistantActions(assistant.id) })
     }
 
     editing?.let { action ->
         ActionDialog(
             "Edit action",
             SaveActionRequest(action.name, action.prompt, action.inputs, action.model, action.nodeId, action.pinned),
-            state,
-            providers,
             onDismiss = { editing = null },
             onSave = { request -> store.api.saveAssistantAction(assistant.id, action.id, request); store.refreshAssistantActions(assistant.id) },
         )
@@ -508,8 +476,6 @@ internal fun ProposedActionCard(store: Store, state: AppState, proposal: ActionP
         ActionDialog(
             "Edit action",
             SaveActionRequest(proposal.name, proposal.prompt, proposal.inputs),
-            state,
-            providers,
             onDismiss = { editing = false },
             onSave = { request -> store.api.approveActionProposal(proposal.assistantId, proposal.id, request); store.refreshAssistantActions(proposal.assistantId) },
         )

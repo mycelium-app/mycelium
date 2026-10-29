@@ -94,7 +94,6 @@ class ChatsTest {
             val body = when {
                 request.method == HttpMethod.Post && path.endsWith("/chats") -> conversation("c9", "Plan a trip", "chat", now.toString())
                 request.method == HttpMethod.Post && path.endsWith("/attachments") -> """{"sha256":"abc","name":"notes.txt","media_type":"text/plain","size":5}"""
-                request.method == HttpMethod.Put && path.endsWith("/favourites") -> Provider.replace(""""default_model"""", """"favourites":["qwen3"],"default_model"""")
                 request.method == HttpMethod.Patch -> conversation("c1", "Trip to Lisbon", "chat", now.toString(), "p2")
                 path.endsWith("/prompt") -> ""
                 path.endsWith("/conversations/c1/events") -> chatEvents
@@ -207,16 +206,15 @@ class ChatsTest {
     }
 
     @Test
-    fun theModelMenuGroupsModelsByProviderAndTheChoiceIsWhatTheChatStartsWith() {
+    fun theModelMenuListsChatModelsAndTheChoiceIsWhatTheChatStartsWith() {
         newChatScreen()
 
-        rule.onNodeWithContentDescription("Account: Ollama · llama3.2").performClick()
+        rule.onNodeWithContentDescription("Model: llama3.2").performClick()
 
-        rule.onAllNodesWithText("Ollama").onFirst().assertIsDisplayed()
-        rule.onNodeWithText("Anthropic").assertIsDisplayed()
+        rule.onNodeWithText("Chat").assertIsDisplayed()
 
         rule.onNodeWithText("claude-sonnet-5-5").performClick()
-        rule.onNodeWithContentDescription("Account: Anthropic · claude-sonnet-5-5").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Model: claude-sonnet-5-5").assertIsDisplayed()
         rule.onNodeWithContentDescription("Message").performTextInput("Hello")
         rule.onNodeWithContentDescription("Send").performClick()
 
@@ -228,59 +226,26 @@ class ChatsTest {
     fun searchingTheModelMenuNarrowsItToMatchingModelsAndEnterPicksTheFirst() {
         newChatScreen()
 
-        rule.onNodeWithContentDescription("Account: Ollama · llama3.2").performClick()
-        rule.onNodeWithContentDescription("Search accounts, nodes and models").performTextInput("qwen")
+        rule.onNodeWithContentDescription("Model: llama3.2").performClick()
+        rule.onNodeWithContentDescription("Search models").performTextInput("qwen")
 
         assertEquals(0, rule.onAllNodesWithText("claude-sonnet-5-5").fetchSemanticsNodes().size)
-        rule.onNodeWithContentDescription("Search accounts, nodes and models").performImeAction()
+        rule.onNodeWithContentDescription("Search models").performImeAction()
 
-        rule.onNodeWithContentDescription("Account: Ollama · qwen3").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Model: qwen3").assertIsDisplayed()
     }
 
     @Test
-    fun searchTermsMatchTheProviderAndTheModelTogether() {
-        providers = "[$Provider,$OpenRouter]"
+    fun starringAModelPutsItUnderFavouritesAndSavesItInAgentSettings() {
         newChatScreen()
 
-        rule.onNodeWithContentDescription("Account: Ollama · llama3.2").performClick()
-        rule.onNodeWithContentDescription("Search accounts, nodes and models").performTextInput("router sonnet")
-
-        rule.onNodeWithText("anthropic/claude-sonnet-5-5").assertIsDisplayed()
-        assertEquals(0, rule.onAllNodesWithText("anthropic/claude-haiku-5-5").fetchSemanticsNodes().size)
-        assertEquals(0, rule.onAllNodesWithText("qwen3").fetchSemanticsNodes().size)
-    }
-
-    @Test
-    fun modelsWithAVendorPrefixAreGroupedUnderIt() {
-        providers = "[$Provider,$OpenRouter]"
-        newChatScreen()
-
-        rule.onNodeWithContentDescription("Account: Ollama · llama3.2").performClick()
-
-        rule.onNodeWithText("OpenRouter · anthropic").assertIsDisplayed()
-        rule.onNodeWithText("anthropic/claude-sonnet-5-5").assertIsDisplayed()
-    }
-
-    @Test
-    fun starringAModelPutsItUnderFavouritesAndSavesIt() {
-        newChatScreen()
-
-        rule.onNodeWithContentDescription("Account: Ollama · llama3.2").performClick()
-        rule.onNodeWithContentDescription("Add qwen3 to favourites").performClick()
+        rule.onNodeWithContentDescription("Model: llama3.2").performClick()
+        rule.onNodeWithContentDescription("Add to favourites: qwen3").performClick()
 
         rule.onNodeWithText("Favourites").assertIsDisplayed()
-        rule.onAllNodesWithContentDescription("Remove qwen3 from favourites").onFirst().assertIsDisplayed()
-        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Put && it.url.encodedPath.endsWith("/model-providers/p1/favourites") } }
-        assertEquals("""{"model":"qwen3","favourite":true}""", bodies.last { it.contains("favourite") })
-    }
-
-    @Test
-    fun aModelUsedInAnEarlierChatIsListedUnderRecent() {
-        newChatScreen()
-
-        rule.onNodeWithContentDescription("Account: Ollama · llama3.2").performClick()
-
-        rule.onNodeWithText("Recent").assertIsDisplayed()
+        rule.onAllNodesWithContentDescription("Remove from favourites: qwen3").onFirst().assertIsDisplayed()
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Put && it.url.encodedPath.endsWith("/agent-settings") } }
+        assertEquals("""{"any_model":[{"provider_id":"p1","model":"qwen3"}]}""", bodies.last { it.contains("any_model") })
     }
 
     @Test
@@ -303,8 +268,8 @@ class ChatsTest {
     fun anOpenChatShowsItsProviderAndModelAndSwitchingPatchesTheConversation() {
         shell(Route.Chat("c1"))
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Account: Ollama · llama3.2").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Account: Ollama · llama3.2").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: llama3.2").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Model: llama3.2").performClick()
         rule.onNodeWithText("claude-sonnet-5-5").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Patch } }
@@ -312,12 +277,12 @@ class ChatsTest {
     }
 
     @Test
-    fun aChatWhoseProviderWasRemovedAsksForAModelInTheAccountControl() {
+    fun aChatWhoseProviderWasRemovedAsksForAModelInTheModelControl() {
         removedProvider = true
         shell(Route.Chat("c1"))
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Account: Choose a model").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Account: Choose a model").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Choose a model").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Model: Choose a model").performClick()
         rule.onNodeWithText("qwen3").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Patch } }

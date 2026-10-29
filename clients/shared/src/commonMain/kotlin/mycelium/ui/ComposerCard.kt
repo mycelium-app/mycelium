@@ -34,95 +34,43 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import mycelium.api.Conversation
+import mycelium.api.ModelChoice
 import mycelium.api.ModelProvider
-import mycelium.state.Choice
+import mycelium.state.ModelOption
 import mycelium.state.PickerAccount
-import mycelium.state.RoutingGroup
-import mycelium.state.agentName
-import mycelium.state.Store
+import mycelium.state.anyModelHint
+import mycelium.state.favouriteOptions
+import mycelium.state.isFavourite
+import mycelium.state.matching
 
 class PickerRefusal(val message: String, val rowId: String, val nodeId: String, val nodeName: String)
 
-class AccountPickerControls(
-    val title: String,
-    val onPick: (String, (PickerRefusal?) -> Unit) -> Unit,
-    val label: String? = null,
+class ModelPickerControls(
+    val label: String,
+    val options: List<ModelOption>,
+    val favourites: List<ModelChoice>,
+    val providers: List<ModelProvider>,
+    val onPickModel: (ModelOption) -> Unit,
+    val onPickAny: (() -> Unit)? = null,
+    val onFavourite: (ModelOption, Boolean) -> Unit,
+    val chosen: ModelChoice? = null,
+    val anyChosen: Boolean = false,
     val tooltip: String? = null,
     val accounts: List<PickerAccount> = emptyList(),
-    val routing: List<Choice> = emptyList(),
-    val current: String? = null,
-    val providers: List<ModelProvider> = emptyList(),
-    val providerId: String? = null,
-    val model: String? = null,
-    val recent: List<Pair<ModelProvider, String>> = emptyList(),
-    val onFavourite: (ModelProvider, String, Boolean) -> Unit = { _, _, _ -> },
-    val onPickModel: (ModelProvider, String) -> Unit = { _, _ -> },
+    val account: String? = null,
+    val onPickAccount: ((String?, (PickerRefusal?) -> Unit) -> Unit)? = null,
     val onMove: (String) -> Unit = {},
     val focus: FocusRequester? = null,
     val problem: String? = null,
 )
 
-fun recentModels(conversations: Collection<Conversation>, providers: List<ModelProvider>, limit: Int = 5): List<Pair<ModelProvider, String>> {
-    val picked = conversations.filter { it.providerId != null && it.model != null }.sortedByDescending { it.updatedAt }
-
-    return picked
-        .mapNotNull { conversation ->
-            val provider = providers.firstOrNull { it.id == conversation.providerId } ?: return@mapNotNull null
-            val model = conversation.model.orEmpty()
-
-            if (model in provider.models && model !in provider.favourites) provider to model else null
-        }
-        .distinctBy { (provider, model) -> provider.id to model }
-        .take(limit)
-}
-
-fun List<ModelProvider>.withFavourite(providerId: String, model: String, favourite: Boolean): List<ModelProvider> =
-    map { if (it.id == providerId) it.copy(favourites = it.favourites.filter { name -> name != model } + listOfNotNull(model.takeIf { favourite })) else it }
-
-fun Store.setFavouriteModel(change: ((List<ModelProvider>) -> List<ModelProvider>) -> Unit, provider: ModelProvider, model: String, favourite: Boolean) {
-    change { it.withFavourite(provider.id, model, favourite) }
-
-    act {
-        val saved = api.setFavouriteModel(provider.id, model, favourite)
-
-        change { current -> current.map { if (it.id == saved.id) saved.copy(favourites = it.favourites) else it } }
-    }
-}
-
-private sealed interface PickerEntry {
-    val key: String
-
-    data class Heading(val text: String, val divided: Boolean) : PickerEntry {
-        override val key = "heading|$text"
-    }
-
-    data class Provider(val text: String) : PickerEntry {
-        override val key = "provider|$text"
-    }
-
-    data class Routing(val choice: Choice) : PickerEntry {
-        override val key = "routing|${choice.id}"
-    }
-
-    data class Account(val row: PickerAccount) : PickerEntry {
-        override val key = "account|${row.id}"
-    }
-
-    data class Refused(val refusal: PickerRefusal) : PickerEntry {
-        override val key = "refused|${refusal.rowId}"
-    }
-
-    data class Model(val section: String, val provider: ModelProvider, val model: String, val showProvider: Boolean) : PickerEntry {
-        override val key = "$section|${provider.id}|$model"
-    }
-}
-
-private const val ChatModelsHeading = "Chat models"
+private const val ModelMenuTitle = "Model"
 
 private const val NoNodeOnline = "No node online"
 
 private const val ThisDevice = "This device"
+
+private const val AnyAccount = "Any account"
 
 private fun PickerAccount.description(): String = when {
     signIn -> "$label, $usage"
@@ -154,170 +102,174 @@ private fun AccountDetail(row: PickerAccount) {
 }
 
 @Composable
-fun AccountPicker(controls: AccountPickerControls, maxWidth: Dp = Tokens.Size.AccountControl) {
-    val current = controls.providers.firstOrNull { it.id == controls.providerId }
-    val label = controls.label ?: if (current != null && controls.model != null) "${current.name} · ${controls.model}" else "Choose a model"
+private fun ModelRow(option: ModelOption, controls: ModelPickerControls, favourite: Boolean, showHarness: Boolean, onChoose: (ModelOption) -> Unit) {
+    val chosen = controls.chosen?.let(option::isChosen) == true
+
+    MenuItem(
+        option.name,
+        onClick = { onChoose(option) },
+        checked = chosen,
+        hint = option.where ?: option.harness.takeIf { showHarness },
+        leadingContent = { Icon(option.agent?.let(::agentIcon) ?: MyIcon.Chat, if (option.available) MyTheme.colors.textMuted else MyTheme.colors.textFaint) },
+        greyed = !option.available,
+        description = "${option.harness}: ${option.name}${option.where?.let { ", ${it.replaceFirstChar(Char::lowercase)}" }.orEmpty()}",
+        trailing = {
+            MyButton(
+                { controls.onFavourite(option, !favourite) },
+                icon = MyIcon.Star,
+                description = if (favourite) "Remove from favourites: ${option.name}" else "Add to favourites: ${option.name}",
+                size = ButtonSize.Sm,
+                selected = favourite,
+                muted = !favourite,
+            )
+        },
+    )
+}
+
+@Composable
+private fun MenuHeading(text: String) {
+    Hairline(Modifier.padding(vertical = Tokens.Space.S1))
+    Label(text, Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1).semantics { heading() }, Tokens.Type.MetaStrong)
+}
+
+@Composable
+fun ModelPicker(controls: ModelPickerControls, maxWidth: Dp = Tokens.Size.AccountControl, trigger: (@Composable (open: () -> Unit, expanded: Boolean) -> Unit)? = null) {
     var open by remember { mutableStateOf(false) }
 
     Box {
-        MyButton(
-            { open = true },
-            Modifier.then(controls.focus?.let { Modifier.focusRequester(it) } ?: Modifier).semantics { controls.problem?.let { error(it) } },
-            text = label,
-            description = "Account: $label",
-            icon = MyIcon.Person,
-            muted = true,
-            trailingIcon = MyIcon.ChevronDown,
-            selected = open,
-            tooltip = controls.tooltip ?: "Account",
-            maxWidth = maxWidth,
-        )
+        if (trigger != null) {
+            trigger({ open = true }, open)
+        } else {
+            MyButton(
+                { open = true },
+                Modifier.then(controls.focus?.let { Modifier.focusRequester(it) } ?: Modifier).semantics { controls.problem?.let { error(it) } },
+                text = controls.label,
+                description = "$ModelMenuTitle: ${controls.label}",
+                icon = if (controls.anyChosen) MyIcon.Layers else controls.chosen?.agent?.let(::agentIcon) ?: MyIcon.Chat,
+                muted = true,
+                trailingIcon = MyIcon.ChevronDown,
+                selected = open,
+                tooltip = controls.tooltip ?: ModelMenuTitle,
+                maxWidth = maxWidth,
+            )
+        }
 
         if (open) {
             var query by remember { mutableStateOf("") }
+            var choosingAccount by remember { mutableStateOf(false) }
             var refusal by remember { mutableStateOf<PickerRefusal?>(null) }
-            val searching = query.isNotBlank()
-            val terms = query.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
-            val listed = controls.providers.filter { it.models.isNotEmpty() }
-
-            fun matches(vararg names: String?) = terms.all { term -> names.any { it?.contains(term, ignoreCase = true) == true } }
-
-            val listing = buildList<PickerEntry> {
-                fun section(heading: String, rows: List<PickerEntry>) {
-                    if (rows.isEmpty()) {
-                        return
-                    }
-
-                    add(PickerEntry.Heading(heading, isNotEmpty()))
-                    addAll(rows)
-                }
-
-                if (!searching) {
-                    val favourites = listed.flatMap { provider -> provider.favourites.filter { it in provider.models }.map { provider to it } }
-
-                    section("Favourites", favourites.map { (provider, model) -> PickerEntry.Model("favourite", provider, model, true) })
-                    section("Recent", controls.recent.map { (provider, model) -> PickerEntry.Model("recent", provider, model, true) })
-                }
-
-                section(RoutingGroup, controls.routing.filter { matches(it.name, it.description) }.map { PickerEntry.Routing(it) })
-
-                val harnesses = (listOf("claude", "codex") + controls.accounts.map { it.agent }).distinct()
-
-                for (agent in harnesses) {
-                    val rows = controls.accounts
-                        .filter { it.agent == agent && matches(agentName(agent), agent, it.account, it.node?.name) }
-                        .sortedByDescending { it.here }
-
-                    section(agentName(agent), rows.map { PickerEntry.Account(it) })
-                }
-
-                val chatModels = buildList<PickerEntry> {
-                    for (provider in listed) {
-                        val matching = provider.models.filter { model -> matches(provider.name, model) }
-
-                        for (group in matching.groupBy { if ('/' in it) it.substringBefore('/') else "" }.entries.sortedBy { it.key }) {
-                            add(PickerEntry.Provider(if (group.key.isEmpty()) provider.name else "${provider.name} · ${group.key}"))
-                            group.value.forEach { add(PickerEntry.Model("provider", provider, it, false)) }
-                        }
-                    }
-                }
-
-                section(ChatModelsHeading, chatModels)
-            }
-            val entries = refusal?.let { refused ->
-                val at = listing.indexOfFirst { it is PickerEntry.Account && it.row.id == refused.rowId }
-
-                if (at < 0) listing else listing.take(at + 1) + PickerEntry.Refused(refused) + listing.drop(at + 1)
-            } ?: listing
             val focus = remember { FocusRequester() }
             val touch = LocalTouch.current
+            val favourites = controls.favourites.favouriteOptions(controls.options, controls.providers)
+            val searching = query.isNotBlank()
+            val found = controls.options.matching(query)
+            val anyListed = controls.onPickAny != null && (!searching || "any model".contains(query.trim(), ignoreCase = true))
 
-            LaunchedEffect(Unit) {
-                if (!touch) {
+            LaunchedEffect(choosingAccount) {
+                if (!touch && !choosingAccount) {
                     focus.requestFocus()
                 }
             }
 
-            fun choose(entry: PickerEntry) {
-                when (entry) {
-                    is PickerEntry.Model -> {
-                        controls.onPickModel(entry.provider, entry.model)
-                        open = false
-                    }
-                    is PickerEntry.Account -> controls.onPick(entry.row.id) { problem -> if (problem == null) open = false else refusal = problem }
-                    is PickerEntry.Routing -> controls.onPick(entry.choice.id) { problem -> if (problem == null) open = false else refusal = problem }
-                    else -> Unit
+            fun choose(option: ModelOption) {
+                if (option.available) {
+                    controls.onPickModel(option)
+                    open = false
                 }
             }
 
+            fun chooseAccount(rowId: String?) {
+                controls.onPickAccount?.invoke(rowId) { problem -> if (problem == null) open = false else refusal = problem }
+            }
+
             MenuPopup(onDismiss = { open = false }, width = Tokens.Size.Menu * 1.75f) {
-                Column(Modifier.semantics { contentDescription = controls.title }) {
+                if (choosingAccount) {
+                    Column(Modifier.semantics { contentDescription = "Account" }) {
+                        MenuItem("Back to models", onClick = { choosingAccount = false; refusal = null }, leading = MyIcon.ChevronLeft)
+                        MenuLabel("Runs on")
+                        MenuItem(AnyAccount, onClick = { chooseAccount(null) }, checked = controls.account == null, hint = "Switches as usage runs out")
+
+                        for (row in controls.accounts) {
+                            val rowRefusal = refusal?.takeIf { it.rowId == row.id }
+
+                            MenuItem(
+                                row.label,
+                                onClick = { chooseAccount(row.id) },
+                                checked = row.id == controls.account,
+                                description = row.description(),
+                                hintContent = { AccountDetail(row) },
+                                checkSlot = true,
+                            )
+
+                            if (rowRefusal != null) {
+                                ErrorBanner(
+                                    rowRefusal.message,
+                                    onDismiss = { refusal = null },
+                                    Modifier.padding(vertical = Tokens.Space.S1),
+                                    actions = {
+                                        MyButton({ open = false; controls.onMove(rowRefusal.nodeId) }, text = "Move to ${rowRefusal.nodeName}", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+                                    },
+                                )
+                            }
+                        }
+                    }
+
+                    return@MenuPopup
+                }
+
+                Column(Modifier.semantics { contentDescription = ModelMenuTitle }) {
                     TextInput(
                         query,
-                        { query = it; refusal = null },
-                        label = "Search accounts, nodes and models",
-                        placeholder = "Account, node or model",
+                        { query = it },
+                        label = "Search models",
+                        placeholder = "Search models",
                         showLabel = false,
                         leadingIcon = MyIcon.Search,
                         focusRequester = focus,
-                        onSubmit = { entries.firstOrNull { it is PickerEntry.Account || it is PickerEntry.Routing || it is PickerEntry.Model }?.let(::choose) },
+                        onSubmit = { found.firstOrNull { it.available }?.let(::choose) },
                     )
                     val scroll = rememberLazyListState()
 
                     LazyColumn(Modifier.heightIn(max = Tokens.Size.MenuList).scrollbar(scroll), state = scroll) {
-                        items(entries, key = { it.key }) { entry ->
-                            when (entry) {
-                                is PickerEntry.Heading -> {
-                                    if (entry.divided) {
-                                        Hairline(Modifier.padding(vertical = Tokens.Space.S1))
-                                    }
-
-                                    Label(entry.text, Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1).semantics { heading() }, Tokens.Type.MetaStrong)
-                                }
-                                is PickerEntry.Provider -> MenuLabel(entry.text)
-                                is PickerEntry.Refused -> ErrorBanner(
-                                    entry.refusal.message,
-                                    onDismiss = { refusal = null },
-                                    Modifier.padding(vertical = Tokens.Space.S1),
-                                    actions = {
-                                        MyButton({ open = false; controls.onMove(entry.refusal.nodeId) }, text = "Move to ${entry.refusal.nodeName}", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
-                                    },
+                        if (anyListed) {
+                            item(key = "any") {
+                                MenuItem(
+                                    "Any model",
+                                    onClick = { controls.onPickAny?.invoke(); open = false },
+                                    checked = controls.anyChosen,
+                                    hint = anyModelHint(favourites),
+                                    leading = MyIcon.Layers,
                                 )
-                                is PickerEntry.Routing -> MenuItem(entry.choice.name, onClick = { choose(entry) }, checked = entry.choice.id == controls.current, hint = entry.choice.description)
-                                is PickerEntry.Account -> MenuItem(
-                                    entry.row.label,
-                                    onClick = { choose(entry) },
-                                    checked = entry.row.id == controls.current,
-                                    description = entry.row.description(),
-                                    hintContent = { AccountDetail(entry.row) },
-                                    checkSlot = true,
-                                )
-                                is PickerEntry.Model -> {
-                                    val provider = entry.provider
-                                    val model = entry.model
-                                    val favourite = model in provider.favourites
-
-                                    MenuItem(
-                                        model,
-                                        onClick = { choose(entry) },
-                                        checked = provider.id == controls.providerId && model == controls.model,
-                                        hint = if (entry.showProvider) provider.name else null,
-                                        trailing = {
-                                            MyButton(
-                                                { controls.onFavourite(provider, model, !favourite) },
-                                                icon = MyIcon.Star,
-                                                description = if (favourite) "Remove $model from favourites" else "Add $model to favourites",
-                                                size = ButtonSize.Sm,
-                                                selected = favourite,
-                                            )
-                                        },
-                                    )
-                                }
                             }
                         }
 
-                        if (entries.isEmpty()) {
-                            item { MenuLabel("No matching accounts, nodes or models") }
+                        val starred = favourites.matching(query)
+
+                        if (starred.isNotEmpty()) {
+                            item(key = "favourites") { MenuHeading("Favourites") }
+                            items(starred, key = { "favourite|${it.key}" }) { ModelRow(it, controls, favourite = true, showHarness = true, onChoose = ::choose) }
+                        }
+
+                        for ((harness, options) in found.groupBy { it.harness }) {
+                            item(key = "heading|$harness") { MenuHeading(harness) }
+                            items(options, key = { "model|${it.key}" }) { ModelRow(it, controls, favourite = controls.favourites.isFavourite(it), showHarness = false, onChoose = ::choose) }
+                        }
+
+                        if (found.isEmpty() && !anyListed && favourites.matching(query).isEmpty()) {
+                            item { MenuLabel("No matching models") }
+                        }
+
+                        if (controls.onPickAccount != null && !searching) {
+                            item(key = "account") {
+                                Hairline(Modifier.padding(vertical = Tokens.Space.S1))
+                                MenuItem(
+                                    "Account",
+                                    onClick = { choosingAccount = true },
+                                    hint = controls.accounts.firstOrNull { it.id == controls.account }?.label ?: "Any signed-in account",
+                                    leading = MyIcon.Person,
+                                    trailing = { Icon(MyIcon.ChevronRight, MyTheme.colors.textMuted) },
+                                )
+                            }
                         }
                     }
                 }
@@ -340,7 +292,6 @@ fun ComposerCard(
     project: (@Composable () -> Unit)? = null,
     place: (@Composable () -> Unit)? = null,
     notice: (@Composable () -> Unit)? = null,
-    account: (@Composable () -> Unit)? = null,
     model: (@Composable () -> Unit)? = null,
 ) {
     val colors = MyTheme.colors
@@ -391,7 +342,6 @@ fun ComposerCard(
                     BarControl.Project -> project?.invoke()
                     BarControl.Place -> place?.invoke()
                     BarControl.Actions -> assistantActions?.let { ActionsButton(it) }
-                    BarControl.Account -> account?.invoke()
                     BarControl.Model -> model?.invoke()
                     BarControl.Send -> MyButton(onSubmit, icon = MyIcon.Send, description = "Send", muted = true)
                     else -> Unit
@@ -404,7 +354,7 @@ fun ComposerCard(
                     horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    listOf(BarControl.Project, BarControl.Place, BarControl.Account, BarControl.Model).forEach { control(it) }
+                    listOf(BarControl.Project, BarControl.Place, BarControl.Model).forEach { control(it) }
                 }
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {

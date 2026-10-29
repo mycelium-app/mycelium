@@ -45,10 +45,8 @@ import mycelium.state.Store
 import mycelium.state.VoiceAssistantKey
 import mycelium.state.ago
 import mycelium.state.formatSize
-import mycelium.state.addModelChoices
-import mycelium.state.harnessModelChoices
-import mycelium.state.modelChoiceFrom
-import mycelium.state.modelChoiceName
+import mycelium.state.displayName
+import mycelium.state.modelOptions
 
 enum class AssistantSection(val label: String, val icon: MyIcon) {
     Identity("Identity", MyIcon.Person),
@@ -322,6 +320,8 @@ private fun ModelsSection(store: Store, state: AppState, assistant: Assistant, o
     var fallBackOn by remember(assistant.id) { mutableStateOf(assistant.preferences.fallBackOn) }
     var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
     val runner = rememberAction(assistant.id)
+    val favourites = rememberFavouriteModels(store)
+    val options = remember(state.nodes, providers) { modelOptions(state.nodes.values, null, providers) }
 
     LaunchedEffect(Unit) {
         store.act { providers = store.api.modelProviders() }
@@ -332,24 +332,26 @@ private fun ModelsSection(store: Store, state: AppState, assistant: Assistant, o
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("Models, in order of preference", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-            Label("A new session starts on the first model.", style = Tokens.Type.Meta, color = colors.textMuted)
+            Label("A new session starts on the first model that can run. Any model picks from your favourites.", style = Tokens.Type.Meta, color = colors.textMuted)
 
             OrderedRows(
-                names = models.map { modelName(it, providers) },
+                names = models.map { it.displayName(options, providers) },
                 onMove = { from, to -> models = models.moved(from, to) },
                 onRemove = { index -> models = models.filterIndexed { position, _ -> position != index } },
-            ) { index ->
-                val choice = models[index]
-
-                if (choice.agent != null) {
-                    val offered = harnessModelChoices(state.nodes.values, choice.agent)
-
-                    OptionMenu("Model for ${harnessName(choice.agent)}", offered, choice.model ?: "", { picked -> models = models.mapIndexed { position, held -> if (position == index) held.copy(model = picked.ifEmpty { null }) else held } }, title = "Model")
-                }
-            }
+            )
 
             Row {
-                OptionMenu("Add a model", addModelChoices(state.nodes.values, providers, includeAnyModel = true), null, { picked -> modelChoiceFrom(picked)?.let { added -> models = models + added } }, title = "Add a model", icon = MyIcon.Plus)
+                ModelPicker(
+                    ModelPickerControls(
+                        label = "Add a model",
+                        options = options,
+                        favourites = favourites.list,
+                        providers = providers,
+                        onPickModel = { picked -> models = models + picked.choice() },
+                        onPickAny = { models = models + ModelChoice(anyModel = true) },
+                        onFavourite = favourites.toggle,
+                    ),
+                )
             }
         }
 
@@ -400,12 +402,6 @@ private fun ModelsSection(store: Store, state: AppState, assistant: Assistant, o
             },
         )
     }
-}
-
-private fun modelName(choice: ModelChoice, providers: List<ModelProvider>): String = when {
-    choice.anyModel -> modelChoiceName(choice, providers)
-    choice.agent != null -> modelChoiceName(choice.copy(model = null), providers)
-    else -> "${providers.firstOrNull { it.id == choice.providerId }?.name ?: "Removed provider"} · ${choice.model.orEmpty()}"
 }
 
 private val FallBackConditions = listOf(

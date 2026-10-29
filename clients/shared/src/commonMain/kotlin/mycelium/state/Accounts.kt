@@ -139,6 +139,8 @@ const val ContinueAgentPrefix = "agent:"
 
 const val ContinueChatPrefix = "chat:"
 
+const val ContinueModelPrefix = "model:"
+
 const val ContinueNodePrefix = "on:"
 
 fun currentContinueId(conversation: Conversation): String? = when {

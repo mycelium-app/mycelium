@@ -27,57 +27,56 @@ import androidx.compose.ui.semantics.semantics
 import mycelium.api.ApiException
 import mycelium.api.Conversation
 import mycelium.api.LoginState
-import mycelium.api.Routing
 import mycelium.api.CreateChatRequest
 import mycelium.api.ModelProvider
-import mycelium.state.AgentPick
+import mycelium.state.PickerAccount
 import mycelium.state.Store
-import mycelium.state.RoutingPrefix
-import mycelium.state.agentPicks
-import mycelium.state.anyAccountId
+import mycelium.state.favouriteOptions
+import mycelium.state.modelOptions
 import mycelium.state.newChatAccounts
-import mycelium.state.reachableLogins
-import mycelium.state.routingAgent
-import mycelium.state.routingChoices
-import mycelium.state.routingName
 
 @Composable
 fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSettings: () -> Unit = {}, onOpenNodes: () -> Unit = {}) {
     val colors = MyTheme.colors
     val state by store.state.collectAsState()
     var providers by remember { mutableStateOf<List<ModelProvider>?>(null) }
-    var providerId by remember { mutableStateOf<String?>(null) }
-    var model by remember { mutableStateOf<String?>(null) }
+    var pickedKey by remember { mutableStateOf<String?>(null) }
+    var anyModel by remember { mutableStateOf(false) }
+    var pinned by remember { mutableStateOf<PickerAccount?>(null) }
     var message by remember { mutableStateOf(TextFieldValue("")) }
     val attached = rememberAttachmentDrafts()
     var messageError by remember { mutableStateOf<String?>(null) }
-    var agentPick by remember { mutableStateOf<AgentPick?>(null) }
     var agentProblem by remember { mutableStateOf<String?>(null) }
     val accountFocus = remember { FocusRequester() }
-    val picks = remember(state.nodes) { agentPicks(state.nodes.values) }
     val accounts = remember(state.nodes) { newChatAccounts(state.nodes.values) }
-    val routing = remember(state.nodes) { routingChoices(reachableLogins(state.nodes.values).map { it.second }, emptyList(), "starts on").filter { it.id != "$RoutingPrefix${Routing.AnyModel}" } }
+    val favourites = rememberFavouriteModels(store)
 
     LaunchedEffect(Unit) {
         store.act { providers = store.api.modelProviders() }
     }
 
     val loaded = providers
-    val provider = loaded?.firstOrNull { it.id == providerId } ?: loaded?.firstOrNull { it.models.isNotEmpty() }
-    val chosenModel = provider?.models?.firstOrNull { it == model } ?: provider?.defaultModel?.takeIf { it in provider.models } ?: provider?.models?.firstOrNull()
+    val options = remember(state.nodes, loaded) { modelOptions(state.nodes.values, null, loaded.orEmpty()) }
+    val favouriteOptions = favourites.list.favouriteOptions(options, loaded.orEmpty()).filter { it.available }
+    val defaultChatModel = loaded?.firstOrNull { it.models.isNotEmpty() }?.let { provider -> provider.defaultModel?.takeIf { it in provider.models } ?: provider.models.first() }
+    val chosenOption = when {
+        anyModel -> favouriteOptions.firstOrNull()
+        else -> options.firstOrNull { it.key == pickedKey } ?: favouriteOptions.firstOrNull() ?: options.firstOrNull { it.providerId != null && it.model == defaultChatModel } ?: options.firstOrNull()
+    }
+    val pin = pinned?.takeIf { it.agent == chosenOption?.agent }
 
-    LaunchedEffect(state.nodes, agentPick) {
-        val picked = agentPick
+    LaunchedEffect(state.nodes, chosenOption, pin) {
+        val picked = chosenOption?.agent
 
-        if (agentProblem != null && picked != null && state.nodes.values.any { node -> node.online && node.logins.any { it.agent == picked.agent && it.state == LoginState.SignedIn && (picked.account == null || it.account == picked.account) } }) {
+        if (agentProblem != null && picked != null && state.nodes.values.any { node -> node.online && node.logins.any { it.agent == picked && it.state == LoginState.SignedIn && (pin?.account == null || it.account == pin.account) } }) {
             agentProblem = null
         }
     }
 
     fun create() {
-        val picked = agentPick
+        val picked = chosenOption
 
-        if (picked == null && (provider == null || chosenModel == null)) {
+        if (picked == null) {
             return
         }
 
@@ -91,7 +90,7 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
         messageError = null
         agentProblem = null
         val files = attached.drafts.map { it.file }
-        val request = if (picked != null) CreateChatRequest(agent = picked.agent, account = picked.account, nodeId = picked.nodeId) else CreateChatRequest(provider?.id, chosenModel)
+        val request = if (picked.agent != null) CreateChatRequest(agent = picked.agent, account = pin?.account, nodeId = pin?.node?.id, model = picked.model.ifEmpty { null }) else CreateChatRequest(picked.providerId, picked.model)
 
         store.act {
             try {
@@ -122,7 +121,7 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
             return@Column
         }
 
-        if (provider == null && picks.isEmpty()) {
+        if (options.isEmpty()) {
             Column(Modifier.padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
                 Label("No chat model is set up. Add a provider in Settings, under Chat models, then start a chat.", color = colors.textMuted)
 
@@ -163,27 +162,33 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
                     attachments = attached.controls(),
                     kind = ConversationKind.NewChat,
                     error = messageError,
-                    account = {
-                        AccountPicker(
-                            AccountPickerControls(
-                                title = "Start on",
-                                label = agentPick?.label,
-                                accounts = accounts,
-                                routing = routing,
-                                current = agentPick?.let { picked -> if (picked.account == null) anyAccountId(picked.agent) else accounts.firstOrNull { it.agent == picked.agent && it.account == picked.account && it.node?.id == picked.nodeId }?.id },
+                    model = {
+                        ModelPicker(
+                            ModelPickerControls(
+                                label = if (anyModel) "Any model" else chosenOption?.name ?: "Choose a model",
+                                options = options,
+                                favourites = favourites.list,
                                 providers = loaded.orEmpty(),
-                                providerId = provider?.id.takeIf { agentPick == null },
-                                model = chosenModel.takeIf { agentPick == null },
-                                recent = recentModels(state.conversations.values, loaded.orEmpty()),
-                                onFavourite = { picked, favouriteModel, on -> store.setFavouriteModel({ change -> providers = providers?.let(change) }, picked, favouriteModel, on) },
-                                onPickModel = { picked, chosenPick -> agentPick = null; providerId = picked.id; model = chosenPick },
+                                chosen = chosenOption?.choice()?.takeIf { !anyModel },
+                                anyChosen = anyModel,
+                                onFavourite = favourites.toggle,
+                                onPickAny = { anyModel = true; agentProblem = null },
+                                onPickModel = { picked -> anyModel = false; pickedKey = picked.key; agentProblem = null },
+                                accounts = accounts,
+                                account = pin?.id,
                                 focus = accountFocus,
                                 problem = agentProblem,
-                                onPick = { picked, done ->
+                                onPickAccount = { picked, done ->
                                     val row = accounts.firstOrNull { it.id == picked }
 
-                                    agentPick = if (row != null) AgentPick(row.agent, row.account, row.label, "", row.node?.id) else routingAgent(picked)?.let { AgentPick(it, null, routingName(picked.removePrefix(RoutingPrefix)), "") }
+                                    pinned = row
                                     agentProblem = null
+
+                                    if (row != null && row.agent != chosenOption?.agent) {
+                                        anyModel = false
+                                        pickedKey = options.firstOrNull { it.agent == row.agent }?.key
+                                    }
+
                                     done(null)
                                 },
                             ),

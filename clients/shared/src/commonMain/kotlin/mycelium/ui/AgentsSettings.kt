@@ -28,13 +28,14 @@ import mycelium.api.SetAccountModeRequest
 import mycelium.api.UsageLimitSetting
 import mycelium.state.AgentAccount
 import mycelium.state.Choice
+import mycelium.state.ModelOption
 import mycelium.state.Store
-import mycelium.state.addModelChoices
 import mycelium.state.agentAccounts
 import mycelium.state.agentName
-import mycelium.state.modelChoiceFrom
-import mycelium.state.modelChoiceName
+import mycelium.state.displayName
+import mycelium.state.modelOptions
 import mycelium.state.splitSignedOut
+import mycelium.state.withFavourite
 
 private val UsageLimitChoices = listOf("Ask me" to "ask", "Wait and resume automatically" to "resume")
 
@@ -48,9 +49,7 @@ private fun defaultModeOf(settings: AgentSettings, agent: String): String? = if 
 
 private fun accountModeOf(settings: AgentSettings, account: AgentAccount): String? = settings.accountModes.firstOrNull { it.agent == account.agent && it.account == account.label }?.mode
 
-private fun entryName(entry: ModelChoice, providers: List<ModelProvider>): String = modelChoiceName(if (entry.agent != null) entry.copy(model = null) else entry, providers)
-
-private fun entryModel(entry: ModelChoice): String = if (entry.agent != null) entry.model ?: "Default model" else ""
+private fun entryHarness(entry: ModelChoice): String = if (entry.anyModel) "" else entry.agent?.let(::agentName) ?: "Chat"
 
 private fun modeName(agent: String, id: String?): String? = fallbackModes(agent).firstOrNull { it.id == id }?.name
 
@@ -63,6 +62,7 @@ fun AgentsSettings(store: Store) {
     var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
     var changingAccount by remember { mutableStateOf<AgentAccount?>(null) }
     var editingList by remember { mutableStateOf(false) }
+    val options = modelOptions(state.nodes.values, null, providers)
     val runner = rememberAction()
     val choices = UsageLimitChoices + SwitchChoice
     val accounts = splitSignedOut(agentAccounts(state.nodes.values)).accounts.filter { account -> account.nodes.any { it.state == LoginState.SignedIn } }
@@ -152,29 +152,29 @@ fun AgentsSettings(store: Store) {
         settings?.let { current ->
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Label("Any model, in order of preference", Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong)
+                    Label("Favourites, in order of preference", Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong)
                     MyButton({ editingList = true }, text = "Edit list", variant = ButtonVariant.Outline)
                 }
 
-                Label("Any model starts on the first entry with usage left, moves down as each reaches a limit, and moves back up at the next turn once usage returns.", style = Tokens.Type.Meta, color = colors.textMuted)
+                Label("Any model starts on the first favourite with usage left, moves down as each reaches a limit, and moves back up at the next turn once usage returns. Star a model in any model menu to add it here.", style = Tokens.Type.Meta, color = colors.textMuted)
 
                 if (current.anyModel.isEmpty()) {
-                    Label("No models listed yet.", color = colors.textMuted)
+                    Label("No favourites yet.", color = colors.textMuted)
                 } else {
                     Table(
-                        listOf(Col("Position", 32.dp, preferred = 40.dp), Col("Entry", 140.dp, weight = 1f), Col("Model", 100.dp, preferred = 160.dp)),
+                        listOf(Col("Position", 32.dp, preferred = 40.dp), Col("Model", 140.dp, weight = 1f), Col("Harness", 100.dp, preferred = 160.dp)),
                         current.anyModel.size,
                         { row, column ->
                             val entry = current.anyModel[row]
 
                             when (column) {
                                 0 -> TableCell.Text("${row + 1}", color = colors.textMuted)
-                                1 -> TableCell.Text(entryName(entry, providers))
-                                else -> TableCell.Text(entryModel(entry), color = colors.textMuted)
+                                1 -> TableCell.Text(entry.displayName(options, providers))
+                                else -> TableCell.Text(entryHarness(entry), color = colors.textMuted)
                             }
                         },
                         header = false,
-                        rowDescription = { row -> "Entry ${row + 1}, ${modelChoiceName(current.anyModel[row], providers)}" },
+                        rowDescription = { row -> "Favourite ${row + 1}, ${current.anyModel[row].displayName(options, providers)}" },
                     )
                 }
             }
@@ -202,7 +202,7 @@ fun AgentsSettings(store: Store) {
         settings?.let { current ->
             AnyModelDialog(
                 current.anyModel,
-                addModelChoices(state.nodes.values, providers, includeAnyModel = false),
+                options,
                 providers,
                 onSave = { list -> settings = store.api.saveAgentSettings(SaveAgentSettingsRequest(current.defaultModes, list)) },
                 onDismiss = { editingList = false },
@@ -233,25 +233,32 @@ private fun AccountModeDialog(account: AgentAccount, current: String?, agentDefa
 }
 
 @Composable
-private fun AnyModelDialog(entries: List<ModelChoice>, addable: List<Choice>, providers: List<ModelProvider>, onSave: suspend (List<ModelChoice>) -> Unit, onDismiss: () -> Unit) {
+private fun AnyModelDialog(entries: List<ModelChoice>, options: List<ModelOption>, providers: List<ModelProvider>, onSave: suspend (List<ModelChoice>) -> Unit, onDismiss: () -> Unit) {
     var list by remember { mutableStateOf(entries) }
     val runner = rememberAction()
 
     Dialog(onDismiss) {
-        Label("Any model", Modifier.semantics { heading() }, Tokens.Type.Title)
+        Label("Favourites", Modifier.semantics { heading() }, Tokens.Type.Title)
 
         OrderedRows(
-            names = list.mapIndexed { index, entry -> "${index + 1}  ${entryName(entry, providers)}" },
+            names = list.mapIndexed { index, entry -> "${index + 1}  ${entry.displayName(options, providers)}" },
             onMove = { from, to -> list = list.toMutableList().also { moved -> moved.add(to, moved.removeAt(from)) } },
             onRemove = { index -> list = list.filterIndexed { position, _ -> position != index } },
         ) { index ->
-            val entry = list[index]
-
-            Label(entryModel(entry), style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+            Label(entryHarness(list[index]), style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
         }
 
         Row {
-            OptionMenu("Add model", addable, null, { picked -> modelChoiceFrom(picked)?.let { added -> list = list + added } }, title = "Add a model", icon = MyIcon.Plus, label = "Add")
+            ModelPicker(
+                ModelPickerControls(
+                    label = "Add a favourite",
+                    options = options,
+                    favourites = list,
+                    providers = providers,
+                    onPickModel = { picked -> list = list.withFavourite(picked, true) },
+                    onFavourite = { picked, on -> list = list.withFavourite(picked, on) },
+                ),
+            )
         }
 
         runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
@@ -272,4 +279,22 @@ fun rememberAgentSettings(store: Store): AgentSettings {
     }
 
     return settings
+}
+
+class FavouriteModels(val list: List<ModelChoice>, val toggle: (ModelOption, Boolean) -> Unit)
+
+@Composable
+fun rememberFavouriteModels(store: Store): FavouriteModels {
+    var settings by remember { mutableStateOf(AgentSettings()) }
+
+    LaunchedEffect(Unit) {
+        store.agentSettings()?.let { settings = it }
+    }
+
+    return FavouriteModels(settings.anyModel) { option, on ->
+        val saved = settings.anyModel.withFavourite(option, on)
+
+        settings = settings.copy(anyModel = saved)
+        store.act { store.api.saveAgentSettings(SaveAgentSettingsRequest(settings.defaultModes, saved)) }
+    }
 }
