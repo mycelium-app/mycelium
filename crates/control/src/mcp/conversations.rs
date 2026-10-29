@@ -84,7 +84,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             let group_filter = arguments.get("group").and_then(Value::as_str).map(str::trim).filter(|name| !name.is_empty());
             let rows = sqlx::query_as::<_, FoundConversation>(sqlx::AssertSqlSafe(format!(
                 "select * from (select c.id, c.title, p.name as project_name, coalesce(n.name, '') as node_name, c.agent, c.status, c.updated_at,
-                        (select g.name from conversations x join groups g on g.id = {CONVERSATION_GROUP_SQL} where x.id = c.id) as group_name
+                        (select g.name from groups g where g.id = (select {CONVERSATION_GROUP_SQL} from conversations where id = c.id)) as group_name
                  from conversations c left join projects p on p.id = c.project_id left join nodes n on n.id = c.node_id
                  where c.owner = (select owner from conversations where id = $1) and c.archived_at is null
                    and not exists (select 1 from unnest($2::text[]) as word where not (strpos(lower(c.title), lower(word)) > 0 or strpos(lower(coalesce(p.name, '')), lower(word)) > 0 or strpos(lower(c.cwd), lower(word)) > 0))) found
