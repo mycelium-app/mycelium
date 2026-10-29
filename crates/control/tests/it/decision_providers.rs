@@ -223,8 +223,12 @@ async fn fake_chat_provider(logprobs: bool) -> (String, Arc<Mutex<Vec<Value>>>) 
         Json(json!({"choices": [choice]})).into_response()
     }
 
+    async fn listed_models() -> Json<Value> {
+        Json(json!({"data": [{"id": "some/model"}]}))
+    }
+
     let asked = Arc::new(Mutex::new(Vec::new()));
-    let base = serve(Router::new().route("/v1/chat/completions", post(completions)).with_state((asked.clone(), logprobs))).await;
+    let base = serve(Router::new().route("/v1/models", get(listed_models)).route("/v1/chat/completions", post(completions)).with_state((asked.clone(), logprobs))).await;
 
     (format!("{base}/v1"), asked)
 }
