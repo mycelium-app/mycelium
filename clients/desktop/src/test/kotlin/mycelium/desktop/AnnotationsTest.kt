@@ -82,7 +82,7 @@ class AnnotationsTest {
                     onSendQueuedNow = {}, onEditQueued = {}, onRemoveQueued = {},
                     options = SessionOptions(emptyList(), null, emptyList(), null, emptyList()), commands = emptyList(),
                     onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },
-                    annotations = annotations, onRemoveAnnotation = onRemove,
+                    pendingCitations = annotations, onCitationPlaced = onRemove,
                 )
             }
         }

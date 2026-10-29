@@ -87,7 +87,6 @@ import mycelium.state.Choice
 import mycelium.state.Annotation
 import mycelium.state.SessionOptions
 import mycelium.state.annotationLabel
-import mycelium.state.citedText
 import mycelium.state.SideChatCommands
 import mycelium.state.sideChatOf
 import mycelium.state.SlashCommand
@@ -155,8 +154,8 @@ fun Composer(
     modifier: Modifier = Modifier,
     accountPicker: AccountPickerControls? = null,
     onSideChat: (kind: String, text: String) -> Unit = { _, _ -> },
-    annotations: List<Annotation> = emptyList(),
-    onRemoveAnnotation: (Annotation) -> Unit = {},
+    pendingCitations: List<Annotation> = emptyList(),
+    onCitationPlaced: (Annotation) -> Unit = {},
     goal: GoalControls? = null,
     attachments: AttachmentControls? = null,
     dictation: Dictation? = null,
@@ -175,6 +174,7 @@ fun Composer(
     val platform = LocalPlatform.current
     var text by remember(conversation.id) { mutableStateOf(initialText) }
     var pastes by remember(conversation.id) { mutableStateOf(emptyMap<Char, String>()) }
+    var citations by remember(conversation.id) { mutableStateOf(emptyMap<Char, String>()) }
     var images by remember(conversation.id) { mutableStateOf(initialImages) }
     var history by remember(conversation.id) { mutableStateOf(EditHistory<ComposerEdit>()) }
     val reportText by rememberUpdatedState(onTextChange)
@@ -187,7 +187,7 @@ fun Composer(
         val live = drafts.map { it.id }.toSet()
         val cleaned = withoutImageMarkers(MarkedText(text.text, text.selection.end, images), images.values.toSet() - live)
         val fresh = drafts.filter { isImage(it.file.mediaType) && it.id !in cleaned.images.values }.map { it.id }
-        val marked = withImageMarkers(cleaned, fresh, pastes.keys)
+        val marked = withImageMarkers(cleaned, fresh, pastes.keys + citations.keys)
 
         if (marked.text != text.text) {
             text = TextFieldValue(marked.text, TextRange(marked.cursor))
@@ -212,8 +212,8 @@ fun Composer(
     }
 
     LaunchedEffect(conversation.id) {
-        snapshotFlow { text to pastes }.collect { (value, held) ->
-            val expanded = expandedPastes(value.text, held)
+        snapshotFlow { Triple(text, pastes, citations) }.collect { (value, held, cited) ->
+            val expanded = expandedPastes(value.text, held, cited)
 
             reportText(if (expanded == value.text) value else TextFieldValue(expanded, TextRange(expanded.length)))
         }
@@ -256,7 +256,7 @@ fun Composer(
     }
 
     fun submit() {
-        val trimmed = serialisedPastes(text.text, pastes).trim()
+        val trimmed = serialisedPastes(text.text, pastes, citations).trim()
 
         if (queueEdit != null) {
             queueEdit.onSave(trimmed)
@@ -264,7 +264,7 @@ fun Composer(
             return
         }
 
-        if (trimmed.isNotEmpty() || annotations.isNotEmpty() || attachments?.drafts?.isNotEmpty() == true) {
+        if (trimmed.isNotEmpty() || attachments?.drafts?.isNotEmpty() == true) {
             val side = sideChatOf(trimmed)
 
             if (side != null) {
@@ -276,6 +276,7 @@ fun Composer(
             sent = text.text
             text = TextFieldValue("")
             pastes = emptyMap()
+            citations = emptyMap()
             images = emptyMap()
             history = EditHistory()
         } else if (queue.isNotEmpty()) {
@@ -289,11 +290,12 @@ fun Composer(
 
         text = TextFieldValue(cleaned.text, TextRange(cleaned.cursor))
         pastes = edit.pastes
+        citations = edit.citations
         images = cleaned.images
     }
 
-    val display = remember(text.text, pastes, images, drafts) {
-        PasteDisplay(text.text, pastes, images.mapNotNull { (marker, id) -> drafts.firstOrNull { it.id == id }?.let { marker to it.file.name } }.toMap())
+    val display = remember(text.text, pastes, citations, images, drafts) {
+        PasteDisplay(text.text, pastes, images.mapNotNull { (marker, id) -> drafts.firstOrNull { it.id == id }?.let { marker to it.file.name } }.toMap(), citations)
     }
     val unmarked = attachments?.let { held -> AttachmentControls(held.drafts.filter { it.id !in images.values }, held.problem, held.onAdd, held.onRemove) }
 
@@ -302,13 +304,13 @@ fun Composer(
     val dictationOpen = remember(conversation.id, dictation) { booleanArrayOf(true) }
 
     fun changeText(changed: TextFieldValue) {
-        val before = ComposerEdit(text, pastes, images)
+        val before = ComposerEdit(text, pastes, images, citations)
         val stale = sent?.takeIf { it.isNotEmpty() && changed.text.startsWith(it) }
         sent = null
 
         val next = if (stale == null) changed else TextFieldValue(changed.text.removePrefix(stale), TextRange(changed.selection.end - stale.length))
         val range = pasteInsertion(text.text, next.text)
-        val marker = freePasteMarker(pastes.keys + text.text.filter(::isPasteMarker).toSet())
+        val marker = freePasteMarker(pastes.keys + citations.keys + text.text.filter(::isPasteMarker).toSet())
 
         if (range == null || marker == null) {
             text = next
@@ -365,24 +367,24 @@ fun Composer(
 
     val fieldFocus = remember { FocusRequester() }
 
-    LaunchedEffect(annotations) {
-        if (annotations.isEmpty()) {
+    LaunchedEffect(pendingCitations) {
+        if (pendingCitations.isEmpty()) {
             return@LaunchedEffect
         }
 
-        for (cited in annotations) {
-            val marker = freePasteMarker(pastes.keys + text.text.filter(::isPasteMarker).toSet())
+        for (cited in pendingCitations) {
+            val marker = freePasteMarker(pastes.keys + citations.keys + text.text.filter(::isPasteMarker).toSet())
 
             if (marker != null) {
                 val cursor = text.selection.end
-                val before = ComposerEdit(text, pastes, images)
+                val before = ComposerEdit(text, pastes, images, citations)
 
-                pastes = pastes + (marker to citedText(cited.quote))
+                citations = citations + (marker to cited.quote)
                 text = TextFieldValue(text.text.substring(0, cursor) + marker + text.text.substring(cursor), TextRange(cursor + 1))
                 history = history.recorded(before, false, false)
             }
 
-            onRemoveAnnotation(cited)
+            onCitationPlaced(cited)
         }
 
         fieldFocus.requestFocus()
@@ -399,8 +401,8 @@ fun Composer(
                     onTextChange = ::changeText,
                     onToggleTeachMe = onTeachMe?.let { change -> { change(!conversation.teachMe) } },
                     onOpenActions = assistantActions?.let { { it.menu.open = true } },
-                    onUndo = { history.undone(ComposerEdit(text, pastes, images))?.let { (rest, edit) -> history = rest; restore(edit) } },
-                    onRedo = { history.redone(ComposerEdit(text, pastes, images))?.let { (rest, edit) -> history = rest; restore(edit) } },
+                    onUndo = { history.undone(ComposerEdit(text, pastes, images, citations))?.let { (rest, edit) -> history = rest; restore(edit) } },
+                    onRedo = { history.redone(ComposerEdit(text, pastes, images, citations))?.let { (rest, edit) -> history = rest; restore(edit) } },
                     source = source,
                     onSubmit = ::submit,
                     onPaste = {
@@ -793,7 +795,7 @@ private fun badgeLineRects(layout: TextLayoutResult, range: IntRange): List<Rect
     }
 }
 
-private data class ComposerEdit(val text: TextFieldValue, val pastes: Map<Char, String>, val images: Map<Char, Int>)
+private data class ComposerEdit(val text: TextFieldValue, val pastes: Map<Char, String>, val images: Map<Char, Int>, val citations: Map<Char, String>)
 
 private class PasteMarkerTransformation(private val display: PasteDisplay, private val labelColour: Color) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {

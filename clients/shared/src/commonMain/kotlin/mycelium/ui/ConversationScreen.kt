@@ -191,19 +191,18 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     }
 
     val draft = store.composerDrafts[id]
-    var annotations by remember(id) { mutableStateOf(draft.annotations) }
+    var citations by remember(id) { mutableStateOf(emptyList<Annotation>()) }
 
     val attached = rememberAttachmentDrafts(id, draft.attachments)
 
     LaunchedEffect(id) {
-        snapshotFlow { annotations to attached.drafts }.collect { (current, files) ->
-            store.composerDrafts.update(id) { copy(annotations = current, attachments = files) }
+        snapshotFlow { attached.drafts }.collect { files ->
+            store.composerDrafts.update(id) { copy(attachments = files) }
         }
     }
 
     fun send(text: String) {
-        store.send(id, messageWithAnnotations(annotations, store.withWalkthroughNotes(id, text)), attached.drafts.map { it.file })
-        annotations = emptyList()
+        store.send(id, store.withWalkthroughNotes(id, text), attached.drafts.map { it.file })
         attached.clear()
     }
 
@@ -368,7 +367,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
             return
         }
 
-        annotations = editing.stash.annotations
         attached.replace(editing.stash.attachments)
         store.composerDrafts.update(id) { editing.stash.copy(attachments = attached.drafts) }
         queueEditing = null
@@ -404,7 +402,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
     val annotate = remember(id) {
         AnnotateActions(
-            onAttach = { added -> annotations = annotations + added },
+            onAttach = { added -> citations = citations + added },
             onAsk = { quote, question -> store.act { onOpenConversation(api.startSideChat(id, sideKind("btw"), messageWithAnnotations(listOf(Annotation(quote, "")), question)).id) } },
         )
     }
@@ -444,7 +442,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         val rooted = path.startsWith("/") || path.startsWith("~")
         val full = if (rooted) path else conversation.cwd.trimEnd('/') + "/" + path.removePrefix("./")
 
-        if (platform?.hostname()?.equals(node.name, ignoreCase = true) == true) {
+        if (platform?.localNodeId() == node.id) {
             platform.revealPath(pathWithoutLine(full))
         } else {
             browsingPath = full
@@ -638,8 +636,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             queue = shownQueue.map { if (it.id == queueEditing?.queueId) it.copy(editing = true) else it },
                             sending = sending.drop(delivering.size),
                             onSend = ::send,
-                            annotations = annotations,
-                            onRemoveAnnotation = { removed -> annotations = annotations - removed },
+                            pendingCitations = citations,
+                            onCitationPlaced = { placed -> citations = citations - placed },
                             attachments = attached.controls(),
                             assistantActions = assistantActions,
                             dictation = dictation,
@@ -656,9 +654,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                                     val files = item.attachments.map { held -> PickedFile(held.name, held.mediaType, loadAttachmentBytes(held.sha256) ?: error("${held.name} could not be loaded. Try again.")) }
                                     api.editQueued(id, item.id, PatchQueueRequest(editing = true))
 
-                                    val stash = store.composerDrafts[id].copy(annotations = annotations, attachments = attached.drafts)
+                                    val stash = store.composerDrafts[id].copy(attachments = attached.drafts)
 
-                                    annotations = emptyList()
                                     attached.replace(emptyList())
                                     attached.add(files)
                                     store.composerDrafts.update(id) { ComposerDraft(text = item.text, cursor = item.text.length, attachments = attached.drafts) }

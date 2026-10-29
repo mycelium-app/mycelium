@@ -35,6 +35,7 @@ import mycelium.state.MaxAttachmentBytes
 import mycelium.state.PickedFile
 import mycelium.state.mediaTypeOf
 import java.awt.FileDialog
+import mycelium.state.nodeIdFromConfig
 import java.awt.Frame
 import java.awt.datatransfer.DataFlavor
 import java.awt.image.BufferedImage
@@ -115,6 +116,20 @@ private object DesktopPlatform : Platform {
         if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
             Desktop.getDesktop().browse(URI(url))
         }
+    }
+
+    override fun localNodeId(): String? {
+        val configured = System.getenv("MYCELIUM_NODE_CONFIG")?.let { File(it) }
+        val home = System.getProperty("user.home")
+        val os = System.getProperty("os.name").lowercase()
+        val configDir = when {
+            os.contains("mac") -> File(home, "Library/Application Support")
+            os.contains("windows") -> File(System.getenv("APPDATA") ?: home)
+            else -> System.getenv("XDG_CONFIG_HOME")?.let { File(it) } ?: File(home, ".config")
+        }
+        val file = configured ?: File(configDir, "mycelium/node.toml")
+
+        return runCatching { nodeIdFromConfig(file.readText()) }.getOrNull()
     }
 
     override fun revealPath(path: String) {
