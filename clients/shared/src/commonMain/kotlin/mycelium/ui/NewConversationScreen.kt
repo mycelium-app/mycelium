@@ -87,6 +87,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val recent = state.conversations.values.filter { it.projectId != null }.sortedByDescending { it.updatedAt }.mapNotNull { conversation -> projects.firstOrNull { it.id == conversation.projectId } }.distinct().take(RecentProjects)
     val project = if (withoutProject) null else state.projects[chosenProject] ?: recent.firstOrNull()
     val node = if (project != null) state.nodes[project.nodeId] else nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
+    val lastNode = if (project != null) state.nodes[project.nodeId] else state.nodes.values.minByOrNull { it.name }
     val agents = node?.agents?.filter { it.available }.orEmpty()
     val chosenAgent = agents.firstOrNull { it.agent == agent }?.agent ?: agents.firstOrNull()?.agent
 
@@ -110,7 +111,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val chosenModel = model.takeIf { picked -> models?.choices?.any { it.id == picked } == true }.orEmpty()
 
     fun create() {
-        if (node == null || chosenAgent == null) {
+        if (nodes.isEmpty() || node == null || chosenAgent == null) {
             return
         }
 
@@ -210,7 +211,18 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                 }
                             }
                         },
-                        place = node?.let { placed ->
+                        place = if (nodes.isEmpty()) lastNode?.let { last ->
+                            {
+                                MyButton(
+                                    onOpenNodes,
+                                    text = "${last.name} · Offline",
+                                    icon = MyIcon.Alert,
+                                    description = "Place: ${last.name} is offline",
+                                    muted = true,
+                                    trailingIcon = MyIcon.ChevronDown,
+                                )
+                            }
+                        } else node?.let { placed ->
                             {
                                 val where = when {
                                     project == null && cwd.isBlank() -> "Choose a folder"
@@ -290,7 +302,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                 }
                             }
                         },
-                        notice = if (node == null) ({
+                        notice = if (nodes.isEmpty()) ({
                             Row(
                                 Modifier.fillMaxWidth().padding(bottom = Tokens.Space.S2),
                                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
@@ -346,7 +358,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                         model = if (models != null) ({ OptionMenu("Model", models.choices, chosenModel, { model = it }, title = models.title) }) else null,
                     )
 
-                    if (node != null && agents.isEmpty()) {
+                    if (node != null && nodes.isNotEmpty() && agents.isEmpty()) {
                         NoAgentNotice(node)
                     }
                 }

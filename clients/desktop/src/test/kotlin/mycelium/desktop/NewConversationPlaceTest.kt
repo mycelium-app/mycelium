@@ -1,6 +1,7 @@
 package mycelium.desktop
 
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -22,6 +23,7 @@ import kotlinx.coroutines.runBlocking
 import mycelium.api.Conversation
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
+import mycelium.ui.LocalTouch
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.NewConversationScreen
 import org.junit.Rule
@@ -32,6 +34,8 @@ private const val OrionId = "aaaaaaaa-0000-0000-0000-000000000001"
 
 private const val OrionJson = """[{"id":"$OrionId","name":"orion","hostname":"orion","os":"linux","arch":"x86_64","version":"0.1.0","online":true,"draining":false,
 "agents":[{"agent":"claude","version":"2.1.308","available":true}],"logins":[],"harness_models":[]}]"""
+
+private val OfflineOrionJson = OrionJson.replace("\"online\":true", "\"online\":false")
 
 private const val HarbourJson = """[{"id":"p1","node_id":"$OrionId","name":"harbour","path":"/p/harbour","forge_id":null,"repository":null,"created_at":"2026-10-22T10:00:00Z"},
 {"id":"p2","node_id":"$OrionId","name":"atlas","path":"/p/atlas","forge_id":null,"repository":null,"created_at":"2026-10-22T10:00:00Z"}]"""
@@ -74,12 +78,14 @@ class NewConversationPlaceTest {
         return store
     }
 
-    private fun show(store: Store, onCreated: (Conversation) -> Unit = {}, onOpenNodes: () -> Unit = {}) {
+    private fun show(store: Store, onCreated: (Conversation) -> Unit = {}, onOpenNodes: () -> Unit = {}, phone: Boolean = false) {
         rule.setContent {
             MyceliumTheme(true) {
                 val state by store.state.collectAsState()
 
-                NewConversationScreen(store, state, onCreated = onCreated, onOpenNodes = onOpenNodes)
+                CompositionLocalProvider(LocalTouch provides phone) {
+                    NewConversationScreen(store, state, onCreated = onCreated, onOpenNodes = onOpenNodes)
+                }
             }
         }
     }
@@ -167,5 +173,40 @@ class NewConversationPlaceTest {
         assertEquals(true, openedNodes)
         assertEquals(0, bodies.size)
         rule.onNodeWithText("Restore the copy").assertExists()
+    }
+
+    @Test
+    fun theLastKnownNodeShowsAsOfflineOnThePlaceControlWhenNoNodeIsOnline() {
+        var openedNodes = false
+        show(store(nodes = OfflineOrionJson), onOpenNodes = { openedNodes = true })
+
+        rule.onNodeWithContentDescription("Place: orion is offline").performClick()
+
+        assertEquals(true, openedNodes)
+    }
+
+    @Test
+    fun onAPhoneThePickersScrollSidewaysAboveAttachAndSend() {
+        show(store(), phone = true)
+
+        rule.onNodeWithContentDescription("Start options").assertExists()
+        rule.onNodeWithContentDescription("Project: harbour").assertExists()
+        rule.onNodeWithContentDescription("Place: orion, existing checkout").assertExists()
+        rule.onNodeWithContentDescription("Attach files").assertExists()
+        rule.onNodeWithContentDescription("Send").assertExists()
+    }
+
+    @Test
+    fun browseInThePlaceMenuOpensTheFolderBrowserAndCancelReturns() {
+        show(store())
+
+        rule.onNodeWithContentDescription("Project: harbour").performClick()
+        rule.onNodeWithText("No project, choose a folder").performClick()
+        rule.onNodeWithContentDescription("Place: orion, choose a folder").performClick()
+        rule.onNodeWithContentDescription("Browse folders on orion").performClick()
+
+        rule.onNodeWithText("Choose a folder on orion").assertExists()
+        rule.onNodeWithText("Cancel").performClick()
+        rule.onNodeWithContentDescription("Place: orion, choose a folder").assertExists()
     }
 }

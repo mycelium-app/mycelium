@@ -59,11 +59,11 @@ fun FolderBrowserDialog(store: Store, nodeId: String, nodeName: String, start: S
             }
         } else {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                Label(shown.path, Modifier.weight(1f), Tokens.Type.CodeSm, colors.textMuted)
+
                 shown.parent?.let { parent ->
                     MyButton({ requested = parent }, text = "Up", icon = MyIcon.ArrowUp, description = "Up to $parent", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
                 }
-
-                Label(shown.path, Modifier.weight(1f), Tokens.Type.CodeSm, colors.textMuted)
             }
 
             val scroll = rememberLazyListState()
@@ -91,8 +91,8 @@ fun FolderBrowserDialog(store: Store, nodeId: String, nodeName: String, start: S
         }
 
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-            MyButton(onDismiss, text = "Cancel", muted = true)
-            MyButton({ listing?.let { onChoose(it.path) } }, text = "Choose this folder", variant = ButtonVariant.Outline)
+            MyButton(onDismiss, text = "Cancel", variant = ButtonVariant.Outline)
+            MyButton({ listing?.let { onChoose(it.path) } }, text = "Choose this folder", variant = ButtonVariant.Primary)
         }
     }
 }

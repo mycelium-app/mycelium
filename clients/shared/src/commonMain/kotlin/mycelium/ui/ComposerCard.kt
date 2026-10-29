@@ -385,7 +385,7 @@ fun ComposerCard(
 
             notice?.invoke()
 
-            ComposerBar(barControls(kind, HarnessReport(models = model != null))) { which ->
+            val control: @Composable (BarControl) -> Unit = { which ->
                 when (which) {
                     BarControl.Attach -> MyButton({ platform?.pickFiles(attachments.onAdd) }, icon = MyIcon.Paperclip, description = "Attach files", muted = true)
                     BarControl.Project -> project?.invoke()
@@ -396,6 +396,23 @@ fun ComposerCard(
                     BarControl.Send -> MyButton(onSubmit, icon = MyIcon.Send, description = "Send", muted = true)
                     else -> Unit
                 }
+            }
+
+            if (LocalTouch.current && kind == ConversationKind.NewConversation) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScrollFaded().semantics { contentDescription = "Start options" },
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    listOf(BarControl.Project, BarControl.Place, BarControl.Account, BarControl.Model).forEach { control(it) }
+                }
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    control(BarControl.Attach)
+                    control(BarControl.Send)
+                }
+            } else {
+                ComposerBar(barControls(kind, HarnessReport(models = model != null)), render = control)
             }
         }
 
