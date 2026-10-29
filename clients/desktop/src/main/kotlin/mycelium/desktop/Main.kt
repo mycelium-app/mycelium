@@ -30,6 +30,7 @@ import mycelium.Connection
 import mycelium.DeviceInfo
 import mycelium.PageReading
 import mycelium.Platform
+import mycelium.WakeListener
 import mycelium.state.MaxAttachmentBytes
 import mycelium.state.PickedFile
 import mycelium.state.mediaTypeOf
@@ -168,6 +169,18 @@ private object DesktopPlatform : Platform {
     override fun audioRecorder(): AudioRecorder = JavaSoundRecorder()
 
     override fun audioPlayer(): AudioPlayer = JavaSoundPlayer()
+
+    private val wakeModelDirectory: Path? by lazy {
+        val supported = System.getProperty("os.name").orEmpty().startsWith("Linux") && System.getProperty("os.arch") == "amd64"
+        val resources = System.getProperty("compose.application.resources.dir")?.let { Path.of(it, "kws").toString() }
+        val directory = (System.getProperty("mycelium.wakeModel") ?: resources)?.let { Path.of(it) }
+
+        directory?.takeIf { supported && Files.exists(it.resolve("keywords.txt")) }
+    }
+
+    private val sherpaWakeListener: WakeListener? by lazy { wakeModelDirectory?.let { SherpaWakeListener(it) } }
+
+    override fun wakeListener(): WakeListener? = sherpaWakeListener
 
     override fun timeZone(): String? = java.time.ZoneId.systemDefault().id
 

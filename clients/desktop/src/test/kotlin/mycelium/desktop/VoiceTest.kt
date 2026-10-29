@@ -3,8 +3,6 @@ package mycelium.desktop
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onFirst
-import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -121,9 +119,9 @@ class VoiceTest {
 
         rule.onNodeWithContentDescription("Talk to Voice").performClick()
 
-        rule.onAllNodesWithText("Stop listening").onLast().assertExists()
+        rule.onNodeWithText("Send").assertExists()
         rule.onNodeWithText("Cancel").assertExists()
-        rule.onNodeWithContentDescription("Stop listening").assertExists()
+        rule.onNodeWithContentDescription("Send what was heard").assertExists()
     }
 
     @Test
@@ -134,13 +132,26 @@ class VoiceTest {
         rule.onNodeWithContentDescription("Talk to Voice").performClick()
         rule.runOnIdle { dictation.onHeard("open the usage history") }
         rule.onNodeWithText("open the usage history").assertExists()
-        rule.onAllNodesWithText("Stop listening").onFirst().performClick()
+        rule.onNodeWithText("Send").performClick()
         rule.waitUntil(5_000) { requests.any { it.first.endsWith("/assistants/a-voice/prompt") } }
 
         val sent = requests.first { it.first.endsWith("/prompt") }.second
 
         assertTrue(sent.contains("\"text\":\"open the usage history\"") && sent.contains("\"spoken\":true"))
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Thinking").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun theMicrophoneSendsWhatWasHeardWhileListening() {
+        val dictation = HeardDictation()
+        open(VoiceOn, dictation)
+
+        rule.onNodeWithContentDescription("Talk to Voice").performClick()
+        rule.runOnIdle { dictation.onHeard("move the standup to Thursday") }
+        rule.onNodeWithContentDescription("Send what was heard").performClick()
+        rule.waitUntil(5_000) { requests.any { it.first.endsWith("/assistants/a-voice/prompt") } }
+
+        assertTrue(requests.first { it.first.endsWith("/prompt") }.second.contains("\"text\":\"move the standup to Thursday\""))
     }
 
     @Test

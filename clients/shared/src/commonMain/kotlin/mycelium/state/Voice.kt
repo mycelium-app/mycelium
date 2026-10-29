@@ -7,6 +7,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import mycelium.AudioPlayer
@@ -80,6 +82,7 @@ data class VoiceState(
     val turn: VoiceTurn = VoiceTurn(),
     val voices: List<String> = emptyList(),
     val device: VoiceDevice = VoiceDevice(),
+    val waitingForWakePhrase: Boolean = false,
 )
 
 fun wakePhraseName(phrase: String): String = if (phrase == WakePhraseOk) "OK Mycelium" else "Hey Mycelium"
@@ -99,8 +102,21 @@ class VoiceStore(private val api: MyceliumApi, private val scope: CoroutineScope
     private var openVoiceThread: () -> Unit = {}
     private var voiceName: String? = null
     private var speechSpeed: String? = null
+    private val wakeListener = platform?.wakeListener()
 
     val state: StateFlow<VoiceState> = mutableState.asStateFlow()
+
+    init {
+        scope.launch {
+            mutableState.map { wakePhraseToHear(it) }.distinctUntilChanged().collect { phrase ->
+                if (phrase == null) {
+                    stopWaitingForWakePhrase()
+                } else {
+                    waitForWakePhrase(phrase)
+                }
+            }
+        }
+    }
 
     private fun readDevice(): VoiceDevice = VoiceDevice(
         wakePhraseEnabled = platform?.loadPreference(WakePhraseEnabledKey) == true.toString(),
@@ -108,6 +124,25 @@ class VoiceStore(private val api: MyceliumApi, private val scope: CoroutineScope
         speechToText = platform?.loadPreference(SpeechToTextKey),
         readAloud = platform?.loadPreference(ReadAloudKey) ?: ReadAloudProvider,
     )
+
+    private fun wakePhraseToHear(current: VoiceState): String? {
+        val idle = current.phase == VoicePhase.Idle || current.phase == VoicePhase.Ended
+
+        return current.device.wakePhrase.takeIf { wakeListener != null && current.privacy.voiceEnabled && current.device.wakePhraseEnabled && idle }
+    }
+
+    private fun waitForWakePhrase(phrase: String) {
+        wakeListener?.stop()
+
+        val waiting = wakeListener?.start(phrase) { startListening() } == true
+
+        mutableState.update { it.copy(waitingForWakePhrase = waiting) }
+    }
+
+    private fun stopWaitingForWakePhrase() {
+        wakeListener?.stop()
+        mutableState.update { it.copy(waitingForWakePhrase = false) }
+    }
 
     fun speechToTextChoice(): String {
         val chosen = mutableState.value.device.speechToText
@@ -227,6 +262,7 @@ class VoiceStore(private val api: MyceliumApi, private val scope: CoroutineScope
     }
 
     fun startListening() {
+        stopWaitingForWakePhrase()
         stopSpeaking()
         discarded = false
 

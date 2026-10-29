@@ -919,30 +919,43 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                     val listening = voice.phase == VoicePhase.Listening
                     val wakeListening = voice.device.wakePhraseEnabled && platform.hearsWakePhrase
                     val name = when {
-                        listening -> "Stop listening"
+                        listening -> "Send what was heard"
                         voice.open -> "Close Voice"
                         wakeListening -> "Talk to Voice, listening for ${wakePhraseName(voice.device.wakePhrase)}"
                         else -> "Talk to Voice"
                     }
 
-                    MyButton(
-                        {
-                            when {
-                                listening -> store.voice.stopListening()
-                                voice.open -> store.voice.close()
-                                else -> {
-                                    usageOpen = false
-                                    platform.savePreference(UsageOpenPreference, false.toString())
-                                    store.voice.startListening()
+                    val waiting = wakeListening && voice.waitingForWakePhrase && !voice.open
+                    val tooltip = when {
+                        waiting -> "Talk to Voice, listening for \"${wakePhraseName(voice.device.wakePhrase)}\" on this device ($VoiceShortcutLabel)"
+                        voice.open && !listening -> name
+                        else -> "$name ($VoiceShortcutLabel)"
+                    }
+
+                    Box {
+                        MyButton(
+                            {
+                                when {
+                                    listening -> store.voice.stopListening()
+                                    voice.open -> store.voice.close()
+                                    else -> {
+                                        usageOpen = false
+                                        platform.savePreference(UsageOpenPreference, false.toString())
+                                        store.voice.startListening()
+                                    }
                                 }
-                            }
-                        },
-                        icon = MyIcon.Microphone,
-                        description = name,
-                        muted = !listening,
-                        selected = voice.open,
-                        tooltip = if (voice.open) name else "$name ($VoiceShortcutLabel)",
-                    )
+                            },
+                            icon = MyIcon.Microphone,
+                            description = name,
+                            muted = !listening,
+                            selected = voice.open,
+                            tooltip = tooltip,
+                        )
+
+                        if (waiting) {
+                            Box(Modifier.align(Alignment.TopEnd).padding(Tokens.Space.S1).size(Tokens.Space.S1_5).background(MyTheme.colors.statusDone, CircleShape))
+                        }
+                    }
                 }
 
                 MyButton({ usageOpen = !usageOpen; platform.savePreference(UsageOpenPreference, usageOpen.toString()); if (usageOpen) store.voice.close() }, icon = MyIcon.Gauge, description = "Usage", muted = true, selected = usageOpen || route == Route.UsageHistory)

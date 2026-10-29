@@ -112,7 +112,9 @@ interface Platform {
 
     fun audioPlayer(): AudioPlayer? = null
 
-    val hearsWakePhrase: Boolean get() = false
+    fun wakeListener(): WakeListener? = null
+
+    val hearsWakePhrase: Boolean get() = wakeListener() != null
 
     val opensMicrophoneSettings: Boolean get() = false
 

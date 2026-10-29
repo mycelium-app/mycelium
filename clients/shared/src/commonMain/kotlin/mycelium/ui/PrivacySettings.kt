@@ -1,17 +1,26 @@
 package mycelium.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import mycelium.Platform
 import mycelium.api.SpeechProvider
@@ -72,6 +81,22 @@ fun PrivacySettings(store: Store, platform: Platform?, onOpenProviders: () -> Un
 
                 if (device.wakePhraseEnabled) {
                     Segmented(listOf(wakePhraseName(WakePhraseHey), wakePhraseName(WakePhraseOk)), wakePhraseName(device.wakePhrase), { picked -> store.voice.setWakePhrase(if (picked == wakePhraseName(WakePhraseOk)) WakePhraseOk else WakePhraseHey) }, groupLabel = "Wake phrase")
+                }
+
+                if (device.wakePhraseEnabled && voice.waitingForWakePhrase) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(colors.bgPanel, BlockShape)
+                            .border(Tokens.Size.Hairline, colors.border, BlockShape)
+                            .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2)
+                            .semantics { liveRegion = LiveRegionMode.Polite },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                    ) {
+                        Box(Modifier.size(Tokens.Space.S2).background(colors.statusDone, CircleShape).clearAndSetSemantics {})
+                        Label("Waiting for \"${wakePhraseName(device.wakePhrase)}\". Say it, then what you want.", Modifier.weight(1f))
+                    }
                 }
 
                 Label("Detected on the device only while Mycelium is open. Audio never leaves the device.", style = Tokens.Type.Meta, color = colors.textMuted)

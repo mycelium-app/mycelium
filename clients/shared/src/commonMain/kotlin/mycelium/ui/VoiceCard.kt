@@ -160,7 +160,7 @@ fun VoiceCard(state: VoiceState, actions: VoiceCardActions, modifier: Modifier =
                             if (state.heard.isBlank()) colors.textMuted else colors.text,
                         )
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                            MyButton(actions.onStopListening, text = "Stop listening", icon = MyIcon.Stop, variant = ButtonVariant.Outline)
+                            MyButton(actions.onStopListening, text = "Send", icon = MyIcon.Send, variant = ButtonVariant.Primary)
                             MyButton(actions.onCancel, text = "Cancel", muted = true)
                         }
                     }

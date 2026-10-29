@@ -35,6 +35,12 @@ interface AudioPlayer {
     fun stop()
 }
 
+interface WakeListener {
+    fun start(phrase: String, onHeard: () -> Unit): Boolean
+
+    fun stop()
+}
+
 class ProviderDictation(private val recorder: AudioRecorder, private val transcribe: suspend (ByteArray) -> String, private val scope: CoroutineScope) : Dictation {
     private var onHeard: (String) -> Unit = {}
     private var onStopped: (DictationProblem?) -> Unit = {}
