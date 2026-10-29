@@ -133,6 +133,13 @@ class EnvironmentsTest {
     }
 
     @Test
+    fun anEnvironmentLineWithAnEventCarriesItsReasonAndTime() {
+        val thread = buildThread(listOf(Event("c1", 1, EventKinds.Environment, Json.parseToJsonElement("{\"event\":\"stopped\",\"text\":\"Environment stopped\",\"why\":\"You closed this conversation.\",\"at\":\"2026-10-28T14:32:00Z\"}"))))
+
+        assertEquals(ThreadItem.EnvironmentLine("e1", "stopped", "Environment stopped", "You closed this conversation.", "2026-10-28T14:32:00Z"), thread.single())
+    }
+
+    @Test
     fun theEnvironmentLinesOfAThreadAreShownAsNotes() {
         val thread = buildThread(listOf(Event("c1", 1, EventKinds.Environment, Json.parseToJsonElement("{\"text\":\"You handed back the environment.\"}"))))
 

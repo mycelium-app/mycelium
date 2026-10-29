@@ -305,6 +305,12 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
         is ThreadItem.ModelChanged -> ModelChangedDivider("Switched to ${item.provider} · ${item.model}")
         is ThreadItem.Continued -> if (item.why != null) SwitchLine(item.text, item.why) else ModelChangedDivider(item.text)
         is ThreadItem.TeachMode -> ModelChangedDivider(if (item.on) "Teach me on" else "Teach me off")
+        is ThreadItem.EnvironmentLine -> {
+            val platform = LocalPlatform.current
+            val time = item.at?.let { at -> clockTime(at) { millis -> platform?.localDateTime(millis) } }.orEmpty()
+
+            SwitchLine(item.text, if (time.isEmpty()) item.why else "$time · ${item.why}", environmentLineIcon(item.event))
+        }
         is ThreadItem.Note -> Label(item.text, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
     }
 }
@@ -320,14 +326,21 @@ private fun ModelChangedDivider(text: String) {
     }
 }
 
+private fun environmentLineIcon(event: String): MyIcon = when (event) {
+    "took_over" -> MyIcon.Person
+    "handed_back" -> MyIcon.Agent
+    "stopped" -> MyIcon.Stop
+    else -> MyIcon.Desktop
+}
+
 @Composable
-private fun SwitchLine(text: String, why: String) {
+private fun SwitchLine(text: String, why: String, icon: MyIcon = MyIcon.Refresh) {
     val colors = MyTheme.colors
 
     Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             Hairline(Modifier.weight(1f))
-            Icon(MyIcon.Refresh, colors.textMuted, Tokens.Size.IconSm)
+            Icon(icon, colors.textMuted, Tokens.Size.IconSm)
             Label(text, style = Tokens.Type.Meta, color = colors.textMuted)
             Hairline(Modifier.weight(1f))
         }

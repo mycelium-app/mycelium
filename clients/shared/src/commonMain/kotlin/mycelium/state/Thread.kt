@@ -171,6 +171,8 @@ sealed interface ThreadItem {
 
     data class Note(override val key: String, val text: String) : ThreadItem
 
+    data class EnvironmentLine(override val key: String, val event: String, val text: String, val why: String, val at: String?) : ThreadItem
+
     data class TurnEnd(override val key: String, val stopReason: String) : ThreadItem
 
     data class Failure(override val key: String, val message: String, val limit: UsageLimitNote? = null) : ThreadItem
@@ -285,7 +287,7 @@ class ThreadBuilder {
             EventKinds.ModelChanged -> items += ThreadItem.ModelChanged(key, payload.string("provider_name").orEmpty(), payload.string("model").orEmpty())
             EventKinds.Continued -> items += continuedItem(key, payload)
             EventKinds.TeachMode -> items += ThreadItem.TeachMode(key, payload.boolean("on") ?: false)
-            EventKinds.Environment -> items += ThreadItem.Note(key, payload.string("text").orEmpty())
+            EventKinds.Environment -> items += environmentItem(key, payload)
             EventKinds.GoalReport -> items += ThreadItem.GoalReport(key, payload.string("outcome").orEmpty(), payload.string("reason").orEmpty(), payload.string("at").orEmpty())
         }
     }
@@ -778,6 +780,13 @@ private fun switchReason(reason: String, payload: JsonObject, from: ContinuedFro
     "offline" -> "node offline"
     "model_error" -> "the model failed"
     else -> null
+}
+
+private fun environmentItem(key: String, payload: JsonObject): ThreadItem {
+    val text = payload.string("text").orEmpty()
+    val event = payload.string("event") ?: return ThreadItem.Note(key, text)
+
+    return ThreadItem.EnvironmentLine(key, event, text, payload.string("why").orEmpty(), payload.string("at"))
 }
 
 private fun continuedItem(key: String, payload: JsonObject): ThreadItem.Continued {
