@@ -1,6 +1,8 @@
 # Changelog
 
-## v0.15.3
+## v0.15.4
+
+The first release published on GitHub. v0.15.3 was tagged but never published.
 
 Mycelium now lives at [github.com/mycelium-app/mycelium](https://github.com/mycelium-app/mycelium). The repository history was rewritten for the move, so clone it again rather than pulling into an old clone.
 

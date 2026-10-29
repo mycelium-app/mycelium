@@ -1,0 +1,22 @@
+name: Warm caches
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.lock
+      - clients/gradle/libs.versions.toml
+      - clients/gradle/wrapper/gradle-wrapper.properties
+      - editor/pnpm-lock.yaml
+      - mise.toml
+      - .github/workflows/release.yml
+      - .github/workflows/warm-cache.yml
+
+permissions: {}
+
+jobs:
+  build:
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+      packages: write
