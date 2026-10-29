@@ -85,6 +85,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/conversations/{id}/queue/{queue_id}/move",
     "POST /api/v1/conversations/{id}/queue/send-all-now",
     "POST /api/v1/conversations/{id}/permission",
+    "POST /api/v1/conversations/{id}/permission/revoke",
     "POST /api/v1/conversations/{id}/responses/{request_id}",
     "POST /api/v1/conversations/{id}/responses/{request_id}/filter",
     "POST /api/v1/conversations/{id}/config",

@@ -156,7 +156,7 @@ class ChatsTest {
     fun aChatHasNoTerminalGitOrNodeControls() {
         shell(Route.Chat("c1"))
 
-        assertEquals(0, rule.onAllNodesWithContentDescription("Open terminal").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithContentDescription("Show terminal").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithContentDescription("Open git").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithContentDescription("Running on", substring = true).fetchSemanticsNodes().size)
     }
@@ -165,7 +165,7 @@ class ChatsTest {
     fun aWorkspaceConversationKeepsItsTerminalAndGitControls() {
         shell(Route.Chat("w1"))
 
-        rule.onNodeWithContentDescription("Open terminal").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Show terminal").assertIsDisplayed()
         rule.onNodeWithContentDescription("Open git").assertIsDisplayed()
     }
 

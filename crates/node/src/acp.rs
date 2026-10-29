@@ -972,6 +972,17 @@ mod tests {
     }
 
     #[test]
+    fn typing_into_a_terminal_asks_the_person_instead_of_being_allowed_like_environment_tools() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        started(&mut state, json!({"sessionId": "s1"}));
+        let options = json!([{"optionId": "always", "kind": "allow_always"}, {"optionId": "once", "kind": "allow_once"}, {"optionId": "no", "kind": "reject_once"}]);
+
+        let asked = state.on_entry(4, Direction::In, json!({"jsonrpc": "2.0", "id": 9001, "method": "session/request_permission", "params": {"toolCall": {"title": "mcp__mycelium__terminal_type"}, "options": options}}));
+
+        assert!(matches!(&asked[0], Action::Emit(4, NodeToControl::PermissionRequest { .. })));
+    }
+
+    #[test]
     fn a_prompt_is_reported_written_right_after_its_frame_goes_out() {
         let mut state = SessionState::new(conversation(), plan(None), 0);
         started(&mut state, json!({"sessionId": "s1"}));

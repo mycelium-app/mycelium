@@ -23,7 +23,7 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path
     }
 
     let terminal_id = Uuid::new_v4();
-    state.hub.track_terminal(terminal_id, row.node_id, user.id);
+    state.hub.track_terminal(terminal_id, row.node_id, user.id, id);
 
     let sent = state.hub.send(row.node_id, ControlToNode::StartTerminal { terminal_id, conversation_id: id, cwd: row.cwd, cols: request.cols, rows: request.rows });
 

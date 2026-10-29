@@ -297,6 +297,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/resume", post(usage_limits::resume).delete(usage_limits::cancel_resume))
         .route("/api/v1/conversations/{id}/cancel", post(prompts::cancel))
         .route("/api/v1/conversations/{id}/permission", post(prompts::permission))
+        .route("/api/v1/conversations/{id}/permission/revoke", post(prompts::revoke_permission))
         .route("/api/v1/conversations/{id}/responses/{request_id}", get(response_editor::show).post(response_editor::send))
         .route("/api/v1/conversations/{id}/responses/{request_id}/filter", post(response_editor::filter))
         .route("/api/v1/conversations/{id}/config", post(prompts::config))

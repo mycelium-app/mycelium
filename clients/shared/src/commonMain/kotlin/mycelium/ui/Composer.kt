@@ -148,6 +148,7 @@ fun Composer(
     options: SessionOptions,
     commands: List<SlashCommand>,
     onSetMode: (String) -> Unit,
+    permissions: SessionPermissions? = null,
     onSetModel: (String) -> Unit,
     onSetSetting: (String, String) -> Unit,
     onSearchFiles: suspend (String) -> List<String>,
@@ -435,6 +436,12 @@ fun Composer(
         HarnessReport(voice = dictation != null, teachMe = onTeachMe != null, working = working, models = options.models.isNotEmpty(), modes = modes.isNotEmpty(), settings = settings.isNotEmpty()),
     ).filterNot { it == BarControl.Send && queueEdit != null }
 
+    var permissionsOpen by remember(conversation.id) { mutableStateOf(false) }
+
+    if (permissionsOpen && permissions != null) {
+        SessionPermissionsDialog(permissions, onDismiss = { permissionsOpen = false })
+    }
+
     val control: @Composable (BarControl) -> Unit = { which ->
         when (which) {
             BarControl.Attach -> MyButton({ attachments?.let { platform?.pickFiles(it.onAdd) } }, icon = MyIcon.Paperclip, description = "Attach files", muted = true)
@@ -453,7 +460,13 @@ fun Composer(
             BarControl.Goal -> goal?.let { GoalButton(it) }
             BarControl.Account -> accountPicker?.let { AccountPicker(it) }
             BarControl.Model -> OptionMenu("Model", options.models, options.currentModel, onSetModel)
-            BarControl.Mode -> OptionMenu("Mode", modes, options.currentMode, onSetMode)
+            BarControl.Mode -> OptionMenu(
+                "Mode",
+                modes,
+                options.currentMode,
+                onSetMode,
+                footer = permissions?.let { OptionFooter("Permissions for this session", if (it.granted.isEmpty()) "None" else "${it.granted.size} approved", MyIcon.Key) { permissionsOpen = true } },
+            )
             BarControl.Settings -> {
                 for (setting in settings) {
                     OptionMenu(setting.name, setting.choices, setting.current, { value -> onSetSetting(setting.id, value) })

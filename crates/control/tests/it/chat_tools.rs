@@ -421,7 +421,7 @@ async fn a_tool_call_waits_for_approval_and_runs_once_allowed() {
     let events = rig.turns_ended(&id, 1).await;
 
     assert_eq!((request["toolCall"]["title"].clone(), request["toolCall"]["server"].clone(), request["toolCall"]["rawInput"].clone()), (json!(WEATHER), json!("Lab"), json!({"city": "Paris"})));
-    assert_eq!(request["options"].as_array().unwrap().iter().map(|option| option["name"].as_str().unwrap()).collect::<Vec<_>>(), ["Approve", "Approve and edit response", "Always approve", "Deny"]);
+    assert_eq!(request["options"].as_array().unwrap().iter().map(|option| option["name"].as_str().unwrap()).collect::<Vec<_>>(), ["Approve", "Approve and edit response", "Approve for this session", "Deny"]);
     assert_eq!((status, before), (json!("input"), 0));
     assert_eq!((allowed, again), (204, 409));
     assert_eq!(error["error"], "already_resolved");
@@ -446,7 +446,7 @@ async fn a_denied_tool_call_never_runs_and_the_model_is_told_the_person_declined
 }
 
 #[tokio::test]
-async fn always_approve_stops_asking_for_that_tool_on_the_account_in_every_chat() {
+async fn approving_for_this_session_stops_asking_in_that_chat_only_and_leaves_the_account_policy_alone() {
     let rig = rig(vec![
         Reply::Call(WEATHER, json!({"city": "Paris"})),
         Reply::Call(WEATHER, json!({"city": "London"})),
@@ -454,7 +454,6 @@ async fn always_approve_stops_asking_for_that_tool_on_the_account_in_every_chat(
         Reply::Call(WEATHER, json!({"city": "Rome"})),
         Reply::Say("Rome too."),
         Reply::Call(WEATHER, json!({"city": "Oslo"})),
-        Reply::Say("Oslo too."),
     ])
     .await;
     let id = rig.chat("Weather?").await;
@@ -471,12 +470,42 @@ async fn always_approve_stops_asking_for_that_tool_on_the_account_in_every_chat(
     assert_eq!(rig.remote.calls().len(), 3);
 
     let other = rig.chat("Weather in Oslo?").await;
-    let events = rig.turns_ended(&other, 1).await;
+    rig.request_waiting(&other).await;
     let (_, servers) = rig.server.user.json(rig.server.user.get("/api/v1/chat-tool-servers")).await;
 
-    assert!(events.iter().all(|event| event["kind"] != "permission_request"));
-    assert_eq!(servers[0]["policy"]["ask"]["tools"]["get_weather"], json!(false));
-    assert_eq!(rig.remote.calls().len(), 4);
+    assert_eq!(servers[0]["policy"]["ask"]["tools"]["get_weather"], json!(null));
+    assert_eq!(rig.remote.calls().len(), 3);
+}
+
+#[tokio::test]
+async fn revoking_a_session_approval_makes_the_tool_ask_again_in_that_chat() {
+    let rig = rig(vec![Reply::Call(WEATHER, json!({"city": "Paris"})), Reply::Say("Sunny."), Reply::Call(WEATHER, json!({"city": "Rome"}))]).await;
+    let id = rig.chat("Weather?").await;
+    let request = rig.request_waiting(&id).await;
+    rig.decide(&id, &request, "always").await;
+    rig.turns_ended(&id, 1).await;
+
+    let (status, _) = rig.server.user.json(rig.server.user.post(&format!("/api/v1/conversations/{id}/permission/revoke")).json(&json!({"tool": WEATHER}))).await;
+    assert_eq!(status, 204);
+
+    rig.say(&id, "Rome?").await;
+    let asked_again = rig.request_waiting(&id).await;
+
+    assert_eq!(asked_again["toolCall"]["title"], WEATHER);
+    assert_ne!(asked_again["request_id"], request["request_id"]);
+}
+
+#[tokio::test]
+async fn a_workspace_agent_keeps_its_own_approvals_so_they_cannot_be_revoked_here() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/conversations/{}/permission/revoke", conversation.id)).json(&json!({"tool": "terminal_type"}))).await;
+
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(body["error"], "not_revocable");
 }
 
 #[tokio::test]
@@ -1005,12 +1034,12 @@ async fn zulip_asks_every_call_and_holds_each_response_for_editing_by_default() 
     rig.send_response(&id, &held, Value::Null).await;
     rig.turns_ended(&id, 2).await;
 
-    assert_eq!((send["asks"].clone(), send["edits"].clone(), send["ask_source"].clone()), (json!(false), json!(true), json!("tool")));
+    assert_eq!((send["asks"].clone(), send["edits"].clone()), (json!(true), json!(true)));
     assert_eq!(zulip.sent().len(), 2);
 }
 
 #[tokio::test]
-async fn email_send_delete_and_move_ask_by_default_and_always_approve_stops_asking_for_that_tool() {
+async fn email_send_delete_and_move_ask_by_default_and_approving_for_the_session_stops_asking_in_that_chat() {
     for (name, arguments) in [
         ("mcp__mail__send_message", json!({"to": ["grace@example.com"], "subject": "Lunch", "body": "Noon works."})),
         ("mcp__mail__delete_message", json!({"id": "5"})),
@@ -1033,7 +1062,7 @@ async fn email_send_delete_and_move_ask_by_default_and_always_approve_stops_aski
         let tool = name.trim_start_matches("mcp__mail__");
 
         let mail_account = stored.as_array().unwrap().iter().find(|server| server["kind"] == "email").unwrap();
-        assert_eq!(mail_account["policy"]["ask"]["tools"][tool], json!(false));
+        assert_eq!(mail_account["policy"]["ask"]["tools"][tool], json!(null));
         assert_eq!(mail.sent.lock().unwrap().len() + mail.removed.lock().unwrap().len(), 1);
 
         rig.say(&id, "Do it again.").await;

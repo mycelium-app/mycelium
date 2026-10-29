@@ -42,6 +42,14 @@ pub struct LoginOwner {
     pub user_id: Uuid,
 }
 
+const TERMINAL_SCROLLBACK_BYTES: usize = 64 * 1024;
+
+struct TerminalSession {
+    owner: LoginOwner,
+    conversation_id: Uuid,
+    scrollback: Vec<u8>,
+}
+
 #[derive(Debug, Clone)]
 pub struct UnacknowledgedPrompt {
     pub node_id: Uuid,
@@ -214,7 +222,7 @@ node_answers! {
 pub struct Hub {
     nodes: Mutex<HashMap<Uuid, NodeConnection>>,
     logins: Mutex<HashMap<Uuid, LoginOwner>>,
-    terminals: Mutex<HashMap<Uuid, LoginOwner>>,
+    terminals: Mutex<HashMap<Uuid, TerminalSession>>,
     send_now: Mutex<HashMap<Uuid, Uuid>>,
     stale_secrets: Mutex<HashSet<Uuid>>,
     unacknowledged: Mutex<Vec<UnacknowledgedPrompt>>,
@@ -615,14 +623,41 @@ impl Hub {
         finished
     }
 
-    pub fn track_terminal(&self, terminal_id: Uuid, node_id: Uuid, user_id: Uuid) {
+    pub fn track_terminal(&self, terminal_id: Uuid, node_id: Uuid, user_id: Uuid, conversation_id: Uuid) {
         if let Ok(mut terminals) = self.terminals.lock() {
-            terminals.insert(terminal_id, LoginOwner { node_id, user_id });
+            terminals.insert(terminal_id, TerminalSession { owner: LoginOwner { node_id, user_id }, conversation_id, scrollback: Vec::new() });
         }
     }
 
     pub fn terminal_owner(&self, terminal_id: Uuid) -> Option<LoginOwner> {
-        self.terminals.lock().ok().and_then(|terminals| terminals.get(&terminal_id).copied())
+        self.terminals.lock().ok().and_then(|terminals| terminals.get(&terminal_id).map(|session| session.owner))
+    }
+
+    pub fn terminals_of_conversation(&self, conversation_id: Uuid) -> Vec<Uuid> {
+        let Ok(terminals) = self.terminals.lock() else {
+            return Vec::new();
+        };
+        let mut found: Vec<Uuid> = terminals.iter().filter(|(_, session)| session.conversation_id == conversation_id).map(|(terminal_id, _)| *terminal_id).collect();
+        found.sort();
+
+        found
+    }
+
+    pub fn append_terminal_output(&self, terminal_id: Uuid, bytes: &[u8]) {
+        let Ok(mut terminals) = self.terminals.lock() else {
+            return;
+        };
+
+        if let Some(session) = terminals.get_mut(&terminal_id) {
+            session.scrollback.extend_from_slice(bytes);
+
+            let excess = session.scrollback.len().saturating_sub(TERMINAL_SCROLLBACK_BYTES);
+            session.scrollback.drain(..excess);
+        }
+    }
+
+    pub fn terminal_scrollback(&self, terminal_id: Uuid) -> Option<Vec<u8>> {
+        self.terminals.lock().ok().and_then(|terminals| terminals.get(&terminal_id).map(|session| session.scrollback.clone()))
     }
 
     pub fn finish_terminal(&self, terminal_id: Uuid) {
@@ -635,9 +670,9 @@ impl Hub {
         let Ok(mut terminals) = self.terminals.lock() else {
             return Vec::new();
         };
-        let finished: Vec<(Uuid, LoginOwner)> = terminals.iter().filter(|(_, owner)| owner.node_id == node_id).map(|(terminal_id, owner)| (*terminal_id, *owner)).collect();
+        let finished: Vec<(Uuid, LoginOwner)> = terminals.iter().filter(|(_, session)| session.owner.node_id == node_id).map(|(terminal_id, session)| (*terminal_id, session.owner)).collect();
 
-        terminals.retain(|_, owner| owner.node_id != node_id);
+        terminals.retain(|_, session| session.owner.node_id != node_id);
 
         finished
     }

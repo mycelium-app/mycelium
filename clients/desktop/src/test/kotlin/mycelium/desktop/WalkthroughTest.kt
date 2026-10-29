@@ -289,16 +289,13 @@ class WalkthroughTest {
     }
 
     @Test
-    fun aDismissedWalkthroughIsReopenedFromTheMoreMenu() {
+    fun aDismissedWalkthroughIsNotOfferedInTheMoreMenu() {
         show(Walkthrough.replace("\"steps\"", "\"dismissed\":true,\"steps\""))
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
-        assertEquals(0, rule.onAllNodesWithText("Walkthrough").fetchSemanticsNodes().size)
 
         rule.onNodeWithContentDescription("More").performClick()
-        rule.onNodeWithText("Show walkthrough").performClick()
 
-        rule.waitUntil(5_000) { requests.any { it.first == "DELETE /api/v1/walkthroughs/w1/dismissal" } }
-        rule.onNodeWithText("Walkthrough").assertIsDisplayed()
+        assertEquals(0, rule.onAllNodesWithText("Show walkthrough").fetchSemanticsNodes().size)
     }
 
     @Test

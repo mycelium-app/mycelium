@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -35,6 +36,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -84,6 +91,7 @@ import mycelium.state.ContinueAccountPrefix
 import mycelium.state.DefaultAccountId
 import mycelium.state.SignInPrefix
 import mycelium.state.isLaptop
+import mycelium.state.sessionGrants
 import mycelium.state.isChat
 import mycelium.state.isSubagent
 import mycelium.state.ThreadBuilder
@@ -137,6 +145,14 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     }
 
     var chatForced by remember(id) { mutableStateOf(false) }
+    var terminalShown by remember(id) { mutableStateOf(false) }
+    var terminalMounted by remember(id) { mutableStateOf(false) }
+    var terminalHeight by remember { mutableStateOf(Tokens.Size.TerminalDock) }
+
+    fun toggleTerminal() {
+        terminalShown = !terminalShown
+        terminalMounted = terminalMounted || terminalShown
+    }
 
     fun openPanel(chosen: SidePanel?) {
         panel = chosen
@@ -446,7 +462,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
             when (panel) {
                 SidePanel.Details -> Inspector(conversation, node, groupName)
                 SidePanel.Subagents -> SubagentsPanel(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation, store::closeSession)
-                SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize(), onExited = { openPanel(null) }) }
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
                 SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, onOpenArtefact, Modifier.fillMaxSize()) }
                 SidePanel.Outline -> outlinePage?.let { page -> platform?.let { BrowserPanel(it, page.url, page.title, onClose = { openPanel(null) }) } }
@@ -455,7 +470,22 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
             }
         }
 
-        Row(Modifier.fillMaxSize().onSizeChanged { areaWidth = with(density) { it.width.toDp() } }) {
+        val terminalAvailable = !chat && !conversation.scratch
+
+        Row(
+            Modifier
+                .fillMaxSize()
+                .onPreviewKeyEvent { event ->
+                    val toggling = terminalAvailable && event.type == KeyEventType.KeyDown && event.isCtrlPressed && event.key == Key.Grave
+
+                    if (toggling) {
+                        toggleTerminal()
+                    }
+
+                    toggling
+                }
+                .onSizeChanged { areaWidth = with(density) { it.width.toDp() } },
+        ) {
             Column(
                 Modifier
                     .then(if (takeover) Modifier.width(0.dp).clearAndSetSemantics {} else Modifier.weight(1f))
@@ -471,6 +501,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     }
                     .onSizeChanged { chatWidth = with(density) { it.width.toDp() } },
             ) {
+                Column(Modifier.weight(1f).fillMaxWidth()) {
                 ConversationHeader(
                     slots = header,
                     conversation = conversation,
@@ -482,7 +513,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     moveSheet = { dismiss -> MoveSheet(store, state, conversation, dismiss, onOpenConversation) },
                     ide = ideControls,
                     onDetails = { openPanel(SidePanel.Details) },
-                    onTerminal = { openPanel(SidePanel.Terminal) },
+                    terminalShown = terminalShown,
+                    onTerminal = ::toggleTerminal,
                     onGit = { openPanel(SidePanel.Git) },
                     onEnvironment = { phoneEnvironment = true },
                     project = state.projects[conversation.projectId],
@@ -504,8 +536,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             }
                         }
                     },
-                    dismissedWalkthrough = !chat && state.walkthroughs[id]?.dismissed == true,
-                    onShowWalkthrough = { store.setWalkthroughDismissed(id, false) },
                     onDelete = {
                         store.act {
                             api.deleteConversation(id)
@@ -661,6 +691,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             options = remember(conversation, state.events[id], state.sessionUpdates[id], state.nodes[conversation.nodeId]) { sessionOptions(conversation, state.events[id].orEmpty(), state.sessionUpdates[id].orEmpty(), reportedModelChoices(state.nodes[conversation.nodeId], conversation.agent, conversation.account)) },
                             commands = remember(state.events[id], state.sessionUpdates[id]) { slashCommands(state.events[id].orEmpty(), state.sessionUpdates[id].orEmpty()) },
                             onSetMode = { mode -> store.act { api.setConfig(id, ConfigRequest(mode = mode)) } },
+                            permissions = SessionPermissions(sessionGrants(state.events[id].orEmpty()), if (chat) ({ tool -> store.act { api.revokePermission(id, tool) } }) else null),
                             onSetModel = { model -> store.act { api.setConfig(id, ConfigRequest(model = model)) } },
                             onSearchFiles = { query -> api.files(id, query) },
                             onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
@@ -678,6 +709,17 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                                 agent = conversation.agent,
                             ),
                         )
+                    }
+                }
+                }
+
+                if (terminalAvailable && terminalMounted) {
+                    Column(if (terminalShown) Modifier.height(terminalHeight) else Modifier.height(0.dp).clearAndSetSemantics {}) {
+                        ResizeHandle("Resize the terminal", Orientation.Vertical) { moved -> terminalHeight = (terminalHeight - moved).coerceIn(Tokens.Size.TerminalDockMin, Tokens.Size.TerminalDockMax) }
+
+                        key(id) {
+                            TerminalPanel(store, state, conversation, Modifier.weight(1f).fillMaxWidth(), onExited = { terminalShown = false; terminalMounted = false })
+                        }
                     }
                 }
             }
@@ -703,7 +745,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     }
                 }
 
-                Rail(if (narrow && chatForced) null else panel, outlinePage != null, conversation.scratch || chat) { chosen ->
+                Rail(if (narrow && chatForced) null else panel, outlinePage != null, conversation.scratch || chat, terminalShown, ::toggleTerminal) { chosen ->
                     if (narrow) {
                         if (panel == chosen && !chatForced) {
                             chatForced = true
@@ -723,7 +765,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
             when (panel) {
                 SidePanel.Details -> InspectorContent(conversation, node, groupName)
                 SidePanel.Subagents -> SubagentsList(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation, store::closeSession)
-                SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet), onExited = { openPanel(null) }) }
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, { openPanel(null); onOpenArtefact(it) }, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 SidePanel.Outline, SidePanel.Environment, null -> Unit
@@ -762,6 +803,7 @@ private fun ConversationHeader(
     moveSheet: @Composable (onDismiss: () -> Unit) -> Unit,
     ide: IdeControls?,
     onDetails: () -> Unit,
+    terminalShown: Boolean,
     onTerminal: () -> Unit,
     onGit: () -> Unit,
     onEnvironment: () -> Unit,
@@ -774,8 +816,6 @@ private fun ConversationHeader(
     onPin: () -> Unit,
     onCloseSession: () -> Unit,
     onArchive: () -> Unit,
-    dismissedWalkthrough: Boolean,
-    onShowWalkthrough: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val colors = MyTheme.colors
@@ -853,7 +893,7 @@ private fun ConversationHeader(
             MyButton(onNode, icon = node?.let(::nodeIcon) ?: MyIcon.Server, description = "Running on ${node?.name ?: "an unknown node"}", muted = true)
 
             if (!conversation.scratch) {
-                MyButton(onTerminal, icon = MyIcon.Terminal, description = "Terminal", muted = true)
+                MyButton(onTerminal, icon = MyIcon.Terminal, description = if (terminalShown) "Hide terminal" else "Show terminal", muted = true, selected = terminalShown)
                 MyButton(onGit, icon = MyIcon.Branch, description = "Git", muted = true)
             }
 
@@ -944,8 +984,8 @@ private fun ConversationHeader(
 
                     MenuItem(if (conversation.pinnedAt == null) "Pin" else "Unpin", onClick = { menuOpen = false; onPin() }, leading = MyIcon.Pin)
 
-                    if (dismissedWalkthrough) {
-                        MenuItem("Show walkthrough", onClick = { menuOpen = false; onShowWalkthrough() }, leading = MyIcon.Code)
+                    if (!chat && !conversation.scratch) {
+                        MenuItem(if (terminalShown) "Hide terminal" else "Show terminal", onClick = { menuOpen = false; onTerminal() }, hint = "Ctrl+`", leading = MyIcon.Terminal)
                     }
 
                     if (!chat && !archived) {
@@ -999,10 +1039,10 @@ fun iconOf(status: ConversationStatus): MyIcon = when (status) {
 private const val ConversationTab = "Conversation"
 private const val WalkthroughTab = "Walkthrough"
 
-private enum class SidePanel { Details, Subagents, Terminal, Git, Artefacts, Outline, Environment }
+private enum class SidePanel { Details, Subagents, Git, Artefacts, Outline, Environment }
 
 @Composable
-private fun Rail(open: SidePanel?, outlineOpen: Boolean, environmentOnly: Boolean, onToggle: (SidePanel) -> Unit) {
+private fun Rail(open: SidePanel?, outlineOpen: Boolean, environmentOnly: Boolean, terminalShown: Boolean, onTerminal: () -> Unit, onToggle: (SidePanel) -> Unit) {
     val colors = MyTheme.colors
 
     Row(Modifier.fillMaxHeight()) {
@@ -1016,7 +1056,7 @@ private fun Rail(open: SidePanel?, outlineOpen: Boolean, environmentOnly: Boolea
                 MyButton({ onToggle(SidePanel.Details) }, icon = MyIcon.Info, description = if (open == SidePanel.Details) "Close details" else "Open details", muted = true, selected = open == SidePanel.Details)
                 MyButton({ onToggle(SidePanel.Subagents) }, icon = MyIcon.Agent, description = if (open == SidePanel.Subagents) "Close subagents" else "Open subagents", muted = true, selected = open == SidePanel.Subagents)
 
-                MyButton({ onToggle(SidePanel.Terminal) }, icon = MyIcon.Terminal, description = if (open == SidePanel.Terminal) "Close terminal" else "Open terminal", muted = true, selected = open == SidePanel.Terminal)
+                MyButton(onTerminal, icon = MyIcon.Terminal, description = if (terminalShown) "Hide terminal" else "Show terminal", muted = true, selected = terminalShown)
                 MyButton({ onToggle(SidePanel.Git) }, icon = MyIcon.Branch, description = if (open == SidePanel.Git) "Close git" else "Open git", muted = true, selected = open == SidePanel.Git)
                 MyButton({ onToggle(SidePanel.Artefacts) }, icon = MyIcon.Layers, description = if (open == SidePanel.Artefacts) "Close artefacts" else "Open artefacts", muted = true, selected = open == SidePanel.Artefacts)
             }

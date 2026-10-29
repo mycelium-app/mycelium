@@ -6,3 +6,4 @@ import androidx.compose.ui.input.pointer.BrowserCursor
 import androidx.compose.ui.input.pointer.PointerIcon
 
 actual val HorizontalResizeIcon: PointerIcon = BrowserCursor("ew-resize")
+actual val VerticalResizeIcon: PointerIcon = BrowserCursor("ns-resize")

@@ -18,19 +18,8 @@ struct TerminalProcess {
 #[derive(Clone)]
 pub struct TerminalManager {
     out: mpsc::UnboundedSender<NodeToControl>,
-    tmux: Option<String>,
     shell: String,
     running: Arc<Mutex<HashMap<Uuid, TerminalProcess>>>,
-}
-
-pub fn tmux_session_name(conversation_id: Uuid) -> String {
-    format!("mycelium-{}", &conversation_id.to_string()[..8])
-}
-
-pub fn find_on_path(program: &str) -> Option<String> {
-    let path = std::env::var_os("PATH")?;
-
-    find_in_path(program, &path)
 }
 
 pub fn find_in_path(program: &str, path: &std::ffi::OsStr) -> Option<String> {
@@ -42,12 +31,12 @@ pub fn user_shell() -> String {
 }
 
 impl TerminalManager {
-    pub fn new(out: mpsc::UnboundedSender<NodeToControl>, tmux: Option<String>, shell: String) -> TerminalManager {
-        TerminalManager { out, tmux, shell, running: Arc::new(Mutex::new(HashMap::new())) }
+    pub fn new(out: mpsc::UnboundedSender<NodeToControl>, shell: String) -> TerminalManager {
+        TerminalManager { out, shell, running: Arc::new(Mutex::new(HashMap::new())) }
     }
 
-    pub fn start(&self, terminal_id: Uuid, conversation_id: Uuid, cwd: &str, cols: u16, rows: u16) {
-        if let Err(error) = self.try_start(terminal_id, conversation_id, cwd, cols, rows) {
+    pub fn start(&self, terminal_id: Uuid, cwd: &str, cols: u16, rows: u16) {
+        if let Err(error) = self.try_start(terminal_id, cwd, cols, rows) {
             let explanation = base64_of(format!("{error:#}\r\n").as_bytes());
             let _ = self.out.send(NodeToControl::TerminalOutput { terminal_id, data: explanation });
             let _ = self.out.send(NodeToControl::TerminalExited { terminal_id });
@@ -88,19 +77,11 @@ impl TerminalManager {
         }
     }
 
-    fn try_start(&self, terminal_id: Uuid, conversation_id: Uuid, cwd: &str, cols: u16, rows: u16) -> Result<()> {
+    fn try_start(&self, terminal_id: Uuid, cwd: &str, cols: u16, rows: u16) -> Result<()> {
         anyhow::ensure!(std::path::Path::new(cwd).is_dir(), "Could not start a terminal in {cwd}. Check that the folder exists on this node.");
 
         let pair = native_pty_system().openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).context("Could not open a terminal on this node.")?;
-        let mut builder = match &self.tmux {
-            Some(tmux) => {
-                let mut builder = CommandBuilder::new(tmux);
-                builder.args(["new-session", "-A", "-s", &tmux_session_name(conversation_id), "-c", cwd]);
-
-                builder
-            }
-            None => CommandBuilder::new(&self.shell),
-        };
+        let mut builder = CommandBuilder::new(&self.shell);
         builder.cwd(cwd);
         builder.env("TERM", "xterm-256color");
 
@@ -165,23 +146,16 @@ mod tests {
     fn shell_manager() -> (TerminalManager, mpsc::UnboundedReceiver<NodeToControl>) {
         let (out, messages) = mpsc::unbounded_channel();
 
-        (TerminalManager::new(out, None, "/bin/sh".into()), messages)
-    }
-
-    #[test]
-    fn the_tmux_session_is_named_after_the_first_eight_characters_of_the_conversation() {
-        let conversation_id: Uuid = "0a1b2c3d-1111-2222-3333-444455556666".parse().unwrap();
-
-        assert_eq!(tmux_session_name(conversation_id), "mycelium-0a1b2c3d");
+        (TerminalManager::new(out, "/bin/sh".into()), messages)
     }
 
     #[tokio::test]
-    async fn without_tmux_a_shell_starts_in_the_folder_and_echoes_what_is_typed() {
+    async fn a_shell_starts_in_the_folder_and_echoes_what_is_typed() {
         let (manager, mut messages) = shell_manager();
         let terminal_id = Uuid::from_u128(1);
         let folder = tempfile::tempdir().unwrap();
 
-        manager.start(terminal_id, Uuid::from_u128(9), folder.path().to_str().unwrap(), 80, 24);
+        manager.start(terminal_id, folder.path().to_str().unwrap(), 80, 24);
         manager.input(terminal_id, &STANDARD.encode("pwd; echo sum-$((20+22))\n"));
 
         let seen = read_until(&mut messages, "sum-42").await;
@@ -193,7 +167,7 @@ mod tests {
         let (manager, mut messages) = shell_manager();
         let terminal_id = Uuid::from_u128(2);
 
-        manager.start(terminal_id, Uuid::from_u128(9), "/", 80, 24);
+        manager.start(terminal_id, "/", 80, 24);
         manager.resize(terminal_id, 100, 30);
         manager.input(terminal_id, &STANDARD.encode("stty size\n"));
 
@@ -205,7 +179,7 @@ mod tests {
         let (manager, mut messages) = shell_manager();
         let terminal_id = Uuid::from_u128(3);
 
-        manager.start(terminal_id, Uuid::from_u128(9), "/", 80, 24);
+        manager.start(terminal_id, "/", 80, 24);
         manager.input(terminal_id, &STANDARD.encode("exit\n"));
 
         let mut next = next_message(&mut messages).await;
@@ -221,7 +195,7 @@ mod tests {
         let (manager, mut messages) = shell_manager();
         let terminal_id = Uuid::from_u128(4);
 
-        manager.start(terminal_id, Uuid::from_u128(9), "/", 80, 24);
+        manager.start(terminal_id, "/", 80, 24);
         manager.input(terminal_id, &STANDARD.encode("echo ready\n"));
         read_until(&mut messages, "ready").await;
 
@@ -236,39 +210,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reopening_with_tmux_reattaches_to_the_session_the_first_terminal_left_running() {
-        let Some(tmux) = find_on_path("tmux") else {
-            return;
-        };
-        let (out, mut messages) = mpsc::unbounded_channel();
-        let manager = TerminalManager::new(out, Some(tmux.clone()), "/bin/sh".into());
-        let conversation_id = Uuid::new_v4();
-        let first = Uuid::from_u128(6);
-        let second = Uuid::from_u128(7);
-
-        manager.start(first, conversation_id, "/", 80, 24);
-        read_until(&mut messages, "0:").await;
-        manager.input(first, &STANDARD.encode("export REMEMBERED=yes-$((6*7))\n"));
-        manager.input(first, &STANDARD.encode("echo first-ready\n"));
-        read_until(&mut messages, "first-ready").await;
-        manager.stop(first);
-        while !matches!(next_message(&mut messages).await, NodeToControl::TerminalExited { .. }) {}
-
-        manager.start(second, conversation_id, "/", 80, 24);
-        read_until(&mut messages, "0:").await;
-        manager.input(second, &STANDARD.encode("echo again-$REMEMBERED\n"));
-        read_until(&mut messages, "again-yes-42").await;
-
-        manager.stop(second);
-        let _ = std::process::Command::new(tmux).args(["kill-session", "-t", &tmux_session_name(conversation_id)]).status();
-    }
-
-    #[tokio::test]
     async fn a_missing_folder_is_explained_and_the_terminal_exits() {
         let (manager, mut messages) = shell_manager();
         let terminal_id = Uuid::from_u128(5);
 
-        manager.start(terminal_id, Uuid::from_u128(9), "/nonexistent/folder", 80, 24);
+        manager.start(terminal_id, "/nonexistent/folder", 80, 24);
 
         let NodeToControl::TerminalOutput { data, .. } = next_message(&mut messages).await else {
             panic!("expected an explanation first");

@@ -158,7 +158,9 @@ object Tokens {
         val SidePanelBrowser: Dp = 480.dp
         val SidePanelMax: Dp = 720.dp
         val ChatMin: Dp = 440.dp
-        val TerminalSheet: Dp = 360.dp
+        val TerminalDock: Dp = 240.dp
+        val TerminalDockMin: Dp = 120.dp
+        val TerminalDockMax: Dp = 640.dp
         val GitSheet: Dp = 520.dp
         val Touch: Dp = 44.dp
         val BarTouch: Dp = 52.dp

@@ -10,6 +10,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.key
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -66,9 +73,12 @@ import mycelium.api.Conversation
 import mycelium.state.AppState
 import mycelium.state.CellStyle
 import mycelium.state.Store
+import mycelium.state.SplitDirection
 import mycelium.state.Terminal
 import mycelium.state.TerminalColor
 import mycelium.state.TerminalKey
+import mycelium.state.TerminalTabs
+import mycelium.state.rects
 import mycelium.state.codePointString
 import mycelium.state.projectName
 import mycelium.state.terminalControlInput
@@ -80,19 +90,69 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, modifier: Modifier = Modifier, onExited: () -> Unit = {}) {
     val colors = MyTheme.colors
+    var tabs by remember(conversation.id) { mutableStateOf(TerminalTabs().open()) }
+    val current = tabs.current
 
-    Column(modifier.background(colors.bgPanel)) {
-        Bar {
-            PanelTitle("Terminal")
-            Label("tmux  ·  ${projectName(conversation.cwd)}", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+    LaunchedEffect(tabs.tabs.isEmpty()) {
+        if (tabs.tabs.isEmpty()) {
+            onExited()
+        }
+    }
+
+    Column(modifier.background(colors.bgPanel).semantics { contentDescription = "Terminal" }) {
+        Row(Modifier.fillMaxWidth().height(Tokens.Size.Bar).padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+            MainTabStrip(
+                tabs = tabs.tabs.map { MainTab(it.id, it.title, "Close ${it.title}") },
+                selected = tabs.selected.orEmpty(),
+                onSelect = { tabs = tabs.select(it) },
+                onClose = { tabs = tabs.closeTab(it) },
+                groupLabel = "Terminals",
+                modifier = Modifier.weight(1f),
+            )
+            MyButton({ tabs = tabs.split(SplitDirection.Right) }, icon = MyIcon.SplitRight, description = "Split right", muted = true)
+            MyButton({ tabs = tabs.split(SplitDirection.Down) }, icon = MyIcon.SplitDown, description = "Split down", muted = true)
+            MyButton({ tabs = tabs.open() }, icon = MyIcon.Plus, description = "New terminal", muted = true)
+            MyButton({ tabs = tabs.closeFocused() }, icon = MyIcon.Close, description = "Close terminal", muted = true)
         }
 
-        TerminalView(store, state, conversation, Modifier.weight(1f).fillMaxWidth(), onExited)
+        Hairline()
+
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            for (tab in tabs.tabs) {
+                key(tab.id) {
+                    val shown = tab.id == current?.id
+
+                    for ((paneId, rect) in tab.layout.rects()) {
+                        key(paneId) {
+                            val placement = if (shown) Modifier.offset(maxWidth * rect.x, maxHeight * rect.y).size(maxWidth * rect.width, maxHeight * rect.height) else Modifier.size(0.dp)
+
+                            TerminalView(
+                                store,
+                                state,
+                                conversation,
+                                placement.clipToBounds().drawBehind {
+                                    if (rect.x > 0f) {
+                                        drawLine(colors.border, Offset(0f, 0f), Offset(0f, size.height))
+                                    }
+
+                                    if (rect.y > 0f) {
+                                        drawLine(colors.border, Offset(0f, 0f), Offset(size.width, 0f))
+                                    }
+                                },
+                                active = shown && tab.focused == paneId,
+                                onFocus = { tabs = tabs.focus(paneId) },
+                                onExited = { tabs = tabs.closePane(paneId) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun TerminalView(store: Store, state: AppState, conversation: Conversation, modifier: Modifier, onExited: () -> Unit) {
+private fun TerminalView(store: Store, state: AppState, conversation: Conversation, modifier: Modifier, active: Boolean, onFocus: () -> Unit, onExited: () -> Unit) {
     val colors = MyTheme.colors
     val touch = LocalTouch.current
     val density = LocalDensity.current
@@ -167,8 +227,8 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
         }
     }
 
-    LaunchedEffect(id) {
-        if (id != null && !touch) {
+    LaunchedEffect(id, active) {
+        if (id != null && active && !touch) {
             focusRequester.requestFocus()
         }
     }
@@ -219,7 +279,7 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
                     typed != null
                 }
                 .focusable(interactionSource = source)
-                .pointerInput(Unit) { detectTapGestures { focusRequester.requestFocus() } }
+                .pointerInput(Unit) { detectTapGestures { onFocus(); focusRequester.requestFocus() } }
                 .semantics { contentDescription = "Terminal for ${projectName(conversation.cwd)}. Press Shift and Tab to leave it." },
         ) {
             Canvas(Modifier.fillMaxSize()) {

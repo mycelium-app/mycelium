@@ -1,5 +1,6 @@
 use crate::attachments;
 use crate::auth::AuthUser;
+use crate::chat_tools;
 use crate::chats;
 use crate::continuation;
 use crate::error::{ApiError, ApiResult};
@@ -12,7 +13,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use mycelium_proto::api::{ConfigRequest, MoveQueuedRequest, PatchQueueRequest, PermissionAnswer, PromptRequest};
+use mycelium_proto::api::{ConfigRequest, MoveQueuedRequest, PatchQueueRequest, PermissionAnswer, PromptRequest, RevokePermissionRequest};
 use mycelium_proto::conversation::{Attachment, ConversationStatus, EventKind, QueuedPrompt};
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
@@ -580,6 +581,31 @@ pub async fn permission(State(state): State<AppState>, user: AuthUser, Path(id):
     }
 
     state.publish(Some(user.id), StreamMessage::Conversation(updated.to_proto()?));
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn revoke_permission(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<RevokePermissionRequest>) -> ApiResult<StatusCode> {
+    let row = find_owned(&state.pool, id, user.id).await?;
+
+    if !chats::is_chat(&row) {
+        return Err(ApiError::bad_request("not_revocable", "A workspace agent keeps its own approvals, so they cannot be taken back here."));
+    }
+
+    let granted = chat_tools::granting_requests(&state, id, &request.tool).await?;
+
+    let mut tx = state.pool.begin().await?;
+    let mut events = Vec::new();
+
+    for request_id in granted {
+        events.extend(append_event(&mut tx, id, EventKind::PermissionResolved, &json!({"request_id": request_id, "option_id": chat_tools::REVOKED}), None).await?);
+    }
+
+    tx.commit().await?;
+
+    for event in events {
+        state.publish(Some(user.id), StreamMessage::Event(event));
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }

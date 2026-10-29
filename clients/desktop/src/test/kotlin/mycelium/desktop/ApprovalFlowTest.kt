@@ -29,7 +29,7 @@ import kotlin.test.assertEquals
 private val Options = listOf(
     PermissionOption("approve", "Approve", "allow_once"),
     PermissionOption("approve_edit", "Approve and edit response", "allow_once"),
-    PermissionOption("always", "Always approve", "allow_always"),
+    PermissionOption("always", "Approve for this session", "allow_always"),
     PermissionOption("deny", "Deny", "reject_once"),
 )
 
@@ -63,8 +63,8 @@ class ApprovalFlowTest {
 
         rule.onNodeWithContentDescription("More ways to approve").performClick()
         rule.onNodeWithText("Approve and edit response").assertExists()
-        rule.onNodeWithText("Stop asking for get_messages").assertExists()
-        rule.onNodeWithText("Always approve").performClick()
+        rule.onNodeWithText("Stop asking in this conversation").assertExists()
+        rule.onNodeWithText("Approve for this session").performClick()
 
         assertEquals(listOf("always"), answers)
     }

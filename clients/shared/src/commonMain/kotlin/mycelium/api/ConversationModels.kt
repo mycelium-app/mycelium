@@ -154,6 +154,9 @@ data class PermissionAnswer(
 )
 
 @Serializable
+data class RevokePermission(val tool: String)
+
+@Serializable
 data class ConfigRequest(
     val mode: String? = null,
     val model: String? = null,

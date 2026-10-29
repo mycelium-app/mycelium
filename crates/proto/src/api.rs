@@ -355,6 +355,11 @@ pub struct PermissionAnswer {
     pub option_id: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RevokePermissionRequest {
+    pub tool: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ConfigRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -1179,6 +1179,12 @@ class MyceliumApi(
         }
     }
 
+    suspend fun revokePermission(id: String, tool: String) {
+        call("/conversations/$id/permission/revoke") {
+            client.post(it) { authorise(); json(RevokePermission(tool)) }
+        }
+    }
+
     suspend fun response(id: String, requestId: String): ResponseToEdit? =
         try {
             call("/conversations/$id/responses/$requestId") { client.get(it) { authorise() } }.body<ResponseToEdit>()
