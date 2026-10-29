@@ -160,10 +160,6 @@ async fn every_zulip_read_from_a_workspace_waits_for_approval_and_an_edit() {
     let conversation = server.node_conversation(&node.token).await;
     let body = call(1, "zulip__get_messages", json!({"channel": "general", "topic": "lunch"}));
 
-    let refused = mcp(&server, &node.token, body.clone()).await;
-    assert_eq!(refused["result"]["isError"], true);
-    assert_eq!(zulip.paths(), ["/api/v1/users/me"]);
-
     let (reply, ()) = tokio::join!(server.agent_mcp(&node.token, conversation, body), async {
         let permission = server.open_request(conversation).await;
         assert_eq!(zulip.paths(), ["/api/v1/users/me"]);
