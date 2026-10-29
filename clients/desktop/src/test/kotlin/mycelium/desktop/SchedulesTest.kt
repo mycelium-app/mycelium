@@ -7,6 +7,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -32,6 +33,11 @@ import kotlin.test.assertTrue
 
 private const val ScheduleNodes = """[{"id":"n1","name":"laptop","hostname":"laptop","os":"linux","arch":"x86_64","version":"v0.1.13","online":true,"draining":false,
 "agents":[{"agent":"claude","version":"2","available":true}],"logins":[],"sessions":[]}]"""
+
+private const val ScheduleNodesWithModels = """[{"id":"n1","name":"laptop","hostname":"laptop","os":"linux","arch":"x86_64","version":"v0.1.13","online":true,"draining":false,
+"agents":[{"agent":"claude","version":"2","available":true}],
+"logins":[{"agent":"claude","account":"sam@example.com","method":"token","state":"signed_in","usage_left":80}],
+"harness_models":[{"agent":"claude","models":[{"id":"opus","name":"Claude Opus 5.5"},{"id":"sonnet","name":"Claude Sonnet 5.5"}],"default_model":"opus","reported_at":"2026-10-27T10:00:00Z"}],"sessions":[]}]"""
 
 private fun schedule(id: String, prompt: String, cron: String, eachRun: String, paused: Boolean) =
     """{"id":"$id","node_id":"n1","agent":"claude","cwd":"/work/app","project_id":"p1","prompt":"$prompt","cron":"$cron","each_run":"$eachRun","paused":$paused,
@@ -59,7 +65,7 @@ class SchedulesTest {
 
     private val requests = java.util.Collections.synchronizedList(mutableListOf<Triple<String, String, String>>())
 
-    private fun showSchedules() {
+    private fun showSchedules(nodes: String = ScheduleNodes) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -73,7 +79,7 @@ class SchedulesTest {
                 path.endsWith("/schedule-runs") -> respond(Runs, HttpStatusCode.OK, json)
                 path.endsWith("/schedules") -> respond(Schedules, HttpStatusCode.OK, json)
                 path.endsWith("/projects") -> respond("""[{"id":"p1","node_id":"n1","name":"midden","path":"/work/app","created_at":"2026-10-22T10:00:00Z"}]""", HttpStatusCode.OK, json)
-                path.endsWith("/nodes") -> respond(ScheduleNodes, HttpStatusCode.OK, json)
+                path.endsWith("/nodes") -> respond(nodes, HttpStatusCode.OK, json)
                 path.endsWith("/conversations") -> respond(RunConversation, HttpStatusCode.OK, json)
                 else -> respond("{}", HttpStatusCode.OK, json)
             }
@@ -186,6 +192,22 @@ class SchedulesTest {
 
         rule.waitUntil(5_000) { sent("POST", "/schedules") != null }
         assertEquals("""{"node_id":"n1","agent":"claude","prompt":"Go","cron":"0 6 * * 1","each_run":"new","cwd":"/work/app","time_zone":"UTC"}""", sent("POST", "/schedules")?.third)
+    }
+
+    @Test
+    fun aNewScheduleCanNameAModelFromTheModelMenu() {
+        showSchedules(ScheduleNodesWithModels)
+
+        rule.onNodeWithText("New schedule").performClick()
+        rule.onNodeWithContentDescription("Prompt").performTextInput("Go")
+        rule.onNodeWithContentDescription("Folder").performTextInput("/work/app")
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Any model").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Model: Any model").performClick()
+        rule.onNodeWithContentDescription("Claude Code: Claude Sonnet 5.5").performClick()
+        rule.onNodeWithText("Add schedule").performClick()
+
+        rule.waitUntil(5_000) { sent("POST", "/schedules") != null }
+        assertEquals("""{"node_id":"n1","agent":"claude","routing":"claude_any","model":"sonnet","prompt":"Go","cron":"0 6 * * 1","each_run":"new","cwd":"/work/app","time_zone":"UTC"}""", sent("POST", "/schedules")?.third)
     }
 
     @Test

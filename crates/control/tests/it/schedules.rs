@@ -111,6 +111,27 @@ async fn a_due_schedule_starts_a_conversation_and_moves_on_to_its_next_run() {
 }
 
 #[tokio::test]
+async fn a_schedule_with_a_model_starts_its_conversation_on_that_model() {
+    let server = ticking_server().await;
+    let mut link = server.online_node("laptop").await;
+    let (status, created) = add_schedule(&server, link.id, json!({"prompt": "Update and test dependencies", "cwd": "/work/app", "cron": EVERY_MONDAY, "each_run": "new", "model": "opus"})).await;
+    assert_eq!(status, 201, "{created}");
+    assert_eq!(created["model"], "opus");
+
+    make_due(&server, created["id"].as_str().unwrap().parse().unwrap()).await;
+
+    match link.next().await {
+        ControlToNode::StartSession { .. } => {}
+        other => panic!("expected start_session, got {other:?}"),
+    }
+
+    let run = first_run(&server).await;
+    let conversation = server.conversation(run["conversation_id"].as_str().unwrap().parse().unwrap()).await;
+
+    assert_eq!(conversation["model"], "opus");
+}
+
+#[tokio::test]
 async fn a_schedule_for_an_offline_node_skips_the_run_and_records_why() {
     let server = ticking_server().await;
     let link = server.online_node("laptop").await;

@@ -593,7 +593,7 @@ pub async fn ensure_wellness(state: &AppState, owner: Uuid) -> ApiResult<Uuid> {
                 cron: cron.to_string(),
                 each_run: EachRun::Same,
                 time_zone: None,
-                account: None, routing: None,
+                account: None, routing: None, model: None,
             };
 
             schedules::insert(state, owner, request).await?;

@@ -1675,6 +1675,8 @@ pub struct Schedule {
     pub account: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing: Option<crate::routing::Routing>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     pub cwd: String,
     pub project_id: Option<Uuid>,
     pub prompt: String,
@@ -1706,6 +1708,8 @@ pub struct CreateScheduleRequest {
     pub account: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing: Option<crate::routing::Routing>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     #[serde(default)]
     pub cwd: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

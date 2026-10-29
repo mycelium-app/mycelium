@@ -37,12 +37,14 @@ import mycelium.state.accountsOn
 import mycelium.state.routingButtonText
 import mycelium.state.scheduleAccountChoice
 import mycelium.state.scheduleInGroup
+import mycelium.api.ModelChoice
 import mycelium.api.Routing
 import mycelium.state.PickerAccount
 import mycelium.state.Store
 import mycelium.state.accountChoiceId
 import mycelium.state.anyAccountId
 import mycelium.state.loginUsage
+import mycelium.state.modelOptions
 import mycelium.state.Cadence
 import mycelium.state.WhenKind
 import mycelium.state.Weekdays
@@ -243,6 +245,7 @@ internal fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = 
     var inputValues by remember { mutableStateOf(editing?.actionInputs.orEmpty()) }
     var actionError by remember { mutableStateOf<String?>(null) }
     var accountPick by remember { mutableStateOf<String?>(null) }
+    var modelPick by remember { mutableStateOf<String?>(null) }
     val favourites = rememberFavouriteModels(store)
     val forAssistant = runsIn == RunsInAssistant
     val actions = chosenAssistant?.let { state.assistantActions[it] }.orEmpty()
@@ -333,6 +336,7 @@ internal fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = 
             agent = target.agent,
             account = account?.takeIf { !routed && it != DefaultAccountId },
             routing = account?.removePrefix(RoutingPrefix)?.takeIf { routed },
+            model = modelPick.takeIf { !routed || account != "$RoutingPrefix${Routing.AnyModel}" },
             prompt = prompt.trim(),
             cron = cron,
             eachRun = eachRun,
@@ -397,17 +401,21 @@ internal fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = 
                     if (signedIn.isNotEmpty()) {
                         val rows = signedIn.map { PickerAccount(accountChoiceId(it), target.agent, it.account, target.node, true, loginUsage(it)) }
                         val pinned = rows.firstOrNull { it.id == shown }
+                        val options = modelOptions(state.nodes.values, target.node, emptyList()).filter { it.agent == target.agent }
 
                         ModelPicker(
                             ModelPickerControls(
-                                label = routingButtonText(shown) ?: pinned?.label ?: "Any model",
-                                options = emptyList(),
+                                label = if (shown == "$RoutingPrefix${Routing.AnyModel}") "Any model" else options.firstOrNull { it.model == modelPick.orEmpty() }?.name ?: pinned?.label ?: "Any model",
+                                options = options,
                                 favourites = favourites.list,
                                 providers = emptyList(),
-                                onPickModel = {},
-                                onPickAny = { accountPick = "$RoutingPrefix${Routing.AnyModel}" },
+                                onPickModel = { picked ->
+                                    modelPick = picked.model.ifEmpty { null }
+                                    accountPick = pinned?.id ?: anyAccountId(target.agent)
+                                },
+                                onPickAny = { accountPick = "$RoutingPrefix${Routing.AnyModel}"; modelPick = null },
                                 onFavourite = favourites.toggle,
-                                chosen = null,
+                                chosen = ModelChoice(agent = target.agent, model = modelPick).takeIf { shown != "$RoutingPrefix${Routing.AnyModel}" },
                                 anyChosen = shown == "$RoutingPrefix${Routing.AnyModel}",
                                 accounts = rows,
                                 account = pinned?.id,
