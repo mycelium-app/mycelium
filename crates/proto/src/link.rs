@@ -62,6 +62,8 @@ pub enum NodeToControl {
     },
     Logins {
         logins: Vec<LoginInfo>,
+    },
+    NodeStatus {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         kubernetes: Option<KubernetesNode>,
     },

@@ -217,7 +217,7 @@ async fn a_node_cannot_write_into_another_nodes_conversation() {
     intruder.send(NodeToControl::SessionStarted { conversation_id: conversation.id, acp_session_id: "forged".into(), modes: None, models: None, config_options: None }).await;
 
     let mut stream = server.user.stream().await;
-    intruder.send(NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: None, method: "token".into(), state: LoginState::SignedOut, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }], kubernetes: None }).await;
+    intruder.send(NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: None, method: "token".into(), state: LoginState::SignedOut, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }).await;
     stream.until(|message| matches!(message, StreamMessage::Node(node) if node.id == intruder.id && !node.logins.is_empty()).then_some(())).await;
 
     assert!(server.events(conversation.id).await.is_empty());
@@ -318,6 +318,70 @@ async fn an_agent_the_node_reported_as_missing_cannot_be_started() {
     assert_eq!((status, body["error"].as_str()), (409, Some("agent_unavailable")));
 }
 
+fn cluster(conversation_id: Uuid, state: mycelium_proto::api::PodState) -> mycelium_proto::api::KubernetesNode {
+    mycelium_proto::api::KubernetesNode {
+        namespace: "mycelium".into(),
+        image: "ghcr.io/mycelium-app/mycelium-agent:latest".into(),
+        credentials_secret: "mycelium-agent-credentials".into(),
+        workspace_persistent: false,
+        pods: vec![mycelium_proto::api::SessionPod { conversation_id, name: "mycelium-session-7f3c2a91".into(), state }],
+    }
+}
+
+#[tokio::test]
+async fn a_node_reporting_kubernetes_facts_shows_them_in_the_node_api() {
+    let server = Server::start().await;
+    let (id, token) = server.join("node", "lab-cluster").await;
+    let conversation_id = Uuid::from_u128(7);
+    let mut link = server.connect_node(id, &token).await;
+    link.send(NodeToControl::Hello { version: "0.1.0".into(), hostname: "lab-cluster".into(), os: "linux".into(), arch: "x86_64".into(), agents: vec![], sessions: vec![], kubernetes: Some(cluster(conversation_id, mycelium_proto::api::PodState::Running)) }).await;
+
+    let user = server.user.clone();
+    let kubernetes = common::eventually("the kubernetes facts", || async {
+        let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;
+
+        nodes[0]["kubernetes"].is_object().then(|| nodes[0]["kubernetes"].clone())
+    })
+    .await;
+
+    assert_eq!(kubernetes["namespace"], "mycelium");
+    assert_eq!(kubernetes["credentials_secret"], "mycelium-agent-credentials");
+    assert_eq!(kubernetes["workspace_persistent"], false);
+    assert_eq!(kubernetes["pods"], json!([{"conversation_id": conversation_id, "name": "mycelium-session-7f3c2a91", "state": "running"}]));
+}
+
+#[tokio::test]
+async fn a_session_pod_changing_state_updates_the_node_api_without_a_reconnect() {
+    let server = Server::start().await;
+    let (id, token) = server.join("node", "lab-cluster").await;
+    let conversation_id = Uuid::from_u128(7);
+    let mut link = server.connect_node(id, &token).await;
+    link.send(NodeToControl::Hello { version: "0.1.0".into(), hostname: "lab-cluster".into(), os: "linux".into(), arch: "x86_64".into(), agents: vec![], sessions: vec![], kubernetes: Some(cluster(conversation_id, mycelium_proto::api::PodState::Running)) }).await;
+
+    link.send(NodeToControl::NodeStatus { kubernetes: Some(cluster(conversation_id, mycelium_proto::api::PodState::Exited)) }).await;
+
+    let user = server.user.clone();
+    let state = common::eventually("the pod state change", || async {
+        let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;
+
+        (nodes[0]["kubernetes"]["pods"][0]["state"] == "exited").then(|| nodes[0]["kubernetes"]["pods"][0]["state"].clone())
+    })
+    .await;
+
+    assert_eq!(state, "exited");
+}
+
+#[tokio::test]
+async fn a_node_that_does_not_report_kubernetes_has_no_kubernetes_facts() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+
+    let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
+
+    assert!(nodes.as_array().unwrap().iter().any(|node| node["id"] == json!(link.id)));
+    assert!(nodes[0].get("kubernetes").is_none());
+}
+
 #[tokio::test]
 async fn an_agent_sign_in_is_started_on_the_node_and_its_output_streams_to_clients() {
     let server = Server::start().await;
@@ -342,7 +406,7 @@ async fn an_agent_sign_in_is_started_on_the_node_and_its_output_streams_to_clien
     assert_eq!(status, 204);
     assert_eq!(link.next().await, ControlToNode::LoginInput { login_id, text: "abc123\n".into() });
 
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: Some("me@example.com".into()), method: "token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }], kubernetes: None }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: Some("me@example.com".into()), method: "token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }).await;
     link.send(NodeToControl::LoginFinished { login_id, ok: true }).await;
     stream.until(|message| matches!(message, StreamMessage::LoginFinished { ok: true, .. }).then_some(())).await;
 
@@ -528,7 +592,7 @@ async fn a_node_cannot_publish_output_for_another_nodes_sign_in() {
 
     intruder.send(NodeToControl::LoginOutput { login_id, data: "spoofed".into() }).await;
     intruder.send(NodeToControl::LoginFinished { login_id, ok: true }).await;
-    intruder.send(NodeToControl::Logins { logins: vec![], kubernetes: None }).await;
+    intruder.send(NodeToControl::Logins { logins: vec![] }).await;
 
     stream
         .until(|message| match message {

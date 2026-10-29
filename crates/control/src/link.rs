@@ -243,7 +243,8 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             Ok(())
         }
-        NodeToControl::Logins { logins, kubernetes } => store_logins(state, node_id, logins, kubernetes).await,
+        NodeToControl::Logins { logins } => store_logins(state, node_id, logins).await,
+        NodeToControl::NodeStatus { kubernetes } => store_node_status(state, node_id, kubernetes).await,
         NodeToControl::LoginOutput { login_id, data } => {
             if let Some(owner) = state.hub.login_owner(login_id).filter(|owner| owner.node_id == node_id) {
                 state.publish(Some(owner.user_id), StreamMessage::LoginOutput { login_id, data });
@@ -1009,13 +1010,14 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
     pump(state, conversation_id, false).await
 }
 
-async fn store_logins(state: &AppState, node_id: Uuid, logins: Vec<LoginInfo>, kubernetes: Option<KubernetesNode>) -> ApiResult<()> {
+async fn store_node_status(state: &AppState, node_id: Uuid, kubernetes: Option<KubernetesNode>) -> ApiResult<()> {
+    sqlx::query("update nodes set kubernetes = $2 where id = $1").bind(node_id).bind(kubernetes.map(sqlx::types::Json)).execute(&state.pool).await?;
+
+    publish_node(state, node_id).await
+}
+
+async fn store_logins(state: &AppState, node_id: Uuid, logins: Vec<LoginInfo>) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
-
-    if let Some(facts) = kubernetes {
-        sqlx::query("update nodes set kubernetes = $2 where id = $1").bind(node_id).bind(sqlx::types::Json(facts)).execute(&mut *tx).await?;
-    }
-
     sqlx::query("delete from logins where node_id = $1").bind(node_id).execute(&mut *tx).await?;
 
     for mut login in logins {

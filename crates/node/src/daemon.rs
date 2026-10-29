@@ -119,7 +119,7 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     let logins_accounts = accounts_dir(&config.state_dir);
     let usage = Arc::new(UsageCache::new(&options.usage_endpoint, &options.codex_usage_endpoint, &options.codex_command, USAGE_MIN_AGE));
     let logins_usage = usage.clone();
-    let login_report = Arc::new(move || NodeToControl::Logins { logins: login_state(&logins_home, &logins_accounts, &agents, &logins_usage), kubernetes: None });
+    let login_report = Arc::new(move || NodeToControl::Logins { logins: login_state(&logins_home, &logins_accounts, &agents, &logins_usage) });
     let transcripts = TranscriptFollower::new(options.home.clone(), options.transcript_roots.clone(), config.state_dir.join("transcripts.json"), out.clone());
 
     let daemon = Arc::new(Daemon {
@@ -212,10 +212,9 @@ async fn follow_pods(daemon: Arc<Daemon>) {
         let report = daemon.kubernetes_report().await;
 
         if report != sent {
-            sent = report;
-            let logins = daemon.logins_report().await;
+            sent = report.clone();
 
-            let _ = daemon.out.send(logins);
+            let _ = daemon.out.send(NodeToControl::NodeStatus { kubernetes: report });
         }
     }
 }
@@ -267,9 +266,7 @@ impl Daemon {
     pub async fn logins_report(&self) -> NodeToControl {
         let agents = self.agents().await;
 
-        let kubernetes = self.kubernetes_report().await;
-
-        NodeToControl::Logins { logins: self.logins_for(&agents), kubernetes }
+        NodeToControl::Logins { logins: self.logins_for(&agents) }
     }
 
     pub async fn kubernetes_report(&self) -> Option<KubernetesNode> {

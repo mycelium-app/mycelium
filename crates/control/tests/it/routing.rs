@@ -41,7 +41,7 @@ async fn save_any_model(server: &Server, entries: Value) {
 }
 
 async fn report(server: &Server, link: &mut NodeLink, accounts: Vec<mycelium_proto::conversation::LoginInfo>, account: &str, left: i64) {
-    link.send(NodeToControl::Logins { logins: accounts, kubernetes: None }).await;
+    link.send(NodeToControl::Logins { logins: accounts }).await;
 
     let user = server.user.clone();
     common::eventually("the usage to be recorded", || async {
@@ -103,7 +103,7 @@ async fn an_account_that_signs_out_is_left_at_the_next_turn() {
     let id = running(&server, &mut link, "claude_any").await;
     finish_turn(&server, &mut link, id, 2).await;
     let signed_out = mycelium_proto::conversation::LoginInfo { state: mycelium_proto::conversation::LoginState::SignedOut, ..with_usage("sam@example.com", 90) };
-    link.send(NodeToControl::Logins { logins: vec![signed_out, with_usage("work@example.org", 40)], kubernetes: None }).await;
+    link.send(NodeToControl::Logins { logins: vec![signed_out, with_usage("work@example.org", 40)] }).await;
     common::eventually("sam to be signed out", || async {
         let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
         let signed_out = nodes[0]["logins"].as_array().unwrap().iter().any(|login| login["account"] == "sam@example.com" && login["state"] == "signed_out");
