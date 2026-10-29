@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.15.3
+
+Mycelium now lives at [github.com/mycelium-app/mycelium](https://github.com/mycelium-app/mycelium). The repository history was rewritten for the move, so clone it again rather than pulling into an old clone.
+
+- Releases are published on GitHub: the binary, desktop, web and Android downloads are on the GitHub release, and the control plane image is `ghcr.io/mycelium-app/mycelium`. Nodes on this version update themselves from GitHub.
+- The Android app is signed with a new key. Uninstall the old app once, add `https://github.com/mycelium-app/mycelium` in Obtainium and sign in again; later releases install over it as usual.
+- The installer reads the latest version from `releases/latest/download/latest`. Its `MYCELIUM_S3` override is replaced by `MYCELIUM_RELEASES` and `MYCELIUM_LATEST`.
+- On macOS the node's launch agent is now `app.mycelium.node`. Unload and remove the old Mycelium launch agent in `~/Library/LaunchAgents` before reinstalling.
+- The Nix flake is `github:mycelium-app/mycelium`.
+- Usage readings from the previous orchestrator are no longer imported.
+- The README and the landing page are up to date, and the landing page sends you to the README for installing.
+
 ## v0.15.2
 
 Every screen change in this release was designed in the canonical design artefact first.
