@@ -316,6 +316,25 @@ async fn answering_a_permission_the_turn_already_ended_without_does_not_resume_t
 }
 
 #[tokio::test]
+async fn a_new_session_reusing_an_answered_request_id_can_still_be_answered() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = waiting_for_permission(&server, &mut link).await;
+    let (status, _) = answer_permission(&server, id).await;
+    assert_eq!(status, 204);
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 6, stop_reason: "end_turn".into(), usage: None }).await;
+    common::eventually("the turn to end", || async { (status_of(&server, id).await == "review").then_some(()) }).await;
+
+    link.send(NodeToControl::PermissionRequest { conversation_id: id, seq: 7, request_id: "req-1".into(), request: json!({"options": [{"optionId": "allow", "name": "Allow", "kind": "allow_once"}]}) }).await;
+    common::eventually("the conversation to wait for input again", || async { (status_of(&server, id).await == "input").then_some(()) }).await;
+
+    let (status, body) = answer_permission(&server, id).await;
+
+    assert_eq!((status, body["error"].as_str()), (204, None));
+    assert_eq!(status_of(&server, id).await, "working");
+}
+
+#[tokio::test]
 async fn answering_a_permission_on_a_failed_conversation_leaves_it_failed() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

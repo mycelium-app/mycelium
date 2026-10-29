@@ -526,20 +526,23 @@ pub async fn permission(State(state): State<AppState>, user: AuthUser, Path(id):
     let mut tx = state.pool.begin().await?;
     let row = lock_owned(&mut tx, id, user.id).await?;
 
-    let request = sqlx::query_scalar::<_, Value>("select payload from events where conversation_id = $1 and kind = 'permission_request' and payload->>'request_id' = $2")
-        .bind(id)
-        .bind(&answer.request_id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| ApiError::not_found("That permission request"))?;
+    let (request_seq, request) = sqlx::query_as::<_, (i64, Value)>(
+        "select seq, payload from events where conversation_id = $1 and kind = 'permission_request' and payload->>'request_id' = $2 order by seq desc limit 1",
+    )
+    .bind(id)
+    .bind(&answer.request_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| ApiError::not_found("That permission request"))?;
 
     if row.status == "failed" {
         return Err(ApiError::conflict("session_failed", "This conversation's session failed, so it is not waiting for an answer. Retry the conversation to continue."));
     }
 
-    let answered = sqlx::query_scalar::<_, bool>("select exists (select 1 from events where conversation_id = $1 and kind = 'permission_resolved' and payload->>'request_id' = $2)")
+    let answered = sqlx::query_scalar::<_, bool>("select exists (select 1 from events where conversation_id = $1 and kind = 'permission_resolved' and payload->>'request_id' = $2 and seq > $3)")
         .bind(id)
         .bind(&answer.request_id)
+        .bind(request_seq)
         .fetch_one(&mut *tx)
         .await?;
 
