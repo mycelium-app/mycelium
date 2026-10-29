@@ -6,16 +6,17 @@ use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{CreateDecisionProviderRequest, DECISION_USES, DecisionProvider, DecisionProviderModels, PatchDecisionProviderRequest, TestDecisionProviderRequest};
+use mycelium_proto::api::{CreateDecisionProviderRequest, DECISION_USES, DecisionProvider, DecisionProviderModels, ModelProviderKind, PatchDecisionProviderRequest, TestDecisionProviderRequest};
 use serde_json::{Value, json};
 use std::time::Duration;
 use uuid::Uuid;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
-const PROVIDER_COLUMNS: &str = "id, name, base_url, api_key, model, uses, created_at";
+const PROVIDER_COLUMNS: &str = "id, name, base_url, api_key, model, uses, model_provider_id, created_at";
 const QUESTION_TYPES: [&str; 4] = ["noul", "choice", "score", "box"];
 const BROWSER_USE: &str = "browser";
 pub const SCREEN_ASSET: &str = "screen";
+const NO_BOX_CHAT_PROVIDER: &str = "Browser tasks need a Jev server that answers box questions. A chat provider answers yes or no, choice and score questions only";
 const NO_BOX_MODEL: &str = "Choose a model that answers box questions, or untick Browser tasks";
 const PROBE_IMAGE: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
@@ -27,12 +28,13 @@ pub struct DecisionRow {
     pub api_key: Option<String>,
     pub model: String,
     pub uses: Vec<String>,
+    pub model_provider_id: Option<Uuid>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl DecisionRow {
     fn to_proto(&self) -> DecisionProvider {
-        DecisionProvider { id: self.id, name: self.name.clone(), base_url: self.base_url.clone(), key_hint: self.api_key.as_deref().map(token_hint), model: self.model.clone(), uses: self.uses.clone(), created_at: self.created_at }
+        DecisionProvider { id: self.id, name: self.name.clone(), base_url: self.base_url.clone(), key_hint: self.api_key.as_deref().map(token_hint), model: self.model.clone(), uses: self.uses.clone(), model_provider_id: self.model_provider_id, created_at: self.created_at }
     }
 }
 
@@ -60,6 +62,20 @@ fn check_uses(uses: &[String]) -> ApiResult<Vec<String>> {
     }
 
     Ok(checked)
+}
+
+async fn check_chat_provider(state: &AppState, owner: Uuid, chat_provider: Uuid, uses: &[String]) -> ApiResult<()> {
+    let found = crate::model_providers::find_owned(state, chat_provider, owner).await?;
+
+    if found.parsed_kind()? != ModelProviderKind::OpenaiCompatible {
+        return Err(ApiError::bad_request("decision_provider_failed", "Choose an OpenAI-compatible provider. Decisions are read from token probabilities, which Anthropic does not return."));
+    }
+
+    if uses.iter().any(|used| used == BROWSER_USE) {
+        return Err(ApiError::bad_request("browser_model_invalid", NO_BOX_CHAT_PROVIDER));
+    }
+
+    Ok(())
 }
 
 async fn take_uses(state: &AppState, owner: Uuid, from_others_than: Uuid, uses: &[String]) -> ApiResult<()> {
@@ -136,20 +152,28 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         return Err(ApiError::bad_request("model_required", "Choose a model. Test the connection to list the server's models."));
     }
 
-    let base_url = normalise_address(&request.base_url)?;
     let uses = check_uses(&request.uses)?;
+    let base_url = match request.model_provider_id {
+        Some(chat_provider) => {
+            check_chat_provider(&state, user.id, chat_provider, &uses).await?;
 
-    if uses.iter().any(|used| used == BROWSER_USE) {
+            String::new()
+        }
+        None => normalise_address(&request.base_url)?,
+    };
+
+    if request.model_provider_id.is_none() && uses.iter().any(|used| used == BROWSER_USE) {
         check_box_model(&state, &base_url, key, model).await?;
     }
 
-    let row = sqlx::query_as::<_, DecisionRow>(sqlx::AssertSqlSafe(format!("insert into decision_providers (owner, name, base_url, api_key, model, uses) values ($1, $2, $3, $4, $5, $6) returning {PROVIDER_COLUMNS}")))
+    let row = sqlx::query_as::<_, DecisionRow>(sqlx::AssertSqlSafe(format!("insert into decision_providers (owner, name, base_url, api_key, model, uses, model_provider_id) values ($1, $2, $3, $4, $5, $6, $7) returning {PROVIDER_COLUMNS}")))
         .bind(user.id)
         .bind(name)
         .bind(&base_url)
         .bind(key)
         .bind(model)
         .bind(&uses)
+        .bind(request.model_provider_id)
         .fetch_one(&state.pool)
         .await?;
 
@@ -175,6 +199,10 @@ pub async fn update(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 
     if uses.as_ref().is_some_and(|uses| uses.iter().any(|used| used == BROWSER_USE)) {
         let existing = sqlx::query_as::<_, DecisionRow>(sqlx::AssertSqlSafe(format!("select {PROVIDER_COLUMNS} from decision_providers where id = $1 and owner = $2"))).bind(id).bind(user.id).fetch_optional(&state.pool).await?.ok_or_else(|| ApiError::not_found("That decisions provider"))?;
+
+        if existing.model_provider_id.is_some() {
+            return Err(ApiError::bad_request("browser_model_invalid", NO_BOX_CHAT_PROVIDER));
+        }
 
         check_box_model(&state, base_url.as_deref().unwrap_or(&existing.base_url), key.or(existing.api_key.as_deref()), model.unwrap_or(&existing.model)).await?;
     }
@@ -302,5 +330,10 @@ pub async fn decide(state: &AppState, owner: Uuid, usage: &str, subject: &Value,
         return Ok(Err("No decisions provider is set for this. Ask the person to add one in Settings, Providers.".to_string()));
     };
 
-    Ok(ask(state, &provider.base_url, provider.api_key.as_deref(), &provider.model, subject, questions, None).await)
+    let Some(chat_provider) = provider.model_provider_id else {
+        return Ok(ask(state, &provider.base_url, provider.api_key.as_deref(), &provider.model, subject, questions, None).await);
+    };
+    let chat_provider = crate::model_providers::find_owned(state, chat_provider, owner).await?;
+
+    Ok(crate::decision_chat::ask(state, &chat_provider, &provider.model, subject, questions).await)
 }

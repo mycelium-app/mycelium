@@ -212,3 +212,71 @@ async fn editing_a_provider_to_use_browser_tasks_probes_the_model_and_moves_the_
     assert_eq!(listed[0]["id"], first["id"]);
     assert_eq!((listed[0]["uses"].clone(), listed[1]["uses"].clone()), (json!([]), json!(["browser"])));
 }
+
+async fn fake_chat_provider(logprobs: bool) -> (String, Arc<Mutex<Vec<Value>>>) {
+    async fn completions(State((asked, logprobs)): State<(Arc<Mutex<Vec<Value>>>, bool)>, Json(request): Json<Value>) -> Response {
+        asked.lock().unwrap().push(request);
+
+        let top = json!([{"token": "Yes", "logprob": 0.75f64.ln()}, {"token": "No", "logprob": 0.25f64.ln()}]);
+        let choice = if logprobs { json!({"message": {"content": "Yes"}, "logprobs": {"content": [{"token": "Yes", "top_logprobs": top}]}}) } else { json!({"message": {"content": "Yes"}}) };
+
+        Json(json!({"choices": [choice]})).into_response()
+    }
+
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let base = serve(Router::new().route("/v1/chat/completions", post(completions)).with_state((asked.clone(), logprobs))).await;
+
+    (format!("{base}/v1"), asked)
+}
+
+async fn add_chat_provider(server: &Server, base: &str) -> Value {
+    let (status, provider) = server.user.json(server.user.post("/api/v1/model-providers").json(&json!({"kind": "openai_compatible", "name": "OpenRouter", "base_url": base}))).await;
+    assert_eq!(status, 201, "{provider}");
+
+    provider
+}
+
+#[tokio::test]
+async fn a_chat_provider_can_be_the_decisions_provider_and_answers_with_token_probabilities() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, asked) = fake_chat_provider(true).await;
+    let chat = add_chat_provider(&server, &base).await;
+
+    let (status, saved) = server.user.json(server.user.post("/api/v1/decision-providers").json(&json!({"name": "OpenRouter", "model_provider_id": chat["id"], "model": "some/model", "uses": ["decide"]}))).await;
+    let result = decide(&server, &node.token).await;
+    let answers: Value = serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+
+    assert_eq!(status, 201, "{saved}");
+    assert_eq!(saved["model_provider_id"], chat["id"]);
+    assert_eq!(result["isError"], json!(false), "{result}");
+    assert_eq!(answers["urgent"]["noul"], 0.75);
+    assert_eq!(asked.lock().unwrap()[0]["logprobs"], true);
+}
+
+#[tokio::test]
+async fn a_chat_provider_that_reports_no_probabilities_still_answers_and_says_the_answer_is_certain_not_measured() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, _) = fake_chat_provider(false).await;
+    let chat = add_chat_provider(&server, &base).await;
+    server.user.json(server.user.post("/api/v1/decision-providers").json(&json!({"name": "OpenRouter", "model_provider_id": chat["id"], "model": "some/model", "uses": ["decide"]}))).await;
+
+    let result = decide(&server, &node.token).await;
+    let answers: Value = serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+
+    assert_eq!(answers["urgent"]["noul"], 1.0);
+    assert_eq!(answers["urgent"]["probabilities_reported"], false);
+}
+
+#[tokio::test]
+async fn a_chat_provider_cannot_take_the_browser_use() {
+    let server = Server::start().await;
+    let (base, _) = fake_chat_provider(true).await;
+    let chat = add_chat_provider(&server, &base).await;
+
+    let (status, refused) = server.user.json(server.user.post("/api/v1/decision-providers").json(&json!({"name": "OpenRouter", "model_provider_id": chat["id"], "model": "some/model", "uses": ["browser"]}))).await;
+
+    assert_eq!(status, 400);
+    assert!(refused["message"].as_str().unwrap().contains("Jev server"), "{refused}");
+}

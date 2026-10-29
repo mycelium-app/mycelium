@@ -607,13 +607,18 @@ pub struct DecisionProvider {
     pub key_hint: Option<String>,
     pub model: String,
     pub uses: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_provider_id: Option<Uuid>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct CreateDecisionProviderRequest {
     pub name: String,
+    #[serde(default)]
     pub base_url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_provider_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     pub model: String,

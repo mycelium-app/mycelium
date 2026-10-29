@@ -19,6 +19,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import mycelium.api.CreateDecisionProviderRequest
 import mycelium.api.DecisionProvider
+import mycelium.api.ModelProvider
 import mycelium.api.PatchDecisionProviderRequest
 import mycelium.api.TestDecisionProviderRequest
 import mycelium.state.Choice
@@ -50,7 +51,7 @@ fun DecisionsSettings(store: Store) {
             MyButton({ editing = DecisionDraft() }, text = "Add a decisions provider", icon = MyIcon.Plus, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
         }
 
-        Label("An OpenJev or Jev-compatible server that answers yes or no, choice and score questions with a probability. Agents ask it through the decide tool. With the Browser use it also picks each step of a browser task and finds a described control on a screenshot.", style = Tokens.Type.Meta, color = colors.textMuted)
+        Label("An OpenJev or Jev-compatible server, or one of your OpenAI-compatible chat providers such as OpenRouter, that answers yes or no, choice and score questions with a probability. Agents ask it through the decide tool. With the Browser use it also picks each step of a browser task and finds a described control on a screenshot.", style = Tokens.Type.Meta, color = colors.textMuted)
 
         Table(
             listOf(
@@ -68,7 +69,7 @@ fun DecisionsSettings(store: Store) {
                     0 -> TableCell.Slot(provider.baseUrl) {
                         Column {
                             Label(provider.name, maxLines = 1)
-                            Label(provider.baseUrl, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+                            Label(if (provider.modelProviderId != null) "Chat provider" else provider.baseUrl, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
                         }
                     }
 
@@ -79,7 +80,7 @@ fun DecisionsSettings(store: Store) {
                         RowMenu(provider.name) { close ->
                             MenuItem("Edit", onClick = {
                                 close()
-                                editing = DecisionDraft(provider.id, provider.name, provider.baseUrl, provider.model, provider.uses.toSet())
+                                editing = DecisionDraft(provider.id, provider.name, provider.baseUrl, provider.model, provider.uses.toSet(), provider.modelProviderId)
                             })
                             MenuItem("Remove provider", onClick = {
                                 close()
@@ -116,7 +117,10 @@ private data class DecisionDraft(
     val address: String = "",
     val model: String = "",
     val uses: Set<String> = setOf("decide"),
+    val chatProvider: String? = null,
 )
+
+private const val JevServer = "jev"
 
 @Composable
 private fun DecisionProviderDialog(store: Store, draft: DecisionDraft, onDismiss: () -> Unit, onSaved: (DecisionProvider) -> Unit) {
@@ -128,7 +132,15 @@ private fun DecisionProviderDialog(store: Store, draft: DecisionDraft, onDismiss
     var model by remember { mutableStateOf(draft.model) }
     var uses by remember { mutableStateOf(draft.uses) }
     var tested by remember { mutableStateOf<String?>(null) }
+    var chatProvider by remember { mutableStateOf(draft.chatProvider) }
+    var chatProviders by remember { mutableStateOf<List<ModelProvider>>(emptyList()) }
     val runner = rememberAction()
+    val chosen = chatProviders.firstOrNull { it.id == chatProvider }
+    val fromChatProvider = chatProvider != null
+
+    LaunchedEffect(Unit) {
+        store.act { chatProviders = store.api.modelProviders().filter { it.kind == "openai_compatible" } }
+    }
 
     fun test() {
         tested = null
@@ -145,9 +157,9 @@ private fun DecisionProviderDialog(store: Store, draft: DecisionDraft, onDismiss
     fun save() {
         runner {
             val saved = if (draft.id == null) {
-                store.api.createDecisionProvider(CreateDecisionProviderRequest(name.trim(), address.trim(), key.trim().ifEmpty { null }, model, DecisionUses.map { it.id }.filter { it in uses }))
+                store.api.createDecisionProvider(CreateDecisionProviderRequest(name.trim(), address.trim(), key.trim().ifEmpty { null }, model, DecisionUses.map { it.id }.filter { it in uses }, chatProvider))
             } else {
-                store.api.updateDecisionProvider(draft.id, PatchDecisionProviderRequest(name.trim(), address.trim(), key.trim().ifEmpty { null }, model, DecisionUses.map { it.id }.filter { it in uses }))
+                store.api.updateDecisionProvider(draft.id, PatchDecisionProviderRequest(name.trim(), address.trim().takeIf { !fromChatProvider }, key.trim().ifEmpty { null }, model, DecisionUses.map { it.id }.filter { it in uses }))
             }
 
             onSaved(saved)
@@ -157,23 +169,45 @@ private fun DecisionProviderDialog(store: Store, draft: DecisionDraft, onDismiss
     Dialog(onDismiss) {
         Label("Decisions provider", Modifier.semantics { heading() }, Tokens.Type.Title)
         TextInput(name, { name = it }, label = "Name", placeholder = "OpenJev")
-        TextInput(address, { address = it; tested = null }, label = "Address", placeholder = "http://localhost:8080", mono = true)
-        TextInput(key, { key = it; tested = null }, label = if (draft.id == null) "Key, if the server needs one" else "Key, leave blank to keep the saved one", mono = true, masked = true)
-        Label("Sent as a bearer token", style = Tokens.Type.Meta, color = colors.textMuted)
 
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2), itemVerticalAlignment = Alignment.CenterVertically) {
-            MyButton(::test, text = "Test", icon = MyIcon.Check, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
-            tested?.let { Label(it, style = Tokens.Type.Meta, color = colors.textMuted) }
+        if (draft.id == null && chatProviders.isNotEmpty()) {
+            Label("Source", style = Tokens.Type.Meta, color = colors.textMuted)
+            OptionMenu(
+                "Source",
+                listOf(Choice(JevServer, "A Jev server")) + chatProviders.map { Choice(it.id, it.name) },
+                chatProvider ?: JevServer,
+                { picked ->
+                    chatProvider = picked.takeIf { it != JevServer }
+                    uses = if (chatProvider != null) uses - "browser" else uses
+                    model = chatProviders.firstOrNull { it.id == chatProvider }?.let { held -> held.defaultModel ?: held.models.firstOrNull() }.orEmpty()
+                },
+            )
         }
 
-        if (models.isNotEmpty()) {
+        if (!fromChatProvider) {
+            TextInput(address, { address = it; tested = null }, label = "Address", placeholder = "http://localhost:8080", mono = true)
+            TextInput(key, { key = it; tested = null }, label = if (draft.id == null) "Key, if the server needs one" else "Key, leave blank to keep the saved one", mono = true, masked = true)
+            Label("Sent as a bearer token", style = Tokens.Type.Meta, color = colors.textMuted)
+
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2), itemVerticalAlignment = Alignment.CenterVertically) {
+                MyButton(::test, text = "Test", icon = MyIcon.Check, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+                tested?.let { Label(it, style = Tokens.Type.Meta, color = colors.textMuted) }
+            }
+        } else {
+            Label("Reads the probability of each answer from the provider's token probabilities. If a model reports none, the answer says so and counts as certain.", style = Tokens.Type.Meta, color = colors.textMuted)
+        }
+
+        if (fromChatProvider && chosen != null) {
+            Label("Model", style = Tokens.Type.Meta, color = colors.textMuted)
+            OptionMenu("Model", chosen.models.map { Choice(it, it) }, model, { model = it })
+        } else if (models.isNotEmpty()) {
             Label("Model", style = Tokens.Type.Meta, color = colors.textMuted)
             OptionMenu("Model", models.map { Choice(it, it) }, model, { model = it })
         }
 
         Label("Use it for", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-        for (use in DecisionUses) {
+        for (use in DecisionUses.filter { !fromChatProvider || it.id != "browser" }) {
             val on = use.id in uses
 
             Row(verticalAlignment = Alignment.CenterVertically) {

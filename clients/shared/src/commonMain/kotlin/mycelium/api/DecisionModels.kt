@@ -11,16 +11,18 @@ data class DecisionProvider(
     @SerialName("key_hint") val keyHint: String? = null,
     val model: String,
     val uses: List<String> = emptyList(),
+    @SerialName("model_provider_id") val modelProviderId: String? = null,
     @SerialName("created_at") val createdAt: String,
 )
 
 @Serializable
 data class CreateDecisionProviderRequest(
     val name: String,
-    @SerialName("base_url") val baseUrl: String,
+    @SerialName("base_url") val baseUrl: String = "",
     @SerialName("api_key") val apiKey: String? = null,
     val model: String,
     val uses: List<String>,
+    @SerialName("model_provider_id") val modelProviderId: String? = null,
 )
 
 @Serializable
