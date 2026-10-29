@@ -244,7 +244,7 @@ private fun HeaderCell(column: HistoryColumn, sort: HistorySort, numeric: Boolea
             }
         }
 
-        ResizeHandle("Resize ${column.title} column", onResize)
+        ResizeHandle("Resize ${column.title} column", onMove = onResize)
     }
 }
 
