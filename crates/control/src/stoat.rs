@@ -151,6 +151,16 @@ fn messages(body: &Value) -> Value {
     )
 }
 
+fn events_host_belongs_to(events: &url::Url, address: &str) -> bool {
+    let (Some(events), Some(account)) = (events.host_str(), url::Url::parse(address).ok().and_then(|parsed| parsed.host_str().map(str::to_string))) else {
+        return false;
+    };
+    let labels: Vec<&str> = account.split('.').collect();
+    let family = if labels.len() > 2 && account.parse::<std::net::IpAddr>().is_err() { labels[1..].join(".") } else { account.clone() };
+
+    events == account || events == family || events.ends_with(&format!(".{family}"))
+}
+
 async fn servers(http: &reqwest::Client, credentials: &Credentials) -> Result<Value, String> {
     let root = send(http.get(format!("{}/", base(credentials))).timeout(TIMEOUT)).await?;
     let Some(events) = root["ws"].as_str() else {
@@ -158,6 +168,10 @@ async fn servers(http: &reqwest::Client, credentials: &Credentials) -> Result<Va
     };
     let unreachable = || "Mycelium could not open Stoat's events connection to list servers. Check the server address, then try again.".to_string();
     let mut address = url::Url::parse(events).map_err(|_| unreachable())?;
+
+    if !events_host_belongs_to(&address, &credentials.address) {
+        return Err("This server named an events address on a different domain, so Mycelium did not send the token there. Check the server address, then try again.".to_string());
+    }
 
     address.query_pairs_mut().append_pair("version", "1").append_pair("format", "json");
     let (mut socket, _) = tokio::time::timeout(TIMEOUT, tokio_tungstenite::connect_async(address.as_str())).await.map_err(|_| unreachable())?.map_err(|_| unreachable())?;
@@ -256,5 +270,22 @@ pub async fn call(http: &reqwest::Client, credentials: &Credentials, tool: &str,
     match run(http, credentials, tool, arguments).await {
         Ok(value) => CallOutput { text: value.to_string(), is_error: false },
         Err(reason) => failure(reason),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_events_address_must_sit_on_the_servers_own_domain() {
+        let events = |address: &str| url::Url::parse(address).unwrap();
+
+        assert!(events_host_belongs_to(&events("wss://stoat.chat/events"), "https://stoat.chat/api"));
+        assert!(events_host_belongs_to(&events("wss://ws.stoat.chat"), "https://api.stoat.chat"));
+        assert!(events_host_belongs_to(&events("ws://127.0.0.1:9000"), "http://127.0.0.1:9001"));
+        assert!(!events_host_belongs_to(&events("wss://evil.example.net/events"), "https://api.stoat.chat"));
+        assert!(!events_host_belongs_to(&events("wss://stoat.chat.evil.example.net"), "https://stoat.chat"));
+        assert!(!events_host_belongs_to(&events("ws://127.0.0.2:9000"), "http://127.0.0.1:9001"));
     }
 }

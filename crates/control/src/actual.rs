@@ -6,6 +6,7 @@ use std::time::Duration;
 const ADD_TRANSACTION: &str = "add_transaction";
 const TIMEOUT: Duration = Duration::from_secs(60);
 const MINOR_UNITS: f64 = 100.0;
+const ACCOUNT_ID_LENGTH: usize = 64;
 
 pub fn normalise_settings(settings: &Value) -> Result<Value, String> {
     let Some(sync_id) = settings["budget_sync_id"].as_str().map(str::trim).filter(|id| !id.is_empty()) else {
@@ -112,6 +113,17 @@ fn transaction_of(transaction: &Value) -> Value {
     json!({"id": transaction["id"], "account": transaction["account"], "date": transaction["date"], "amount": currency(&transaction["amount"]), "payee": transaction["payee_name"].as_str().or_else(|| transaction["payee"].as_str()), "category": transaction["category"], "notes": transaction["notes"], "cleared": transaction["cleared"]})
 }
 
+fn account_id<'a>(arguments: &'a Value) -> Option<&'a str> {
+    text(arguments, "account").filter(|account| account.len() <= ACCOUNT_ID_LENGTH && account.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'))
+}
+
+fn month_of<'a>(arguments: &'a Value) -> Option<&'a str> {
+    let month = text(arguments, "month")?;
+    let (year, number) = month.split_once('-')?;
+
+    (year.len() == 4 && number.len() == 2 && year.bytes().chain(number.bytes()).all(|byte| byte.is_ascii_digit())).then_some(month)
+}
+
 fn collect(list: Result<Value, String>, convert: fn(&Value) -> Value) -> Result<Value, String> {
     list.map(|data| Value::Array(data.as_array().into_iter().flatten().map(convert).collect()))
 }
@@ -125,7 +137,11 @@ pub async fn call(http: &reqwest::Client, credentials: &Credentials, tool: &str,
                 return failure("Give the first day in since, as YYYY-MM-DD.");
             };
             let until = text(arguments, "until").map(str::to_string).unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
-            let accounts = match text(arguments, "account") {
+            if text(arguments, "account").is_some() && account_id(arguments).is_none() {
+                return failure("Give the account's id in account, as listed by list_accounts.");
+            }
+
+            let accounts = match account_id(arguments) {
                 Some(account) => Ok(vec![account.to_string()]),
                 None => send(request(http, credentials, reqwest::Method::GET, "accounts")).await.map(|data| data.as_array().into_iter().flatten().filter(|account| account["closed"] != true).filter_map(|account| account["id"].as_str().map(str::to_string)).collect()),
             };
@@ -155,7 +171,7 @@ pub async fn call(http: &reqwest::Client, credentials: &Credentials, tool: &str,
             }
         }
         "get_budget_month" => {
-            let Some(month) = text(arguments, "month") else {
+            let Some(month) = month_of(arguments) else {
                 return failure("Give the month in month, as YYYY-MM.");
             };
 
@@ -164,8 +180,8 @@ pub async fn call(http: &reqwest::Client, credentials: &Credentials, tool: &str,
             })
         }
         ADD_TRANSACTION => {
-            let (Some(account), Some(date), Some(amount)) = (text(arguments, "account"), text(arguments, "date"), arguments["amount"].as_f64()) else {
-                return failure("Give the account, date and amount.");
+            let (Some(account), Some(date), Some(amount)) = (account_id(arguments), text(arguments, "date"), arguments["amount"].as_f64()) else {
+                return failure("Give the account's id from list_accounts, the date and the amount.");
             };
             let mut transaction = json!({"date": date, "amount": (amount * MINOR_UNITS).round() as i64});
 

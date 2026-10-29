@@ -248,6 +248,28 @@ pub async fn test(State(state): State<AppState>, _user: AuthUser, Json(request):
     }
 }
 
+fn stays_in_api(path: &str) -> bool {
+    let (route, query) = path.split_once('?').unwrap_or((path, ""));
+    let plain = |part: &str| !part.is_empty() && part != ".." && part != "." && part.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'));
+    let allowed: &[&str] = match route {
+        "deploy" => &["uuid", "force"],
+        route if route.ends_with("/logs") => &["lines"],
+        route if route.starts_with("applications/") && route.matches('/').count() == 1 => &["delete_configurations", "delete_volumes"],
+        _ => &[],
+    };
+    let mut keys = Vec::new();
+    let query_ok = query.split('&').filter(|pair| !pair.is_empty()).all(|pair| {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let fresh = !keys.contains(&key);
+
+        keys.push(key);
+
+        fresh && allowed.contains(&key) && (value.is_empty() || plain(value))
+    });
+
+    route.split('/').all(plain) && query_ok
+}
+
 struct Account {
     http: reqwest::Client,
     credentials: Credentials,
@@ -318,6 +340,10 @@ impl Account {
     }
 
     async fn call(&self, method: reqwest::Method, path: &str, body: Option<Value>) -> Outcome<Value> {
+        if !stays_in_api(path) {
+            return Err(Failure::Other("That id is not a Coolify id. Use the uuid from list_apps.".to_string()));
+        }
+
         let builder = request(&self.http, &self.credentials, method, path);
         let builder = match body {
             Some(body) => builder.json(&body),

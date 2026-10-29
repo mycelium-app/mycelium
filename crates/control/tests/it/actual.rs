@@ -102,6 +102,20 @@ async fn adding_actual_needs_a_sync_id_and_checks_the_key_against_the_budget() {
 }
 
 #[tokio::test]
+async fn the_budget_encryption_password_is_never_returned_by_the_account_list() {
+    let server = Server::start().await;
+    let (base, _) = fake_actual().await;
+
+    let (status, added) = add_actual(&server, &base, API_KEY, json!({"budget_sync_id": SYNC_ID, "encryption_password": "budget-secret-77"})).await;
+    let listed = server.user.get("/api/v1/chat-tool-servers").send().await.unwrap().text().await.unwrap();
+
+    assert_eq!(status, 201, "{added}");
+    assert!(!added.to_string().contains("budget-secret-77"));
+    assert!(!listed.contains("budget-secret-77"));
+    assert_eq!(added["settings"]["encryption_password_set"], true);
+}
+
+#[tokio::test]
 async fn the_agent_reads_accounts_categories_transactions_in_a_range_and_a_months_budget_in_currency() {
     let server = Server::start().await;
     let node = server.online_node("laptop").await;
@@ -135,4 +149,48 @@ async fn adding_a_transaction_asks_first_and_sends_the_amount_in_minor_units() {
     assert_ne!(added["isError"], true, "{added}");
     assert_eq!(sent[0]["account"], "a1");
     assert_eq!(sent[0]["body"]["transaction"], json!({"date": "2026-10-27", "amount": -1250, "payee_name": "Corner shop", "category": "c1"}));
+}
+
+#[tokio::test]
+async fn an_account_or_month_that_is_not_an_id_is_refused_instead_of_extending_the_request_path() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, fake) = fake_actual().await;
+    add_actual(&server, &base, API_KEY, json!({"budget_sync_id": SYNC_ID})).await;
+
+    let transactions = call(&server, &node.token, "get_transactions", json!({"since": "2026-10-01", "account": "a1/../../x"})).await;
+    let month = call(&server, &node.token, "get_budget_month", json!({"month": "2026-10/../../x"})).await;
+    let added = call(&server, &node.token, "add_transaction", json!({"account": "a1/../../x", "date": "2026-10-27", "amount": -12.5})).await;
+
+    assert_eq!((transactions["isError"].clone(), month["isError"].clone(), added["isError"].clone()), (json!(true), json!(true), json!(true)));
+    assert!(fake.added.lock().unwrap().is_empty());
+    assert!(fake.ranges.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_budget_server_that_redirects_does_not_receive_the_api_key_elsewhere() {
+    let server = Server::start().await;
+    let keys: Arc<Mutex<Vec<String>>> = Arc::default();
+    let recorded = keys.clone();
+    let sink = serve(Router::new().fallback(move |headers: HeaderMap| {
+        let recorded = recorded.clone();
+
+        async move {
+            recorded.lock().unwrap().push(headers.get("x-api-key").and_then(|value| value.to_str().ok()).unwrap_or_default().to_string());
+
+            Json(json!({"data": []}))
+        }
+    }))
+    .await;
+    let front = serve(Router::new().fallback(move || {
+        let landing = sink.clone();
+
+        async move { (StatusCode::TEMPORARY_REDIRECT, [("location", landing)]) }
+    }))
+    .await;
+
+    let (status, refused) = add_actual(&server, &front, API_KEY, json!({"budget_sync_id": SYNC_ID})).await;
+
+    assert_eq!(status, 400, "{refused}");
+    assert!(keys.lock().unwrap().is_empty());
 }

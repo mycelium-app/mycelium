@@ -312,3 +312,17 @@ async fn stopping_an_app_asks_first() {
     assert_eq!(asked, json!("coolify__stop"));
     assert_eq!(reply["result"]["isError"], true);
 }
+
+#[tokio::test]
+async fn an_id_that_would_leave_the_app_path_is_refused_before_it_reaches_coolify() {
+    let server = Server::start().await;
+    let (base, _) = fake_coolify().await;
+    add_coolify(&server, &base).await;
+
+    let (status, refused) = server.user.json(server.user.get("/api/v1/apps/a1/logs?kind=build&deployment=d1/../../servers")).await;
+    let (injected, _) = server.user.json(server.user.get("/api/v1/apps/a1%3Fforce=true/deployments")).await;
+
+    assert!(status >= 400, "{refused}");
+    assert!(refused.to_string().contains("not a Coolify id"), "{refused}");
+    assert!(injected >= 400);
+}

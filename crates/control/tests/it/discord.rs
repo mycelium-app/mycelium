@@ -133,3 +133,19 @@ async fn a_sent_message_opens_with_a_line_saying_the_mycelium_agent_posted_it_on
     assert!(content.starts_with("*Posted by the Mycelium agent on behalf of Sam.*"), "{content}");
     assert!(content.ends_with("Seeds are in the shed."), "{content}");
 }
+
+#[tokio::test]
+async fn an_id_that_is_not_digits_is_refused_instead_of_extending_the_request_path() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, fake) = fake_discord().await;
+    add_discord(&server, &base, TOKEN).await;
+
+    let read = call(&server, &node.token, "get_messages", json!({"channel": "20/../../users/@me"})).await;
+    let channels = call(&server, &node.token, "list_channels", json!({"server": "10?x=1"})).await;
+    let sent = call(&server, &node.token, "send_message", json!({"channel": "20/../../users/@me", "content": "Seeds are in the shed."})).await;
+
+    assert_eq!((read["isError"].clone(), channels["isError"].clone(), sent["isError"].clone()), (json!(true), json!(true), json!(true)));
+    assert!(text(&read).contains("digits only"), "{read}");
+    assert!(fake.posted.lock().unwrap().is_empty());
+}

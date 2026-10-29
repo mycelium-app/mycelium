@@ -123,6 +123,18 @@ impl ServerRow {
         self.known_app().map_or(DEFAULT_KEY_HEADER, |app| app.key_header)
     }
 
+    fn visible_settings(&self) -> Value {
+        let mut settings = self.settings.0.clone();
+
+        if let Some(object) = settings.as_object_mut()
+            && object.remove("encryption_password").is_some()
+        {
+            object.insert("encryption_password_set".to_string(), Value::Bool(true));
+        }
+
+        settings
+    }
+
     pub fn to_proto(&self) -> ChatToolServer {
         ChatToolServer {
             id: self.id,
@@ -130,7 +142,7 @@ impl ServerRow {
             kind: self.kind.clone(),
             url: self.url.clone(),
             account: self.account.clone(),
-            settings: self.settings.0.clone(),
+            settings: self.visible_settings(),
             token_hint: self.bearer_token.as_deref().map(token_hint),
             oauth: self.oauth.is_some(),
             enabled: self.enabled,
