@@ -3,7 +3,11 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 fn flags(voice: bool, kubernetes_nodes: bool) -> Value {
-    json!({"tasks": true, "workflows": true, "instructions": true, "details": true, "subagents": true, "walkthrough": true, "move_chats": true, "groups": true, "continue_elsewhere": true, "assistants": true, "memory_banks": true, "chat_across_groups": true, "voice": voice, "kubernetes_nodes": kubernetes_nodes})
+    flags_with(voice, kubernetes_nodes, false, false)
+}
+
+fn flags_with(voice: bool, kubernetes_nodes: bool, tasks_and_workflows: bool, history: bool) -> Value {
+    json!({"tasks": true, "workflows": true, "instructions": true, "details": true, "subagents": true, "walkthrough": true, "move_chats": true, "groups": true, "continue_elsewhere": true, "assistants": true, "memory_banks": true, "chat_across_groups": true, "voice": voice, "kubernetes_nodes": kubernetes_nodes, "tasks_and_workflows": tasks_and_workflows, "history": history})
 }
 
 async fn mcp(server: &Server, token: &str, method: &str, params: Value) -> (u16, Value) {
@@ -25,6 +29,15 @@ async fn voice_is_off_by_default_is_isolated_per_person_and_survives_a_restart()
     let restarted = Server::start_on(server.database_url.clone(), |_| {}).await;
     let (_, persisted) = restarted.user.json(restarted.user.get("/api/v1/experiments")).await;
     assert_eq!(persisted, flags(true, false));
+}
+
+#[tokio::test]
+async fn tasks_workflows_and_history_are_off_until_switched_on() {
+    let server = Server::start().await;
+    let (_, defaults) = server.user.json(server.user.get("/api/v1/experiments")).await;
+    let (_, saved) = server.user.json(server.user.put("/api/v1/experiments").json(&json!({"tasks_and_workflows": true, "history": true}))).await;
+    assert_eq!(defaults, flags(false, false));
+    assert_eq!(saved, flags_with(false, false, true, true));
 }
 
 #[tokio::test]
