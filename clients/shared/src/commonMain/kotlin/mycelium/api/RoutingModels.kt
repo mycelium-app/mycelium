@@ -27,7 +27,7 @@ data class AgentSettings(
 data class SaveAgentSettingsRequest(
     @SerialName("default_modes") val defaultModes: DefaultModes = DefaultModes(),
     @SerialName("any_model") val anyModel: List<ModelChoice> = emptyList(),
-    @SerialName("node_preferences") val nodePreferences: Map<String, String> = emptyMap(),
+    @SerialName("node_preferences") val nodePreferences: Map<String, String>? = null,
 )
 
 object NodePreference {

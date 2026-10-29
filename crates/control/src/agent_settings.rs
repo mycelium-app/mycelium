@@ -88,14 +88,14 @@ pub async fn save(State(state): State<AppState>, user: AuthUser, Json(request): 
     }
 
     sqlx::query(
-        "insert into user_settings (owner, default_mode_claude, default_mode_codex, any_model, node_preferences) values ($1, $2, $3, $4, $5)
-         on conflict (owner) do update set default_mode_claude = excluded.default_mode_claude, default_mode_codex = excluded.default_mode_codex, any_model = excluded.any_model, node_preferences = excluded.node_preferences",
+        "insert into user_settings (owner, default_mode_claude, default_mode_codex, any_model, node_preferences) values ($1, $2, $3, $4, coalesce($5, '{}'::jsonb))
+         on conflict (owner) do update set default_mode_claude = excluded.default_mode_claude, default_mode_codex = excluded.default_mode_codex, any_model = excluded.any_model, node_preferences = coalesce($5, user_settings.node_preferences)",
     )
     .bind(user.id)
     .bind(&request.default_modes.claude)
     .bind(&request.default_modes.codex)
     .bind(Sql(&request.any_model))
-    .bind(Sql(&request.node_preferences))
+    .bind(request.node_preferences.as_ref().map(Sql))
     .execute(&state.pool)
     .await?;
 

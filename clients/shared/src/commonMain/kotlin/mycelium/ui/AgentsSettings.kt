@@ -98,7 +98,7 @@ fun AgentsSettings(store: Store) {
                                 val picked = modes.first { it.name == label }.id
                                 val defaults = if (agent == "codex") current.defaultModes.copy(codex = picked) else current.defaultModes.copy(claude = picked)
 
-                                runner { settings = store.api.saveAgentSettings(SaveAgentSettingsRequest(defaults, current.anyModel, current.nodePreferences)) }
+                                runner { settings = store.api.saveAgentSettings(SaveAgentSettingsRequest(defaults, current.anyModel)) }
                             },
                             groupLabel = "Default mode for ${agentName(agent)}",
                         )
@@ -228,7 +228,7 @@ fun AgentsSettings(store: Store) {
                 current.anyModel,
                 addModelChoices(state.nodes.values, providers, includeAnyModel = false),
                 providers,
-                onSave = { list -> settings = store.api.saveAgentSettings(SaveAgentSettingsRequest(current.defaultModes, list, current.nodePreferences)) },
+                onSave = { list -> settings = store.api.saveAgentSettings(SaveAgentSettingsRequest(current.defaultModes, list)) },
                 onDismiss = { editingList = false },
             )
         }

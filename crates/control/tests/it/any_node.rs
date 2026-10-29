@@ -89,3 +89,15 @@ async fn the_any_node_preview_names_the_node_it_would_pick_now() {
     assert_eq!(status, 200, "{pick}");
     assert_eq!(pick, json!({"node_id": atlas.id, "name": "atlas"}));
 }
+
+#[tokio::test]
+async fn saving_agent_settings_without_node_preferences_leaves_the_stored_ones_alone() {
+    let server = Server::start().await;
+    let willow = server.online_node("willow").await;
+    save_preferences(&server, json!({willow.id.to_string(): "avoid"})).await;
+
+    let (status, settings) = server.user.json(server.user.put("/api/v1/agent-settings").json(&json!({"any_model": []}))).await;
+
+    assert_eq!(status, 200, "{settings}");
+    assert_eq!(settings["node_preferences"], json!({willow.id.to_string(): "avoid"}));
+}

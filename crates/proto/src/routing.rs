@@ -95,8 +95,8 @@ pub struct SaveAgentSettingsRequest {
     pub default_modes: DefaultModes,
     #[serde(default)]
     pub any_model: Vec<ModelChoice>,
-    #[serde(default)]
-    pub node_preferences: std::collections::HashMap<Uuid, NodePreference>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_preferences: Option<std::collections::HashMap<Uuid, NodePreference>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
