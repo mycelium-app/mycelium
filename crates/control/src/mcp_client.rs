@@ -1,3 +1,4 @@
+use crate::outbound::{BODY_LIMIT, Oversize, read_text_limited};
 use serde_json::{Value, json};
 use std::time::Duration;
 
@@ -235,8 +236,10 @@ impl McpConnection {
         let status = response.status().as_u16();
         let session = response.headers().get("mcp-session-id").and_then(|value| value.to_str().ok()).map(str::to_string);
         let event_stream = response.headers().get("content-type").and_then(|value| value.to_str().ok()).is_some_and(|value| value.starts_with("text/event-stream"));
-        let Ok(text) = response.text().await else {
-            return Err(McpError::Failed("the server stopped replying part way through.".to_string()));
+        let text = match read_text_limited(response, BODY_LIMIT).await {
+            Ok(text) => text,
+            Err(Oversize::Larger) => return Err(McpError::Failed("the server's reply was larger than 16 MiB.".to_string())),
+            Err(Oversize::Stopped) => return Err(McpError::Failed("the server stopped replying part way through.".to_string())),
         };
 
         if status == 401 || status == 403 {

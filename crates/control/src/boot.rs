@@ -37,7 +37,7 @@ pub fn new_state(config: Config) -> Result<AppState> {
         rate_limiter: Arc::new(RateLimiter::default()),
         latest: Arc::new(LatestVersions::default()),
         readiness: Arc::new(Mutex::new(Readiness::Migrating)),
-        http: reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?,
+        http: crate::outbound::client()?,
         forge_cache,
     })
 }

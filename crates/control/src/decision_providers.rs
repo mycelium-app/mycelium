@@ -1,6 +1,7 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::forges::token_hint;
+use crate::outbound::{BODY_LIMIT, read_limited, read_text_limited};
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Path, State};
@@ -85,7 +86,9 @@ pub async fn list_models(state: &AppState, base_url: &str, key: Option<&str>) ->
         return Err(ApiError::bad_request("decision_provider_failed", format!("The server answered {} when asked for its models. Check the address.", status.as_u16())));
     }
 
-    let body: Value = response.json().await.map_err(|_| ApiError::bad_request("decision_provider_failed", "The server did not answer with a list of models. Check the address is an OpenJev or Jev-compatible server."))?;
+    let unreadable = || ApiError::bad_request("decision_provider_failed", "The server did not answer with a list of models. Check the address is an OpenJev or Jev-compatible server.");
+    let raw = read_limited(response, BODY_LIMIT).await.map_err(|_| unreadable())?;
+    let body: Value = serde_json::from_slice(&raw).map_err(|_| unreadable())?;
     let models = body["data"].as_array().into_iter().flatten().filter_map(|model| model["id"].as_str()).map(str::to_string).collect();
 
     Ok(models)
@@ -276,7 +279,7 @@ pub async fn ask(state: &AppState, base_url: &str, key: Option<&str>, model: &st
     };
     let status = response.status();
     let retry_after = response.headers().get("retry-after").and_then(|value| value.to_str().ok()).map(str::to_string);
-    let body = response.text().await.unwrap_or_default();
+    let body = read_text_limited(response, BODY_LIMIT).await.unwrap_or_default();
 
     if !status.is_success() {
         return Err(describe_failure(status, retry_after.as_deref(), &body));

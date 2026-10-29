@@ -1,11 +1,12 @@
 use crate::auth::AuthUser;
 use crate::chat_tool_servers::{ApiSurface, ServerRow, bearer, known_app, list_owned};
 use crate::error::{ApiError, ApiResult};
+use crate::outbound::{BODY_LIMIT, Oversize, read_limited};
 use crate::state::AppState;
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Path, RawQuery, State};
-use axum::http::{HeaderMap, Method, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use mycelium_proto::api::IntegrationApiGrant;
 use std::time::Duration;
@@ -149,8 +150,23 @@ pub async fn proxy(State(state): State<AppState>, user: AuthUser, Path((server_i
         }
     };
     let status = response.status();
+
+    if status.is_redirection() {
+        record(&state, user.id, server, &tool, reading, true).await;
+
+        return Err(ApiError::new(StatusCode::BAD_GATEWAY, "integration_redirected", format!("{} sent Mycelium to another address, which it does not follow. Check the integration's address in Settings, Integrations.", server.name)));
+    }
+
     let content_type = response.headers().get(header::CONTENT_TYPE).cloned();
-    let bytes = response.bytes().await.map_err(|_| ApiError::new(StatusCode::BAD_GATEWAY, "integration_unreachable", format!("{} stopped answering part way.", server.name)))?;
+    let bytes = match read_limited(response, BODY_LIMIT).await {
+        Ok(bytes) => bytes,
+        Err(Oversize::Larger) => {
+            record(&state, user.id, server, &tool, reading, true).await;
+
+            return Err(ApiError::new(StatusCode::BAD_GATEWAY, "integration_response_too_large", format!("{} answered with more than 16 MiB. Ask for a smaller part of it.", server.name)));
+        }
+        Err(Oversize::Stopped) => return Err(ApiError::new(StatusCode::BAD_GATEWAY, "integration_unreachable", format!("{} stopped answering part way.", server.name))),
+    };
 
     record(&state, user.id, server, &tool, reading, !status.is_success()).await;
 
@@ -159,6 +175,10 @@ pub async fn proxy(State(state): State<AppState>, user: AuthUser, Path((server_i
     if let Some(content_type) = content_type {
         answer.headers_mut().insert(header::CONTENT_TYPE, content_type);
     }
+
+    answer.headers_mut().insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    answer.headers_mut().insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("sandbox"));
+    answer.headers_mut().insert(header::CONTENT_DISPOSITION, HeaderValue::from_static("attachment"));
 
     Ok(answer)
 }

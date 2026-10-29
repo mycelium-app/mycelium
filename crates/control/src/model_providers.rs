@@ -1,6 +1,7 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::forges::token_hint;
+use crate::outbound::{BODY_LIMIT, LINE_LIMIT, read_limited, read_text_limited};
 use crate::state::AppState;
 use crate::store::{enum_text, parse_enum};
 use axum::Json;
@@ -306,7 +307,10 @@ impl ProviderRow {
             return Ok(Err(ProviderError::Failed(status.as_u16())));
         }
 
-        let Ok(body) = response.json::<Value>().await else {
+        let Ok(raw) = read_limited(response, BODY_LIMIT).await else {
+            return Ok(Err(ProviderError::Failed(status.as_u16())));
+        };
+        let Ok(body) = serde_json::from_slice::<Value>(&raw) else {
             return Ok(Err(ProviderError::Failed(status.as_u16())));
         };
         let mut models: Vec<String> = body["data"].as_array().map(|items| items.iter().filter_map(|item| item["id"].as_str().map(str::to_string)).collect()).unwrap_or_default();
@@ -388,7 +392,7 @@ impl ProviderRow {
         }
 
         if !status.is_success() {
-            let mentions_tools = !tools.is_empty() && response.text().await.is_ok_and(|text| text.to_lowercase().contains("tool"));
+            let mentions_tools = !tools.is_empty() && read_text_limited(response, BODY_LIMIT).await.is_ok_and(|text| text.to_lowercase().contains("tool"));
 
             return Ok(Err(if mentions_tools { ProviderError::ToolsRejected } else { ProviderError::Failed(status.as_u16()) }));
         }
@@ -416,6 +420,10 @@ impl ReplyStream {
             };
 
             self.buffer.extend_from_slice(&bytes);
+
+            if self.buffer.len() > LINE_LIMIT && !self.buffer.contains(&b'\n') {
+                return Err(ProviderError::Stopped("The model sent a line that was too long to read. Send your message again.".to_string()));
+            }
 
             while let Some(end) = self.buffer.iter().position(|byte| *byte == b'\n') {
                 let line: Vec<u8> = self.buffer.drain(..=end).collect();

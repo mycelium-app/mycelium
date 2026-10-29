@@ -42,7 +42,7 @@ fn parse(text: &str) -> Option<Version> {
 }
 
 async fn fetch(state: &AppState, url: &str) -> Result<String> {
-    let response = state.http.get(url).send().await.context("the request failed")?;
+    let response = crate::outbound::get_following_redirects(&state.http, url).await.context("the request failed")?;
 
     if !response.status().is_success() {
         bail!("it answered {}", response.status());

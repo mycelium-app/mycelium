@@ -17,6 +17,7 @@ mod artifact_access;
 mod attachments;
 mod auth;
 mod boot;
+mod outbound;
 mod caldav;
 mod coolify;
 mod chat_import;

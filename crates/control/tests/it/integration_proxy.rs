@@ -50,9 +50,21 @@ async fn document_info(Json(body): Json<Value>) -> Response {
     Json(json!({"data": {"title": "Release notes", "urlId": "aB3dE5fG"}})).into_response()
 }
 
+async fn redirecting() -> Response {
+    (StatusCode::TEMPORARY_REDIRECT, [("location", "http://169.254.169.254/latest/meta-data/")]).into_response()
+}
+
+async fn oversize() -> Response {
+    vec![b'a'; 17 * 1024 * 1024].into_response()
+}
+
+async fn page() -> Response {
+    ([("content-type", "text/html")], "<script>alert(1)</script>").into_response()
+}
+
 async fn add_outline(server: &Server) -> (String, Arc<FakeOutline>) {
     let fake = Arc::new(FakeOutline::default());
-    let base = serve(Router::new().route("/mcp", post(mcp)).route("/api/documents.info", post(document_info)).route("/api/{action}", post(api)).with_state(fake.clone())).await;
+    let base = serve(Router::new().route("/mcp", post(mcp)).route("/api/documents.info", post(document_info)).route("/api/redirect.me", post(redirecting)).route("/api/oversize.list", post(oversize)).route("/api/page.html", post(page)).route("/api/{action}", post(api)).with_state(fake.clone())).await;
     let (status, added) = server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Docs", "kind": "outline", "url": base, "bearer_token": KEY}))).await;
     assert_eq!(status, 201, "{added}");
 
@@ -80,11 +92,14 @@ async fn request_access(server: &Server, link: &NodeLink, conversation: Uuid, ar
     body["result"].clone()
 }
 
-async fn call(server: &Server, token: &str, id: &str, method: &str, path: &str) -> u16 {
+async fn answer(server: &Server, token: &str, id: &str, method: &str, path: &str) -> reqwest::Response {
     let method = reqwest::Method::from_bytes(method.as_bytes()).unwrap();
-    let response = server.anonymous().http.request(method, format!("{}/api/v1/integrations/{id}/proxy/{path}", server.base)).header("authorization", format!("Bearer {token}")).send().await.unwrap();
 
-    response.status().as_u16()
+    server.anonymous().http.request(method, format!("{}/api/v1/integrations/{id}/proxy/{path}", server.base)).header("authorization", format!("Bearer {token}")).send().await.unwrap()
+}
+
+async fn call(server: &Server, token: &str, id: &str, method: &str, path: &str) -> u16 {
+    answer(server, token, id, method, path).await.status().as_u16()
 }
 
 async fn granted_token(server: &Server, link: &mut NodeLink, conversation: Uuid, scopes: Value) -> String {
@@ -120,6 +135,49 @@ async fn a_granted_agent_reaches_the_integration_api_without_the_key_and_the_cal
     assert_eq!(logged[0]["tool"], "api:POST documents.list");
     assert_eq!(grants[0]["scopes"], json!(["read"]));
     assert!(!token.contains(KEY));
+}
+
+#[tokio::test]
+async fn an_integration_that_redirects_is_not_followed_and_the_redirect_is_not_passed_on() {
+    let server = Server::start().await;
+    let (id, _) = add_outline(&server).await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = working_conversation(&server, &mut link).await;
+    let token = granted_token(&server, &mut link, conversation, json!(["write"])).await;
+
+    let response = answer(&server, &token, &id, "POST", "redirect.me").await;
+
+    assert_eq!(response.status().as_u16(), 502);
+    assert!(response.headers().get("location").is_none());
+}
+
+#[tokio::test]
+async fn an_integration_answer_larger_than_the_limit_is_refused() {
+    let server = Server::start().await;
+    let (id, _) = add_outline(&server).await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = working_conversation(&server, &mut link).await;
+    let token = granted_token(&server, &mut link, conversation, json!(["read"])).await;
+
+    let response = answer(&server, &token, &id, "POST", "oversize.list").await;
+
+    assert_eq!(response.status().as_u16(), 502);
+}
+
+#[tokio::test]
+async fn an_integration_page_is_served_as_a_download_that_cannot_run_script_on_the_mycelium_origin() {
+    let server = Server::start().await;
+    let (id, _) = add_outline(&server).await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = working_conversation(&server, &mut link).await;
+    let token = granted_token(&server, &mut link, conversation, json!(["write"])).await;
+
+    let response = answer(&server, &token, &id, "POST", "page.html").await;
+    let header = |name: &str| response.headers().get(name).and_then(|value| value.to_str().ok()).map(str::to_string);
+
+    assert_eq!(header("x-content-type-options").as_deref(), Some("nosniff"));
+    assert_eq!(header("content-security-policy").as_deref(), Some("sandbox"));
+    assert_eq!(header("content-disposition").as_deref(), Some("attachment"));
 }
 
 #[tokio::test]

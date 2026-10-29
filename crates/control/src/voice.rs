@@ -2,6 +2,7 @@ use crate::assistants;
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::model_providers;
+use crate::outbound::{AUDIO_LIMIT, read_limited};
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Path, State};
@@ -173,10 +174,10 @@ pub async fn speak(State(state): State<AppState>, user: AuthUser, Json(request):
         return Err(speech_failed());
     }
 
-    let content_type = response.headers().get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or(DEFAULT_AUDIO_TYPE).to_string();
-    let Ok(audio) = response.bytes().await else {
+    let content_type = response.headers().get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).filter(|value| value.starts_with("audio/")).unwrap_or(DEFAULT_AUDIO_TYPE).to_string();
+    let Ok(audio) = read_limited(response, AUDIO_LIMIT).await else {
         return Err(speech_failed());
     };
 
-    Ok(([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, "no-store".to_string())], audio).into_response())
+    Ok(([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, "no-store".to_string()), (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string())], audio).into_response())
 }
