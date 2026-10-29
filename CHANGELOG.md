@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.16.0
+
+Every screen change in this release was designed in the canonical design artefact first.
+
+- New conversation starts from the composer: project and place sit beside the account and model controls, the project picker searches and lists recent projects first, the place menu chooses the node and an existing checkout or a new worktree with its branch, and a folder is only asked for when there is no project. The composer starts on your most recent project and stays usable with no node online.
+- The folder browser has the path first and a single primary action, Choose this folder.
+- Cowork environments have a searchable app launcher with open windows, recent apps and apps grouped by kind, and the thread shows when an environment started, when you took over or handed back, and when it stopped.
+- The live environment view renders again while the agent is in control.
+- While listening, voice offers Send and Cancel, and the microphone says it sends what was heard.
+- Wake phrase: say "Hey Mycelium" or "OK Mycelium" to start voice in the Linux desktop app (Settings, Privacy). Detection runs on the device, and audio is discarded unless the phrase is heard.
+- Experiment: Kubernetes nodes. A node in a cluster runs each conversation in its own pod from the `ghcr.io/mycelium-app/mycelium-agent` image, with Claude Code and Codex preinstalled and agent sign-ins from a Kubernetes Secret. Turn it on in Settings, Experiments, then join one from Nodes. The node page shows its cluster settings and each conversation's pod. See `docs/KUBERNETES.md`.
+- Every node page has the More menu with Rename, Drain and Revoke.
+- Security, from independent reviews by Claude Opus 5.5 and Claude Mythos 5.1:
+  - Each agent session gets its own short-lived Mycelium token instead of the node's credential, and Mycelium's tools act for the conversation's owner. Nodes on older versions lose Mycelium's tools until they update.
+  - A scoped API token can no longer approve its own access requests, cookie requests are checked for their origin, and sign-in redirects stay on the control plane.
+  - The global instruction layer and dashboards are limited to operators (`MYCELIUM_OPERATORS`, by default the first allowed email). Memories, imports, SSH access and device sign-ins are limited to their owner.
+  - With `MYCELIUM_ALLOWED_EMAILS` set, sign-in needs the identity provider to mark the email as verified.
+  - Outbound requests no longer follow redirects or reach link-local and cloud metadata addresses, and oversized replies are refused. Integrations on your own network keep working.
+  - Forge credentials no longer reach repository hooks or a rewritten `origin`; git stays inside the projects folder.
+  - Private artefacts are only shown to their owner, page artefacts run in a sandboxed frame and keep their data store, and only the owner can write to a page's data store.
+  - Actual's encryption password is no longer returned with its settings.
+
 ## v0.15.6
 
 The first release published on GitHub. v0.15.3 to v0.15.5 were tagged but never published.
