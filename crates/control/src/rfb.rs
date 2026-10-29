@@ -43,6 +43,7 @@ fn next_message(bytes: &[u8]) -> Message {
             Some(_) => known(needs(8 + read_u32(bytes, 4)), true),
             None => Message::Incomplete,
         },
+        150 => known(needs(10), false),
         248 => match needs(9) {
             Some(_) => known(needs(9 + bytes[8] as usize), false),
             None => Message::Incomplete,
@@ -118,6 +119,7 @@ mod tests {
     const KEY_EVENT: [u8; 8] = [4, 1, 0, 0, 0, 0, 0, 97];
     const POINTER_EVENT: [u8; 6] = [5, 1, 0, 10, 0, 10];
     const REFRESH_REQUEST: [u8; 10] = [3, 1, 0, 0, 0, 0, 0, 100, 0, 100];
+    const CONTINUOUS_UPDATES_REQUEST: [u8; 10] = [150, 1, 0, 0, 0, 0, 0, 100, 0, 100];
 
     fn shaken() -> ClientFilter {
         let mut filter = ClientFilter::default();
@@ -142,6 +144,14 @@ mod tests {
         let batch = [REFRESH_REQUEST.to_vec(), KEY_EVENT.to_vec(), POINTER_EVENT.to_vec()].concat();
 
         assert_eq!(filter.pass(&batch, false), REFRESH_REQUEST.to_vec());
+    }
+
+    #[test]
+    fn a_continuous_updates_request_keeps_the_view_updating_while_the_agent_controls() {
+        let mut filter = shaken();
+        let batch = [CONTINUOUS_UPDATES_REQUEST.to_vec(), KEY_EVENT.to_vec(), REFRESH_REQUEST.to_vec()].concat();
+
+        assert_eq!(filter.pass(&batch, false), [CONTINUOUS_UPDATES_REQUEST.to_vec(), REFRESH_REQUEST.to_vec()].concat());
     }
 
     #[test]
