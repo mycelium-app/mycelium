@@ -21,6 +21,8 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import mycelium.api.AnyNodeId
+import mycelium.api.AnyNodePick
 import mycelium.api.Conversation
 import mycelium.api.CreateConversationRequest
 import mycelium.api.LoginState
@@ -60,6 +62,8 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val colors = MyTheme.colors
     val nodes = startableNodes(state)
     var nodeId by remember { mutableStateOf<String?>(null) }
+    var anyNode by remember { mutableStateOf(false) }
+    var anyNodePick by remember { mutableStateOf<AnyNodePick?>(null) }
     var agent by remember { mutableStateOf<String?>(null) }
     var cwd by remember { mutableStateOf("") }
     var prompt by remember { mutableStateOf(TextFieldValue("")) }
@@ -82,11 +86,23 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
         store.load { store.refreshProjects() }
     }
 
+    LaunchedEffect(placeMenuOpen, anyNode, nodes.size) {
+        if ((placeMenuOpen || anyNode) && nodes.isNotEmpty()) {
+            anyNodePick = runCatching { store.api.anyNodePick() }.getOrNull()
+        }
+    }
+
     val groupFilter = LocalGroupFilter.current
     val projects = state.projects.values.filter { inGroup(it.groupId, groupFilter) }.sortedBy { it.name }
     val recent = state.conversations.values.filter { it.projectId != null }.sortedByDescending { it.updatedAt }.mapNotNull { conversation -> projects.firstOrNull { it.id == conversation.projectId } }.distinct().take(RecentProjects)
     val project = if (withoutProject) null else state.projects[chosenProject] ?: recent.firstOrNull()
-    val node = if (project != null) state.nodes[project.nodeId] else nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
+    val previewedNode = anyNodePick?.let { state.nodes[it.nodeId] }
+    val node = when {
+        project != null && anyNode -> previewedNode ?: state.nodes[project.nodeId]
+        project != null -> state.nodes[project.nodeId]
+        anyNode -> previewedNode ?: nodes.firstOrNull()
+        else -> nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
+    }
     val lastNode = if (project != null) state.nodes[project.nodeId] else state.nodes.values.minByOrNull { it.name }
     val agents = node?.agents?.filter { it.available }.orEmpty()
     val chosenAgent = agents.firstOrNull { it.agent == agent }?.agent ?: agents.firstOrNull()?.agent
@@ -133,7 +149,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
         store.act {
             val created = store.api.createConversation(
                 CreateConversationRequest(
-                    node.id,
+                    if (anyNode) AnyNodeId else node.id,
                     chosenAgent,
                     account = chosenAccount?.account,
                     routing = routing,
@@ -240,9 +256,9 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                 Box {
                                     MyButton(
                                         { placeMenuOpen = true },
-                                        text = "${placed.name} · $where",
-                                        icon = nodeIcon(placed),
-                                        description = "Place: ${placed.name}, $summary",
+                                        text = "${if (anyNode) "Any node" else placed.name} · $where",
+                                        icon = if (anyNode) MyIcon.Server else nodeIcon(placed),
+                                        description = "Place: ${if (anyNode) "Any node" else placed.name}, $summary",
                                         muted = true,
                                         trailingIcon = MyIcon.ChevronDown,
                                     )
@@ -250,6 +266,14 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                     if (placeMenuOpen) {
                                         MenuPopup(onDismiss = { placeMenuOpen = false }, width = PlaceMenuWidth) {
                                             MenuLabel("Run on")
+
+                                            MenuItem(
+                                                "Any node",
+                                                onClick = { anyNode = true },
+                                                checked = anyNode,
+                                                hint = anyNodePick?.let { "Would pick ${it.name}" },
+                                                leading = MyIcon.Server,
+                                            )
 
                                             for (option in nodes) {
                                                 MenuItem(
@@ -260,9 +284,10 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                                             worktree = false
                                                         }
 
+                                                        anyNode = false
                                                         nodeId = option.id
                                                     },
-                                                    checked = option.id == placed.id,
+                                                    checked = !anyNode && option.id == placed.id,
                                                     hint = if (project == null) null else if (option.id == project.nodeId) project.path else "No checkout, choose a folder",
                                                     leading = nodeIcon(option),
                                                 )

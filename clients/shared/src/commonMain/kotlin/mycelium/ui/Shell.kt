@@ -135,6 +135,7 @@ import mycelium.state.isWorktree
 import mycelium.state.needsInputIn
 import mycelium.state.pinnedChats
 import mycelium.state.pinnedConversations
+import mycelium.state.snoozedConversations
 import mycelium.state.projectName
 import mycelium.state.resetBefore
 import mycelium.state.sidebarAssistants
@@ -708,6 +709,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
     val workspaceConversations = if (appClosed) state.conversations.values.filter { it.groupId != null } else state.conversations.values
     val pinned = pinnedConversations(workspaceConversations, scope)
     val sections = sidebarSections(workspaceConversations, scope)
+    val snoozed = snoozedConversations(workspaceConversations, scope)
     val openChats = if (appClosed) emptyList() else state.conversations.values.filterNot { hours.closed(it.groupId) }
     val pinnedChatRows = pinnedChats(openChats)
     val chats = chatSections(openChats)
@@ -867,6 +869,8 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                         conversationRows(null, section.rows, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = true)
                     }
                 }
+
+                conversationRows(SnoozedName, snoozed, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = true)
             }
         }
 
@@ -1016,6 +1020,7 @@ private fun LazyListScope.conversationRows(
             expanded = row.conversation.id !in collapsed,
             onToggle = { onCollapsed(if (row.conversation.id in collapsed) collapsed - row.conversation.id else collapsed + row.conversation.id) },
             onPin = { store.pin(row.conversation, row.conversation.pinnedAt == null) },
+            onSnooze = { until -> store.snooze(row.conversation, until) },
             onRename = { title -> store.rename(row.conversation, title) },
             onCloseSession = { store.closeSession(row.conversation) },
             onDismiss = { store.dismissFailure(row.conversation) },
@@ -1073,11 +1078,12 @@ private fun SectionHeading(section: SidebarSection, open: Boolean?, onToggle: ()
 }
 
 @Composable
-private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Project?, selected: Boolean, onClick: () -> Unit, depth: Int = 0, sideChats: Int = 0, pingHeld: Boolean = false, expanded: Boolean = true, onToggle: () -> Unit = {}, onPin: () -> Unit = {}, onRename: (String) -> Unit = {}, onCloseSession: () -> Unit = {}, onDismiss: () -> Unit = {}, onArchive: () -> Unit = {}, onCancelResume: () -> Unit = {}) {
+private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Project?, selected: Boolean, onClick: () -> Unit, depth: Int = 0, sideChats: Int = 0, pingHeld: Boolean = false, expanded: Boolean = true, onToggle: () -> Unit = {}, onPin: () -> Unit = {}, onSnooze: (String?) -> Unit = {}, onRename: (String) -> Unit = {}, onCloseSession: () -> Unit = {}, onDismiss: () -> Unit = {}, onArchive: () -> Unit = {}, onCancelResume: () -> Unit = {}) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
     val menu = rememberRowMenuState()
     var renaming by remember { mutableStateOf(false) }
+    var snoozing by remember { mutableStateOf(false) }
     val pausedUntil = row.resumeAt?.let(::resetBefore)?.let { reset -> "Paused until ${clockTime(reset) { millis -> platform?.localDateTime(millis) }}" }
     val statusName = pausedUntil ?: statusSectionName(row.status)
     val notRunning = node != null && (!node.online || row.id !in node.sessions)
@@ -1092,6 +1098,10 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
             .rowContextMenu(menu),
         contentAlignment = Alignment.CenterStart,
     ) {
+        if (snoozing) {
+            SnoozeMenu(onSnooze = onSnooze, onDismiss = { snoozing = false })
+        }
+
         if (renaming) {
             var title by remember { mutableStateOf(row.title) }
             val save = {
@@ -1197,6 +1207,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
 
         RowMenuPopup(menu) { close ->
             MenuItem(if (row.pinnedAt == null) "Pin" else "Unpin", onClick = { close(); onPin() }, leading = MyIcon.Pin)
+            MenuItem(if (row.snoozedUntil == null) "Snooze" else "Wake now", onClick = { close(); if (row.snoozedUntil == null) snoozing = true else onSnooze(null) }, leading = MyIcon.Clock)
             MenuItem("Rename", onClick = { close(); renaming = true }, leading = MyIcon.Pencil)
 
             if (!row.isChat) {
