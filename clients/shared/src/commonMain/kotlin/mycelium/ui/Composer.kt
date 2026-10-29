@@ -294,7 +294,7 @@ fun Composer(
     val display = remember(text.text, pastes, images, drafts) {
         PasteDisplay(text.text, pastes, images.mapNotNull { (marker, id) -> drafts.firstOrNull { it.id == id }?.let { marker to it.file.name } }.toMap())
     }
-    val unmarked = attachments?.let { held -> AttachmentControls(held.drafts.filter { it.id !in images.values }, held.problem, held.onAdd, held.onRemove) }
+    val unmarked = attachments?.let { held -> AttachmentControls(held.drafts.filter { !isImage(it.file.mediaType) }, held.problem, held.onAdd, held.onRemove) }
 
     var listening by remember(conversation.id) { mutableStateOf(false) }
     var dictationProblem by remember(conversation.id) { mutableStateOf<DictationProblem?>(null) }

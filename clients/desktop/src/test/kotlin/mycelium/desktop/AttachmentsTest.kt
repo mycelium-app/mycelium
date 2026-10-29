@@ -147,6 +147,18 @@ class AttachmentsTest {
     }
 
     @Test
+    fun aPastedImageNeverShowsInTheAttachmentBarOnItsWayToTheInlineBadge() {
+        val platform = FilePlatform()
+        open(platform)
+        rule.mainClock.autoAdvance = false
+
+        rule.runOnUiThread { platform.listener!!(listOf(PickedFile("pasted-image.png", "image/png", png))) }
+        rule.mainClock.advanceTimeByFrame()
+
+        assertEquals(0, rule.onAllNodesWithContentDescription("Attached: pasted-image.png, ${formatSize(png.size.toLong())}").fetchSemanticsNodes().size)
+    }
+
+    @Test
     fun hoveringAnInlineImageBadgeShowsAPreviewOfTheImage() {
         open(FilePlatform(clipboard = listOf(PickedFile("pasted-image.png", "image/png", png))))
 
