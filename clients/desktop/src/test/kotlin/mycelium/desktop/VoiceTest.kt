@@ -42,7 +42,7 @@ private const val VoiceOff = """{"voice_enabled":false}"""
 
 private const val VoiceAssistantJson = """{"id":"a-voice","name":"Voice","builtin_key":"voice","created_at":"2026-10-22T10:00:00Z"}"""
 
-private const val VoiceThreadJson = """{"id":"c-voice","owner":"u","node_id":null,"agent":"chat","cwd":"","title":"Voice","status":"working",
+private const val VoiceThreadJson = """{"id":"c-voice","owner":"u","node_id":"n-voice","agent":"chat","cwd":"","title":"Voice","status":"working",
 "acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}"""
 
 private class HeardDictation : Dictation {
