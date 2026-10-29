@@ -1,6 +1,7 @@
 use crate::api::ModelChoice;
 use crate::conversation::AgentId;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -32,6 +33,35 @@ impl Routing {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodePreference {
+    Preferred,
+    #[default]
+    Normal,
+    Avoid,
+    Never,
+}
+
+impl NodePreference {
+    pub fn weight(self) -> Option<f64> {
+        match self {
+            NodePreference::Preferred => Some(2.0),
+            NodePreference::Normal => Some(1.0),
+            NodePreference::Avoid => Some(0.25),
+            NodePreference::Never => None,
+        }
+    }
+}
+
+pub const ANY_NODE: Uuid = Uuid::nil();
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnyNodePick {
+    pub node_id: Uuid,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DefaultModes {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -55,6 +85,8 @@ pub struct AgentSettings {
     pub account_modes: Vec<AccountMode>,
     #[serde(default)]
     pub any_model: Vec<ModelChoice>,
+    #[serde(default)]
+    pub node_preferences: std::collections::HashMap<Uuid, NodePreference>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -63,6 +95,8 @@ pub struct SaveAgentSettingsRequest {
     pub default_modes: DefaultModes,
     #[serde(default)]
     pub any_model: Vec<ModelChoice>,
+    #[serde(default)]
+    pub node_preferences: std::collections::HashMap<Uuid, NodePreference>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

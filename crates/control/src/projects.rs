@@ -49,6 +49,18 @@ pub async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<Pr
     row.ok_or_else(|| ApiError::not_found("That project"))
 }
 
+pub async fn nodes_holding(state: &AppState, owner: Uuid, project: &ProjectRow) -> ApiResult<Vec<Uuid>> {
+    let siblings = sqlx::query_scalar::<_, Uuid>("select node_id from projects where owner = $1 and forge_id = $2 and repository = $3").bind(owner).bind(project.forge_id).bind(&project.repository).fetch_all(&state.pool).await?;
+
+    Ok(std::iter::once(project.node_id).chain(siblings).collect())
+}
+
+pub async fn sibling_on(state: &AppState, owner: Uuid, project: &ProjectRow, node_id: Uuid) -> ApiResult<ProjectRow> {
+    let row = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("select {PROJECT_COLUMNS} from projects where owner = $1 and node_id = $2 and forge_id = $3 and repository = $4"))).bind(owner).bind(node_id).bind(project.forge_id).bind(&project.repository).fetch_optional(&state.pool).await?;
+
+    row.ok_or_else(|| ApiError::bad_request("project_not_on_node", "This project is not set up on that node. Choose a node it is set up on."))
+}
+
 pub async fn clone_repository(state: &AppState, forge: &forges::ForgeRow, repository: &str, node_id: Uuid) -> ApiResult<String> {
     let credentials = forge.git_credentials()?;
     let url = format!("{}/{repository}.git", forge.base_url);

@@ -68,6 +68,7 @@ mod provider_usage;
 mod puzzles;
 mod moves;
 mod node_updates;
+mod node_pick;
 mod nodes;
 mod novnc;
 mod projects;
@@ -149,6 +150,7 @@ pub async fn run(config: Config, listener: TcpListener) -> Result<()> {
     tokio::spawn(usage_limits::resume_regularly(state.clone()));
     tokio::spawn(activity_sweep::sweep_regularly(state.clone()));
     tokio::spawn(goals::nudge_regularly(state.clone()));
+    tokio::spawn(conversations::wake_regularly(state.clone()));
     tokio::spawn(wellness::announce_boundaries(state.clone()));
     axum::serve(listener, router(state).into_make_service_with_connect_info::<SocketAddr>()).await?;
 
@@ -184,6 +186,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/device/{user_code}/approve", post(device::approve))
         .route("/api/v1/device/{user_code}/deny", post(device::deny))
         .route("/api/v1/nodes", get(nodes::list))
+        .route("/api/v1/nodes/any", get(node_pick::preview))
         .route("/api/v1/nodes/{id}", patch(nodes::update).delete(nodes::revoke))
         .route("/api/v1/nodes/{id}/directories", get(nodes::directories))
         .route("/api/v1/nodes/{id}/drain", post(nodes::drain))
