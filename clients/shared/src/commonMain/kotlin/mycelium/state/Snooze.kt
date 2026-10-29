@@ -52,6 +52,17 @@ fun customSnoozeUntil(text: String, now: Instant, localDateTime: (Long) -> Strin
     return moment.takeIf { it > now }
 }
 
+fun customSnoozeError(text: String, now: Instant, localDateTime: (Long) -> String?): String? {
+    val example = "for example 2026-11-03 09:30"
+
+    return when {
+        text.isBlank() -> "Enter the date and time to snooze until, $example."
+        customSnoozeUntil(text, now - 365_000.days, localDateTime) == null -> "Enter the date and time as year-month-day and a 24-hour time, $example."
+        customSnoozeUntil(text, now, localDateTime) == null -> "The time to snooze until must be in the future. Enter a later date or time, $example."
+        else -> null
+    }
+}
+
 fun snoozeLeft(until: String, now: Instant): String {
     val left = (instantOrNull(until) ?: return "") - now
 

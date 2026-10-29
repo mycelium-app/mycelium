@@ -13,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import mycelium.state.SnoozeChoice
 import mycelium.state.clockTime
+import mycelium.state.customSnoozeError
 import mycelium.state.customSnoozeUntil
 import mycelium.state.snoozeLeft
 import mycelium.state.snoozeUntil
@@ -31,10 +32,11 @@ fun SnoozeMenu(onSnooze: (String) -> Unit, onDismiss: () -> Unit) {
 
     if (custom) {
         val save = {
-            val until = customSnoozeUntil(text, Clock.System.now(), localDateTime)
+            val moment = Clock.System.now()
+            val until = customSnoozeUntil(text, moment, localDateTime)
 
             if (until == null) {
-                failure = "Enter a date and time in the future, like 2026-11-03 09:30."
+                failure = customSnoozeError(text, moment, localDateTime)
             } else {
                 onSnooze(until.toString())
                 onDismiss()

@@ -340,6 +340,7 @@ fun ComposerCard(
     project: (@Composable () -> Unit)? = null,
     place: (@Composable () -> Unit)? = null,
     notice: (@Composable () -> Unit)? = null,
+    setup: (@Composable () -> Unit)? = null,
     account: (@Composable () -> Unit)? = null,
     model: (@Composable () -> Unit)? = null,
 ) {
@@ -355,6 +356,8 @@ fun ComposerCard(
     }
 
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+        setup?.invoke()
+
         Column(
             Modifier
                 .fillMaxWidth()

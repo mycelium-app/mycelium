@@ -790,6 +790,9 @@ class MyceliumApi(
     suspend fun createProject(request: CreateProjectRequest): Project =
         call("/projects") { client.post(it) { authorise(); json(request) } }.body()
 
+    suspend fun checkoutProject(id: String, nodeId: String): Project =
+        call("/projects/$id/checkout") { client.post(it) { authorise(); json(CheckoutProjectRequest(nodeId)) } }.body()
+
     suspend fun worktrees(): List<Worktree> = call("/worktrees") { client.get(it) { authorise() } }.body()
 
     suspend fun tasks(): List<Task> = call("/tasks") { client.get(it) { authorise() } }.body()

@@ -12,6 +12,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -24,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import mycelium.api.AnyNodeId
 import mycelium.api.AnyNodePick
 import mycelium.api.Conversation
+import mycelium.api.NodeSummary
+import mycelium.api.Project
 import mycelium.api.CreateConversationRequest
 import mycelium.api.LoginState
 import mycelium.state.AppState
@@ -63,6 +68,9 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val nodes = startableNodes(state)
     var nodeId by remember { mutableStateOf<String?>(null) }
     var anyNode by remember { mutableStateOf(false) }
+    var setup by remember { mutableStateOf<ProjectSetup?>(null) }
+    var setupJob by remember { mutableStateOf<Job?>(null) }
+    val scope = rememberCoroutineScope()
     var anyNodePick by remember { mutableStateOf<AnyNodePick?>(null) }
     var agent by remember { mutableStateOf<String?>(null) }
     var cwd by remember { mutableStateOf("") }
@@ -126,8 +134,26 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val models = if (node != null && chosenAgent != null) modelMenu(node, chosenAgent, chosenAccount?.account) else null
     val chosenModel = model.takeIf { picked -> models?.choices?.any { it.id == picked } == true }.orEmpty()
 
+    fun startSetup(target: Project, onNode: NodeSummary) {
+        setup = ProjectSetup.Running(target, onNode)
+        setupJob = scope.launch {
+            val failure = attempt {
+                val checkout = store.api.checkoutProject(target.id, onNode.id)
+
+                store.refreshProjects()
+                chosenProject = checkout.id
+                withoutProject = false
+                setup = null
+            }
+
+            if (failure != null) {
+                setup = ProjectSetup.Failed(target, onNode, failure)
+            }
+        }
+    }
+
     fun create() {
-        if (nodes.isEmpty() || node == null || chosenAgent == null) {
+        if (nodes.isEmpty() || node == null || chosenAgent == null || setup is ProjectSetup.Running) {
             return
         }
 
@@ -195,6 +221,19 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                         attachments = attached.controls(),
                         kind = ConversationKind.NewConversation,
                         error = cwdError ?: branchError,
+                        setup = setup?.let { current ->
+                            {
+                                SetupStrip(
+                                    current,
+                                    SetupActions(
+                                        onCancel = { setupJob?.cancel(); setup = null },
+                                        onRetry = { startSetup(current.project, current.node) },
+                                        onStartOnAnyNode = { setup = null; anyNode = true },
+                                        onRemove = { setup = null },
+                                    ),
+                                )
+                            }
+                        },
                         project = {
                             Box {
                                 MyButton(
@@ -271,7 +310,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                                 "Any node",
                                                 onClick = { anyNode = true },
                                                 checked = anyNode,
-                                                hint = anyNodePick?.let { "Would pick ${it.name}" },
+                                                hint = anyNodePick?.let { "${it.name} now, most free" },
                                                 leading = MyIcon.Server,
                                             )
 
@@ -279,19 +318,35 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                                 MenuItem(
                                                     option.name,
                                                     onClick = {
-                                                        if (project != null && option.id != project.nodeId) {
-                                                            withoutProject = true
-                                                            worktree = false
+                                                        val held = project?.let { checkoutOn(state, it, option.id) }
+
+                                                        setup = null
+
+                                                        when {
+                                                            project == null -> Unit
+                                                            held != null -> {
+                                                                chosenProject = held.id
+                                                                withoutProject = false
+                                                            }
+                                                            cloneable(project) -> startSetup(project, option)
+                                                            else -> {
+                                                                withoutProject = true
+                                                                worktree = false
+                                                            }
                                                         }
 
                                                         anyNode = false
                                                         nodeId = option.id
                                                     },
                                                     checked = !anyNode && option.id == placed.id,
-                                                    hint = if (project == null) null else if (option.id == project.nodeId) project.path else "No checkout, choose a folder",
+                                                    hint = project?.let { held -> checkoutOn(state, held, option.id)?.path ?: if (cloneable(held)) "Not set up yet, clones ${held.name}" else "No checkout, choose a folder" },
                                                     leading = nodeIcon(option),
                                                 )
                                             }
+
+                                            Hairline(Modifier.padding(vertical = Tokens.Space.S1))
+
+                                            MenuItem("Load balancing", onClick = { placeMenuOpen = false; store.openScreen("settings/agents") }, leading = MyIcon.Settings)
 
                                             Hairline(Modifier.padding(vertical = Tokens.Space.S1))
 
