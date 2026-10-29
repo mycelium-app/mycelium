@@ -351,7 +351,6 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                             done(null)
                                         },
                                     ),
-                                    Tokens.Size.AccountControlInCard,
                                 )
                             }
                         },
