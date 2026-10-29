@@ -1,7 +1,7 @@
 use crate::auth;
 use crate::config::Config;
-use crate::control::{Artifact, ControlClient};
-use crate::render::{self, DOCUMENT_POLICY, EDITOR_POLICY, FILE_POLICY, PAGE_POLICY, PDF_VIEWER_POLICY, hardened, notice};
+use crate::control::{Artifact, ControlClient, Denied, Viewer};
+use crate::render::{self, DOCUMENT_POLICY, EDITOR_POLICY, FILE_POLICY, PAGE_POLICY, PDF_VIEWER_POLICY, SHELL_POLICY, hardened, notice};
 use crate::session::{SESSION_COOKIE, Sessions, cookie};
 use anyhow::Result;
 use axum::Json;
@@ -24,6 +24,9 @@ const MAX_SAVED_BYTES: usize = 20 * 1024 * 1024;
 const PDF_MAGIC: &[u8] = b"%PDF-";
 const VIEWER_SCRIPT: &str = include_str!("viewer.js");
 const VIEWER_STYLE: &str = include_str!("viewer.css");
+const SHELL_SCRIPT: &str = include_str!("shell.js");
+const RUNTIME_SCRIPT: &str = include_str!("runtime.js");
+const RUNTIME_INCLUDE: &str = "<script src=\"/_runtime.js\"></script>";
 const VIEWER_INCLUDES: &str = "<link rel=\"stylesheet\" href=\"../mycelium-viewer.css\"><script src=\"../mycelium-viewer.js\"></script>";
 
 struct Inner {
@@ -51,6 +54,13 @@ impl AppState {
 
     fn signed_in_subject(&self, headers: &HeaderMap) -> Option<String> {
         cookie(headers, SESSION_COOKIE).and_then(|value| self.0.sessions.subject(value, chrono::Utc::now().timestamp()))
+    }
+
+    fn viewer(&self, headers: &HeaderMap) -> Viewer {
+        let subject = self.signed_in_subject(headers);
+        let issuer = subject.as_ref().and_then(|_| self.0.config.oidc.as_ref().map(|oidc| oidc.issuer.clone()));
+
+        Viewer { subject, issuer }
     }
 }
 
@@ -117,6 +127,9 @@ pub fn router(config: Config) -> Result<Router> {
         .route("/_auth/login", get(auth::login))
         .route("/_auth/callback", get(auth::callback))
         .route("/_artifact.json", get(design_json))
+        .route("/_page", get(page_frame))
+        .route("/_shell.js", get(shell_script))
+        .route("/_runtime.js", get(runtime_script))
         .route("/_pdfjs/{*path}", get(pdf_viewer_asset))
         .route("/_data", get(data_list))
         .route("/_data/{key}", put(data_put))
@@ -141,6 +154,17 @@ fn unauthorised() -> Response {
     (StatusCode::UNAUTHORIZED, Json(json!({"error": "unauthorised", "message": "Sign in to save changes."}))).into_response()
 }
 
+fn forbidden() -> Response {
+    notice(StatusCode::FORBIDDEN, "You cannot open this artefact", "It belongs to someone else. Ask its owner to make it public.")
+}
+
+fn denied_json(denied: Denied) -> Response {
+    match denied {
+        Denied::Missing => (StatusCode::NOT_FOUND, Json(json!({"error": "not_found", "message": "Nothing lives at this address."}))).into_response(),
+        Denied::Forbidden => (StatusCode::FORBIDDEN, Json(json!({"error": "forbidden", "message": "Only the owner of this artefact can change its data."}))).into_response(),
+    }
+}
+
 fn refuse_cross_site(headers: &HeaderMap, site: &Site) -> Option<Response> {
     let origin = headers.get(ORIGIN)?.to_str().ok()?;
     let same_host = url::Url::parse(origin).ok().and_then(|url| url.host_str().map(str::to_string)).is_some_and(|host| host == site.host);
@@ -160,19 +184,18 @@ enum Gate {
 async fn gate(state: &AppState, site: &Site, headers: &HeaderMap, uri: &Uri, navigation: bool) -> Gate {
     let config = state.config();
     let Some(slug) = site.slug(&config.domain) else { return Gate::Closed(not_found()) };
+    let viewer = state.viewer(headers);
 
-    let artifact = match state.0.control.artifact(slug).await {
-        Ok(Some(artifact)) => artifact,
-        Ok(None) => return Gate::Closed(not_found()),
+    match state.0.control.artifact(slug, &viewer).await {
+        Ok(Ok(artifact)) => return Gate::Open(artifact),
+        Ok(Err(Denied::Missing)) => return Gate::Closed(not_found()),
+        Ok(Err(Denied::Forbidden)) if viewer.subject.is_some() => return Gate::Closed(if navigation { forbidden() } else { denied_json(Denied::Forbidden) }),
+        Ok(Err(Denied::Forbidden)) => {}
         Err(error) => {
             tracing::warn!("loading artifact {slug}: {error}");
 
             return Gate::Closed(bad_gateway());
         }
-    };
-
-    if artifact.public || state.signed_in_subject(headers).is_some() {
-        return Gate::Open(artifact);
     }
 
     if !navigation {
@@ -237,6 +260,13 @@ fn existing_asset(directory: &std::path::Path, path: &str) -> Option<std::path::
 fn with_viewer_includes(html: &[u8]) -> Vec<u8> {
     let html = String::from_utf8_lossy(html);
     let included = if html.contains("<script") { html.replacen("<script", &format!("{VIEWER_INCLUDES}<script"), 1) } else { format!("{html}{VIEWER_INCLUDES}") };
+
+    included.into_bytes()
+}
+
+fn with_runtime_include(html: &[u8]) -> Vec<u8> {
+    let html = String::from_utf8_lossy(html);
+    let included = if html.contains("<script") { html.replacen("<script", &format!("{RUNTIME_INCLUDE}<script"), 1) } else { format!("{html}{RUNTIME_INCLUDE}") };
 
     included.into_bytes()
 }
@@ -307,10 +337,15 @@ async fn content(State(state): State<AppState>, site: Site, method: Method, uri:
         return not_found();
     }
 
+    if artifact.kind == "page" {
+        return page_shell(&artifact.title);
+    }
+
     let slug = site.slug(&state.config().domain).unwrap_or_default();
-    let stored = match state.0.control.content(slug).await {
-        Ok(Some(stored)) => stored,
-        Ok(None) => return not_found(),
+    let stored = match state.0.control.content(slug, &state.viewer(&headers)).await {
+        Ok(Ok(stored)) => stored,
+        Ok(Err(Denied::Missing)) => return not_found(),
+        Ok(Err(Denied::Forbidden)) => return forbidden(),
         Err(error) => {
             tracing::warn!("loading content of {slug}: {error}");
 
@@ -319,12 +354,6 @@ async fn content(State(state): State<AppState>, site: Site, method: Method, uri:
     };
 
     match artifact.kind.as_str() {
-        "page" => {
-            let mut response = stored.bytes.into_response();
-            response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"));
-
-            no_cache(hardened(response, PAGE_POLICY))
-        }
         "markdown" => no_cache(render::markdown(&artifact.title, &String::from_utf8_lossy(&stored.bytes))),
         _ => {
             let media_type = if stored.media_type.is_empty() { artifact.media_type.clone() } else { stored.media_type.clone() };
@@ -346,6 +375,57 @@ async fn content(State(state): State<AppState>, site: Site, method: Method, uri:
     }
 }
 
+fn page_shell(title: &str) -> Response {
+    let title = render::escape(title);
+    let body = format!("<!doctype html><html lang=\"en-GB\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{title}</title><style>html,body,iframe{{margin:0;border:0;width:100%;height:100%}}</style></head><body><iframe id=\"artifact\" title=\"{title}\" sandbox=\"allow-scripts allow-forms allow-popups\" src=\"/_page\"></iframe><script src=\"/_shell.js\"></script></body></html>");
+
+    no_cache(render::html(StatusCode::OK, body, SHELL_POLICY))
+}
+
+async fn page_frame(State(state): State<AppState>, site: Site, uri: Uri, headers: HeaderMap) -> Response {
+    let artifact = match gate(&state, &site, &headers, &uri, false).await {
+        Gate::Open(artifact) => artifact,
+        Gate::Closed(response) => return response,
+    };
+
+    if artifact.kind != "page" {
+        return not_found();
+    }
+
+    let slug = site.slug(&state.config().domain).unwrap_or_default();
+
+    match state.0.control.content(slug, &state.viewer(&headers)).await {
+        Ok(Ok(stored)) => {
+            let mut response = with_runtime_include(&stored.bytes).into_response();
+            response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"));
+
+            no_cache(hardened(response, PAGE_POLICY))
+        }
+        Ok(Err(Denied::Missing)) => not_found(),
+        Ok(Err(Denied::Forbidden)) => forbidden(),
+        Err(error) => {
+            tracing::warn!("loading content of {slug}: {error}");
+
+            bad_gateway()
+        }
+    }
+}
+
+fn script_response(body: &'static str, policy: &'static str) -> Response {
+    let mut response = body.into_response();
+    response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/javascript; charset=utf-8"));
+
+    no_cache(hardened(response, policy))
+}
+
+async fn shell_script() -> Response {
+    script_response(SHELL_SCRIPT, SHELL_POLICY)
+}
+
+async fn runtime_script() -> Response {
+    script_response(RUNTIME_SCRIPT, PAGE_POLICY)
+}
+
 async fn design_json(State(state): State<AppState>, site: Site, uri: Uri, headers: HeaderMap) -> Response {
     let artifact = match gate(&state, &site, &headers, &uri, false).await {
         Gate::Open(artifact) => artifact,
@@ -358,14 +438,15 @@ async fn design_json(State(state): State<AppState>, site: Site, uri: Uri, header
 
     let slug = site.slug(&state.config().domain).unwrap_or_default();
 
-    match state.0.control.content(slug).await {
-        Ok(Some(stored)) => {
+    match state.0.control.content(slug, &state.viewer(&headers)).await {
+        Ok(Ok(stored)) => {
             let mut response = stored.bytes.into_response();
             response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
             no_cache(hardened(response, DOCUMENT_POLICY))
         }
-        Ok(None) => not_found(),
+        Ok(Err(Denied::Missing)) => not_found(),
+        Ok(Err(Denied::Forbidden)) => forbidden(),
         Err(error) => {
             tracing::warn!("loading design {slug}: {error}");
 
@@ -381,9 +462,9 @@ async fn data_list(State(state): State<AppState>, site: Site, uri: Uri, headers:
 
     let slug = site.slug(&state.config().domain).unwrap_or_default();
 
-    match state.0.control.data(slug).await {
-        Ok(Some(data)) => no_cache(Json(data).into_response()),
-        Ok(None) => not_found(),
+    match state.0.control.data(slug, &state.viewer(&headers)).await {
+        Ok(Ok(data)) => no_cache(Json(data).into_response()),
+        Ok(Err(denied)) => denied_json(denied),
         Err(error) => {
             tracing::warn!("loading data of {slug}: {error}");
 
@@ -407,9 +488,13 @@ async fn data_put(State(state): State<AppState>, site: Site, Path(key): Path<Str
 
     let slug = site.slug(&state.config().domain).unwrap_or_default();
 
-    match state.0.control.put_data(slug, &key, &value).await {
-        Ok(Some(saved)) => Json(saved).into_response(),
-        Ok(None) => not_found(),
+    match state.0.control.put_data(slug, &key, &value, &state.viewer(&headers)).await {
+        Ok((status, saved)) if status.is_success() => Json(saved).into_response(),
+        Ok((status, refused)) => {
+            let message = refused["message"].as_str().unwrap_or("Mycelium could not save this entry. Try again in a minute.");
+
+            (StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY), Json(json!({"error": "not_saved", "message": message}))).into_response()
+        }
         Err(error) => {
             tracing::warn!("saving data of {slug}: {error}");
 
@@ -424,7 +509,9 @@ async fn content_put(State(state): State<AppState>, site: Site, uri: Uri, header
         Gate::Closed(response) => return response,
     };
 
-    let Some(subject) = state.signed_in_subject(&headers) else { return unauthorised() };
+    if state.signed_in_subject(&headers).is_none() {
+        return unauthorised();
+    }
 
     if let Some(refusal) = refuse_cross_site(&headers, &site) {
         return refusal;
@@ -436,7 +523,7 @@ async fn content_put(State(state): State<AppState>, site: Site, uri: Uri, header
 
     let slug = site.slug(&state.config().domain).unwrap_or_default();
 
-    match state.0.control.save_version(slug, &subject, body).await {
+    match state.0.control.save_version(slug, &state.viewer(&headers), body).await {
         Ok((status, saved)) if status.is_success() => Json(json!({"version": saved["latest_version"]})).into_response(),
         Ok((status, refused)) => {
             let message = refused["message"].as_str().unwrap_or("Mycelium could not save this PDF. Try again in a minute.");

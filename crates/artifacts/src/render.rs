@@ -3,7 +3,8 @@ use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use pulldown_cmark::{CowStr, Event, Options, Parser, Tag};
 
-pub const PAGE_POLICY: &str = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: data: blob:; font-src https: data:; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+pub const PAGE_POLICY: &str = "sandbox allow-scripts allow-forms allow-popups; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data: blob:; font-src https: data:; connect-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'self'";
+pub const SHELL_POLICY: &str = "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; frame-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 pub const DOCUMENT_POLICY: &str = "default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; base-uri 'none'; frame-ancestors 'none'";
 pub const EDITOR_POLICY: &str = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; font-src 'self' https: data:; connect-src 'self'; frame-src 'self' about:; base-uri 'none'; frame-ancestors 'none'";
 pub const PDF_VIEWER_POLICY: &str = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self'; img-src 'self' blob: data:; media-src blob:; font-src 'self' data:; connect-src 'self' blob: data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";

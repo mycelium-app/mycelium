@@ -1409,7 +1409,11 @@ async fn memory_banks_and_moving_a_memory_into_one_reach_the_stream() {
 
 #[tokio::test]
 async fn a_version_saved_by_the_artifact_host_is_streamed_to_its_owner() {
-    let server = Server::start_with(|config| config.artifact_host_token = Some("host-token".into())).await;
+    let server = Server::start_with(|config| {
+        config.artifact_host_token = Some("host-token".into());
+        config.oidc = Some(mycelium_control::OidcConfig { issuer: "https://id.example.com".into(), client_id: "mycelium".into(), client_secret: None });
+    })
+    .await;
     let mut stream = server.user.stream().await;
     let user = &server.user;
     let (_, artifact) = user.json(user.post("/api/v1/artifacts").json(&json!({"kind": "file", "title": "Report", "content": "a", "media_type": "application/pdf"}))).await;
@@ -1417,7 +1421,7 @@ async fn a_version_saved_by_the_artifact_host_is_streamed_to_its_owner() {
     let anonymous = server.anonymous();
     let slug = artifact["slug"].as_str().unwrap();
 
-    anonymous.json(anonymous.post(&format!("/internal/artifacts/by-slug/{slug}/versions")).query(&[("subject", "reader")]).header("authorization", "Bearer host-token").body("b")).await;
+    anonymous.json(anonymous.post(&format!("/internal/artifacts/by-slug/{slug}/versions")).query(&[("subject", "reader"), ("issuer", "https://id.example.com")]).header("authorization", "Bearer host-token").body("b")).await;
     let versioned = stream.until(|message| match message {
         StreamMessage::Artifact(artifact) if artifact.latest_version == 2 => Some(artifact),
         _ => None,

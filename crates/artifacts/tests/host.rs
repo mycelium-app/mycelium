@@ -1,6 +1,6 @@
 use axum::Json;
 use axum::Router;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -40,21 +40,37 @@ fn authorised(headers: &HeaderMap) -> bool {
     headers.get(AUTHORIZATION).and_then(|value| value.to_str().ok()) == Some(&format!("Bearer {HOST_TOKEN}"))
 }
 
-async fn control_artifact(State(control): State<Arc<Control>>, headers: HeaderMap, Path(slug): Path<String>) -> Response {
+type Viewer = Query<HashMap<String, String>>;
+
+fn is_owner(viewer: &Viewer) -> bool {
+    viewer.get("subject").map(String::as_str) == Some("reader") && viewer.get("issuer").is_some_and(|issuer| issuer.starts_with("http://127.0.0.1"))
+}
+
+async fn control_artifact(State(control): State<Arc<Control>>, headers: HeaderMap, Path(slug): Path<String>, viewer: Viewer) -> Response {
     let Some(found) = control.artifacts.get(slug.as_str()).filter(|_| authorised(&headers)) else { return StatusCode::NOT_FOUND.into_response() };
+
+    if !found.public && !is_owner(&viewer) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
 
     Json(json!({"artifact": {"slug": slug, "kind": found.kind, "title": format!("Title of {slug}"), "public": found.public}, "media_type": found.media_type, "sha256": "00"})).into_response()
 }
 
-async fn control_content(State(control): State<Arc<Control>>, headers: HeaderMap, Path(slug): Path<String>) -> Response {
+async fn control_content(State(control): State<Arc<Control>>, headers: HeaderMap, Path(slug): Path<String>, viewer: Viewer) -> Response {
     let Some(found) = control.artifacts.get(slug.as_str()).filter(|_| authorised(&headers)) else { return StatusCode::NOT_FOUND.into_response() };
+
+    if !found.public && !is_owner(&viewer) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
 
     ([(CONTENT_TYPE, found.media_type)], found.bytes.clone()).into_response()
 }
 
-async fn control_data(State(control): State<Arc<Control>>, headers: HeaderMap, Path(slug): Path<String>) -> Response {
-    if !authorised(&headers) || !control.artifacts.contains_key(slug.as_str()) {
-        return StatusCode::NOT_FOUND.into_response();
+async fn control_data(State(control): State<Arc<Control>>, headers: HeaderMap, Path(slug): Path<String>, viewer: Viewer) -> Response {
+    let Some(found) = control.artifacts.get(slug.as_str()).filter(|_| authorised(&headers)) else { return StatusCode::NOT_FOUND.into_response() };
+
+    if !found.public && !is_owner(&viewer) {
+        return StatusCode::FORBIDDEN.into_response();
     }
 
     let data = control.data.lock().unwrap().get(&slug).cloned().unwrap_or_default();
@@ -62,9 +78,13 @@ async fn control_data(State(control): State<Arc<Control>>, headers: HeaderMap, P
     Json(Value::Object(data)).into_response()
 }
 
-async fn control_put_data(State(control): State<Arc<Control>>, headers: HeaderMap, Path((slug, key)): Path<(String, String)>, Json(value): Json<Value>) -> Response {
+async fn control_put_data(State(control): State<Arc<Control>>, headers: HeaderMap, Path((slug, key)): Path<(String, String)>, viewer: Viewer, Json(value): Json<Value>) -> Response {
     if !authorised(&headers) || !control.artifacts.contains_key(slug.as_str()) {
         return StatusCode::NOT_FOUND.into_response();
+    }
+
+    if !is_owner(&viewer) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "edit_forbidden", "message": "Only the owner can write."}))).into_response();
     }
 
     control.data.lock().unwrap().entry(slug).or_default().insert(key.clone(), value.clone());
@@ -90,6 +110,7 @@ async fn control_save_version(State(control): State<Arc<Control>>, headers: Head
 struct Idp {
     base: String,
     nonce: Arc<Mutex<String>>,
+    subject: Arc<Mutex<String>>,
 }
 
 async fn idp_discovery(State(idp): State<Idp>) -> Json<Value> {
@@ -97,7 +118,7 @@ async fn idp_discovery(State(idp): State<Idp>) -> Json<Value> {
 }
 
 async fn idp_token(State(idp): State<Idp>) -> Json<Value> {
-    let claims = json!({"iss": idp.base, "aud": "artifacts", "sub": "reader", "nonce": *idp.nonce.lock().unwrap(), "exp": 4_000_000_000_i64});
+    let claims = json!({"iss": idp.base, "aud": "artifacts", "sub": *idp.subject.lock().unwrap(), "nonce": *idp.nonce.lock().unwrap(), "exp": 4_000_000_000_i64});
     let id_token = format!("e30.{}.c2ln", URL_SAFE_NO_PAD.encode(claims.to_string()));
 
     Json(json!({"id_token": id_token}))
@@ -115,6 +136,7 @@ struct Harness {
     base: String,
     http: reqwest::Client,
     nonce: Arc<Mutex<String>>,
+    subject: Arc<Mutex<String>>,
     _editor: TempDir,
     _pdfjs: TempDir,
 }
@@ -144,7 +166,8 @@ impl Harness {
 
         let (idp_listener, idp_base) = listen().await;
         let nonce = Arc::new(Mutex::new(String::new()));
-        let idp = Idp { base: idp_base.clone(), nonce: nonce.clone() };
+        let subject = Arc::new(Mutex::new("reader".to_string()));
+        let idp = Idp { base: idp_base.clone(), nonce: nonce.clone(), subject: subject.clone() };
         let idp_app = Router::new().route("/.well-known/openid-configuration", get(idp_discovery)).route("/token", axum::routing::post(idp_token)).with_state(idp);
         tokio::spawn(async move { axum::serve(idp_listener, idp_app).await });
 
@@ -171,7 +194,7 @@ impl Harness {
         let (listener, base) = listen().await;
         tokio::spawn(mycelium_artifacts::run(config, listener));
 
-        Harness { control, base, http: reqwest::Client::builder().redirect(Policy::none()).build().unwrap(), nonce, _editor: editor, _pdfjs: pdfjs }
+        Harness { control, base, http: reqwest::Client::builder().redirect(Policy::none()).build().unwrap(), nonce, subject, _editor: editor, _pdfjs: pdfjs }
     }
 
     fn request(&self, method: reqwest::Method, host: &str, path: &str, cookie: Option<&str>) -> reqwest::RequestBuilder {
@@ -204,7 +227,13 @@ impl Harness {
     }
 
     async fn session(&self) -> String {
+        self.session_as("reader").await
+    }
+
+    async fn session_as(&self, subject: &str) -> String {
+        *self.subject.lock().unwrap() = subject.to_string();
         let (session, _) = self.sign_in(&format!("https://private-page.{DOMAIN}/")).await;
+        *self.subject.lock().unwrap() = "reader".to_string();
 
         session.split(';').next().unwrap().to_string()
     }
@@ -253,10 +282,10 @@ async fn a_signed_in_visitor_reads_a_private_artifact() {
     let harness = Harness::start().await;
     let cookie = harness.session().await;
 
-    let response = harness.get("private-page", "/", Some(&cookie)).await;
+    let response = harness.get("private-page", "/_page", Some(&cookie)).await;
 
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.text().await.unwrap(), "<h1>Secret</h1>");
+    assert_eq!(response.text().await.unwrap(), "<h1>Secret</h1><script src=\"/_runtime.js\"></script>");
 }
 
 #[tokio::test]
@@ -281,18 +310,48 @@ async fn a_sign_in_cannot_send_the_visitor_to_another_site() {
 async fn a_public_page_is_served_without_a_login_under_a_content_security_policy() {
     let harness = Harness::start().await;
 
-    let response = harness.get("open-page", "/", None).await;
+    let shell = harness.get("open-page", "/", None).await;
+    let response = harness.get("open-page", "/_page", None).await;
 
+    assert_eq!(shell.status(), StatusCode::OK);
+    assert!(shell.text().await.unwrap().contains("sandbox=\"allow-scripts allow-forms allow-popups\" src=\"/_page\""));
     assert_eq!(response.status(), StatusCode::OK);
     let policy = response.headers()["content-security-policy"].to_str().unwrap().to_string();
-    assert!(policy.contains("script-src 'unsafe-inline'"));
+    assert!(policy.starts_with("sandbox allow-scripts allow-forms allow-popups;"), "{policy}");
+    assert!(policy.contains("script-src 'self' 'unsafe-inline'"));
     assert!(policy.contains("style-src 'unsafe-inline'"));
-    assert!(policy.contains("img-src https:"));
+    assert!(policy.contains("img-src 'self' data: blob:"), "{policy}");
+    assert!(!policy.contains("img-src https:"));
     assert!(policy.contains("font-src https:"));
-    assert!(policy.contains("frame-ancestors 'none'"));
+    assert!(policy.contains("frame-ancestors 'self'"));
     assert_eq!(response.headers()["x-content-type-options"], "nosniff");
     assert!(response.headers()["content-type"].to_str().unwrap().starts_with("text/html"));
-    assert!(response.text().await.unwrap().contains("<h1>Hello</h1>"));
+    let body = response.text().await.unwrap();
+    assert!(body.contains("<h1>Hello</h1>") && body.contains("<script src=\"/_runtime.js\"></script><script>1</script>"), "{body}");
+}
+
+#[tokio::test]
+async fn a_signed_in_visitor_who_does_not_own_a_private_artifact_is_refused_and_cannot_write_its_data() {
+    let harness = Harness::start().await;
+    let other = harness.session_as("someone-else").await;
+
+    let page = harness.get("board", "/", Some(&other)).await;
+    let read = harness.get("board", "/_data", Some(&other)).await;
+    let public_write = harness.request(reqwest::Method::PUT, &format!("open-board.{DOMAIN}"), "/_data/row-1", Some(&other)).json(&json!(1)).send().await.unwrap();
+
+    assert_eq!((page.status(), read.status(), public_write.status()), (StatusCode::FORBIDDEN, StatusCode::FORBIDDEN, StatusCode::FORBIDDEN));
+}
+
+#[tokio::test]
+async fn the_page_runtime_and_shell_scripts_are_served_for_the_data_store_bridge() {
+    let harness = Harness::start().await;
+
+    let runtime = harness.get("open-page", "/_runtime.js", None).await;
+    let shell = harness.get("open-page", "/_shell.js", None).await;
+
+    assert_eq!((runtime.status(), shell.status()), (StatusCode::OK, StatusCode::OK));
+    assert!(runtime.text().await.unwrap().contains("window.mycelium"));
+    assert!(shell.text().await.unwrap().contains("data-reply"));
 }
 
 #[tokio::test]
