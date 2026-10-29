@@ -214,6 +214,7 @@ fn name_taken(name: &str) -> ApiError {
 pub async fn validate_preferences(state: &AppState, owner: Uuid, preferences: &AssistantPreferences) -> ApiResult<()> {
     for choice in &preferences.models {
         match (choice.agent, choice.provider_id) {
+            (None, None) if choice.any_model => {}
             (Some(_), None) => {}
             (None, Some(provider_id)) => {
                 let exists = sqlx::query_scalar::<_, bool>("select exists (select 1 from model_providers where id = $1 and owner = $2)").bind(provider_id).bind(owner).fetch_one(&state.pool).await?;
@@ -253,8 +254,12 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 
 pub async fn create_for(state: &AppState, owner: Uuid, request: CreateAssistantRequest) -> ApiResult<Assistant> {
     let name = valid_name(&request.name)?;
-    let preferences = request.preferences.unwrap_or_default();
+    let mut preferences = request.preferences.unwrap_or_default();
     let instructions = request.instructions.unwrap_or_default();
+
+    if preferences.models.is_empty() {
+        preferences.models = vec![ModelChoice { agent: None, provider_id: None, model: None, account: None, any_model: true }];
+    }
 
     check_file_size(INSTRUCTIONS_PATH, instructions.as_bytes())?;
 
