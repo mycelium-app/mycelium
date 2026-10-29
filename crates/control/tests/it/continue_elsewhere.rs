@@ -71,7 +71,7 @@ pub async fn expect_prompt(link: &mut NodeLink) -> String {
 
 pub async fn node_with_accounts(server: &Server, version: &str, accounts: Vec<LoginInfo>) -> NodeLink {
     let mut link = server.online_node_as("laptop", version).await;
-    link.send(NodeToControl::Logins { logins: accounts }).await;
+    link.send(NodeToControl::Logins { logins: accounts, kubernetes: None }).await;
 
     let user = server.user.clone();
     let id = link.id;
@@ -146,7 +146,7 @@ async fn continuing_on_another_node_that_lacks_the_folder_is_refused_and_says_to
     let mut laptop = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
     let id = idle_conversation(&server, &mut laptop, "sam@example.com").await;
     let mut desktop = server.online_node_as("desktop", "v0.11.0").await;
-    desktop.send(NodeToControl::Logins { logins: vec![login("sam@example.com", LoginState::SignedIn)] }).await;
+    desktop.send(NodeToControl::Logins { logins: vec![login("sam@example.com", LoginState::SignedIn)], kubernetes: None }).await;
     let user = server.user.clone();
     let desktop_id = desktop.id;
     common::eventually("the desktop's account", || async {

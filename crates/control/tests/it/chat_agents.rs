@@ -11,7 +11,7 @@ fn claude_login(account: &str) -> LoginInfo {
 
 async fn node_signed_in(server: &Server, name: &str, account: &str) -> NodeLink {
     let mut link = server.online_node(name).await;
-    link.send(NodeToControl::Logins { logins: vec![claude_login(account)] }).await;
+    link.send(NodeToControl::Logins { logins: vec![claude_login(account)], kubernetes: None }).await;
 
     let user = server.user.clone();
     let id = link.id;

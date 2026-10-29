@@ -14,6 +14,7 @@ use crate::pod::PodRuntime;
 use crate::session::{Launch, SessionHandle, SessionSpec, next_failure_seq, spawn_session};
 use crate::transcripts::TranscriptFollower;
 use anyhow::{Context, Result};
+use mycelium_proto::api::KubernetesNode;
 use mycelium_proto::conversation::{AgentId, AgentInfo, LoginInfo, SessionPosition};
 use mycelium_proto::link::{ControlToNode, NodeToControl};
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,7 @@ pub const VERSION: &str = match option_env!("MYCELIUM_VERSION") {
 const FILE_CHUNK_CHARS: usize = 1024 * 1024;
 const UPDATE_EXIT_DELAY: Duration = Duration::from_millis(500);
 const RESOURCE_INTERVAL: Duration = Duration::from_secs(3);
+const POD_INTERVAL: Duration = Duration::from_secs(3);
 const USAGE_INTERVAL: Duration = Duration::from_secs(310);
 
 type CommandSource = Arc<dyn Fn(AgentId) -> Vec<String> + Send + Sync>;
@@ -117,7 +119,7 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     let logins_accounts = accounts_dir(&config.state_dir);
     let usage = Arc::new(UsageCache::new(&options.usage_endpoint, &options.codex_usage_endpoint, &options.codex_command, USAGE_MIN_AGE));
     let logins_usage = usage.clone();
-    let login_report = Arc::new(move || NodeToControl::Logins { logins: login_state(&logins_home, &logins_accounts, &agents, &logins_usage) });
+    let login_report = Arc::new(move || NodeToControl::Logins { logins: login_state(&logins_home, &logins_accounts, &agents, &logins_usage), kubernetes: None });
     let transcripts = TranscriptFollower::new(options.home.clone(), options.transcript_roots.clone(), config.state_dir.join("transcripts.json"), out.clone());
 
     let daemon = Arc::new(Daemon {
@@ -142,6 +144,10 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     daemon.write_status();
     tokio::spawn(follow_transcripts(daemon.clone()));
     tokio::spawn(follow_usage(daemon.clone()));
+
+    if daemon.pods.is_some() {
+        tokio::spawn(follow_pods(daemon.clone()));
+    }
 
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let linked = run_link(daemon.clone(), out_rx);
@@ -190,6 +196,30 @@ async fn follow_transcripts(daemon: Arc<Daemon>) {
     }
 }
 
+async fn follow_pods(daemon: Arc<Daemon>) {
+    let mut ticker = tokio::time::interval(POD_INTERVAL);
+    let mut sent = None;
+
+    loop {
+        ticker.tick().await;
+
+        if !daemon.connected.load(Ordering::SeqCst) {
+            sent = None;
+
+            continue;
+        }
+
+        let report = daemon.kubernetes_report().await;
+
+        if report != sent {
+            sent = report;
+            let logins = daemon.logins_report().await;
+
+            let _ = daemon.out.send(logins);
+        }
+    }
+}
+
 async fn follow_usage(daemon: Arc<Daemon>) {
     let mut ticker = tokio::time::interval(USAGE_INTERVAL);
 
@@ -228,13 +258,8 @@ impl Daemon {
 
     pub async fn hello(&self) -> NodeToControl {
         let agents = self.agents().await;
-        let handles = self.session_handles();
-        let conversations: Vec<Uuid> = handles.iter().map(|(conversation_id, _)| *conversation_id).collect();
-        let sessions = handles.into_iter().map(|(conversation_id, handle)| SessionPosition { conversation_id, last_seq: handle.acked(), live: !handle.ended() }).collect();
-        let kubernetes = match &self.pods {
-            Some(pods) => Some(pods.report(&conversations).await),
-            None => None,
-        };
+        let sessions = self.session_handles().into_iter().map(|(conversation_id, handle)| SessionPosition { conversation_id, last_seq: handle.acked(), live: !handle.ended() }).collect();
+        let kubernetes = self.kubernetes_report().await;
 
         NodeToControl::Hello { version: VERSION.to_string(), hostname: hostname(), os: std::env::consts::OS.to_string(), arch: std::env::consts::ARCH.to_string(), agents, sessions, kubernetes }
     }
@@ -242,7 +267,16 @@ impl Daemon {
     pub async fn logins_report(&self) -> NodeToControl {
         let agents = self.agents().await;
 
-        NodeToControl::Logins { logins: self.logins_for(&agents) }
+        let kubernetes = self.kubernetes_report().await;
+
+        NodeToControl::Logins { logins: self.logins_for(&agents), kubernetes }
+    }
+
+    pub async fn kubernetes_report(&self) -> Option<KubernetesNode> {
+        let pods = self.pods.as_ref()?;
+        let conversations: Vec<Uuid> = self.session_handles().into_iter().map(|(conversation_id, _)| conversation_id).collect();
+
+        Some(pods.report(&conversations).await)
     }
 
     fn use_reset(&self, request_id: Uuid, agent: AgentId, account: Option<String>, idempotency_key: String) {

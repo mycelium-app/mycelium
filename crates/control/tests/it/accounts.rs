@@ -10,7 +10,7 @@ fn login(account: &str, state: LoginState) -> LoginInfo {
 
 async fn node_with_accounts(server: &Server, accounts: Vec<LoginInfo>) -> common::NodeLink {
     let mut link = server.online_node("laptop").await;
-    link.send(NodeToControl::Logins { logins: accounts }).await;
+    link.send(NodeToControl::Logins { logins: accounts, kubernetes: None }).await;
 
     let user = server.user.clone();
     let id = link.id;
@@ -34,7 +34,7 @@ async fn a_node_lists_every_account_signed_in_to_one_agent_and_forgets_the_ones_
     let accounts: Vec<&str> = nodes[0]["logins"].as_array().unwrap().iter().map(|login| login["account"].as_str().unwrap()).collect();
     assert_eq!(accounts, vec!["sam@example.com", "work@acme.example"]);
 
-    link.send(NodeToControl::Logins { logins: vec![login("work@acme.example", LoginState::SignedIn)] }).await;
+    link.send(NodeToControl::Logins { logins: vec![login("work@acme.example", LoginState::SignedIn)], kubernetes: None }).await;
 
     let user = server.user.clone();
     common::eventually("the dropped account", || async {
@@ -54,7 +54,7 @@ async fn the_usage_left_an_account_reports_is_shown_on_the_node_and_replaced_by_
     let usage = |nodes: &serde_json::Value| nodes[0]["logins"].as_array().unwrap().iter().map(|login| login["usage_left"].clone()).collect::<Vec<_>>();
     assert_eq!(usage(&nodes), vec![json!(18), serde_json::Value::Null]);
 
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { usage_left: Some(60), ..login("sam@example.com", LoginState::SignedIn) }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { usage_left: Some(60), ..login("sam@example.com", LoginState::SignedIn) }], kubernetes: None }).await;
 
     let user = server.user.clone();
     common::eventually("the refreshed usage", || async {
@@ -71,7 +71,7 @@ fn window(name: &str, used: f64, resets_in_hours: i64) -> mycelium_proto::conver
 
 async fn report_usage(link: &mut common::NodeLink, hours_ago: i64, windows: Vec<mycelium_proto::conversation::UsageWindow>) {
     let read_at = chrono::Utc::now() - chrono::Duration::hours(hours_ago);
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { windows, usage_read_at: Some(read_at), ..login("sam@example.com", LoginState::SignedIn) }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { windows, usage_read_at: Some(read_at), ..login("sam@example.com", LoginState::SignedIn) }], kubernetes: None }).await;
 }
 
 async fn first_login(server: &Server, settled: impl Fn(&serde_json::Value) -> bool) -> serde_json::Value {
@@ -107,7 +107,7 @@ async fn an_unknown_usage_report_preserves_the_last_reading_without_preserving_s
     report_usage(&mut link, 0, vec![window("five_hour", 42.0, 2)]).await;
     let before = first_login(&server, |login| login["usage_read_at"].is_string()).await;
 
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { method: "refresh".into(), ..login("sam@example.com", LoginState::SignedOut) }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { method: "refresh".into(), ..login("sam@example.com", LoginState::SignedOut) }], kubernetes: None }).await;
     let after = first_login(&server, |login| login["method"] == "refresh").await;
 
     assert_eq!(after["state"], "signed_out");
@@ -121,7 +121,7 @@ async fn a_reconnected_account_recovers_usage_but_a_missing_account_stays_remove
     let mut link = server.online_node("laptop").await;
     report_usage(&mut link, 0, vec![window("five_hour", 42.0, 2)]).await;
     let before = first_login(&server, |login| login["usage_read_at"].is_string()).await;
-    link.send(NodeToControl::Logins { logins: vec![] }).await;
+    link.send(NodeToControl::Logins { logins: vec![], kubernetes: None }).await;
     common::eventually("the removed account", || async {
         let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
 
@@ -132,7 +132,7 @@ async fn a_reconnected_account_recovers_usage_but_a_missing_account_stays_remove
     drop(link);
     let mut reconnected = server.connect_node(id, &token).await;
     reconnected.hello(vec![]).await;
-    reconnected.send(NodeToControl::Logins { logins: vec![login("sam@example.com", LoginState::SignedIn)] }).await;
+    reconnected.send(NodeToControl::Logins { logins: vec![login("sam@example.com", LoginState::SignedIn)], kubernetes: None }).await;
     let after = first_login(&server, |login| login["account"] == "sam@example.com").await;
 
     assert_eq!(after["windows"], before["windows"]);
@@ -145,7 +145,7 @@ async fn an_older_usage_report_does_not_replace_a_newer_control_plane_reading() 
     let mut link = server.online_node("laptop").await;
     report_usage(&mut link, 0, vec![window("five_hour", 42.0, 2)]).await;
     let before = first_login(&server, |login| login["usage_read_at"].is_string()).await;
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { method: "older".into(), windows: vec![window("five_hour", 10.0, 2)], usage_read_at: Some(chrono::Utc::now() - chrono::Duration::hours(1)), ..login("sam@example.com", LoginState::SignedIn) }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { method: "older".into(), windows: vec![window("five_hour", 10.0, 2)], usage_read_at: Some(chrono::Utc::now() - chrono::Duration::hours(1)), ..login("sam@example.com", LoginState::SignedIn) }], kubernetes: None }).await;
     let after = first_login(&server, |login| login["method"] == "older").await;
 
     assert_eq!(after["windows"][0]["used_percent"], before["windows"][0]["used_percent"]);
@@ -286,14 +286,14 @@ async fn banked_resets_a_node_reports_appear_on_its_login() {
         credits: Some(vec![mycelium_proto::conversation::ResetCredit { id: "a".into(), expires_at: Some(chrono::Utc::now() + chrono::Duration::days(14)), title: Some("Bonus reset".into()) }]),
     };
 
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { reset_credits: Some(credits), ..login("sam@example.com", LoginState::SignedIn) }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { reset_credits: Some(credits), ..login("sam@example.com", LoginState::SignedIn) }], kubernetes: None }).await;
     let reported = first_login(&server, |login| login["reset_credits"].is_object()).await;
 
     assert_eq!(reported["reset_credits"]["available_count"], json!(2));
     assert_eq!(reported["reset_credits"]["credits"][0]["title"], json!("Bonus reset"));
     assert!(reported["reset_credits"]["credits"][0]["expires_at"].is_string());
 
-    link.send(NodeToControl::Logins { logins: vec![login("sam@example.com", LoginState::SignedIn)] }).await;
+    link.send(NodeToControl::Logins { logins: vec![login("sam@example.com", LoginState::SignedIn)], kubernetes: None }).await;
     let user = server.user.clone();
     common::eventually("the spent resets to clear", || async {
         let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;

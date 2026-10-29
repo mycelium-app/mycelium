@@ -217,7 +217,7 @@ async fn a_node_cannot_write_into_another_nodes_conversation() {
     intruder.send(NodeToControl::SessionStarted { conversation_id: conversation.id, acp_session_id: "forged".into(), modes: None, models: None, config_options: None }).await;
 
     let mut stream = server.user.stream().await;
-    intruder.send(NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: None, method: "token".into(), state: LoginState::SignedOut, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }).await;
+    intruder.send(NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: None, method: "token".into(), state: LoginState::SignedOut, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }], kubernetes: None }).await;
     stream.until(|message| matches!(message, StreamMessage::Node(node) if node.id == intruder.id && !node.logins.is_empty()).then_some(())).await;
 
     assert!(server.events(conversation.id).await.is_empty());
@@ -342,7 +342,7 @@ async fn an_agent_sign_in_is_started_on_the_node_and_its_output_streams_to_clien
     assert_eq!(status, 204);
     assert_eq!(link.next().await, ControlToNode::LoginInput { login_id, text: "abc123\n".into() });
 
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: Some("me@example.com".into()), method: "token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: Some("me@example.com".into()), method: "token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }], kubernetes: None }).await;
     link.send(NodeToControl::LoginFinished { login_id, ok: true }).await;
     stream.until(|message| matches!(message, StreamMessage::LoginFinished { ok: true, .. }).then_some(())).await;
 
@@ -528,7 +528,7 @@ async fn a_node_cannot_publish_output_for_another_nodes_sign_in() {
 
     intruder.send(NodeToControl::LoginOutput { login_id, data: "spoofed".into() }).await;
     intruder.send(NodeToControl::LoginFinished { login_id, ok: true }).await;
-    intruder.send(NodeToControl::Logins { logins: vec![] }).await;
+    intruder.send(NodeToControl::Logins { logins: vec![], kubernetes: None }).await;
 
     stream
         .until(|message| match message {
