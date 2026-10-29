@@ -77,6 +77,7 @@ import mycelium.state.heatLevel
 import mycelium.state.heatName
 import mycelium.state.rangeOf
 import mycelium.state.stretchOf
+import mycelium.state.stretchesOf
 import mycelium.state.weekdayOf
 
 private val ConversationBlue = Color(0xFF3987E5)
@@ -773,7 +774,7 @@ fun ActivityTab(store: Store, platform: Platform, onOpenConversation: (String) -
         DayHeader(date, day?.onScreenMinutes, view.onToday, phone, store.wellness::stepActivityDay, { view.today?.let(store.wellness::showActivityDay) })
 
         if (day != null) {
-            val stretches = day.spans.mapNotNull { stretchOf(it, platform) }
+            val stretches = stretchesOf(day.spans, platform)
             val range = rangeOf(stretches)
 
             if (range == null) {

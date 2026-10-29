@@ -104,10 +104,20 @@ fun stretchOf(span: ActivitySpan, platform: Platform?): Stretch? {
     val start = instantOrNull(span.start) ?: return null
     val end = instantOrNull(span.end) ?: return null
     val startMinute = minuteOfDay(localTimeOf(platform, start))
-    val endClock = minuteOfDay(localTimeOf(platform, end))
-    val endMinute = if (endClock <= startMinute) endClock + MinutesInDay else endClock
+    val endMinute = minOf(startMinute + ((end - start).inWholeSeconds / 60).toInt(), MinutesInDay)
 
-    return Stretch(span, activityKindOf(span.kind), startMinute, endMinute)
+    return Stretch(span, activityKindOf(span.kind), startMinute, endMinute).takeIf { it.minutes > 0 }
+}
+
+fun stretchesOf(spans: List<ActivitySpan>, platform: Platform?): List<Stretch> {
+    var reached = 0
+
+    return spans.mapNotNull { stretchOf(it, platform) }.sortedBy { it.startMinute }.mapNotNull { stretch ->
+        val clipped = stretch.copy(startMinute = maxOf(stretch.startMinute, reached))
+
+        reached = maxOf(reached, stretch.endMinute)
+        clipped.takeIf { it.minutes > 0 }
+    }
 }
 
 fun rangeOf(stretches: List<Stretch>): TimelineRange? {

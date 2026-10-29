@@ -482,6 +482,8 @@ async fn relay(state: &AppState, owner: Uuid, id: Uuid, provider: &ProviderRow, 
     let mut rounds = 0;
 
     loop {
+        toolbox.reload_if_changed(state, owner, id).await?;
+
         let definitions = if tools_on { toolbox.definitions() } else { Vec::new() };
         let instructions = if tools_on { format!("{base_instructions}\n{}", toolbox.instructions()) } else { base_instructions.clone() };
         let started = provider.stream_reply(&state.http, model, &instructions, &messages, &definitions).await?;

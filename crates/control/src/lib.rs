@@ -62,6 +62,7 @@ mod memories;
 mod message_proposals;
 mod conversation_connections;
 mod group_connections;
+mod decision_chat;
 mod decision_providers;
 mod model_providers;
 mod provider_usage;

@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -123,8 +125,12 @@ fun SignInScreen(platform: Platform, savedAddress: String?, notice: String?, onS
                 )
             }
         }
+
+        MyButton({ platform.openUrl(ProjectUrl) }, text = "Mycelium on GitHub", icon = MyIcon.Globe, description = "Mycelium on GitHub, opens in your browser", size = ButtonSize.Sm, muted = true)
     }
 }
+
+private const val ProjectUrl = "https://github.com/mycelium-app"
 
 @Composable
 private fun DeviceCodePanel(device: DeviceResponse, platform: Platform, onOpen: () -> Unit, onCancel: () -> Unit) {
@@ -242,8 +248,12 @@ fun ApproveScreen(api: MyceliumApi, code: String, returnTo: String?, onReturn: (
 
 @Composable
 private fun CenteredPage(content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxSize().background(MyTheme.colors.bgContent), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
+    Box(Modifier.fillMaxSize().background(MyTheme.colors.bgContent)) {
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = Tokens.Space.S6),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6, Alignment.CenterVertically),
+        ) {
             content()
         }
     }

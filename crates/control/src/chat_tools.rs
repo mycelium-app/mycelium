@@ -12,6 +12,7 @@ use mycelium_proto::conversation::{ConversationStatus, EventKind};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap};
+use tokio::sync::broadcast::{self, error::TryRecvError};
 use uuid::Uuid;
 
 pub const TOOL_SEARCH: &str = "tool_search";
@@ -59,6 +60,7 @@ pub struct Toolbox {
     connections: HashMap<Uuid, McpConnection>,
     chat_node: Uuid,
     provider: Option<String>,
+    changes: broadcast::Receiver<()>,
 }
 
 fn model_name(server: &str, tool: &str) -> String {
@@ -107,6 +109,7 @@ fn text_content(text: &str) -> Value {
 
 impl Toolbox {
     pub async fn open(state: &AppState, owner: Uuid, conversation_id: Uuid) -> ApiResult<Toolbox> {
+        let changes = state.hub.subscribe_tools(owner);
         let mut tools: Vec<Tool> = mcp::tool_definitions()
             .as_array()
             .into_iter()
@@ -155,7 +158,31 @@ impl Toolbox {
         .fetch_all(&state.pool)
         .await?;
 
-        Ok(Toolbox { tools, loaded, always_allowed: always_allowed.into_iter().collect(), connections: HashMap::new(), chat_node: chat_node(state, owner).await?, provider })
+        Ok(Toolbox { tools, loaded, always_allowed: always_allowed.into_iter().collect(), connections: HashMap::new(), chat_node: chat_node(state, owner).await?, provider, changes })
+    }
+
+    pub async fn reload_if_changed(&mut self, state: &AppState, owner: Uuid, conversation_id: Uuid) -> ApiResult<()> {
+        let mut changed = false;
+
+        loop {
+            match self.changes.try_recv() {
+                Ok(()) | Err(TryRecvError::Lagged(_)) => changed = true,
+                Err(TryRecvError::Empty | TryRecvError::Closed) => break,
+            }
+        }
+
+        if !changed {
+            return Ok(());
+        }
+
+        let mut fresh = Toolbox::open(state, owner, conversation_id).await?;
+        let kept: Vec<String> = self.loaded.iter().filter(|name| fresh.tools.iter().any(|tool| &tool.name == *name)).cloned().collect();
+
+        fresh.loaded.extend(kept);
+        fresh.connections = std::mem::take(&mut self.connections);
+        *self = fresh;
+
+        Ok(())
     }
 
     pub fn definitions(&self) -> Vec<ToolDefinition> {

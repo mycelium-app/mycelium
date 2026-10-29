@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type KeyInput, commandForKey } from './keys';
+import { type KeyInput, commandForKey, submitsComment } from './keys';
 
 function press(key: string, modifiers: Partial<KeyInput> = {}): KeyInput
 {
@@ -37,5 +37,23 @@ describe('keyboard shortcuts', () =>
   {
     expect(commandForKey(press('v', { ctrlKey: true }))).toBeNull();
     expect(commandForKey(press('x'))).toBeNull();
+  });
+});
+
+describe('comment submit key', () =>
+{
+  it('submits on Enter', () =>
+  {
+    expect(submitsComment({ key: 'Enter', shiftKey: false })).toBe(true);
+  });
+
+  it('keeps Shift Enter for a new line', () =>
+  {
+    expect(submitsComment({ key: 'Enter', shiftKey: true })).toBe(false);
+  });
+
+  it('does not submit while an input method is composing', () =>
+  {
+    expect(submitsComment({ key: 'Enter', shiftKey: false, isComposing: true })).toBe(false);
   });
 });
