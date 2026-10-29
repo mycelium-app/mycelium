@@ -614,106 +614,90 @@ impl Daemon {
 
         let agent_command = (self.options.agent_commands)(agent);
 
-        if self.pods.is_some() {
+        let (env, folder, requested_account) = if self.pods.is_some() {
             let mut env = agent_env(agent);
 
             if let (AgentId::Codex, Some(text)) = (agent, &instructions) {
                 env = with_developer_instructions(env, text);
             }
 
-            let cwd = std::path::Path::new(crate::pod::WORKSPACE_PATH).join(cwd.trim_start_matches('/'));
-            let launch = Launch {
-                agent,
-                account: account.clone(),
-                keeper_binary: self.options.keeper_binary.clone(),
-                agent_command,
-                agent_env: env,
-                mcp_server: self.config.mcp_server(conversation_id),
-                instructions: instructions.filter(|_| agent == AgentId::Claude),
-                cwd,
-                resume,
-                fork,
-            };
-            let spec = SessionSpec { conversation_id, dir: self.session_dir(conversation_id), launch: Some(launch), pods: self.pods.clone() };
-            let handle = spawn_session(spec, self.out.clone());
-            if let Ok(mut sessions) = self.sessions.lock() {
-                sessions.insert(conversation_id, handle);
+            let folder = std::path::Path::new(crate::pod::WORKSPACE_PATH).join(cwd.trim_start_matches('/'));
+
+            (env, folder, account)
+        } else {
+            let available = agent_command.first().and_then(|program| crate::agents::resolve_program(program)).is_some();
+            if !available {
+                self.refuse(conversation_id, format!("{} is not installed on this node.", agent.as_str()));
+
+                return;
             }
 
-            return;
-        }
+            let mut env = agent_env(agent);
+            match crate::secrets_file::write(&self.session_dir(conversation_id), &secrets) {
+                Ok(path) => env.push((crate::secrets_file::SECRETS_FILE_ENV.to_string(), path.to_string_lossy().into_owned())),
+                Err(error) => tracing::warn!(conversation = %conversation_id, "could not write the secrets file: {error}"),
+            }
 
-        let available = agent_command.first().and_then(|program| crate::agents::resolve_program(program)).is_some();
-        if !available {
-            self.refuse(conversation_id, format!("{} is not installed on this node.", agent.as_str()));
+            if let Ok(mut launched) = self.launched_secrets.lock() {
+                launched.insert(conversation_id, secrets.clone());
+            }
 
-            return;
-        }
+            env.extend(secrets);
 
-        let mut env = agent_env(agent);
-        match crate::secrets_file::write(&self.session_dir(conversation_id), &secrets) {
-            Ok(path) => env.push((crate::secrets_file::SECRETS_FILE_ENV.to_string(), path.to_string_lossy().into_owned())),
-            Err(error) => tracing::warn!(conversation = %conversation_id, "could not write the secrets file: {error}"),
-        }
+            if let (AgentId::Codex, Some(text)) = (agent, &instructions) {
+                env = with_developer_instructions(env, text);
+            }
 
-        if let Ok(mut launched) = self.launched_secrets.lock() {
-            launched.insert(conversation_id, secrets.clone());
-        }
+            let requested_account = account.clone();
+            let accounts = accounts_dir(&self.config.state_dir);
+            let mut chosen = None;
 
-        env.extend(secrets);
+            if let Some(label) = account {
+                let Some(found) = find_account(&self.options.home, &accounts, agent, &label) else {
+                    self.refuse(conversation_id, format!("{label} is not signed in on this node. Sign in to it there, or start the conversation with another account."));
 
-        if let (AgentId::Codex, Some(text)) = (agent, &instructions) {
-            env = with_developer_instructions(env, text);
-        }
+                    return;
+                };
 
-        let requested_account = account.clone();
-        let accounts = accounts_dir(&self.config.state_dir);
-        let mut chosen = None;
+                env.extend(account_env(agent, &found));
+                chosen = Some((label, found));
+            }
 
-        if let Some(label) = account {
-            let Some(found) = find_account(&self.options.home, &accounts, agent, &label) else {
-                self.refuse(conversation_id, format!("{label} is not signed in on this node. Sign in to it there, or start the conversation with another account."));
+            if let Some(session_id) = &resume {
+                let (label, home) = match chosen {
+                    Some((label, found)) => (label, found),
+                    None => ("the default account".to_string(), crate::agents::account_homes(&self.options.home, &accounts, agent).remove(0)),
+                };
+                let roots = crate::agents::transcript_roots(&self.options.home, &accounts, &self.options.transcript_roots);
+                let target = crate::agents::transcript_root(agent, &home);
+
+                if let Err(error) = crate::transcripts::adopt(&self.options.home, &roots, &target, session_id) {
+                    self.refuse(conversation_id, format!("The conversation's transcript could not be copied to {label}: {error}"));
+
+                    return;
+                }
+            }
+
+            let requested = self.config.projects_root.join(cwd);
+            let (Ok(folder), Ok(root)) = (requested.canonicalize(), self.config.projects_root.canonicalize()) else {
+                self.refuse(conversation_id, format!("The folder {} does not exist on this node.", requested.display()));
 
                 return;
             };
 
-            env.extend(account_env(agent, &found));
-            chosen = Some((label, found));
-        }
-
-        if let Some(session_id) = &resume {
-            let (label, home) = match chosen {
-                Some((label, found)) => (label, found),
-                None => ("the default account".to_string(), crate::agents::account_homes(&self.options.home, &accounts, agent).remove(0)),
-            };
-            let roots = crate::agents::transcript_roots(&self.options.home, &accounts, &self.options.transcript_roots);
-            let target = crate::agents::transcript_root(agent, &home);
-
-            if let Err(error) = crate::transcripts::adopt(&self.options.home, &roots, &target, session_id) {
-                self.refuse(conversation_id, format!("The conversation's transcript could not be copied to {label}: {error}"));
+            if !folder.is_dir() {
+                self.refuse(conversation_id, format!("The folder {} does not exist on this node.", requested.display()));
 
                 return;
             }
-        }
 
-        let requested = self.config.projects_root.join(cwd);
-        let (Ok(folder), Ok(root)) = (requested.canonicalize(), self.config.projects_root.canonicalize()) else {
-            self.refuse(conversation_id, format!("The folder {} does not exist on this node.", requested.display()));
+            if !folder.starts_with(&root) {
+                self.refuse(conversation_id, format!("The folder {} is outside {}. Choose a folder inside it.", requested.display(), self.config.projects_root.display()));
 
-            return;
+                return;
+            }
+            (env, folder, requested_account)
         };
-
-        if !folder.is_dir() {
-            self.refuse(conversation_id, format!("The folder {} does not exist on this node.", requested.display()));
-
-            return;
-        }
-
-        if !folder.starts_with(&root) {
-            self.refuse(conversation_id, format!("The folder {} is outside {}. Choose a folder inside it.", requested.display(), self.config.projects_root.display()));
-
-            return;
-        }
 
         let launch = Launch {
             agent,
