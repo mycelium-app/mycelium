@@ -1,8 +1,8 @@
 # Changelog
 
-## v0.15.5
+## v0.15.6
 
-The first release published on GitHub. v0.15.3 and v0.15.4 were tagged but never published.
+The first release published on GitHub. v0.15.3 to v0.15.5 were tagged but never published.
 
 Mycelium now lives at [github.com/mycelium-app/mycelium](https://github.com/mycelium-app/mycelium). The repository history was rewritten for the move, so clone it again rather than pulling into an old clone.
 
@@ -11,8 +11,10 @@ Mycelium now lives at [github.com/mycelium-app/mycelium](https://github.com/myce
 - The installer reads the latest version from `releases/latest/download/latest`. Its `MYCELIUM_S3` override is replaced by `MYCELIUM_RELEASES` and `MYCELIUM_LATEST`.
 - On macOS the node's launch agent is now `app.mycelium.node`. Unload and remove the old Mycelium launch agent in `~/Library/LaunchAgents` before reinstalling.
 - The Nix flake is `github:mycelium-app/mycelium`.
-- Usage readings from the previous orchestrator are no longer imported.
 - The README and the landing page are up to date, and the landing page sends you to the README for installing.
+- The control plane image is published without build attestations, and only once every download and the signed Android app are ready.
+- Usage history no longer imports readings from the previous orchestrator. Readings it imported before stay in the history.
+- The design editor's source moved to `clients/editor` beside the other clients.
 
 ## v0.15.2
 
