@@ -2,6 +2,7 @@ use crate::auth::AuthUser;
 use crate::chat_tool_servers::{SERVER_COLUMNS, ServerRow, StoredTool};
 use crate::error::{ApiError, ApiResult};
 use crate::integrations::{CallOutput, Credentials};
+use crate::outbound::{BODY_LIMIT, Oversize, read_text_limited};
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Path, State};
@@ -16,6 +17,7 @@ const WRITES: [&str; 3] = ["create_event", "update_event", "delete_event"];
 const CONFLICT: &str = "The event changed on the server since you read it. List it again and retry.";
 const READ_ONLY: &str = "That calendar is read only.";
 const FOLD_AT: usize = 73;
+const REDIRECT_HOPS: usize = 5;
 
 const PRINCIPAL_QUERY: &str = r#"<d:propfind xmlns:d="DAV:"><d:prop><d:current-user-principal/></d:prop></d:propfind>"#;
 const HOME_QUERY: &str = r#"<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><c:calendar-home-set/></d:prop></d:propfind>"#;
@@ -133,17 +135,33 @@ pub fn host_of(address: &str) -> String {
 }
 
 async fn send_once(http: &reqwest::Client, credentials: &Credentials, method: &reqwest::Method, url: &Url, headers: &[(&str, &str)], body: &Option<String>) -> Result<reqwest::Response, Failure> {
-    let mut builder = http.request(method.clone(), url.clone()).basic_auth(&credentials.account, Some(&credentials.secret)).timeout(TIMEOUT);
+    let mut target = url.clone();
 
-    for (name, value) in headers {
-        builder = builder.header(*name, *value);
+    for _ in 0..=REDIRECT_HOPS {
+        let mut builder = http.request(method.clone(), target.clone()).timeout(TIMEOUT);
+
+        if target.origin() == url.origin() {
+            builder = builder.basic_auth(&credentials.account, Some(&credentials.secret));
+        }
+
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+
+        if let Some(body) = body {
+            builder = builder.body(body.clone());
+        }
+
+        let response = builder.send().await.map_err(|error| Failure::Unreachable(error.without_url().to_string()))?;
+        let location = response.headers().get("location").and_then(|value| value.to_str().ok()).and_then(|location| target.join(location).ok());
+
+        match location {
+            Some(next) if response.status().is_redirection() => target = next,
+            _ => return Ok(response),
+        }
     }
 
-    if let Some(body) = body {
-        builder = builder.body(body.clone());
-    }
-
-    builder.send().await.map_err(|error| Failure::Unreachable(error.without_url().to_string()))
+    Err(Failure::Unreachable("it redirected too many times".to_string()))
 }
 
 async fn request(http: &reqwest::Client, credentials: &Credentials, method: &str, url: &Url, headers: &[(&str, &str)], body: Option<String>) -> Result<Reply, Failure> {
@@ -164,7 +182,10 @@ async fn request(http: &reqwest::Client, credentials: &Credentials, method: &str
 
     let url = response.url().clone();
     let etag = response.headers().get("etag").and_then(|value| value.to_str().ok()).map(str::to_string);
-    let body = response.text().await.map_err(|error| Failure::Unreachable(error.without_url().to_string()))?;
+    let body = read_text_limited(response, BODY_LIMIT).await.map_err(|reason| match reason {
+        Oversize::Larger => Failure::Unreachable("its reply was larger than 16 MiB".to_string()),
+        Oversize::Stopped => Failure::Unreachable("it stopped replying part way through".to_string()),
+    })?;
 
     Ok(Reply { status, url, etag, body })
 }
@@ -623,7 +644,7 @@ async fn events_between(http: &reqwest::Client, credentials: &Credentials, calen
 fn event_url(calendars: &[Calendar], href: &str) -> Result<(Url, Calendar), String> {
     let base = calendars.first().map(|calendar| calendar.href.clone()).ok_or("The account has no calendars.")?;
     let url = base.join(href.trim()).map_err(|_| format!("{href} is not an event href. Use the href from list_events."))?;
-    let owner = calendars.iter().find(|calendar| url.path().starts_with(calendar.href.path())).ok_or_else(|| format!("{href} is not in one of the account's calendars."))?;
+    let owner = calendars.iter().find(|calendar| url.origin() == calendar.href.origin() && url.path().starts_with(calendar.href.path())).ok_or_else(|| format!("{href} is not in one of the account's calendars."))?;
 
     Ok((url, owner.clone()))
 }
@@ -789,6 +810,60 @@ pub async fn calendars(State(state): State<AppState>, user: AuthUser, Path(serve
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn calendar_at(href: &str) -> Calendar {
+        Calendar { href: Url::parse(href).unwrap(), name: "Work".to_string(), colour: None, read_only: false }
+    }
+
+    #[test]
+    fn an_event_href_on_another_host_is_refused_even_when_its_path_matches() {
+        let calendars = [calendar_at("http://cal.example.com/sam/work/")];
+
+        assert!(event_url(&calendars, "http://evil.example.net/sam/work/a.ics").is_err());
+        assert!(event_url(&calendars, "http://cal.example.com:8443/sam/work/a.ics").is_err());
+        assert!(event_url(&calendars, "/sam/work/a.ics").is_ok());
+        assert!(event_url(&calendars, "http://cal.example.com/sam/work/a.ics").is_ok());
+    }
+
+    async fn serve(router: axum::Router) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+
+        tokio::spawn(async move { axum::serve(listener, router).await });
+
+        format!("http://127.0.0.1:{}", address.port())
+    }
+
+    #[tokio::test]
+    async fn a_redirect_to_another_origin_does_not_carry_the_app_password() {
+        use std::sync::{Arc, Mutex};
+
+        let seen: Arc<Mutex<Vec<Option<String>>>> = Arc::default();
+        let recorded = seen.clone();
+        let target = serve(axum::Router::new().fallback(move |headers: axum::http::HeaderMap| {
+            let recorded = recorded.clone();
+
+            async move {
+                recorded.lock().unwrap().push(headers.get("authorization").and_then(|value| value.to_str().ok()).map(str::to_string));
+
+                "ok"
+            }
+        }))
+        .await;
+        let destination = format!("{target}/landing");
+        let front = serve(axum::Router::new().fallback(move || {
+            let destination = destination.clone();
+
+            async move { axum::response::Redirect::temporary(&destination) }
+        }))
+        .await;
+        let credentials = Credentials { address: front.clone(), account: "sam".into(), secret: "app-password".into(), settings: json!({}), session: None };
+        let http = crate::outbound::client().unwrap();
+        let response = send_once(&http, &credentials, &reqwest::Method::GET, &Url::parse(&front).unwrap(), &[], &None).await.ok().unwrap();
+
+        assert_eq!(response.status().as_u16(), 200);
+        assert_eq!(*seen.lock().unwrap(), vec![None]);
+    }
 
     #[test]
     fn a_calendar_without_write_privileges_is_read_only() {
