@@ -99,6 +99,13 @@ class ThreadTest {
     }
 
     @Test
+    fun startingOnAnyNodeSaysWhichNodeWasPicked() {
+        val thread = buildThread(listOf(event(1, EventKinds.Continued, """{"kind":"any_node","node_name":"orion"}""")))
+
+        assertEquals(ThreadItem.Continued("e1", "Started on orion, picked from Any node"), thread[0])
+    }
+
+    @Test
     fun toolCallUpdateChangesTheExistingCallInPlace() {
         val thread = buildThread(
             listOf(
