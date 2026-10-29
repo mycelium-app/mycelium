@@ -54,6 +54,7 @@ import mycelium.api.NodeSummary
 import mycelium.api.ModelProvider
 import mycelium.api.PatchConversationRequest
 import mycelium.api.PatchQueueRequest
+import mycelium.state.forgeReferences
 import mycelium.state.Annotation
 import mycelium.state.QueueEditing
 import mycelium.state.ComposerDraft
@@ -663,6 +664,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             onSetMode = { mode -> store.act { api.setConfig(id, ConfigRequest(mode = mode)) } },
                             onSetModel = { model -> store.act { api.setConfig(id, ConfigRequest(model = model)) } },
                             onSearchFiles = { query -> api.files(id, query) },
+                            onSearchReferences = { query -> forgeReferences(api.issues().issues, api.pullRequests().pullRequests, query) },
                             onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
                             onSideChat = { kind, text -> store.act { onOpenConversation(api.startSideChat(id, sideKind(kind), text.ifEmpty { null }).id) } },
                             onTeachMe = { on -> store.act { api.patchConversation(id, PatchConversationRequest(teachMe = on)) } },

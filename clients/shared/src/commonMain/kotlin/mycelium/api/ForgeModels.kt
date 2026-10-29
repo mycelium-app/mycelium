@@ -28,7 +28,13 @@ data class Issue(
     val url: String,
     val body: String? = null,
     @SerialName("pull_requests") val pullRequests: List<PullRequest>? = null,
+    val author: ForgePerson? = null,
+    val assignees: List<ForgePerson> = emptyList(),
+    @SerialName("updated_at") val updatedAt: String? = null,
 )
+
+@Serializable
+data class ForgePerson(val name: String, @SerialName("avatar_url") val avatarUrl: String? = null)
 
 @Serializable
 enum class PullRequestState {
@@ -39,6 +45,42 @@ enum class PullRequestState {
 
 @Serializable
 data class PullRequest(val number: Long, val label: String, val url: String, val state: PullRequestState)
+
+@Serializable
+data class PullRequestItem(
+    @SerialName("forge_id") val forgeId: String,
+    val repository: String,
+    val number: Long,
+    val label: String,
+    val title: String,
+    val url: String,
+    val body: String = "",
+    val state: PullRequestState,
+    val draft: Boolean = false,
+    @SerialName("source_branch") val sourceBranch: String = "",
+    @SerialName("target_branch") val targetBranch: String = "",
+    val author: ForgePerson? = null,
+    val assignees: List<ForgePerson> = emptyList(),
+    @SerialName("updated_at") val updatedAt: String? = null,
+)
+
+@Serializable
+data class PullRequests(@SerialName("pull_requests") val pullRequests: List<PullRequestItem> = emptyList(), val failures: List<RepositoryFailure> = emptyList())
+
+@Serializable
+data class PullRequestComment(
+    val author: ForgePerson? = null,
+    val body: String,
+    @SerialName("created_at") val createdAt: String? = null,
+    val path: String? = null,
+    val resolved: Boolean? = null,
+)
+
+@Serializable
+data class PullRequestDetail(@SerialName("pull_request") val pullRequest: PullRequestItem, val timeline: List<PullRequestComment> = emptyList())
+
+@Serializable
+data class PullRequestDiff(val diff: String)
 
 @Serializable
 data class Issues(val issues: List<Issue> = emptyList(), val failures: List<RepositoryFailure> = emptyList())

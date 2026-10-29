@@ -886,6 +886,18 @@ class MyceliumApi(
     suspend fun startWorkspace(projectId: String, number: Long, agent: String): Conversation =
         call("/projects/$projectId/issues/$number/workspace") { client.post(it) { authorise(); json(StartWorkspaceRequest(agent)) } }.body()
 
+    suspend fun pullRequests(query: String = ""): PullRequests =
+        call("/pulls") { client.get(it) { authorise(); if (query.isNotBlank()) parameter("q", query.trim()) } }.body()
+
+    suspend fun pullRequest(forgeId: String, repository: String, number: Long): PullRequestDetail =
+        call("/forges/$forgeId/pulls/$number") { client.get(it) { authorise(); parameter("repository", repository) } }.body()
+
+    suspend fun pullRequestDiff(forgeId: String, repository: String, number: Long): PullRequestDiff =
+        call("/forges/$forgeId/pulls/$number/diff") { client.get(it) { authorise(); parameter("repository", repository) } }.body()
+
+    suspend fun startPullRequestWorkspace(projectId: String, number: Long, agent: String): Conversation =
+        call("/projects/$projectId/pulls/$number/workspace") { client.post(it) { authorise(); json(StartWorkspaceRequest(agent)) } }.body()
+
     suspend fun imports(): List<ImportStatus> = call("/imports") { client.get(it) { authorise() } }.body()
 
     suspend fun importJobs(): List<ImportJob> = call("/imports/jobs") { client.get(it) { authorise() } }.body()

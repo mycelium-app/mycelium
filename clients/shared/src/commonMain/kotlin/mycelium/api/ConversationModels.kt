@@ -181,6 +181,7 @@ data class Conversation(
     val branch: String? = null,
     @SerialName("pull_request_label") val pullRequestLabel: String? = null,
     @SerialName("pull_request_url") val pullRequestUrl: String? = null,
+    @SerialName("pull_request_state") val pullRequestState: String? = null,
     val account: String? = null,
     @SerialName("title_user_set") val titleUserSet: Boolean = false,
     @SerialName("parent_id") val parentId: String? = null,

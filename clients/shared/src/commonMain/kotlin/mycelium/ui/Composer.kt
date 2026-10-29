@@ -84,6 +84,7 @@ import androidx.compose.ui.window.PopupProperties
 import mycelium.Dictation
 import mycelium.DictationProblem
 import mycelium.state.Choice
+import mycelium.state.ForgeReference
 import mycelium.state.Annotation
 import mycelium.state.SessionOptions
 import mycelium.state.annotationLabel
@@ -152,6 +153,7 @@ fun Composer(
     onSetSetting: (String, String) -> Unit,
     onSearchFiles: suspend (String) -> List<String>,
     modifier: Modifier = Modifier,
+    onSearchReferences: suspend (String) -> List<ForgeReference> = { emptyList() },
     accountPicker: AccountPickerControls? = null,
     onSideChat: (kind: String, text: String) -> Unit = { _, _ -> },
     annotations: List<Annotation> = emptyList(),
@@ -225,12 +227,15 @@ fun Composer(
     val query = text.text.takeIf { it.startsWith("/") && it.none(Char::isWhitespace) }?.drop(1)
     val mention = if (query == null) mentionAt(text.text, text.selection.end) else null
     var files by remember { mutableStateOf(emptyList<String>()) }
+    var references by remember { mutableStateOf(emptyList<ForgeReference>()) }
 
     LaunchedEffect(mention?.query) {
         files = emptyList()
+        references = emptyList()
         val wanted = mention?.query ?: return@LaunchedEffect
         delay(FileSearchDelayMillis)
         attempt { files = onSearchFiles(wanted) }
+        attempt { references = onSearchReferences(wanted) }
     }
 
     fun insert(start: Int, completed: String) {
@@ -241,7 +246,8 @@ fun Composer(
     val matches = when {
         query != null -> (SideChatCommands + commands.filterNot { command -> SideChatCommands.any { it.name == command.name } }).filter { it.name.contains(query, ignoreCase = true) }.sortedBy { !it.name.startsWith(query, ignoreCase = true) }
             .map { command -> Completion(command.name, command.description) { insert(0, "/${command.name} ") } }
-        mention != null -> files.map { path -> Completion(path, "") { insert(mention.start, "@$path ") } }
+        mention != null -> references.map { reference -> Completion(reference.label, reference.title) { insert(mention.start, "${reference.label} ${reference.url} ") } } +
+            files.map { path -> Completion(path, "") { insert(mention.start, "@$path ") } }
         else -> emptyList()
     }
     var highlighted by remember(query, mention?.query) { mutableStateOf(0) }
