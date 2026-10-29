@@ -191,7 +191,7 @@ async fn provider_favourites_from_before_the_merge_become_any_model_entries_once
     .fetch_one(&server.pool)
     .await
     .unwrap();
-    let migration = include_str!("../../migrations/0140_favourites_into_any_model.sql");
+    let migration = include_str!("../../migrations/0144_favourites_into_any_model.sql");
 
     sqlx::raw_sql(migration).execute(&server.pool).await.unwrap();
     sqlx::raw_sql(migration).execute(&server.pool).await.unwrap();
