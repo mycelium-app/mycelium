@@ -219,18 +219,18 @@ fun QueuedMessages(
                     }
                 }
 
-                if (item.editing) {
-                    Box(Modifier.height(Tokens.Size.ControlSm), contentAlignment = Alignment.Center) {
-                        Label("Editing in the composer", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                if (!item.editing) {
+                    if (index > 0) {
+                        SplitButton("Send now", { onSendNow(item.id) }, listOf(SplitAlternative("Move to front", { onMove(item.id, 0) })), variant = ButtonVariant.Outline, size = ButtonSize.Sm, description = "Send queued message ${index + 1} now", menuLabel = "Queued message ${index + 1}")
+                    } else {
+                        MyButton({ onSendNow(item.id) }, text = "Send now", variant = ButtonVariant.Outline, size = ButtonSize.Sm, description = "Send queued message ${index + 1} now")
                     }
-                } else {
+
                     Box {
                         MyButton({ menuOpen = true }, icon = MyIcon.MoreVertical, description = "Actions for queued message ${index + 1}", size = ButtonSize.Sm, muted = true, selected = menuOpen)
 
                         if (menuOpen) {
                             MenuPopup(onDismiss = { menuOpen = false }) {
-                                MenuItem("Send now", { menuOpen = false; onSendNow(item.id) }, leading = MyIcon.Send)
-
                                 if (editable) {
                                     MenuItem("Edit", { menuOpen = false; onEdit(item) }, leading = MyIcon.Pencil)
                                 }

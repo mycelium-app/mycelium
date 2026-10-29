@@ -103,14 +103,13 @@ class QueuedMessagesTest {
     }
 
     @Test
-    fun aRowMenuOffersSendNowEditMoveAndRemove() {
+    fun aRowMenuOffersEditMoveAndRemove() {
         val sent = mutableListOf<String>()
         val removed = mutableListOf<String>()
         val edited = mutableListOf<String>()
         show(sendNow = { sent += it }, edit = { edited += it.id }, remove = { removed += it })
 
-        openActions(2)
-        rule.onNodeWithText("Send now").performClick()
+        rule.onNodeWithContentDescription("Send queued message 2 now").performClick()
         openActions(1)
         rule.onNodeWithText("Edit").performClick()
         openActions(1)
@@ -119,6 +118,17 @@ class QueuedMessagesTest {
         assertEquals(listOf("q2"), sent)
         assertEquals(listOf("q1"), edited)
         assertEquals(listOf("q1"), removed)
+    }
+
+    @Test
+    fun theSendNowChevronMovesALaterMessageToTheFront() {
+        val moved = mutableListOf<Pair<String, Int>>()
+        show(move = { id, to -> moved += id to to })
+
+        rule.onNodeWithContentDescription("More ways to send now").performClick()
+        rule.onNodeWithText("Move to front").performClick()
+
+        assertEquals(listOf("q2" to 0), moved)
     }
 
     @Test
@@ -150,10 +160,10 @@ class QueuedMessagesTest {
     }
 
     @Test
-    fun aMessageBeingEditedShowsWhereItIsBeingEditedInsteadOfARowMenu() {
+    fun aMessageBeingEditedHasNoRowMenuOrSendNow() {
         show(queued = listOf(queue[0], queue[1].copy(editing = true)))
 
-        rule.onNodeWithText("Editing in the composer").assertIsDisplayed()
+        assertEquals(0, rule.onAllNodesWithContentDescription("Send queued message 2 now").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithContentDescription("Actions for queued message 2").fetchSemanticsNodes().size)
         assertEquals(1, rule.onAllNodesWithContentDescription("Actions for queued message 1").fetchSemanticsNodes().size)
     }
