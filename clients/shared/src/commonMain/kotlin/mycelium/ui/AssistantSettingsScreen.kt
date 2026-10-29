@@ -194,10 +194,6 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("Group", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
             OptionMenu("Group", groupChoices, group, { group = it }, title = "Group", icon = MyIcon.Group)
-
-            if (groupName != null) {
-                Label("Group instructions apply to its sessions, and the sidebar group filter shows it under $groupName.", style = Tokens.Type.Meta, color = colors.textMuted)
-            }
         }
 
         if (isVoice) {
@@ -249,7 +245,6 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
 
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 Label("Archive", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                Label("Archived assistants keep their thread, files and secrets, and stop waking for schedules. Restore one from Assistants, state Archived.", style = Tokens.Type.Meta, color = colors.textMuted)
 
                 Row {
                     MyButton({ confirmingArchive = true }, text = "Archive assistant", icon = MyIcon.Archive, variant = ButtonVariant.Outline)

@@ -1,5 +1,8 @@
 package mycelium.ui
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -74,9 +77,9 @@ private fun TileGrid(tiles: List<CatalogueTile>) {
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             for (row in tiles.chunked(columns)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                     for (tile in row) {
-                        Tile(tile, Modifier.weight(1f))
+                        Tile(tile, Modifier.weight(1f).fillMaxHeight())
                     }
 
                     repeat(columns - row.size) {

@@ -460,6 +460,7 @@ fun LoginPanel(
     onCopy: (String) -> Unit,
     onInput: (String) -> Unit,
     onClose: () -> Unit,
+    framed: Boolean = true,
 ) {
     val colors = MyTheme.colors
     var reply by remember { mutableStateOf("") }
@@ -472,7 +473,7 @@ fun LoginPanel(
     }
 
     Column(
-        Modifier.fillMaxWidth().background(colors.bgSelected).padding(Tokens.Space.S3).semantics { contentDescription = "${agentName(session.agent)} sign-in" },
+        Modifier.fillMaxWidth().then(if (framed) Modifier.background(colors.bgSelected).padding(Tokens.Space.S3) else Modifier).semantics { contentDescription = "${agentName(session.agent)} sign-in" },
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
     ) {
         Label("Sign in ${agentName(session.agent)}", style = Tokens.Type.UiStrong)
