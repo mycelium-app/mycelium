@@ -4,7 +4,7 @@ plugins {
 }
 
 val releaseTag: MatchResult? =
-    Regex("^v(\\d+)\\.(\\d+)\\.(\\d+)$").find(providers.gradleProperty("appVersion").orNull ?: System.getenv("CI_COMMIT_TAG") ?: "")
+    Regex("^v(\\d+)\\.(\\d+)\\.(\\d+)$").find(providers.gradleProperty("appVersion").orNull ?: System.getenv("MYCELIUM_VERSION") ?: "")
 
 val appVersionName: String =
     releaseTag?.let { "${it.groupValues[1]}.${it.groupValues[2]}.${it.groupValues[3]}" } ?: "0.0.0-dev"

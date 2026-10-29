@@ -8,7 +8,7 @@ plugins {
     alias(libs.plugins.androidKmpLibrary)
 }
 
-val clientVersion = (providers.gradleProperty("appVersion").orNull ?: System.getenv("MYCELIUM_VERSION") ?: System.getenv("CI_COMMIT_TAG") ?: "dev").removePrefix("v")
+val clientVersion = (providers.gradleProperty("appVersion").orNull ?: System.getenv("MYCELIUM_VERSION") ?: "dev").removePrefix("v")
 val buildInfoDir = layout.buildDirectory.dir("generated/buildInfo")
 val writeBuildInfo by tasks.registering {
     val version = clientVersion
