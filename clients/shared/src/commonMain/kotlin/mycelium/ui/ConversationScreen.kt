@@ -444,7 +444,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
         val panelContent: @Composable () -> Unit = {
             when (panel) {
-                SidePanel.Details -> Inspector(conversation, node, groupName)
                 SidePanel.Subagents -> SubagentsPanel(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation, store::closeSession)
                 SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize(), onExited = { openPanel(null) }) }
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
@@ -481,7 +480,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     onOpenNodes = onOpenNodes,
                     moveSheet = { dismiss -> MoveSheet(store, state, conversation, dismiss, onOpenConversation) },
                     ide = ideControls,
-                    onDetails = { openPanel(SidePanel.Details) },
                     onTerminal = { openPanel(SidePanel.Terminal) },
                     onGit = { openPanel(SidePanel.Git) },
                     onEnvironment = { phoneEnvironment = true },
@@ -721,7 +719,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     if (compact && !chat && panels && panel != null) {
         BottomSheet(onDismiss = { openPanel(null) }) {
             when (panel) {
-                SidePanel.Details -> InspectorContent(conversation, node, groupName)
                 SidePanel.Subagents -> SubagentsList(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation, store::closeSession)
                 SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet), onExited = { openPanel(null) }) }
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
@@ -761,7 +758,6 @@ private fun ConversationHeader(
     onOpenNodes: () -> Unit,
     moveSheet: @Composable (onDismiss: () -> Unit) -> Unit,
     ide: IdeControls?,
-    onDetails: () -> Unit,
     onTerminal: () -> Unit,
     onGit: () -> Unit,
     onEnvironment: () -> Unit,
@@ -858,8 +854,6 @@ private fun ConversationHeader(
             }
 
             MyButton(onEnvironment, icon = MyIcon.Desktop, description = "Environment", muted = true)
-
-            MyButton(onDetails, icon = MyIcon.Info, description = "Details", muted = true)
         } else {
             if (!placeInMore) {
                 Row(Modifier.onSizeChanged { placeWidth = with(density) { it.width.toDp() } }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
@@ -999,7 +993,7 @@ fun iconOf(status: ConversationStatus): MyIcon = when (status) {
 private const val ConversationTab = "Conversation"
 private const val WalkthroughTab = "Walkthrough"
 
-private enum class SidePanel { Details, Subagents, Terminal, Git, Artefacts, Outline, Environment }
+private enum class SidePanel { Subagents, Terminal, Git, Artefacts, Outline, Environment }
 
 @Composable
 private fun Rail(open: SidePanel?, outlineOpen: Boolean, environmentOnly: Boolean, onToggle: (SidePanel) -> Unit) {
@@ -1013,7 +1007,6 @@ private fun Rail(open: SidePanel?, outlineOpen: Boolean, environmentOnly: Boolea
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (!environmentOnly) {
-                MyButton({ onToggle(SidePanel.Details) }, icon = MyIcon.Info, description = if (open == SidePanel.Details) "Close details" else "Open details", muted = true, selected = open == SidePanel.Details)
                 MyButton({ onToggle(SidePanel.Subagents) }, icon = MyIcon.Agent, description = if (open == SidePanel.Subagents) "Close subagents" else "Open subagents", muted = true, selected = open == SidePanel.Subagents)
 
                 MyButton({ onToggle(SidePanel.Terminal) }, icon = MyIcon.Terminal, description = if (open == SidePanel.Terminal) "Close terminal" else "Open terminal", muted = true, selected = open == SidePanel.Terminal)
@@ -1026,21 +1019,6 @@ private fun Rail(open: SidePanel?, outlineOpen: Boolean, environmentOnly: Boolea
             if (outlineOpen) {
                 MyButton({ onToggle(SidePanel.Outline) }, icon = MyIcon.Globe, description = if (open == SidePanel.Outline) "Close Outline page" else "Open Outline page", muted = true, selected = open == SidePanel.Outline)
             }
-        }
-    }
-}
-
-@Composable
-private fun Inspector(conversation: Conversation, node: NodeSummary?, groupName: String?) {
-    val colors = MyTheme.colors
-
-    Column(Modifier.fillMaxSize().background(colors.bgPanel).semantics { contentDescription = "Conversation details" }) {
-        Bar {
-            PanelTitle("Details")
-        }
-
-        Column(Modifier.weight(1f).verticalScrollWithBar().padding(top = Tokens.Space.S2, bottom = Tokens.Space.S4)) {
-            InspectorContent(conversation, node, groupName)
         }
     }
 }
@@ -1110,33 +1088,6 @@ private fun SubagentsList(sections: List<SubagentSection>, currentId: String, pa
             }
         }
     }
-}
-
-@Composable
-private fun InspectorContent(conversation: Conversation, node: NodeSummary?, groupName: String?) {
-    val agentInfo = node?.agents?.firstOrNull { it.agent == conversation.agent }
-    val login: LoginInfo? = node?.logins?.firstOrNull { it.agent == conversation.agent }
-
-    InspectorSection(
-        "Runs on",
-        listOf(
-            "Node" to (node?.name ?: "Unknown"),
-            "Agent" to listOfNotNull(agentName(conversation.agent), agentInfo?.version).joinToString(" "),
-            "Account" to (login?.account ?: "Not signed in"),
-            "Login" to (login?.let { loginMethodName(it.method) } ?: "None"),
-        ),
-    )
-    InspectorSection(
-        "Conversation",
-        listOf(
-            "Folder" to conversation.cwd,
-            "Group" to (groupName ?: "None"),
-            "Status" to statusSectionName(conversation.status),
-            "Mode" to (conversation.mode ?: "Default"),
-            "Model" to (conversation.model ?: "Not set"),
-            "Started" to timestamp(conversation.createdAt, ago = true),
-        ),
-    )
 }
 
 @Composable

@@ -105,21 +105,21 @@ class SidePanelMemoryTest {
     @Test
     fun eachConversationReopensTheSidePanelItHadOpen() {
         show()
-        rule.onNodeWithContentDescription("Open details").performClick()
+        rule.onNodeWithContentDescription("Open subagents").performClick()
 
         shown = "b1"
         rule.waitForIdle()
-        rule.onNodeWithContentDescription("Open details").assertExists()
+        rule.onNodeWithContentDescription("Open subagents").assertExists()
 
         shown = "a1"
         rule.waitForIdle()
-        rule.onNodeWithContentDescription("Close details").assertExists()
+        rule.onNodeWithContentDescription("Close subagents").assertExists()
     }
 
     @Test
     fun aResizedSidePanelKeepsItsWidthInItsOwnWorkspaceOnly() {
         show()
-        rule.onNodeWithContentDescription("Open details").performClick()
+        rule.onNodeWithContentDescription("Open subagents").performClick()
         val handle = rule.onNodeWithContentDescription("Resize the side panel")
         val before = handle.getBoundsInRoot().left
         handle.onChildren().onFirst().requestFocus()
@@ -129,7 +129,7 @@ class SidePanelMemoryTest {
 
         shown = "b1"
         rule.waitForIdle()
-        rule.onNodeWithContentDescription("Open details").performClick()
+        rule.onNodeWithContentDescription("Open subagents").performClick()
         val other = rule.onNodeWithContentDescription("Resize the side panel")
         other.onChildren().onFirst().requestFocus()
         other.onChildren().onFirst().performKeyInput { pressKey(Key.DirectionRight); pressKey(Key.DirectionRight) }
@@ -138,7 +138,7 @@ class SidePanelMemoryTest {
 
         shown = "a2"
         rule.waitForIdle()
-        rule.onNodeWithContentDescription("Open details").performClick()
+        rule.onNodeWithContentDescription("Open subagents").performClick()
         val back = rule.onNodeWithContentDescription("Resize the side panel").getBoundsInRoot().left
 
         assertNotEquals(before, widened)
@@ -150,7 +150,7 @@ class SidePanelMemoryTest {
     fun theSidePanelWidensPastItsOldLimitUntilTheChatReachesItsMinimum() {
         platform.preferences["side-panel-width"] = "700"
         show(1600.dp)
-        rule.onNodeWithContentDescription("Open details").performClick()
+        rule.onNodeWithContentDescription("Open subagents").performClick()
         val handle = rule.onNodeWithContentDescription("Resize the side panel")
         handle.onChildren().onFirst().requestFocus()
 

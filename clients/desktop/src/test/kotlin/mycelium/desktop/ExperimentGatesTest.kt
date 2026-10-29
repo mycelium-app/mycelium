@@ -72,10 +72,9 @@ class ExperimentGatesTest {
     private fun present(description: String) = rule.onAllNodesWithContentDescription(description).fetchSemanticsNodes().size
 
     @Test
-    fun withEveryExperimentOffTheDetailsAndSubagentsPanelsAreOffered() {
+    fun withEveryExperimentOffTheSubagentsPanelIsOffered() {
         shell(AllOff)
 
-        assertEquals(1, present("Open details"))
         assertEquals(1, present("Open subagents"))
         assertEquals(1, present("Open git"))
     }
@@ -112,7 +111,6 @@ class ExperimentGatesTest {
     fun afterAFailedExperimentsFetchTheRestOfTheShellStillLoads() {
         shell(null)
 
-        assertEquals(1, present("Open details"))
         assertTrue(rule.onAllNodesWithText("Artefacts").fetchSemanticsNodes().isNotEmpty())
     }
 }

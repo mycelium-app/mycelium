@@ -112,7 +112,7 @@ class SidebarToggleTest {
     fun aSidePanelBesideTheChatCarriesNoShowTheSidebarButton() {
         show(1600.dp)
         rule.onNodeWithContentDescription("Hide the sidebar").performClick()
-        rule.onNodeWithContentDescription("Open details").performClick()
+        rule.onNodeWithContentDescription("Open subagents").performClick()
 
         assertEquals(1, count("Show the sidebar"))
     }
@@ -120,7 +120,7 @@ class SidebarToggleTest {
     @Test
     fun aSidePanelThatTakesOverTheChatHasOneHeaderWithBackToConversation() {
         show(700.dp)
-        rule.onNodeWithContentDescription("Open details").performClick()
+        rule.onNodeWithContentDescription("Open subagents").performClick()
 
         assertEquals(1, count("Back to conversation"))
         assertEquals(1, count("Show the sidebar"))
