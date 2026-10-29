@@ -235,6 +235,8 @@ jobs:
             web=${{ runner.temp }}/web
           cache-from: type=gha,scope=image
           cache-to: type=gha,scope=image,mode=max
+          provenance: false
+          sbom: false
 
   flake:
     name: Release flake
