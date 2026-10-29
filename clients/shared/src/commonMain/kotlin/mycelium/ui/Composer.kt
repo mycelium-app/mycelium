@@ -238,7 +238,9 @@ fun Composer(
         text = TextFieldValue(updated, TextRange(start + completed.length))
     }
 
+    var dismissedAt by remember(conversation.id) { mutableStateOf<String?>(null) }
     val matches = when {
+        dismissedAt == text.text -> emptyList()
         query != null -> (SideChatCommands + commands.filterNot { command -> SideChatCommands.any { it.name == command.name } }).filter { it.name.contains(query, ignoreCase = true) }.sortedBy { !it.name.startsWith(query, ignoreCase = true) }
             .map { command -> Completion(command.name, command.description) { insert(0, "/${command.name} ") } }
         mention != null -> files.map { path -> Completion(path, "") { insert(mention.start, "@$path ") } }
@@ -393,7 +395,8 @@ fun Composer(
                             key == Key.DirectionDown -> { highlighted = (highlighted + 1) % matches.size; true }
                             key == Key.DirectionUp -> { highlighted = (highlighted - 1 + matches.size) % matches.size; true }
                             key == Key.Tab || key == Key.Enter -> { matches[highlighted.coerceIn(matches.indices)].apply(); true }
-                            key == Key.Escape -> { text = TextFieldValue(""); true }
+                            key == Key.Escape && query != null -> { text = TextFieldValue(""); true }
+                            key == Key.Escape -> { dismissedAt = text.text; true }
                             else -> false
                         }
                     },

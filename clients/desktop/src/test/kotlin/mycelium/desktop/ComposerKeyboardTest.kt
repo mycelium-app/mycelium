@@ -46,6 +46,8 @@ class ComposerKeyboardTest {
 
     private fun SemanticsNodeInteraction.caret(): TextRange = fetchSemanticsNode().config.getOrNull(SemanticsProperties.TextSelectionRange) ?: TextRange.Zero
 
+    private fun SemanticsNodeInteraction.typed(): String = fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text.orEmpty()
+
     private fun SemanticsNodeInteraction.press(key: Key) = performKeyInput { pressKey(key) }
 
     private fun SemanticsNodeInteraction.pressWith(modifier: Key, key: Key) = performKeyInput { withKeyDown(modifier) { pressKey(key) } }
@@ -120,7 +122,7 @@ class ComposerKeyboardTest {
         field().press(Key.Enter)
 
         assertEquals(listOf("one\ntwo"), sent)
-        field().assertTextEquals("")
+        assertEquals("", field().typed())
     }
 
     @Test
@@ -195,7 +197,7 @@ class ComposerKeyboardTest {
         field().performTextInput("hello world")
         field().pressWith(Key.CtrlLeft, Key.Z)
 
-        field().assertTextEquals("")
+        assertEquals("", field().typed())
 
         field().performKeyInput { withKeyDown(Key.CtrlLeft) { withKeyDown(Key.ShiftLeft) { pressKey(Key.Z) } } }
 
@@ -284,6 +286,6 @@ class ComposerKeyboardTest {
         rule.waitUntil(5_000) { rule.onAllNodes(androidx.compose.ui.test.hasContentDescription("a.kt")).fetchSemanticsNodes().isNotEmpty() }
         field().press(Key.Escape)
 
-        field().assertTextEquals("a long message mentioning @")
+        assertEquals("a long message mentioning @", field().typed())
     }
 }
