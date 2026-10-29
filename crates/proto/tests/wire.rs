@@ -132,7 +132,7 @@ fn every_control_message_round_trips_under_its_tag() {
     config.insert("effort".to_string(), json!("high"));
     let cases = vec![
         (ControlToNode::Ack { conversation_id: id(), seq: 9 }, "ack"),
-        (ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: Some("s".into()), fork: false, account: None, instructions: None, reload: false, env: vec![] }, "start_session"),
+        (ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: Some("s".into()), fork: false, account: None, instructions: None, reload: false, env: vec![], mcp_token: String::new() }, "start_session"),
         (ControlToNode::SecretsChanged { conversation_id: id(), env: vec![("TOKEN".into(), "v".into())] }, "secrets_changed"),
         (ControlToNode::Instructions { revision: "afad776".into(), global: Some("# Rules".into()), take_over: false }, "instructions"),
         (ControlToNode::Prompt { conversation_id: id(), prompt_id: id(), text: "go".into(), attachments: vec![] }, "prompt"),
@@ -179,7 +179,7 @@ fn git_commands_are_tagged_snake_case() {
 
 #[test]
 fn start_session_omits_resume_when_absent_and_accepts_it_missing() {
-    let message = ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: None, fork: false, account: None, instructions: None, reload: false, env: vec![] };
+    let message = ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: None, fork: false, account: None, instructions: None, reload: false, env: vec![], mcp_token: String::new() };
     let json = round_trip(&message);
 
     assert!(json.get("resume").is_none());
@@ -434,8 +434,8 @@ fn device_stream_message_carries_state_and_a_null_result_until_consumed() {
 
 #[test]
 fn a_fork_start_session_names_the_session_to_fork_and_a_plain_one_omits_the_flag() {
-    let forked = round_trip(&ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: Some("s".into()), fork: true, account: None, instructions: None, reload: false, env: vec![] });
-    let plain = round_trip(&ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: None, fork: false, account: None, instructions: None, reload: false, env: vec![] });
+    let forked = round_trip(&ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: Some("s".into()), fork: true, account: None, instructions: None, reload: false, env: vec![], mcp_token: String::new() });
+    let plain = round_trip(&ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: None, fork: false, account: None, instructions: None, reload: false, env: vec![], mcp_token: String::new() });
 
     assert_eq!((forked["fork"].clone(), forked["resume"].clone()), (serde_json::json!(true), serde_json::json!("s")));
     assert!(plain.get("fork").is_none());

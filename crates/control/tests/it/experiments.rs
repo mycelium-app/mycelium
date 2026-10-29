@@ -59,8 +59,6 @@ async fn graduated_tools_are_listed_and_callable_for_everyone() {
 async fn multi_step_workflows_can_be_read_without_any_experiment() {
     let server = Server::start().await;
     let (_, token) = server.join("node", "laptop").await;
-    let (status, standalone) = mcp(&server, &token, "tools/call", json!({"name": "start_subagent", "arguments": {"step": {"title": "Pause here", "gate": true}}})).await;
-    assert_eq!((status, standalone["result"]["isError"].clone()), (200, json!(true)), "{standalone}");
     let owner = sqlx::query_scalar::<_, Uuid>("select created_by from nodes limit 1").fetch_one(&server.pool).await.unwrap();
     let multi = Uuid::new_v4();
     sqlx::query("insert into workflows (id, owner, title, status, plan, steps) values ($1, $2, 'Existing workflow', 'paused', $3, '[]')").bind(multi).bind(owner).bind(json!({"title": "Existing workflow", "steps": [{"key": "one", "title": "One", "gate": true}, {"key": "two", "title": "Two", "gate": true}]})).execute(&server.pool).await.unwrap();

@@ -1,4 +1,4 @@
-use crate::error::ApiResult;
+use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use crate::store::{CONVERSATION_GROUP_SQL, parse_enum};
 use axum::http::HeaderMap;
@@ -10,6 +10,7 @@ use uuid::Uuid;
 pub struct Caller<'a> {
     pub state: &'a AppState,
     pub node_id: Uuid,
+    pub conversation_id: Option<Uuid>,
     pub headers: &'a HeaderMap,
 }
 
@@ -36,19 +37,16 @@ impl ToolReply {
     }
 }
 
-pub async fn node_owner(state: &AppState, node_id: Uuid) -> ApiResult<Uuid> {
-    Ok(sqlx::query_scalar::<_, Uuid>("select created_by from nodes where id = $1").bind(node_id).fetch_one(&state.pool).await?)
-}
-
 impl Caller<'_> {
     pub async fn owner(&self) -> ApiResult<Uuid> {
-        node_owner(self.state, self.node_id).await
+        let conversation_id = self.conversation_id.ok_or_else(|| ApiError::bad_request("no_conversation", "This tool needs a conversation. Call it from inside a Mycelium conversation."))?;
+        let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1 and node_id = $2").bind(conversation_id).bind(self.node_id).fetch_optional(&self.state.pool).await?;
+
+        owner.ok_or_else(|| ApiError::not_found("conversation"))
     }
 
     pub async fn conversation(&self) -> ApiResult<Option<(Uuid, String)>> {
-        let claimed = self.headers.get("x-mycelium-conversation").and_then(|value| value.to_str().ok()).and_then(|value| value.parse::<Uuid>().ok());
-
-        match claimed {
+        match self.conversation_id {
             Some(conversation_id) => Ok(sqlx::query_as::<_, (Uuid, String)>("select id, title from conversations where id = $1 and node_id = $2").bind(conversation_id).bind(self.node_id).fetch_optional(&self.state.pool).await?),
             None => Ok(None),
         }

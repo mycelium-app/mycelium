@@ -56,6 +56,7 @@ mod link;
 mod mcp;
 mod mcp_client;
 mod mcp_oauth;
+mod mcp_tokens;
 mod memories;
 mod message_proposals;
 mod conversation_connections;

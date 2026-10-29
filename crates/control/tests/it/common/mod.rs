@@ -73,6 +73,7 @@ pub struct Client {
     pub base: String,
     pub cookie: String,
     pub http: reqwest::Client,
+    pub pool: Option<sqlx::PgPool>,
 }
 
 impl Client {
@@ -100,8 +101,40 @@ impl Client {
         self.authorised(self.http.delete(format!("{}{path}", self.base)))
     }
 
+    async fn as_the_agent_session(&self, request: &mut reqwest::Request) {
+        let Some(pool) = &self.pool else {
+            return;
+        };
+
+        if request.url().path() != "/api/v1/mcp" {
+            return;
+        }
+
+        let node_secret = request.headers().get("authorization").and_then(|value| value.to_str().ok()).and_then(|value| value.strip_prefix("Bearer myc_node_")).map(str::to_string);
+        let Some(node_secret) = node_secret else {
+            return;
+        };
+        let node = sqlx::query_as::<_, (Uuid, Uuid)>("select id, created_by from nodes where token_hash = $1").bind(hash(&node_secret)).fetch_optional(pool).await.unwrap();
+        let Some((node_id, owner)) = node else {
+            return;
+        };
+        let named = request.headers_mut().remove("x-mycelium-conversation").and_then(|value| value.to_str().ok().and_then(|text| text.parse::<Uuid>().ok()));
+        let conversation_id = match named {
+            Some(conversation_id) => conversation_id,
+            None => sqlx::query_scalar::<_, Uuid>("insert into conversations (owner, node_id, agent, cwd, title, status) values ($1, $2, 'claude', '/work/app', 'Agent', 'done') returning id").bind(owner).bind(node_id).fetch_one(pool).await.unwrap(),
+        };
+        let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+
+        sqlx::query("insert into mcp_session_tokens (token_hash, conversation_id, node_id) values ($1, $2, $3)").bind(hash(&secret)).bind(conversation_id).bind(node_id).execute(pool).await.unwrap();
+        request.headers_mut().insert("authorization", format!("Bearer myc_session_{secret}").parse().unwrap());
+    }
+
     pub async fn json(&self, response: reqwest::RequestBuilder) -> (u16, Value) {
-        let response = response.send().await.unwrap();
+        let mut request = response.build().unwrap();
+
+        self.as_the_agent_session(&mut request).await;
+
+        let response = self.http.execute(request).await.unwrap();
         let status = response.status().as_u16();
         let text = response.text().await.unwrap();
 
@@ -339,19 +372,19 @@ impl Server {
         tokio::spawn(mycelium_control::run(config, listener));
 
         let http = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
-        let anonymous = Client { base: base.clone(), cookie: String::new(), http: http.clone() };
+        let pool = sqlx::PgPool::connect(&database_url).await.unwrap();
+        let anonymous = Client { base: base.clone(), cookie: String::new(), http: http.clone(), pool: Some(pool.clone()) };
 
         let probe = anonymous.clone();
         eventually("readyz", || async { (probe.get("/readyz").send().await.unwrap().status() == 200).then_some(()) }).await;
 
         let cookie = if has_dev_login { session_cookie(&anonymous.get("/auth/login").send().await.unwrap()) } else { String::new() };
-        let pool = sqlx::PgPool::connect(&database_url).await.unwrap();
 
-        Server { user: Client { base: base.clone(), cookie, http }, base, address, database_url, data_dir, web_dir, pool, _directory: directory }
+        Server { user: Client { base: base.clone(), cookie, http, pool: Some(pool.clone()) }, base, address, database_url, data_dir, web_dir, pool, _directory: directory }
     }
 
     pub fn anonymous(&self) -> Client {
-        Client { base: self.base.clone(), cookie: String::new(), http: self.user.http.clone() }
+        Client { base: self.base.clone(), cookie: String::new(), http: self.user.http.clone(), pool: Some(self.pool.clone()) }
     }
 
     pub async fn second_user(&self, email: &str) -> Client {
@@ -360,7 +393,7 @@ impl Server {
 
         sqlx::query("insert into web_sessions (user_id, token_hash, expires_at) values ($1, $2, now() + interval '1 day')").bind(user_id).bind(hash(&token)).execute(&self.pool).await.unwrap();
 
-        Client { base: self.base.clone(), cookie: format!("myc_session={token}"), http: self.user.http.clone() }
+        Client { base: self.base.clone(), cookie: format!("myc_session={token}"), http: self.user.http.clone(), pool: Some(self.pool.clone()) }
     }
 
     pub async fn join(&self, kind: &str, label: &str) -> (Uuid, String) {

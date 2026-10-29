@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 async fn another_browser(server: &Server, user_agent: &str) -> Client {
     let response = server.anonymous().get("/auth/login").header("user-agent", user_agent).send().await.unwrap();
     let cookie = session_cookie(&response);
-    let browser = Client { base: server.base.clone(), cookie, http: server.user.http.clone() };
+    let browser = Client { base: server.base.clone(), cookie, http: server.user.http.clone(), pool: None };
 
     let (status, _) = browser.json(browser.get("/api/v1/me").header("user-agent", user_agent)).await;
     assert_eq!(status, 200);
@@ -56,7 +56,7 @@ async fn ending_another_browser_signs_it_out_at_once() {
 async fn an_app_is_listed_with_its_label_and_hostname_and_ending_it_revokes_its_token() {
     let server = Server::start().await;
     let (id, token) = server.join("client", "Desktop app").await;
-    let app = Client { base: server.base.clone(), cookie: String::new(), http: server.user.http.clone() };
+    let app = Client { base: server.base.clone(), cookie: String::new(), http: server.user.http.clone(), pool: None };
     let bearer = format!("Bearer {token}");
     let (status, _) = app.json(app.get("/api/v1/me").header("authorization", &bearer)).await;
     assert_eq!(status, 200);

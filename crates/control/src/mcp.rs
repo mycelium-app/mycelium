@@ -20,16 +20,17 @@ mod ssh_access;
 mod tasks;
 mod workflows;
 
-use crate::auth::AuthNode;
-use crate::error::ApiResult;
+use crate::error::{ApiError, ApiResult};
+use crate::mcp_tokens::SESSION_TOKEN_PREFIX;
 use crate::learned;
-use crate::state::AppState;
+use crate::state::{AppState, hash_token};
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{FromRequestParts, State};
+use axum::http::request::Parts;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use call::{Caller, ToolCall, ToolReply, node_owner};
+use call::{Caller, ToolCall, ToolReply};
 use serde_json::{Value, json};
 use std::convert::Infallible;
 use tokio::sync::broadcast::error::RecvError;
@@ -171,16 +172,41 @@ pub fn tools_instructions() -> String {
     )
 }
 
-pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: HeaderMap, Json(request): Json<Value>) -> ApiResult<Response> {
-    respond(&state, node.id, &headers, request).await
+pub struct AuthSession {
+    node_id: Uuid,
+    conversation_id: Uuid,
 }
 
-pub async fn respond(state: &AppState, node_id: Uuid, headers: &HeaderMap, request: Value) -> ApiResult<Response> {
+impl FromRequestParts<AppState> for AuthSession {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<AuthSession, ApiError> {
+        let header = parts.headers.get(axum::http::header::AUTHORIZATION).and_then(|value| value.to_str().ok());
+        let secret = header.and_then(|value| value.strip_prefix("Bearer ")).and_then(|value| value.strip_prefix(SESSION_TOKEN_PREFIX)).ok_or_else(ApiError::unauthorised)?;
+        let found = sqlx::query_as::<_, (Uuid, Uuid)>(
+            "select t.node_id, t.conversation_id from mcp_session_tokens t
+             join conversations c on c.id = t.conversation_id and c.node_id = t.node_id
+             join nodes n on n.id = t.node_id and n.revoked_at is null
+             where t.token_hash = $1",
+        )
+        .bind(hash_token(secret))
+        .fetch_optional(&state.pool)
+        .await?;
+
+        found.map(|(node_id, conversation_id)| AuthSession { node_id, conversation_id }).ok_or_else(ApiError::unauthorised)
+    }
+}
+
+pub async fn handle(State(state): State<AppState>, session: AuthSession, headers: HeaderMap, Json(request): Json<Value>) -> ApiResult<Response> {
+    respond(&state, session.node_id, Some(session.conversation_id), &headers, request).await
+}
+
+pub async fn respond(state: &AppState, node_id: Uuid, conversation_id: Option<Uuid>, headers: &HeaderMap, request: Value) -> ApiResult<Response> {
     let Some(id) = request.get("id").cloned() else {
         return Ok(StatusCode::ACCEPTED.into_response());
     };
     let params = request.get("params").cloned().unwrap_or(Value::Null);
-    let caller = Caller { state, node_id, headers };
+    let caller = Caller { state, node_id, conversation_id, headers };
 
     let response = match request.get("method").and_then(Value::as_str).unwrap_or_default() {
         "initialize" => {
@@ -242,8 +268,9 @@ pub async fn respond(state: &AppState, node_id: Uuid, headers: &HeaderMap, reque
     Ok(response)
 }
 
-pub async fn stream(State(state): State<AppState>, node: AuthNode) -> ApiResult<Response> {
-    let owner = node_owner(&state, node.id).await?;
+pub async fn stream(State(state): State<AppState>, session: AuthSession) -> ApiResult<Response> {
+    let caller = Caller { state: &state, node_id: session.node_id, conversation_id: Some(session.conversation_id), headers: &HeaderMap::new() };
+    let owner = caller.owner().await?;
     let receiver = state.hub.subscribe_tools(owner);
     let notifications = futures_util::stream::unfold(receiver, |mut receiver| async move {
         match receiver.recv().await {
@@ -262,9 +289,8 @@ pub async fn call_in_process(state: &AppState, node_id: Uuid, conversation_id: U
         headers.insert("x-mycelium-tool-call", tool_call);
     }
 
-    headers.insert("x-mycelium-conversation", conversation_id.to_string().parse().map_err(crate::error::ApiError::internal)?);
     let request = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": arguments}});
-    let response = respond(state, node_id, &headers, request).await?;
+    let response = respond(state, node_id, Some(conversation_id), &headers, request).await?;
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.map_err(crate::error::ApiError::internal)?;
     let answer: Value = serde_json::from_slice(&bytes).map_err(crate::error::ApiError::internal)?;
 

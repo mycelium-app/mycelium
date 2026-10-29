@@ -298,7 +298,7 @@ impl Daemon {
     pub fn handle(&self, message: ControlToNode) {
         match message {
             ControlToNode::Ack { conversation_id, seq } => self.with_session(conversation_id, |session| session.ack(seq)),
-            ControlToNode::StartSession { conversation_id, agent, cwd, resume, fork, account, instructions, reload, env } => self.start_session(conversation_id, agent, &cwd, resume, fork, account, instructions, reload, env),
+            ControlToNode::StartSession { conversation_id, agent, cwd, resume, fork, account, instructions, reload, env, mcp_token } => self.start_session(conversation_id, agent, &cwd, resume, fork, account, instructions, reload, env, mcp_token),
             ControlToNode::SecretsChanged { conversation_id, env } => self.rewrite_secrets(conversation_id, &env),
             ControlToNode::Instructions { revision, global, take_over } => self.hold_instructions(revision, global, take_over),
             ControlToNode::Prompt { conversation_id, prompt_id, text, attachments } => self.prompt(conversation_id, prompt_id, text, attachments),
@@ -587,7 +587,7 @@ impl Daemon {
         }
     }
 
-    fn start_session(&self, conversation_id: Uuid, agent: AgentId, cwd: &str, resume: Option<String>, fork: bool, account: Option<String>, instructions: Option<String>, reload: bool, secrets: Vec<(String, String)>) {
+    fn start_session(&self, conversation_id: Uuid, agent: AgentId, cwd: &str, resume: Option<String>, fork: bool, account: Option<String>, instructions: Option<String>, reload: bool, secrets: Vec<(String, String)>, mcp_token: String) {
         let existing = self.session_handles();
         let running_here = existing.iter().find(|(id, handle)| *id == conversation_id && handle.running());
         if let Some((_, handle)) = running_here {
@@ -705,7 +705,7 @@ impl Daemon {
             keeper_binary: self.options.keeper_binary.clone(),
             agent_command,
             agent_env: env,
-            mcp_server: self.config.mcp_server(conversation_id),
+            mcp_server: self.config.mcp_server(&mcp_token),
             instructions: instructions.filter(|_| agent == AgentId::Claude),
             cwd: folder,
             resume,

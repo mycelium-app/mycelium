@@ -4,7 +4,8 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
-use crate::common::{Server, serve};
+use crate::common::{NodeLink, Server, hash, serve};
+use mycelium_proto::link::ControlToNode;
 use serde_json::{Value, json};
 use std::time::Duration;
 use uuid::Uuid;
@@ -48,6 +49,16 @@ fn gateway_server(key_header: &'static str) -> Router {
     }
 
     Router::new().route("/mcp", post(handle)).route("/mcp/", post(handle)).with_state(key_header)
+}
+
+async fn own_session_token(server: &Server) -> String {
+    let (node, _) = server.join("node", "laptop").await;
+    let owner = sqlx::query_scalar::<_, Uuid>("select created_by from nodes where id = $1").bind(node).fetch_one(&server.pool).await.unwrap();
+    let conversation = sqlx::query_scalar::<_, Uuid>("insert into conversations (owner, node_id, agent, cwd, title, status) values ($1, $2, 'claude', '/work/app', 'Mine', 'done') returning id").bind(owner).bind(node).fetch_one(&server.pool).await.unwrap();
+    let secret = "own-session-secret";
+    sqlx::query("insert into mcp_session_tokens (token_hash, conversation_id, node_id) values ($1, $2, $3)").bind(hash(secret)).bind(conversation).bind(node).execute(&server.pool).await.unwrap();
+
+    format!("myc_session_{secret}")
 }
 
 async fn add_lab(server: &Server) -> (String, Uuid) {
@@ -124,7 +135,7 @@ async fn a_disabled_server_is_left_out_and_calling_it_says_why() {
 #[tokio::test]
 async fn an_open_stream_is_told_when_a_tool_server_is_added() {
     let server = Server::start().await;
-    let (_, token) = server.join("node", "laptop").await;
+    let token = own_session_token(&server).await;
     let anonymous = server.anonymous();
     let mut stream = anonymous.http.get(format!("{}/api/v1/mcp", anonymous.base)).header("authorization", format!("Bearer {token}")).header("accept", "text/event-stream").send().await.unwrap();
     assert_eq!(stream.status(), 200);
@@ -145,7 +156,7 @@ async fn an_open_stream_is_told_when_a_tool_server_is_added() {
 #[tokio::test]
 async fn an_open_stream_is_told_when_a_server_is_switched_back_on() {
     let server = Server::start().await;
-    let (_, token) = server.join("node", "laptop").await;
+    let token = own_session_token(&server).await;
     let (_, lab) = add_lab(&server).await;
     let anonymous = server.anonymous();
     let mut stream = anonymous.http.get(format!("{}/api/v1/mcp", anonymous.base)).header("authorization", format!("Bearer {token}")).header("accept", "text/event-stream").send().await.unwrap();
@@ -183,4 +194,88 @@ async fn find_and_call_integration_tool_reach_a_server_added_after_tools_list() 
     assert!(found["result"]["content"][0]["text"].as_str().unwrap().contains("lab__get_weather"));
     assert_eq!(called["result"]["content"][0]["text"], "Sunny in Paris");
     assert_eq!(wrong["result"]["isError"], true);
+}
+
+async fn session_token_from_start(link: &mut NodeLink) -> String {
+    loop {
+        if let ControlToNode::StartSession { mcp_token, .. } = link.next().await {
+            return mcp_token;
+        }
+    }
+}
+
+async fn tools_with_header(server: &Server, token: &str, named_conversation: Option<Uuid>) -> (u16, Value) {
+    let anonymous = server.anonymous();
+    let mut request = anonymous.http.post(format!("{}/api/v1/mcp", anonymous.base)).header("authorization", format!("Bearer {token}")).json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
+
+    if let Some(conversation) = named_conversation {
+        request = request.header("x-mycelium-conversation", conversation.to_string());
+    }
+
+    let response = request.send().await.unwrap();
+    let status = response.status().as_u16();
+
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+
+async fn conversation_of_another_user(server: &Server, node: Uuid) -> (Uuid, String) {
+    let _ = server.second_user("other@example.com").await;
+    let other = sqlx::query_scalar::<_, Uuid>("select id from users where email = 'other@example.com'").fetch_one(&server.pool).await.unwrap();
+    let conversation = sqlx::query_scalar::<_, Uuid>("insert into conversations (owner, node_id, agent, cwd, title, status) values ($1, $2, 'claude', '/work/app', 'Other', 'done') returning id").bind(other).bind(node).fetch_one(&server.pool).await.unwrap();
+    let secret = "other-session-secret";
+    sqlx::query("insert into mcp_session_tokens (token_hash, conversation_id, node_id) values ($1, $2, $3)").bind(hash(secret)).bind(conversation).bind(node).execute(&server.pool).await.unwrap();
+
+    (conversation, format!("myc_session_{secret}"))
+}
+
+#[tokio::test]
+async fn the_node_token_is_refused_on_the_mcp_endpoint() {
+    let server = Server::start().await;
+    let (_, token) = server.join("node", "laptop").await;
+
+    let (status, _) = tools_with_header(&server, &token, None).await;
+    let anonymous = server.anonymous();
+    let stream = anonymous.http.get(format!("{}/api/v1/mcp", anonymous.base)).header("authorization", format!("Bearer {token}")).header("accept", "text/event-stream").send().await.unwrap();
+
+    assert_eq!((status, stream.status().as_u16()), (401, 401));
+}
+
+#[tokio::test]
+async fn a_started_session_is_given_a_token_that_works_on_the_mcp_endpoint() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    server.create_conversation(link.id, None).await;
+    let token = session_token_from_start(&mut link).await;
+
+    let (status, listed) = tools_with_header(&server, &token, None).await;
+
+    assert_eq!(status, 200, "{listed}");
+    assert!(names(&listed).contains(&"recall".to_string()));
+}
+
+#[tokio::test]
+async fn a_session_token_ignores_the_conversation_a_request_names() {
+    let server = Server::start().await;
+    add_lab(&server).await;
+    let mut link = server.online_node("laptop").await;
+    server.create_conversation(link.id, None).await;
+    let own = session_token_from_start(&mut link).await;
+    let (other_conversation, _) = conversation_of_another_user(&server, link.id).await;
+
+    let (_, listed) = tools_with_header(&server, &own, Some(other_conversation)).await;
+
+    assert!(names(&listed).contains(&"lab__get_weather".to_string()));
+}
+
+#[tokio::test]
+async fn tools_act_for_the_conversations_owner_not_the_node_creator() {
+    let server = Server::start().await;
+    add_lab(&server).await;
+    let link = server.online_node("laptop").await;
+    let (_, other_token) = conversation_of_another_user(&server, link.id).await;
+
+    let (status, listed) = tools_with_header(&server, &other_token, None).await;
+
+    assert_eq!(status, 200, "{listed}");
+    assert!(!names(&listed).contains(&"lab__get_weather".to_string()));
 }

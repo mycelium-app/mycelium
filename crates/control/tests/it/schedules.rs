@@ -423,12 +423,6 @@ async fn a_proposal_that_cannot_work_is_refused_with_how_to_fix_it_and_stores_no
         assert_eq!(result["isError"], true, "{arguments}");
         assert!(result["content"][0]["text"].as_str().unwrap().contains(fix), "{arguments}: {result}");
     }
-
-    let outside = server.anonymous();
-    let request = outside.post("/api/v1/mcp").header("authorization", format!("Bearer {}", link.token)).json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "propose_schedule", "arguments": {"prompt": "Go", "preset": "daily at 09:00"}}}));
-    let (_, body) = outside.json(request).await;
-    assert_eq!(body["result"]["isError"], true);
-    assert_eq!(proposed(&server).await.len(), 0);
 }
 
 #[tokio::test]

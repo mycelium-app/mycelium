@@ -439,6 +439,8 @@ pub enum ControlToNode {
         reload: bool,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         env: Vec<(String, String)>,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        mcp_token: String,
     },
     SecretsChanged {
         conversation_id: Uuid,

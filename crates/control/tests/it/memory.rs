@@ -120,19 +120,6 @@ async fn remember_records_the_node_and_conversation_it_came_from() {
 }
 
 #[tokio::test]
-async fn remember_ignores_a_conversation_that_belongs_to_another_node() {
-    let server = Server::start().await;
-    let first = server.online_node("laptop").await;
-    let conversation = server.create_conversation(first.id, None).await;
-    let (_, other) = server.join("node", "desk").await;
-
-    call(&server, &other, Some(conversation.id), "remember", json!({"text": "Not linked"})).await;
-
-    let (_, memories) = server.user.json(server.user.get("/api/v1/memories")).await;
-    assert_eq!(memories[0]["conversation_id"], Value::Null);
-}
-
-#[tokio::test]
 async fn remember_refuses_empty_text_and_bad_params_are_json_rpc_errors() {
     let server = Server::start().await;
     let (_, token) = server.join("node", "laptop").await;

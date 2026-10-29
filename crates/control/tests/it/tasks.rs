@@ -195,13 +195,10 @@ async fn a_proposed_task_belongs_to_the_named_project_and_an_unknown_project_is_
 }
 
 #[tokio::test]
-async fn proposing_or_asking_needs_a_title_and_a_conversation() {
+async fn asking_needs_a_title() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let conversation = asking_conversation(&server, &mut link).await;
-
-    let outside = tool(&server, &link.token, None, "propose_task", json!({"title": "Tidy"})).await;
-    assert_eq!(outside["isError"], true);
 
     let blank = tool(&server, &link.token, Some(conversation), "ask_question", json!({"question": "  "})).await;
     assert_eq!(blank["isError"], true);

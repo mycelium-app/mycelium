@@ -133,7 +133,8 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         }
 
         state.hub.secrets_fresh(conversation_id);
-        state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent, cwd, resume: acp_session_id, fork: false, account, instructions, reload: reloads, env });
+        let mcp_token = crate::mcp_tokens::mint(state, node_id, conversation_id).await?;
+        state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent, cwd, resume: acp_session_id, fork: false, account, instructions, reload: reloads, env, mcp_token });
     }
 
     let environment_notes = state.hub.take_notes_for_agent(conversation_id);
@@ -296,7 +297,8 @@ pub async fn retry_failed(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<
     state.add_session(row.node_id, id).await?;
     let instructions = instructions::session_layer(state, id).await?;
     let env = crate::assistants::secret_env(state, id).await?;
-    state.hub.send(row.node_id, ControlToNode::StartSession { conversation_id: id, agent: parse_enum(&row.agent)?, cwd: row.cwd.clone(), resume: row.acp_session_id.clone(), fork: false, account: row.account.clone(), instructions, reload: false, env });
+    let mcp_token = crate::mcp_tokens::mint(state, row.node_id, id).await?;
+    state.hub.send(row.node_id, ControlToNode::StartSession { conversation_id: id, agent: parse_enum(&row.agent)?, cwd: row.cwd.clone(), resume: row.acp_session_id.clone(), fork: false, account: row.account.clone(), instructions, reload: false, env, mcp_token });
     state.publish(Some(owner), StreamMessage::Conversation(updated.to_proto()?));
     pump(state, id, true).await?;
 

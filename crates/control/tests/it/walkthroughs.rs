@@ -165,16 +165,6 @@ async fn a_step_without_a_title_is_refused_and_nothing_is_stored() {
 }
 
 #[tokio::test]
-async fn a_call_that_does_not_come_from_a_conversation_is_refused() {
-    let server = Server::start().await;
-    let (_, token) = server.join("node", "laptop").await;
-
-    let result = call_raw(&server, &token, None, steps()).await;
-
-    assert_eq!(result["isError"], true);
-}
-
-#[tokio::test]
 async fn sections_and_their_icons_are_stored_on_each_step_and_unknown_icons_are_dropped() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

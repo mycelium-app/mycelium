@@ -155,7 +155,7 @@ impl NodeConfig {
         self.state_dir.join("sessions")
     }
 
-    pub fn mcp_server(&self, conversation_id: Uuid) -> Value {
+    pub fn mcp_server(&self, session_token: &str) -> Value {
         let base = self.control_plane.trim_end_matches('/');
 
         json!({
@@ -163,8 +163,7 @@ impl NodeConfig {
             "name": "mycelium",
             "url": format!("{base}/api/v1/mcp"),
             "headers": [
-                {"name": "Authorization", "value": format!("Bearer {}", self.bearer_token())},
-                {"name": "X-Mycelium-Conversation", "value": conversation_id.to_string()},
+                {"name": "Authorization", "value": format!("Bearer {session_token}")},
             ],
         })
     }
@@ -198,6 +197,13 @@ fn socket_base_of(control_plane: &str) -> Result<String> {
     }
 
     if let Some(rest) = base.strip_prefix("http://") {
+        let host = rest.split('/').next().unwrap_or_default();
+        let loopback = ["localhost", "127.0.0.1", "[::1]"].iter().any(|name| host == *name || host.strip_prefix(name).is_some_and(|port| port.starts_with(':')));
+
+        if !loopback {
+            anyhow::bail!("The control plane address {base} sends the node token without encryption. Use an https:// address.");
+        }
+
         return Ok(format!("ws://{rest}"));
     }
 
@@ -333,6 +339,24 @@ mod tests {
     }
 
     #[test]
+    fn connect_url_refuses_plain_http_except_to_this_machine() {
+        let mut plain = sample();
+
+        for address in ["http://mycelium.example", "http://localhost.example.com:8080", "http://127.0.0.1.example.com"] {
+            plain.control_plane = address.into();
+            let error = plain.connect_url().unwrap_err();
+
+            assert!(format!("{error:#}").contains("Use an https:// address"), "{address}");
+        }
+
+        for address in ["http://localhost", "http://127.0.0.1:8080", "http://[::1]:8080"] {
+            plain.control_plane = address.into();
+
+            assert!(plain.connect_url().is_ok(), "{address}");
+        }
+    }
+
+    #[test]
     fn ssh_url_swaps_the_scheme_and_encodes_the_node() {
         assert_eq!(sample().ssh_url("builder one/é").unwrap(), "wss://mycelium.example/api/v1/nodes/builder%20one%2F%C3%A9/ssh");
 
@@ -367,8 +391,8 @@ mod tests {
     }
 
     #[test]
-    fn the_mcp_server_points_at_the_control_plane_with_the_node_token_and_conversation() {
-        let server = sample().mcp_server(Uuid::from_u128(9));
+    fn the_mcp_server_carries_the_session_token_and_never_the_node_token() {
+        let server = sample().mcp_server("myc_session_example");
 
         assert_eq!(
             server,
@@ -377,8 +401,7 @@ mod tests {
                 "name": "mycelium",
                 "url": "https://mycelium.example/api/v1/mcp",
                 "headers": [
-                    {"name": "Authorization", "value": "Bearer myc_node_abc"},
-                    {"name": "X-Mycelium-Conversation", "value": "00000000-0000-0000-0000-000000000009"},
+                    {"name": "Authorization", "value": "Bearer myc_session_example"},
                 ],
             })
         );
