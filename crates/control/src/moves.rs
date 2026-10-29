@@ -261,7 +261,7 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
 
             sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!(
                 "insert into projects (owner, node_id, name, path, forge_id, repository, group_id) values ($1, $2, $3, $4, $5, $6, $7)
-                 on conflict (node_id, path) do update set forge_id = excluded.forge_id, repository = excluded.repository
+                 on conflict (node_id, path) do update set forge_id = excluded.forge_id, repository = excluded.repository where projects.owner = excluded.owner
                  returning {PROJECT_COLUMNS}",
             )))
             .bind(owner)
@@ -271,9 +271,10 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
             .bind(forge_id)
             .bind(&repository)
             .bind(source_project.group_id)
-            .fetch_one(&state.pool)
+            .fetch_optional(&state.pool)
             .await
             .map_err(|error| reason(ApiError::from(error).message()))?
+            .ok_or_else(|| reason("The folder on the other node already belongs to another account. Choose a different node."))?
         }
     };
 
@@ -290,6 +291,7 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
         patch: snapshot["patch"].as_str().unwrap_or_default().to_string(),
         bundle: snapshot["bundle"].as_str().map(str::to_string),
         credentials: Some(forge.git_credentials().map_err(|error| reason(error.message()))?),
+        approved_urls: forge.approved_clone_urls(&state.http, &repository).await.map_err(|error| reason(error.message()))?,
     };
     let applied = relay(state, target_node_id, target_project.path.clone(), apply).await.map_err(|error| reason(error.message()))?;
 

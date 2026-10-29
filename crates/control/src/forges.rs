@@ -92,6 +92,13 @@ impl ForgeRow {
         Ok(GitCredentials { username: username.to_string(), password: self.token.clone() })
     }
 
+    pub async fn approved_clone_urls(&self, http: &reqwest::Client, repository: &str) -> ApiResult<Vec<String>> {
+        let mut urls = ForgeApi::from_row(self)?.clone_urls(http, repository).await;
+        urls.push(format!("{}/{repository}.git", self.base_url));
+
+        Ok(urls)
+    }
+
     pub fn to_proto(&self) -> ApiResult<Forge> {
         Ok(Forge {
             id: self.id,

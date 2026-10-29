@@ -281,8 +281,7 @@ async fn run_remote(state: &AppState, user: &AuthUser, id: Uuid, action: &str, f
             let credentials = forge.git_credentials()?;
             let url = format!("{}/{repository}.git", forge.base_url);
 
-            let mut allowed_urls = ForgeApi::from_row(&forge)?.clone_urls(&state.http, repository).await;
-            allowed_urls.push(url.clone());
+            let allowed_urls = forge.approved_clone_urls(&state.http, repository).await?;
 
             GitCommand::Remote { action: action.into(), force, url, allowed_urls, credentials }
         } else if action == "fetch" {

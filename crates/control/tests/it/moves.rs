@@ -229,10 +229,11 @@ async fn an_idle_conversation_moves_with_its_branch_unsaved_work_and_transcript_
     let (cwd, command) = answer_next(&mut moving.target, Ok(json!({"branch": "feature/moves", "applied_files": 1}))).await;
     let engine = base64::engine::general_purpose::STANDARD;
     match command {
-        GitCommand::Apply { branch, head, patch, bundle, credentials } => {
+        GitCommand::Apply { branch, head, patch, bundle, credentials, approved_urls } => {
             assert_eq!((cwd.as_str(), branch.as_str(), head.as_str()), (TARGET_PATH, "feature/moves", "0123456789abcdef0123456789abcdef01234567"));
             assert_eq!((patch, bundle), (engine.encode("diff --git a/a.txt b/a.txt\n"), Some(engine.encode("bundle bytes"))));
             assert_eq!(credentials.map(|credentials| credentials.username).as_deref(), Some("x-access-token"));
+            assert!(approved_urls.iter().any(|url| url.ends_with("/acme-org/app.git")), "{approved_urls:?}");
         }
         other => panic!("expected apply, got {other:?}"),
     }
@@ -283,6 +284,24 @@ async fn the_project_is_cloned_on_the_other_node_when_it_is_missing_there() {
     let (_, projects) = moving.server.user.json(moving.server.user.get("/api/v1/projects")).await;
     let on_target = projects.as_array().unwrap().iter().find(|project| project["node_id"] == json!(moving.target.id)).unwrap();
     assert_eq!((on_target["path"].clone(), on_target["repository"].clone(), on_target["forge_id"].clone()), (json!(TARGET_PATH), json!("acme-org/app"), json!(moving.forge_id)));
+}
+
+#[tokio::test]
+async fn cloning_onto_a_folder_another_account_registered_leaves_their_project_alone() {
+    let mut moving = start(false, false).await;
+    mirror_transcript(&mut moving).await;
+    moving.server.second_user("alex@example.com").await;
+    let alex = sqlx::query_scalar::<_, Uuid>("select id from users where email = 'alex@example.com'").fetch_one(&moving.server.pool).await.unwrap();
+    sqlx::query("insert into projects (owner, node_id, name, path) values ($1, $2, 'app', $3)").bind(alex).bind(moving.target.id).bind(TARGET_PATH).execute(&moving.server.pool).await.unwrap();
+    request_move(&moving, false).await;
+
+    answer_next(&mut moving.source, Ok(snapshot())).await;
+    answer_next(&mut moving.target, Ok(json!({"path": TARGET_PATH}))).await;
+    let failed = progress(&moving, "failed").await;
+
+    assert!(failed["message"].as_str().unwrap().contains("another account"), "{failed}");
+    let (owner, forge_id) = sqlx::query_as::<_, (Uuid, Option<Uuid>)>("select owner, forge_id from projects where node_id = $1 and path = $2").bind(moving.target.id).bind(TARGET_PATH).fetch_one(&moving.server.pool).await.unwrap();
+    assert_eq!((owner, forge_id), (alex, None));
 }
 
 #[tokio::test]
