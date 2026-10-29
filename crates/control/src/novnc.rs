@@ -75,7 +75,19 @@ fn content_type(path: &str) -> &'static str {
 
 pub async fn serve(Path(path): Path<String>) -> Response {
     match FILES.iter().find(|(name, _)| *name == path) {
-        Some((name, body)) => ([(header::CONTENT_TYPE, content_type(name)), (header::CACHE_CONTROL, "public, max-age=3600")], *body).into_response(),
+        Some((name, body)) => ([(header::CONTENT_TYPE, content_type(name)), (header::CACHE_CONTROL, "public, max-age=3600"), (header::CONTENT_SECURITY_POLICY, "frame-ancestors 'self'")], *body).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn the_embed_page_can_only_be_framed_by_the_control_plane_itself() {
+        let response = serve(Path("embed.html".to_string())).await;
+
+        assert_eq!(response.headers()[header::CONTENT_SECURITY_POLICY], "frame-ancestors 'self'");
     }
 }

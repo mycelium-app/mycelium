@@ -15,7 +15,8 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
 import RFB from './core/rfb.js';
 
 const query = new URLSearchParams(location.search);
-const path = query.get('path') || '';
+const requested = query.get('path') || '';
+const path = requested.startsWith('/api/v1/') && !requested.includes('..') ? requested : '';
 const ticket = query.get('ticket') || '';
 const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
 const separator = path.includes('?') ? '&' : '?';
