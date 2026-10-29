@@ -59,6 +59,10 @@ pub async fn detect_agents(commands: impl Fn(AgentId) -> Vec<String>) -> Vec<Age
     agents
 }
 
+pub fn pod_agents() -> Vec<AgentInfo> {
+    ALL_AGENTS.into_iter().map(|agent| AgentInfo { agent, version: None, available: true, update_available: None }).collect()
+}
+
 pub async fn detect_default_agents() -> Vec<AgentInfo> {
     detect_agents(agent_command).await
 }

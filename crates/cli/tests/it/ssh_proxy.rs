@@ -67,6 +67,7 @@ impl Fixture {
             state_dir: dir.path().join("state"),
             projects_root: dir.path().join("projects"),
             max_sessions: 4,
+            kubernetes: Default::default(),
         };
         config.save(&config_file).unwrap();
         std::fs::write(&token_file, format!("{token}\n")).unwrap();

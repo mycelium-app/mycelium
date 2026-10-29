@@ -16,6 +16,7 @@ pub mod join;
 pub mod link;
 pub mod login;
 pub mod logo;
+pub mod pod;
 pub mod resources;
 pub mod rfb;
 pub mod secrets_file;

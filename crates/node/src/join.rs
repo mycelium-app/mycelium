@@ -64,6 +64,7 @@ pub async fn join(options: JoinOptions) -> Result<()> {
         state_dir: default_state_dir(),
         projects_root: default_projects_root(),
         max_sessions: 8,
+        kubernetes: Default::default(),
     };
     let path = options.config_path.unwrap_or_else(config_path);
     config.save(&path)?;

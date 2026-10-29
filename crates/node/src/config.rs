@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use mycelium_proto::conversation::AgentId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -19,7 +20,84 @@ pub struct NodeConfig {
     pub projects_root: PathBuf,
     #[serde(default = "default_max_sessions")]
     pub max_sessions: usize,
+    #[serde(default, skip_serializing_if = "KubernetesConfig::is_default")]
+    pub kubernetes: KubernetesConfig,
 }
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KubernetesResources {
+    pub requests: BTreeMap<String, String>,
+    pub limits: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KubernetesConfig {
+    pub enabled: bool,
+    pub namespace: String,
+    pub image: String,
+    pub image_pull_policy: Option<String>,
+    pub resources: KubernetesResources,
+    pub credentials_secret: String,
+    pub storage_class: Option<String>,
+    pub storage_size: String,
+}
+
+impl Default for KubernetesConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            namespace: "mycelium".to_string(),
+            image: DEFAULT_AGENT_IMAGE.to_string(),
+            image_pull_policy: None,
+            resources: KubernetesResources::default(),
+            credentials_secret: "mycelium-agent-credentials".to_string(),
+            storage_class: None,
+            storage_size: "10Gi".to_string(),
+        }
+    }
+}
+
+impl KubernetesConfig {
+    pub fn is_default(&self) -> bool {
+        *self == KubernetesConfig::default()
+    }
+
+    pub fn with_environment(mut self, lookup: impl Fn(&str) -> Option<String>) -> Self {
+        if let Some(enabled) = lookup("MYCELIUM_KUBERNETES_ENABLED") {
+            self.enabled = matches!(enabled.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes");
+        }
+
+        if let Some(namespace) = lookup("MYCELIUM_KUBERNETES_NAMESPACE") {
+            self.namespace = namespace;
+        }
+
+        if let Some(image) = lookup("MYCELIUM_KUBERNETES_IMAGE") {
+            self.image = image;
+        }
+
+        if let Some(policy) = lookup("MYCELIUM_KUBERNETES_IMAGE_PULL_POLICY") {
+            self.image_pull_policy = Some(policy);
+        }
+
+        if let Some(secret) = lookup("MYCELIUM_KUBERNETES_CREDENTIALS_SECRET") {
+            self.credentials_secret = secret;
+        }
+
+        if let Some(class) = lookup("MYCELIUM_KUBERNETES_STORAGE_CLASS") {
+            self.storage_class = Some(class);
+        }
+
+        if let Some(size) = lookup("MYCELIUM_KUBERNETES_STORAGE_SIZE") {
+            self.storage_size = size;
+        }
+
+        self
+    }
+}
+
+pub const DEFAULT_AGENT_IMAGE: &str = "ghcr.io/mycelium-app/mycelium-agent:latest";
 
 fn default_max_sessions() -> usize {
     8
@@ -28,7 +106,8 @@ fn default_max_sessions() -> usize {
 impl NodeConfig {
     pub fn load(path: &Path) -> Result<NodeConfig> {
         let text = std::fs::read_to_string(path).with_context(|| format!("This node has no credential at {}. Run mycelium node join first.", path.display()))?;
-        let config = toml::from_str(&text).with_context(|| format!("{} is not a valid node config.", path.display()))?;
+        let mut config: NodeConfig = toml::from_str(&text).with_context(|| format!("{} is not a valid node config.", path.display()))?;
+        config.kubernetes = config.kubernetes.with_environment(|name| std::env::var(name).ok());
 
         Ok(config)
     }
@@ -216,6 +295,7 @@ mod tests {
             state_dir: "/tmp/state".into(),
             projects_root: "/tmp/projects".into(),
             max_sessions: 8,
+            kubernetes: KubernetesConfig::default(),
         }
     }
 
@@ -308,6 +388,67 @@ mod tests {
     fn claude_runs_with_its_own_memory_off_and_codex_is_untouched() {
         assert_eq!(agent_env(AgentId::Claude), vec![("CLAUDE_CODE_DISABLE_AUTO_MEMORY".to_string(), "1".to_string())]);
         assert!(agent_env(AgentId::Codex).is_empty());
+    }
+
+    #[test]
+    fn a_config_without_a_kubernetes_section_has_it_off_and_does_not_write_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("node.toml");
+
+        sample().save(&path).unwrap();
+
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("kubernetes"));
+        assert!(!NodeConfig::load(&path).unwrap().kubernetes.enabled);
+    }
+
+    #[test]
+    fn the_kubernetes_section_overrides_the_defaults_it_names() {
+        let text = r#"
+control_plane = "https://mycelium.example"
+node_id = "00000000-0000-0000-0000-000000000000"
+token = "abc"
+state_dir = "/tmp/state"
+projects_root = "/workspace"
+
+[kubernetes]
+enabled = true
+namespace = "agents"
+image = "registry.example.com/agent:1"
+image_pull_policy = "Always"
+credentials_secret = "agent-signins"
+storage_class = "fast"
+
+[kubernetes.resources.limits]
+memory = "4Gi"
+"#;
+
+        let config: NodeConfig = toml::from_str(text).unwrap();
+
+        assert!(config.kubernetes.enabled);
+        assert_eq!(config.kubernetes.namespace, "agents");
+        assert_eq!(config.kubernetes.image, "registry.example.com/agent:1");
+        assert_eq!(config.kubernetes.image_pull_policy.as_deref(), Some("Always"));
+        assert_eq!(config.kubernetes.credentials_secret, "agent-signins");
+        assert_eq!(config.kubernetes.storage_class.as_deref(), Some("fast"));
+        assert_eq!(config.kubernetes.storage_size, "10Gi");
+        assert_eq!(config.kubernetes.resources.limits.get("memory").map(String::as_str), Some("4Gi"));
+    }
+
+    #[test]
+    fn kubernetes_environment_variables_override_the_file() {
+        let lookup = |name: &str| match name {
+            "MYCELIUM_KUBERNETES_ENABLED" => Some("true".to_string()),
+            "MYCELIUM_KUBERNETES_NAMESPACE" => Some("team-a".to_string()),
+            "MYCELIUM_KUBERNETES_IMAGE" => Some("registry.example.com/agent:2".to_string()),
+            _ => None,
+        };
+
+        let config = KubernetesConfig::default().with_environment(lookup);
+
+        assert!(config.enabled);
+        assert_eq!(config.namespace, "team-a");
+        assert_eq!(config.image, "registry.example.com/agent:2");
+        assert_eq!(config.credentials_secret, "mycelium-agent-credentials");
     }
 
     #[test]

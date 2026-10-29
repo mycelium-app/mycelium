@@ -154,6 +154,7 @@ fn status_prints_the_node_the_connection_and_the_sessions() {
         state_dir: dir.path().join("state"),
         projects_root: dir.path().join("projects"),
         max_sessions: 4,
+        kubernetes: Default::default(),
     };
     config.save(&config_path).unwrap();
     let ended = config.sessions_dir().join("00000000-0000-0000-0000-000000000001");

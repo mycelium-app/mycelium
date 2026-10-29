@@ -1,5 +1,5 @@
 use crate::acp::Command;
-use crate::agents::{ALL_AGENTS, account_env, account_homes, accounts_dir, detect_agents, find_account, login_command, login_state, new_account, resolve_program};
+use crate::agents::{ALL_AGENTS, account_env, account_homes, accounts_dir, detect_agents, find_account, pod_agents, login_command, login_state, new_account, resolve_program};
 use crate::usage::{CODEX_USAGE_ENDPOINT, USAGE_ENDPOINT, USAGE_MIN_AGE, UsageCache};
 use crate::instructions::deliver;
 use crate::config::{NodeConfig, agent_command, codex_command, agent_env, config_path, with_developer_instructions};
@@ -10,6 +10,7 @@ use crate::resources::Watcher;
 use crate::ssh::SshServer;
 use crate::environment::EnvironmentManager;
 use crate::terminal::{TerminalManager, find_on_path, user_shell};
+use crate::pod::PodRuntime;
 use crate::session::{Launch, SessionHandle, SessionSpec, next_failure_seq, spawn_session};
 use crate::transcripts::TranscriptFollower;
 use anyhow::{Context, Result};
@@ -97,13 +98,21 @@ pub struct Daemon {
     watcher: Watcher,
     transcripts: Mutex<TranscriptFollower>,
     connected: AtomicBool,
+    pods: Option<PodRuntime>,
 }
 
 pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: DaemonOptions) -> Result<()> {
     std::fs::create_dir_all(config.sessions_dir())?;
 
     let (out, out_rx) = mpsc::unbounded_channel();
-    let agents = detect_agents(|agent| (options.agent_commands)(agent)).await;
+    let pods = match config.kubernetes.enabled {
+        true => Some(PodRuntime::connect(config.kubernetes.clone(), config.node_id).await?),
+        false => None,
+    };
+    let agents = match &pods {
+        Some(_) => pod_agents(),
+        None => detect_agents(|agent| (options.agent_commands)(agent)).await,
+    };
     let logins_home = options.home.clone();
     let logins_accounts = accounts_dir(&config.state_dir);
     let usage = Arc::new(UsageCache::new(&options.usage_endpoint, &options.codex_usage_endpoint, &options.codex_command, USAGE_MIN_AGE));
@@ -122,6 +131,7 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
         sessions: Mutex::new(HashMap::new()),
         launched_secrets: Mutex::new(HashMap::new()),
         connected: AtomicBool::new(false),
+        pods,
         config,
         config_file,
         options,
@@ -469,6 +479,10 @@ impl Daemon {
     }
 
     async fn agents(&self) -> Vec<AgentInfo> {
+        if self.pods.is_some() {
+            return pod_agents();
+        }
+
         detect_agents(|agent| (self.options.agent_commands)(agent)).await
     }
 
@@ -545,7 +559,7 @@ impl Daemon {
                 continue;
             }
 
-            let spec = SessionSpec { conversation_id, dir: entry.path(), launch: None };
+            let spec = SessionSpec { conversation_id, dir: entry.path(), launch: None, pods: self.pods.clone() };
             let handle = spawn_session(spec, self.out.clone());
             if let Ok(mut sessions) = self.sessions.lock() {
                 sessions.insert(conversation_id, handle);
@@ -599,6 +613,36 @@ impl Daemon {
         }
 
         let agent_command = (self.options.agent_commands)(agent);
+
+        if self.pods.is_some() {
+            let mut env = agent_env(agent);
+
+            if let (AgentId::Codex, Some(text)) = (agent, &instructions) {
+                env = with_developer_instructions(env, text);
+            }
+
+            let cwd = std::path::Path::new(crate::pod::WORKSPACE_PATH).join(cwd.trim_start_matches('/'));
+            let launch = Launch {
+                agent,
+                account: account.clone(),
+                keeper_binary: self.options.keeper_binary.clone(),
+                agent_command,
+                agent_env: env,
+                mcp_server: self.config.mcp_server(conversation_id),
+                instructions: instructions.filter(|_| agent == AgentId::Claude),
+                cwd,
+                resume,
+                fork,
+            };
+            let spec = SessionSpec { conversation_id, dir: self.session_dir(conversation_id), launch: Some(launch), pods: self.pods.clone() };
+            let handle = spawn_session(spec, self.out.clone());
+            if let Ok(mut sessions) = self.sessions.lock() {
+                sessions.insert(conversation_id, handle);
+            }
+
+            return;
+        }
+
         let available = agent_command.first().and_then(|program| crate::agents::resolve_program(program)).is_some();
         if !available {
             self.refuse(conversation_id, format!("{} is not installed on this node.", agent.as_str()));
@@ -683,7 +727,7 @@ impl Daemon {
             resume,
             fork,
         };
-        let spec = SessionSpec { conversation_id, dir: self.session_dir(conversation_id), launch: Some(launch) };
+        let spec = SessionSpec { conversation_id, dir: self.session_dir(conversation_id), launch: Some(launch), pods: self.pods.clone() };
         let handle = spawn_session(spec, self.out.clone());
         if let Ok(mut sessions) = self.sessions.lock() {
             sessions.insert(conversation_id, handle);

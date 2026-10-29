@@ -148,6 +148,7 @@ impl Fixture {
             state_dir: root.path().join("state"),
             projects_root: root.path().join("projects"),
             max_sessions: 4,
+            kubernetes: Default::default(),
         };
         let agent = fake_acp();
         let options = DaemonOptions {

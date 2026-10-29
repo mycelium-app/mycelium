@@ -1,4 +1,5 @@
 use crate::attachments;
+use crate::pod::{PodLaunch, PodRuntime};
 use crate::acp::{Action, Command, Direction, SessionSnapshot, SessionState, StartPlan};
 use anyhow::{Context, Result, bail};
 use mycelium_keeper::socket_path;
@@ -43,6 +44,7 @@ pub struct SessionSpec {
     pub conversation_id: Uuid,
     pub dir: PathBuf,
     pub launch: Option<Launch>,
+    pub pods: Option<PodRuntime>,
 }
 
 enum Message {
@@ -199,7 +201,7 @@ pub fn journal_head(dir: &Path) -> i64 {
 pub fn spawn_session(spec: SessionSpec, out: mpsc::UnboundedSender<NodeToControl>) -> SessionHandle {
     let (messages, inbox) = mpsc::unbounded_channel();
     let acked = Arc::new(AtomicI64::new(read_acked(&spec.dir)));
-    let already_ended = spec.launch.is_none() && (spec.dir.join("exit.json").exists() || !socket_path(&spec.dir).exists());
+    let already_ended = spec.launch.is_none() && (spec.dir.join("exit.json").exists() || (spec.pods.is_none() && !socket_path(&spec.dir).exists()));
     let handle = SessionHandle { messages, acked: acked.clone(), ended: Arc::new(AtomicBool::new(already_ended)), acp_session_id: Arc::new(Mutex::new(None)), busy: Arc::new(AtomicBool::new(true)), closing: Arc::new(AtomicBool::new(false)), launched_as: spec.launch.as_ref().map(|launch| (launch.agent, launch.account.clone())), last_active: Arc::new(AtomicU64::new(now_millis())) };
 
     let base = if spec.launch.is_some() { start_new_journal_epoch(&spec.dir) } else { read_base(&spec.dir) };
@@ -254,9 +256,14 @@ fn start_new_journal_epoch(dir: &Path) -> i64 {
     base
 }
 
+enum Writer {
+    Keeper(OwnedWriteHalf),
+    Pod(mpsc::UnboundedSender<Value>),
+}
+
 struct Connection {
     entries: mpsc::UnboundedReceiver<Value>,
-    writer: Option<OwnedWriteHalf>,
+    writer: Option<Writer>,
 }
 
 struct Actor {
@@ -505,13 +512,24 @@ async fn write_to_keeper(connection: &mut Connection, message: Value) {
         return;
     };
 
-    let line = format!("{message}\n");
-    if let Err(error) = writer.write_all(line.as_bytes()).await {
-        tracing::warn!("keeper write failed: {error}");
+    match writer {
+        Writer::Keeper(half) => {
+            let line = format!("{message}\n");
+            if let Err(error) = half.write_all(line.as_bytes()).await {
+                tracing::warn!("keeper write failed: {error}");
+            }
+        }
+        Writer::Pod(frames) => {
+            let _ = frames.send(message);
+        }
     }
 }
 
 async fn connect(spec: &SessionSpec, after: usize) -> Result<Connection> {
+    if let Some(pods) = &spec.pods {
+        return connect_pod(pods.clone(), spec, after).await;
+    }
+
     if let Some(launch) = &spec.launch {
         launch_keeper(&spec.dir, launch).await?;
         let stream = connect_socket(&spec.dir).await?;
@@ -545,7 +563,43 @@ async fn attach(stream: UnixStream, after: usize) -> Result<Connection> {
         }
     });
 
-    Ok(Connection { entries, writer: Some(write_half) })
+    Ok(Connection { entries, writer: Some(Writer::Keeper(write_half)) })
+}
+
+async fn connect_pod(pods: PodRuntime, spec: &SessionSpec, after: usize) -> Result<Connection> {
+    let (entries_tx, entries) = mpsc::unbounded_channel();
+    let (frames_tx, frames) = mpsc::unbounded_channel();
+    let launch = spec.launch.as_ref().map(|launch| PodLaunch { agent_command: launch.agent_command.clone(), agent_env: launch.agent_env.clone(), cwd: launch.cwd.display().to_string() });
+
+    if launch.is_some() {
+        clear_session_files(&spec.dir)?;
+    } else if spec.dir.join("exit.json").exists() || pods.find(spec.conversation_id).await?.is_none() {
+        return replay_ended_journal(&spec.dir, after);
+    }
+
+    let conversation_id = spec.conversation_id;
+    let dir = spec.dir.clone();
+    let lost = entries_tx.clone();
+    tokio::spawn(async move {
+        let bridged = pods.bridge(conversation_id, &dir, launch, after, entries_tx, frames).await;
+        if let Err(error) = bridged {
+            tracing::error!(conversation = %conversation_id, "the session's pod failed: {error:#}");
+            let _ = lost.send(json!({"exit": -1}));
+        }
+    });
+
+    Ok(Connection { entries, writer: Some(Writer::Pod(frames_tx)) })
+}
+
+fn clear_session_files(dir: &Path) -> Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let _ = std::fs::remove_file(acked_path(dir));
+    let _ = std::fs::remove_file(snapshot_path(dir));
+    let _ = std::fs::remove_file(closed_path(dir));
+    let _ = std::fs::remove_file(socket_path(dir));
+    let _ = std::fs::remove_file(dir.join("exit.json"));
+
+    Ok(())
 }
 
 fn replay_ended_journal(dir: &Path, after: usize) -> Result<Connection> {
@@ -590,12 +644,7 @@ async fn launch_keeper(dir: &Path, launch: &Launch) -> Result<()> {
         );
     }
 
-    std::fs::create_dir_all(dir)?;
-    let _ = std::fs::remove_file(acked_path(dir));
-    let _ = std::fs::remove_file(snapshot_path(dir));
-    let _ = std::fs::remove_file(closed_path(dir));
-    let _ = std::fs::remove_file(socket_path(dir));
-    let _ = std::fs::remove_file(dir.join("exit.json"));
+    clear_session_files(dir)?;
 
     let mut command = tokio::process::Command::new(&launch.keeper_binary);
     command
