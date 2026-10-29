@@ -28,6 +28,8 @@ const TOKEN_LABEL: &str = "Agent access";
 
 const REQUEST_COLUMNS: &str = "id, conversation_id, scopes, hours, reason, state, created_at, decided_at, server_id, (select name from chat_tool_servers s where s.id = api_access_requests.server_id) as integration";
 
+const FULL_ACCESS_ENDINGS: [&str; 5] = ["/terminal", "/permission", "/config", "/move", "/git/push"];
+
 enum Need {
     Anyone,
     Scope(&'static str),
@@ -68,7 +70,10 @@ fn need(method: &Method, route: &str) -> Need {
     }
 
     if route == "/api/v1/conversations" || route.starts_with("/api/v1/conversations/") {
-        if route.ends_with("/terminal") || route.ends_with("/permission") {
+        let creating = !reading && route == "/api/v1/conversations";
+        let sensitive = FULL_ACCESS_ENDINGS.iter().any(|ending| route.ends_with(ending)) || route.contains("/responses/") || route.contains("/environment");
+
+        if creating || sensitive {
             return Need::Full;
         }
 
@@ -97,18 +102,19 @@ pub async fn gate_scoped_tokens(State(state): State<AppState>, request: Request,
     let Some(token) = client_token(request.headers()) else {
         return next.run(request).await;
     };
-    let grant = sqlx::query_as::<_, (Uuid, Option<Vec<String>>)>("select id, scopes from client_tokens where token_hash = $1 and revoked_at is null and (expires_at is null or expires_at > now())")
+    let grant = sqlx::query_as::<_, (Uuid, Option<Vec<String>>, Option<Uuid>)>("select id, scopes, conversation_id from client_tokens where token_hash = $1 and revoked_at is null and (expires_at is null or expires_at > now())")
         .bind(hash_token(token))
         .fetch_optional(&state.pool)
         .await;
-    let Ok(Some((token_id, Some(scopes)))) = grant else {
+    let Ok(Some((token_id, Some(scopes), bound_conversation))) = grant else {
         return next.run(request).await;
     };
 
     let method = request.method().clone();
     let path = request.uri().path().to_string();
     let route = request.extensions().get::<MatchedPath>().map(|matched| matched.as_str().to_string()).unwrap_or_else(|| request.uri().path().to_string());
-    let allowed = match integration_proxy::server_of(&path) {
+    let other_conversation = bound_conversation.is_some_and(|bound| conversation_in(&path).is_some_and(|asked| asked != bound));
+    let allowed = !other_conversation && match integration_proxy::server_of(&path) {
         Some(server_id) => scopes.iter().any(|granted| granted.starts_with(&integration_proxy::token_scope(server_id, ""))),
         None => match need(&method, &route) {
             Need::Anyone => true,
@@ -146,6 +152,10 @@ pub async fn gate_scoped_tokens(State(state): State<AppState>, request: Request,
     }
 
     response
+}
+
+fn conversation_in(path: &str) -> Option<Uuid> {
+    path.strip_prefix("/api/v1/conversations/")?.split('/').next()?.parse().ok()
 }
 
 fn purge_is_due() -> bool {

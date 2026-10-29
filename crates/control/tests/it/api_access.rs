@@ -142,6 +142,12 @@ async fn a_token_reaches_only_the_routes_its_scopes_cover() {
         (Some(WRITE), "GET", "/api/v1/conversations".into(), false),
         (Some(WRITE), "POST", format!("/api/v1/conversations/{any}/permission"), false),
         (Some(WRITE), "POST", format!("/api/v1/conversations/{any}/terminal"), false),
+        (Some(WRITE), "POST", format!("/api/v1/conversations/{any}/config"), false),
+        (Some(WRITE), "POST", format!("/api/v1/conversations/{any}/responses/{any}"), false),
+        (Some(WRITE), "POST", format!("/api/v1/conversations/{any}/environment"), false),
+        (Some(WRITE), "POST", format!("/api/v1/conversations/{any}/move"), false),
+        (Some(WRITE), "POST", format!("/api/v1/conversations/{any}/git/push"), false),
+        (Some(WRITE), "POST", "/api/v1/conversations".into(), false),
         (Some(NODES), "GET", "/api/v1/nodes".into(), true),
         (Some(NODES), "POST", format!("/api/v1/nodes/{any}/drain"), false),
         (Some(NODES), "GET", "/api/v1/conversations".into(), false),
@@ -165,6 +171,21 @@ async fn a_token_reaches_only_the_routes_its_scopes_cover() {
             assert_eq!(status, 403, "{scopes:?} should not reach {method} {path}");
         }
     }
+}
+
+#[tokio::test]
+async fn a_token_granted_for_one_conversation_is_refused_on_another() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let own = working_conversation(&server, &mut link).await;
+    let other = Uuid::new_v4();
+    let (token_id, token) = insert_token(&server, Some(READ), None).await;
+    sqlx::query("update client_tokens set conversation_id = $2 where id = $1").bind(token_id).bind(own).execute(&server.pool).await.unwrap();
+
+    let on_its_own = status_with(&server, &token, "GET", &format!("/api/v1/conversations/{own}/events")).await;
+    let on_another = status_with(&server, &token, "GET", &format!("/api/v1/conversations/{other}/events")).await;
+
+    assert_eq!((on_its_own, on_another), (200, 403));
 }
 
 #[tokio::test]
