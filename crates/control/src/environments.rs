@@ -325,11 +325,11 @@ pub fn record_action(state: &AppState, conversation_id: Uuid, label: &str, updat
     Some(record)
 }
 
-pub async fn record_thread_line(state: &AppState, record: &EnvironmentRecord, text: &str, note_for_agent: Option<String>) {
+pub async fn record_thread_line(state: &AppState, record: &EnvironmentRecord, event: &str, text: &str, why: &str, note_for_agent: Option<String>) {
     let conversation_id = record.environment.conversation_id;
     let appended = async {
         let mut tx = state.pool.begin().await?;
-        let event = append_event(&mut tx, conversation_id, EventKind::Environment, &serde_json::json!({"text": text}), None).await?;
+        let event = append_event(&mut tx, conversation_id, EventKind::Environment, &serde_json::json!({"event": event, "text": text, "why": why, "at": Utc::now().to_rfc3339()}), None).await?;
 
         tx.commit().await?;
 
@@ -374,7 +374,7 @@ pub async fn stop_with_conversation(state: &AppState, conversation_id: Uuid, del
     let stopped = halt_environment(state, record, true);
 
     if !deleted {
-        record_thread_line(state, &stopped, "The environment stopped when the conversation closed.", None).await;
+        record_thread_line(state, &stopped, "stopped", "Environment stopped", "You closed this conversation, so the environment and its apps closed too.", None).await;
     }
 }
 
@@ -486,10 +486,10 @@ pub async fn start_environment(state: &AppState, row: &ConversationRow, person: 
     publish_environment(state, &record);
 
     match starter {
-        Starter::Person => record_thread_line(state, &record, &format!("You started the environment on {}.", record.environment.node_name), None).await,
+        Starter::Person => record_thread_line(state, &record, "started", &format!("Environment started on {}", record.environment.node_name), "You can watch, or take over at any time.", None).await,
         Starter::Agent => {
             record_action(state, id, "The agent started the environment", |_| {});
-            record_thread_line(state, &record, &format!("The agent started the environment on {}.", record.environment.node_name), None).await;
+            record_thread_line(state, &record, "started", &format!("Environment started on {}", record.environment.node_name), "The agent started it. You can watch, or take over at any time.", None).await;
         }
     }
 
@@ -537,7 +537,7 @@ pub async fn take_over(State(state): State<AppState>, user: AuthUser, Path(id): 
     .ok_or_else(|| ApiError::not_found("An environment"))?;
     let note = format!("{} took over the environment. Do not use it until they hand back.", record.person);
 
-    record_thread_line(&state, &record, "You took over the environment. The agent is paused until you hand back.", Some(note)).await;
+    record_thread_line(&state, &record, "took_over", "You took over the environment", "The agent waits and does not click or type until you hand back.", Some(note)).await;
 
     Ok(Json(record.environment))
 }
@@ -552,7 +552,7 @@ pub async fn hand_back(State(state): State<AppState>, user: AuthUser, Path(id): 
     .ok_or_else(|| ApiError::not_found("An environment"))?;
     let note = format!("{} handed the environment back. Take a screenshot before relying on what you saw earlier.", record.person);
 
-    record_thread_line(&state, &record, "You handed back the environment.", Some(note)).await;
+    record_thread_line(&state, &record, "handed_back", "You handed back the environment", "The agent can see what changed.", Some(note)).await;
 
     Ok(Json(record.environment))
 }

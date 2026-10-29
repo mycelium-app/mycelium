@@ -661,9 +661,9 @@ async fn starting_taking_over_and_handing_back_are_lines_in_the_thread() {
     assert_eq!(
         environment_lines(&fixture).await,
         [
-            "You started the environment on laptop.",
-            "You took over the environment. The agent is paused until you hand back.",
-            "You handed back the environment.",
+            "Environment started on laptop",
+            "You took over the environment",
+            "You handed back the environment",
         ]
     );
 }
@@ -703,7 +703,7 @@ async fn closing_the_conversation_stops_its_environment() {
     let (_, environment) = fixture.server.user.json(fixture.server.user.get(&fixture.url(""))).await;
 
     assert_eq!((environment["state"].clone(), environment["closed_with_conversation"].clone()), (json!("stopped"), json!(true)), "{environment}");
-    assert_eq!(environment_lines(&fixture).await.last().map(String::as_str), Some("The environment stopped when the conversation closed."));
+    assert_eq!(environment_lines(&fixture).await.last().map(String::as_str), Some("Environment stopped"));
 }
 
 #[tokio::test]
@@ -1034,7 +1034,7 @@ async fn the_agent_starting_an_environment_in_a_chat_is_recorded_as_the_agent() 
     assert!(matches!(fixture.link.next().await, ControlToNode::StartEnvironment { .. }));
     assert_eq!((text_of(&reply).starts_with("Started the environment on laptop."), reply["result"]["isError"].clone()), (true, json!(false)), "{reply}");
     assert_eq!(text_of(&again), "The environment is already running on laptop.");
-    assert_eq!(environment_lines(&fixture).await, ["The agent started the environment on laptop."]);
+    assert_eq!(environment_lines(&fixture).await, ["Environment started on laptop"]);
     assert_eq!(actions[0]["label"], "The agent started the environment");
 }
 
