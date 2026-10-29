@@ -43,49 +43,49 @@ function jsonInit(method: string, body: unknown): RequestInit
 
 export async function getArtifact(id: string): Promise<Artifact>
 {
-  const response = await request(`/api/v1/artifacts/${id}`);
+  const response = await request(`/api/v1/artifacts/${encodeURIComponent(id)}`);
 
   return response.json();
 }
 
 export async function getDesign(id: string, version: number): Promise<DesignDoc>
 {
-  const response = await request(`/api/v1/artifacts/${id}/versions/${version}/content`);
+  const response = await request(`/api/v1/artifacts/${encodeURIComponent(id)}/versions/${version}/content`);
 
   return parseDesign(await response.text());
 }
 
 export async function saveVersion(id: string, doc: DesignDoc, note?: string): Promise<Artifact>
 {
-  const response = await request(`/api/v1/artifacts/${id}/versions`, jsonInit('POST', { content: serialiseDesign(doc), media_type: designMediaType, note }));
+  const response = await request(`/api/v1/artifacts/${encodeURIComponent(id)}/versions`, jsonInit('POST', { content: serialiseDesign(doc), media_type: designMediaType, note }));
 
   return response.json();
 }
 
 export async function renameArtifact(id: string, title: string): Promise<Artifact>
 {
-  const response = await request(`/api/v1/artifacts/${id}`, jsonInit('PATCH', { title }));
+  const response = await request(`/api/v1/artifacts/${encodeURIComponent(id)}`, jsonInit('PATCH', { title }));
 
   return response.json();
 }
 
 export async function listComments(id: string): Promise<ArtifactComment[]>
 {
-  const response = await request(`/api/v1/artifacts/${id}/comments`);
+  const response = await request(`/api/v1/artifacts/${encodeURIComponent(id)}/comments`);
 
   return response.json();
 }
 
 export async function postComment(id: string, body: string, anchor: CommentAnchor): Promise<ArtifactComment>
 {
-  const response = await request(`/api/v1/artifacts/${id}/comments`, jsonInit('POST', { body, anchor }));
+  const response = await request(`/api/v1/artifacts/${encodeURIComponent(id)}/comments`, jsonInit('POST', { body, anchor }));
 
   return response.json();
 }
 
 export async function resolveComment(id: string, commentId: string, resolved: boolean): Promise<ArtifactComment>
 {
-  const response = await request(`/api/v1/artifacts/${id}/comments/${commentId}`, jsonInit('PATCH', { resolved }));
+  const response = await request(`/api/v1/artifacts/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}`, jsonInit('PATCH', { resolved }));
 
   return response.json();
 }

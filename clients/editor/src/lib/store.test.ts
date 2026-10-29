@@ -6,7 +6,7 @@ let createEditor: () => Editor;
 
 beforeAll(async () =>
 {
-  vi.stubGlobal('location', { pathname: '/design/a1', search: '' });
+  vi.stubGlobal('location', { pathname: '/design/6f1c2a34-9b7d-4e55-8a10-3c2d1e0f4b66', search: '' });
   const { Editor } = await import('./store.svelte');
   createEditor = () => new Editor();
 });
@@ -36,7 +36,7 @@ describe('editing text', () =>
   });
 });
 
-const artifact = { id: 'design-1', kind: 'design', title: 'Design', slug: 'design-1', public: false, latest_version: 1, url: null, versions: [] };
+const artifact = { id: '6f1c2a34-9b7d-4e55-8a10-3c2d1e0f4b66', kind: 'design', title: 'Design', slug: 'design-1', public: false, latest_version: 1, url: null, versions: [] };
 
 afterEach(() =>
 {
@@ -46,7 +46,7 @@ afterEach(() =>
 it('saves edits queued during a slow request as soon as that request finishes', async () =>
 {
   vi.useFakeTimers();
-  vi.stubGlobal('location', { pathname: '/design/design-1', search: '' });
+  vi.stubGlobal('location', { pathname: '/design/6f1c2a34-9b7d-4e55-8a10-3c2d1e0f4b66', search: '' });
   let finishFirst: (response: Response) => void = () => {};
   const bodies: string[] = [];
   const fetch = vi.fn((_url: string, init: RequestInit) =>
