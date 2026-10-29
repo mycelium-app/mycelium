@@ -28,6 +28,8 @@ rand.workspace = true
 nix.workspace = true
 sha2.workspace = true
 resvg.workspace = true
+kube.workspace = true
+k8s-openapi.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
