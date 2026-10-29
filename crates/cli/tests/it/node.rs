@@ -45,7 +45,13 @@ impl Connection {
     }
 
     async fn nothing_more(&mut self) -> Option<NodeToControl> {
-        tokio::time::timeout(QUIET, self.incoming.recv()).await.ok().flatten()
+        let deadline = tokio::time::Instant::now() + QUIET;
+        loop {
+            let message = tokio::time::timeout_at(deadline, self.incoming.recv()).await.ok().flatten()?;
+            if !matches!(message, NodeToControl::EnvironmentCapability { .. }) {
+                return Some(message);
+            }
+        }
     }
 
     fn send(&self, message: ControlToNode) {

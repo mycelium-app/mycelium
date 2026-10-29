@@ -26,6 +26,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "PATCH /api/v1/nodes/{id}",
     "POST /api/v1/nodes/{id}/update",
     "DELETE /api/v1/logins/{login_id}",
+    "DELETE /api/v1/nodes/{id}/logins/{agent}/{account}",
     "POST /api/v1/conversations",
     "POST /api/v1/chats",
     "POST /api/v1/chats/import",
@@ -490,6 +491,22 @@ async fn a_node_connecting_greeting_reporting_logins_and_leaving_is_streamed() {
 
     drop(link);
     node_message(&mut stream, id, |node| !node.online).await;
+}
+
+#[tokio::test]
+async fn removing_a_login_mycelium_made_is_streamed() {
+    let server = Server::start().await;
+    let (id, token) = server.join("node", "laptop").await;
+    let mut stream = server.user.stream().await;
+    let mut link = server.connect_node(id, &token).await;
+    link.hello(vec![]).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: true, agent: AgentId::Claude, account: Some("account-1970".into()), method: "token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }).await;
+    node_message(&mut stream, id, |node| !node.logins.is_empty()).await;
+
+    let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/nodes/{id}/logins/claude/account-1970"))).await;
+    assert_eq!(status, 204);
+
+    node_message(&mut stream, id, |node| node.online && node.logins.is_empty()).await;
 }
 
 #[tokio::test]
