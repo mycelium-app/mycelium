@@ -23,7 +23,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -197,16 +196,12 @@ private fun JoinPopup(controlPlane: String, platform: Platform, kubernetes: Bool
                 Label("The node runs as one Deployment and starts each session in its own pod, from ghcr.io/mycelium-app/mycelium-agent:latest unless you set another image. Run these from a checkout of the repository or an unpacked release.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
 
                 for ((index, step) in kubernetesJoinSteps(controlPlane).withIndex()) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-                        Label("${index + 1}", Modifier.clearAndSetSemantics {}, Tokens.Type.MetaStrong, MyTheme.colors.textMuted)
+                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                        StepHeading(index + 1, step.title, filled = false)
+                        step.note?.let { Label(it, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted) }
 
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                            Label(step.title, style = Tokens.Type.UiStrong)
-                            step.note?.let { Label(it, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted) }
-
-                            for ((description, command) in step.commands) {
-                                CopyableCode(command, step.title, platform::copyToClipboard, description = description)
-                            }
+                        for ((description, command) in step.commands) {
+                            CopyableCode(command, step.title, platform::copyToClipboard, description = description)
                         }
                     }
                 }
@@ -222,6 +217,45 @@ private fun JoinPopup(controlPlane: String, platform: Platform, kubernetes: Bool
             StatusMark("Waiting for the next node", Tone.Working, MyIcon.Working)
         }
     }
+}
+
+@Composable
+fun NodeMenuItems(
+    node: NodeSummary,
+    close: () -> Unit,
+    onRename: () -> Unit,
+    onIcon: (String) -> Unit,
+    onColour: (String) -> Unit,
+    onDrain: () -> Unit,
+    onAskRevoke: () -> Unit,
+) {
+            MenuItem("Rename", onClick = { close(); onRename() }, leading = MyIcon.Pencil)
+            MenuLabel("Icon")
+            Row(Modifier.padding(horizontal = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+                for ((key, icon) in NodeIcons) {
+                    MyButton({ close(); onIcon(key) }, icon = icon, description = "Use the ${key} icon", muted = true, selected = nodeIcon(node) == icon)
+                }
+            }
+            MenuLabel("Colour")
+            Row(Modifier.padding(horizontal = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+                val current = nodeColour(node)
+
+                for (accent in NodeColours) {
+                    val colour = if (LocalAppearance.current.dark) accent.dark else accent.light
+                    val name = accent.name.lowercase()
+
+                    Box(
+                        Modifier
+                            .size(touchMin(Tokens.Size.ControlMd))
+                            .pressable({ close(); onColour(name) }, description = "Use the $name colour", shape = ControlShape, selected = colour == current, stateDescription = if (colour == current) "Chosen" else null),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(Modifier.size(Tokens.Size.IconMd).background(colour, CircleShape))
+                    }
+                }
+            }
+            MenuItem(if (node.draining) "Resume new conversations" else "Drain", onClick = { close(); onDrain() })
+            MenuItem("Revoke", onClick = { close(); onAskRevoke() })
 }
 
 @Composable
@@ -305,33 +339,7 @@ private fun NodeGroup(
             }
 
             RowMenu(node.name) { close ->
-                MenuItem("Rename", onClick = { close(); renaming = node.name }, leading = MyIcon.Pencil)
-                MenuLabel("Icon")
-                Row(Modifier.padding(horizontal = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
-                    for ((key, icon) in NodeIcons) {
-                        MyButton({ close(); onIcon(key) }, icon = icon, description = "Use the ${key} icon", muted = true, selected = nodeIcon(node) == icon)
-                    }
-                }
-                MenuLabel("Colour")
-                Row(Modifier.padding(horizontal = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
-                    val current = nodeColour(node)
-
-                    for (accent in NodeColours) {
-                        val colour = if (LocalAppearance.current.dark) accent.dark else accent.light
-                        val name = accent.name.lowercase()
-
-                        Box(
-                            Modifier
-                                .size(touchMin(Tokens.Size.ControlMd))
-                                .pressable({ close(); onColour(name) }, description = "Use the $name colour", shape = ControlShape, selected = colour == current, stateDescription = if (colour == current) "Chosen" else null),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Box(Modifier.size(Tokens.Size.IconMd).background(colour, CircleShape))
-                        }
-                    }
-                }
-                MenuItem(if (node.draining) "Resume new conversations" else "Drain", onClick = { close(); onDrain() })
-                MenuItem("Revoke", onClick = { close(); onAskRevoke() })
+                NodeMenuItems(node, close, onRename = { renaming = node.name }, onIcon, onColour, onDrain, onAskRevoke)
             }
         }
 

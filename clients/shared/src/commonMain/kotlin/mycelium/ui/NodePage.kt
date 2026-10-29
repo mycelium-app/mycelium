@@ -37,6 +37,7 @@ import mycelium.api.LoginState
 import mycelium.api.NodeSummary
 import mycelium.api.PodState
 import mycelium.api.ProcessUsage
+import mycelium.api.UpdateNodeRequest
 import mycelium.api.ResourceSample
 import mycelium.state.AppState
 import mycelium.state.Store
@@ -70,6 +71,8 @@ fun NodePage(store: Store, state: AppState, nodeId: String, platform: Platform, 
     val node = state.nodes[nodeId]
     var tab by remember { mutableStateOf(Tabs.first()) }
     var controlVersion by remember { mutableStateOf<String?>(null) }
+    var renaming by remember { mutableStateOf<String?>(null) }
+    var revoking by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         attempt { controlVersion = store.api.version() }
@@ -106,11 +109,58 @@ fun NodePage(store: Store, state: AppState, nodeId: String, platform: Platform, 
 
                     Label("$presence  ·  ${node.os} ${node.arch}  ·  ${versionWithUpdate(node.version, node.updateAvailable)}", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
                 }
+
+                Box(Modifier.weight(1f))
+
+                RowMenu(node.name) { close ->
+                    NodeMenuItems(
+                        node,
+                        close,
+                        onRename = { renaming = node.name },
+                        onIcon = { icon -> store.act { store.api.updateNode(node.id, UpdateNodeRequest(icon = icon)) } },
+                        onColour = { colour -> store.act { store.api.updateNode(node.id, UpdateNodeRequest(colour = colour)) } },
+                        onDrain = { store.act { store.api.drainNode(node.id, !node.draining) } },
+                        onAskRevoke = { revoking = true },
+                    )
+                }
             }
         }
 
         if (node == null) {
             return@Column
+        }
+
+        val draft = renaming
+
+        if (draft != null) {
+            val save = {
+                store.act { store.api.updateNode(node.id, UpdateNodeRequest(name = draft.trim())) }
+                renaming = null
+            }
+
+            Dialog(onDismiss = { renaming = null }) {
+                Label("Rename ${node.name}", Modifier.semantics { heading() }, Tokens.Type.Title)
+                TextInput(draft, { renaming = it }, label = "Name for ${node.name}", onSubmit = save)
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+                    MyButton({ renaming = null }, text = "Cancel", muted = true)
+                    MyButton(save, text = "Save", variant = ButtonVariant.Outline)
+                }
+            }
+        }
+
+        if (revoking) {
+            ConfirmDialog(
+                "Revoke ${node.name}?",
+                "It disconnects now and must join again to come back.",
+                "Revoke ${node.name}",
+                onDismiss = { revoking = false },
+                onConfirm = {
+                    revoking = false
+                    store.act { store.api.revokeNode(node.id) }
+                    onBack()
+                },
+            )
         }
 
         val updateTo = controlVersion?.takeIf { node.online && isOlderThan(node.version, it) }?.let { "v${it.removePrefix("v")}" }
@@ -220,9 +270,24 @@ private fun PodsTable(cluster: KubernetesNode, state: AppState, onOpenConversati
         "No conversation is running on this node.",
         onRow = { onOpenConversation(running[it].first.id) },
         rowDescription = { "Open ${running[it].first.title}" },
+        cells = mapOf(2 to { row -> PodStatus(running[row].second.state, running[row].first.status) }),
         monospaceColumns = setOf(3, 4),
         footer = "Closing a conversation deletes its pod.",
     )
+}
+
+@Composable
+private fun PodStatus(pod: PodState, conversation: ConversationStatus) {
+    val name = podStatusName(pod, conversation)
+
+    when {
+        pod == PodState.Exited -> StatusMark(name, Tone.Muted, MyIcon.Stop)
+        pod == PodState.Pending -> StatusMark(name, Tone.Working, MyIcon.Working)
+        conversation == ConversationStatus.Input -> StatusMark(name, Tone.Attention, MyIcon.Alert)
+        conversation == ConversationStatus.Failed -> StatusMark(name, Tone.Failed, MyIcon.Failed)
+        conversation == ConversationStatus.Working -> StatusMark(name, Tone.Working, MyIcon.Working)
+        else -> StatusMark(name, Tone.Muted, MyIcon.Check)
+    }
 }
 
 private fun podStatusName(pod: PodState, conversation: ConversationStatus): String = when (pod) {

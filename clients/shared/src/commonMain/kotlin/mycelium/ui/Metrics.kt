@@ -124,6 +124,7 @@ fun DataTable(
     onRow: ((Int) -> Unit)? = null,
     rowDescription: (Int) -> String = { rows[it].joinToString(", ") },
     trailing: (@Composable (Int) -> Unit)? = null,
+    cells: Map<Int, @Composable (Int) -> Unit> = emptyMap(),
     monospaceColumns: Set<Int> = emptySet(),
     status: String? = null,
     header: (@Composable () -> Unit)? = null,
@@ -161,6 +162,8 @@ fun DataTable(
             { row, position ->
                 if (position >= columns.size) {
                     TableCell.Slot { trailing?.invoke(row) }
+                } else if (position in cells) {
+                    TableCell.Slot(rows[row][position], Tokens.Size.IconSm + Tokens.Space.S1) { cells.getValue(position)(row) }
                 } else {
                     TableCell.Text(rows[row].getOrElse(position) { "" }, if (position in monospaceColumns) Tokens.Type.Code else Tokens.Type.Ui, if (position == 0) colors.text else colors.textMuted)
                 }

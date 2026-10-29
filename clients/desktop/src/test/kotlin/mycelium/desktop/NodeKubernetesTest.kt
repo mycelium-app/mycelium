@@ -164,4 +164,17 @@ class NodeKubernetesTest {
         rule.onNodeWithContentDescription("Open Uploads survive a 503 retry").assertExists()
         assertEquals(false, present("Ports"))
     }
+
+    @Test
+    fun aKubernetesNodePageOffersTheSameMoreMenuAsEveryNode() {
+        val store = store("""{"kubernetes_nodes":true}""", Cluster)
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NodePage(store, state, "k1", KubernetesPlatform, onBack = {}, onOpenConversation = {}) } }
+
+        rule.onNodeWithContentDescription("More for lab-cluster").performClick()
+        rule.waitForIdle()
+
+        for (item in listOf("Rename", "Drain", "Revoke")) {
+            assertTrue(present(item), item)
+        }
+    }
 }

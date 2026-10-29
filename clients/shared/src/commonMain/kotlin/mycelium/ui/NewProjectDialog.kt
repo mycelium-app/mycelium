@@ -42,7 +42,7 @@ private val ProjectSources = listOf(ForgeRepository, NewRepository, NodeFolder)
 private fun forgeName(forge: Forge): String = "${forge.account} on ${forge.baseUrl.substringAfter("://")}"
 
 @Composable
-private fun StepHeading(number: Int, title: String, filled: Boolean = true) {
+fun StepHeading(number: Int, title: String, filled: Boolean = true) {
     val colors = MyTheme.colors
 
     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
