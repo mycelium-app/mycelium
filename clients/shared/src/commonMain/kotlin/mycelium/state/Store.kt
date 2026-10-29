@@ -1141,7 +1141,11 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         act {
             val environment = api.openEnvironmentApp(conversationId, app)
 
-            mutableState.update { it.copy(environments = it.environments + (conversationId to environment)) }
+            mutableState.update {
+                val recent = (listOf(app) + it.recentEnvironmentApps[conversationId].orEmpty().filter { id -> id != app }).take(EnvironmentRecentAppsShown)
+
+                it.copy(environments = it.environments + (conversationId to environment), recentEnvironmentApps = it.recentEnvironmentApps + (conversationId to recent))
+            }
         }
     }
 

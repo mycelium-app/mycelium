@@ -8,9 +8,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
@@ -41,6 +45,10 @@ import kotlin.test.assertTrue
 private const val ConversationJson = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/harbour","title":"Check the harbour sign-in","status":"working","acp_session_id":"s","created_at":"2026-10-28T10:00:00Z","updated_at":"2026-10-28T10:00:00Z"}"""
 
 private const val CanRun = """{"available":true,"versions":{"compositor":"sway 1.10","wayvnc":"0.9.1","browser":"Chromium 141"}}"""
+
+private const val WithApps = """{"available":true,"apps":[{"id":"firefox","name":"Firefox","kind":"browser"},{"id":"chromium","name":"Chromium","kind":"browser"},{"id":"terminal","name":"Terminal","kind":"terminal"},{"id":"files","name":"Files","kind":"file_manager"}]}"""
+
+private const val Windows = ""","windows":[{"id":1,"app_id":"firefox","title":"Release notes","focused":true},{"id":2,"app_id":"files","title":"Downloads"}]"""
 
 private const val CannotRun = """{"available":false,"missing":["sway","wayvnc"]}"""
 
@@ -89,6 +97,7 @@ class EnvironmentPanelTest {
         nodes: List<String> = listOf(nodeJson("n1", "atlas-box", CanRun)),
         actions: List<EnvironmentAction> = emptyList(),
         platform: EnvironmentPlatform = EnvironmentPlatform(),
+        recentApps: List<String> = emptyList(),
     ) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
@@ -108,6 +117,7 @@ class EnvironmentPanelTest {
             nodes = parsed.associateBy { it.id },
             environments = environment?.let { mapOf("c1" to (parseStreamMessage(it) as StreamMessage.EnvironmentChanged).environment) }.orEmpty(),
             environmentActions = mapOf("c1" to actions),
+            recentEnvironmentApps = mapOf("c1" to recentApps),
         )
 
         expanded = false
@@ -266,5 +276,81 @@ class EnvironmentPanelTest {
 
         rule.onNodeWithText("Move to atlas-box").assertDoesNotExist()
         rule.onNodeWithText("Check again").assertExists()
+    }
+
+    private fun openLauncher(recentApps: List<String> = emptyList()) {
+        show(environmentJson(extra = Windows), nodes = listOf(nodeJson("n1", "atlas-box", WithApps)), recentApps = recentApps)
+        rule.onNodeWithContentDescription("Apps and windows, Firefox is in front").performClick()
+    }
+
+    @Test
+    fun theLauncherListsOpenWindowsThenAppsGroupedByKindWithTheirCounts() {
+        openLauncher()
+
+        rule.onNodeWithText("Search 4 apps and 2 windows").assertExists()
+        rule.onNodeWithText("Downloads").assertExists()
+        rule.onNodeWithContentDescription("Browsers, 2 apps").assertExists()
+        rule.onNodeWithContentDescription("Terminals, 1 app").assertExists()
+        rule.onNodeWithText("Recent apps").assertDoesNotExist()
+    }
+
+    @Test
+    fun theLauncherShowsTheRecentlyLaunchedAppsBeforeTheGroups() {
+        openLauncher(recentApps = listOf("terminal", "chromium"))
+
+        rule.onNodeWithText("Recent apps").assertExists()
+        rule.onNodeWithText("Terminal").assertExists()
+        rule.onNodeWithText("Chromium").assertExists()
+    }
+
+    @Test
+    fun choosingAGroupListsThatGroupsAppsAndOpeningOneLaunchesIt() {
+        openLauncher()
+
+        rule.onNodeWithContentDescription("Browsers, 2 apps").performClick()
+
+        rule.onNodeWithText("Chromium").assertExists()
+        rule.onNodeWithText("Terminal").assertDoesNotExist()
+
+        rule.onNodeWithText("Chromium").performClick()
+        rule.waitUntil(5_000) { requests.isNotEmpty() }
+
+        assertEquals(listOf("POST /api/v1/conversations/c1/environment/apps"), requests.toList())
+    }
+
+    @Test
+    fun searchingNarrowsTheLauncherToMatchingWindowsAndApps() {
+        openLauncher()
+
+        rule.onNode(hasSetTextAction()).performTextInput("down")
+
+        rule.onNodeWithText("Downloads").assertExists()
+        rule.onAllNodesWithText("Release notes").assertCountEquals(1)
+        rule.onNodeWithContentDescription("Browsers, 2 apps").assertDoesNotExist()
+
+        rule.onNode(hasSetTextAction()).performTextInput("zzz")
+
+        rule.onNodeWithText("Nothing matches downzzz").assertExists()
+    }
+
+    @Test
+    fun searchingByAppNameFindsTheAppWithoutItsGroup() {
+        openLauncher()
+
+        rule.onNode(hasSetTextAction()).performTextInput("term")
+
+        rule.onNodeWithText("Terminal").assertExists()
+        rule.onAllNodesWithText("Firefox").assertCountEquals(1)
+    }
+
+    @Test
+    fun aConversationClosedWithItsEnvironmentShowsItStoppedAndStartsItAgain() {
+        show(environmentJson("stopped", extra = ""","stopped_at":"2026-10-28T14:32:10Z","closed_with_conversation":true"""))
+
+        rule.onNodeWithText("It stopped when you closed this conversation at 14:32, so the apps in it closed too. Starting again reopens the conversation first.").assertExists()
+        rule.onNodeWithText("Start environment").performClick()
+        rule.waitUntil(5_000) { requests.isNotEmpty() }
+
+        assertEquals(listOf("POST /api/v1/conversations/c1/environment"), requests.toList())
     }
 }

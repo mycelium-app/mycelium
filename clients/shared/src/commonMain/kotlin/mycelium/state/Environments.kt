@@ -19,6 +19,8 @@ import mycelium.api.NodeSummary
 
 enum class EnvironmentStage { CannotRun, NoNode, Empty, Starting, Failed, Active, Stopped }
 
+const val EnvironmentRecentAppsShown = 3
+
 const val EnvironmentStoppedAdvice = "The browser closed with it, so anything signed in there is signed out."
 
 fun environmentStage(environment: Environment?, capability: EnvironmentCapability?, noNode: Boolean = false): EnvironmentStage = when {
@@ -118,6 +120,28 @@ fun environmentKindText(kind: EnvironmentAppKind): String = when (kind) {
     EnvironmentAppKind.Terminal -> "Terminal"
     EnvironmentAppKind.Other -> "Other"
 }
+
+fun environmentAppGroupText(kind: EnvironmentAppKind): String = when (kind) {
+    EnvironmentAppKind.Browser -> "Browsers"
+    EnvironmentAppKind.FileManager -> "File managers"
+    EnvironmentAppKind.Editor -> "Editors"
+    EnvironmentAppKind.Office -> "Office"
+    EnvironmentAppKind.Mail -> "Mail"
+    EnvironmentAppKind.Terminal -> "Terminals"
+    EnvironmentAppKind.Other -> "Other"
+}
+
+fun environmentAppGroups(apps: List<EnvironmentApp>): List<Pair<EnvironmentAppKind, List<EnvironmentApp>>> =
+    apps.groupBy { it.kind }.toList().sortedBy { it.first.ordinal }
+
+fun environmentRecentApps(apps: List<EnvironmentApp>, recentIds: List<String>): List<EnvironmentApp> =
+    recentIds.mapNotNull { id -> apps.firstOrNull { it.id == id } }
+
+fun environmentAppsMatching(apps: List<EnvironmentApp>, query: String): List<EnvironmentApp> =
+    apps.filter { it.name.contains(query.trim(), ignoreCase = true) || environmentKindText(it.kind).contains(query.trim(), ignoreCase = true) }
+
+fun environmentWindowsMatching(environment: Environment, apps: List<EnvironmentApp>, query: String): List<EnvironmentWindow> =
+    environment.windows.filter { it.title.contains(query.trim(), ignoreCase = true) || environmentAppName(apps, it.appId).contains(query.trim(), ignoreCase = true) }
 
 fun environmentCurrentWindow(environment: Environment): EnvironmentWindow? =
     environment.windows.firstOrNull { it.focused } ?: environment.windows.firstOrNull()

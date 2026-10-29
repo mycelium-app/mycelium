@@ -27,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -55,6 +56,7 @@ import mycelium.api.BrowserTaskState
 import mycelium.api.Conversation
 import mycelium.api.Environment
 import mycelium.api.EnvironmentAction
+import mycelium.api.EnvironmentApp
 import mycelium.api.EnvironmentAppKind
 import mycelium.api.EnvironmentController
 import mycelium.api.EnvironmentSize
@@ -66,6 +68,12 @@ import mycelium.state.EnvironmentStage
 import mycelium.state.Store
 import mycelium.state.catching
 import mycelium.state.environmentActionAge
+import mycelium.state.environmentAppGroupText
+import mycelium.state.environmentAppGroups
+import mycelium.state.environmentAppName
+import mycelium.state.environmentAppsMatching
+import mycelium.state.environmentRecentApps
+import mycelium.state.environmentWindowsMatching
 import mycelium.state.environmentAppsToStart
 import mycelium.state.environmentCurrentWindow
 import mycelium.state.environmentDefaultApps
@@ -323,6 +331,8 @@ private fun ColumnScope.ActiveEnvironment(
     val apps = state.nodes[environment.nodeId]?.environment?.apps.orEmpty()
     val currentWindow = environmentCurrentWindow(environment)
     var windowsOpen by remember { mutableStateOf(false) }
+    var query by remember(windowsOpen) { mutableStateOf("") }
+    var group by remember(windowsOpen) { mutableStateOf<EnvironmentAppKind?>(null) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -377,22 +387,46 @@ private fun ColumnScope.ActiveEnvironment(
         Box {
             MyButton(
                 { windowsOpen = true },
-                text = currentWindow?.title ?: "Windows",
+                text = currentWindow?.title ?: "Apps and windows",
                 icon = environmentAppIcon(apps.firstOrNull { it.id.equals(currentWindow?.appId, ignoreCase = true) }?.kind),
                 size = ButtonSize.Sm,
                 muted = true,
-                description = "Windows, ${currentWindow?.title ?: "none open"}",
+                description = "Apps and windows, ${currentWindow?.let { environmentAppName(apps, it.appId) + " is in front" } ?: "none open"}",
             )
 
             if (windowsOpen) {
                 MenuPopup({ windowsOpen = false }, width = WindowsMenuWidth) {
-                    MenuLabel("Windows")
+                    val searching = query.isNotBlank()
+                    val windows = if (searching) environmentWindowsMatching(environment, apps, query) else environment.windows
+                    val recent = environmentRecentApps(apps, state.recentEnvironmentApps[conversation.id].orEmpty())
+                    val groups = environmentAppGroups(apps)
+                    val shownGroup = groups.firstOrNull { it.first == group }
+                    val searchFocus = remember { FocusRequester() }
+
+                    LaunchedEffect(Unit) {
+                        searchFocus.requestFocus()
+                    }
+
+                    TextInput(
+                        query,
+                        { query = it },
+                        label = "Search apps and windows",
+                        modifier = Modifier.padding(Tokens.Space.S1).fillMaxWidth(),
+                        placeholder = "Search ${apps.size} apps and ${environment.windows.size} windows",
+                        showLabel = false,
+                        leadingIcon = MyIcon.Search,
+                        focusRequester = searchFocus,
+                    )
+
+                    if (windows.isNotEmpty() || !searching) {
+                        MenuLabel("Windows")
+                    }
 
                     if (environment.windows.isEmpty()) {
                         MenuLabel("No window is open yet")
                     }
 
-                    for (window in environment.windows) {
+                    for (window in windows) {
                         MenuItem(
                             window.title,
                             {
@@ -402,23 +436,60 @@ private fun ColumnScope.ActiveEnvironment(
                             checked = window.focused,
                             hint = environmentWindowApp(environment, window, apps),
                             leading = environmentAppIcon(apps.firstOrNull { it.id.equals(window.appId, ignoreCase = true) }?.kind),
+                            checkSlot = true,
                         )
                     }
 
-                    if (apps.isNotEmpty()) {
-                        MenuLabel("Open an app")
-                    }
+                    if (searching) {
+                        val matches = environmentAppsMatching(apps, query)
 
-                    for (app in apps) {
-                        MenuItem(
-                            app.name,
-                            {
-                                windowsOpen = false
-                                store.openEnvironmentApp(conversation.id, app.id)
-                            },
-                            hint = environmentKindText(app.kind),
-                            leading = environmentAppIcon(app.kind),
-                        )
+                        if (matches.isNotEmpty()) {
+                            Hairline(Modifier.padding(vertical = Tokens.Space.S1))
+                            MenuLabel("Apps")
+                        }
+
+                        for (app in matches) {
+                            AppMenuItem(app) { windowsOpen = false; store.openEnvironmentApp(conversation.id, app.id) }
+                        }
+
+                        if (windows.isEmpty() && matches.isEmpty()) {
+                            MenuLabel("Nothing matches $query")
+                        }
+                    } else if (shownGroup != null) {
+                        Hairline(Modifier.padding(vertical = Tokens.Space.S1))
+                        MenuItem("All apps", { group = null }, leading = MyIcon.ChevronLeft, description = "Back to all apps")
+                        MenuLabel(environmentAppGroupText(shownGroup.first))
+
+                        for (app in shownGroup.second) {
+                            AppMenuItem(app) { windowsOpen = false; store.openEnvironmentApp(conversation.id, app.id) }
+                        }
+                    } else {
+                        if (recent.isNotEmpty()) {
+                            Hairline(Modifier.padding(vertical = Tokens.Space.S1))
+                            MenuLabel("Recent apps")
+                        }
+
+                        for (app in recent) {
+                            AppMenuItem(app) { windowsOpen = false; store.openEnvironmentApp(conversation.id, app.id) }
+                        }
+
+                        if (groups.isNotEmpty()) {
+                            Hairline(Modifier.padding(vertical = Tokens.Space.S1))
+                            MenuLabel("All apps")
+                        }
+
+                        for ((kind, members) in groups) {
+                            val name = environmentAppGroupText(kind)
+
+                            MenuItem(
+                                name,
+                                { group = kind },
+                                hint = members.size.toString(),
+                                leading = environmentAppIcon(kind),
+                                description = "$name, ${members.size} ${if (members.size == 1) "app" else "apps"}",
+                                trailing = { Icon(MyIcon.ChevronRight, MyTheme.colors.textMuted, Tokens.Size.IconSm) },
+                            )
+                        }
                     }
                 }
             }
@@ -473,6 +544,11 @@ private fun ColumnScope.ActiveEnvironment(
         Hairline(Modifier.padding(top = Tokens.Space.S2))
         ActionsLog(actions, ActionsShownInPanel, now)
     }
+}
+
+@Composable
+private fun AppMenuItem(app: EnvironmentApp, onClick: () -> Unit) {
+    MenuItem(app.name, onClick, hint = environmentKindText(app.kind), leading = environmentAppIcon(app.kind), checkSlot = true)
 }
 
 @Composable

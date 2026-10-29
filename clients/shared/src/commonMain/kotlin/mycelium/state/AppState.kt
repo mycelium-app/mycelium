@@ -92,6 +92,7 @@ data class AppState(
     val environments: Map<String, mycelium.api.Environment> = emptyMap(),
     val environmentActions: Map<String, List<mycelium.api.EnvironmentAction>> = emptyMap(),
     val lastEnvironmentNodeId: String? = null,
+    val recentEnvironmentApps: Map<String, List<String>> = emptyMap(),
     val sending: Map<String, List<String>> = emptyMap(),
     val connected: Boolean = false,
 )
