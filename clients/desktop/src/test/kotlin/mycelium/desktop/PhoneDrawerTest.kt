@@ -76,7 +76,7 @@ class PhoneDrawerTest {
         }
     }
 
-    private fun drawerIsOpen() = rule.onAllNodesWithText("Schedules").fetchSemanticsNodes().isNotEmpty()
+    private fun drawerIsOpen() = rule.onAllNodesWithText("Chats").fetchSemanticsNodes().isNotEmpty()
 
     @Test
     fun swipingRightFromTheLeftEdgeOpensTheSidebar() {

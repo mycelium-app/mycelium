@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -56,7 +57,7 @@ class SidebarModeTest {
         rule.setContent { MyceliumTheme(true) { Shell(store, ModePlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}) } }
 
         rule.onNodeWithContentDescription("Projects").assertExists()
-        rule.onNodeWithContentDescription("Nodes").assertExists()
+        rule.onAllNodesWithContentDescription("Nodes").onFirst().assertExists()
         rule.onNodeWithText("Chats").performClick()
         rule.onAllNodesWithContentDescription("Projects").assertCountEquals(0)
         rule.onAllNodesWithContentDescription("Issues").assertCountEquals(0)

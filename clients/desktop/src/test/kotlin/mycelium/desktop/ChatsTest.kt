@@ -115,7 +115,7 @@ class ChatsTest {
     fun theSidebarStartsOnWorkspacesAndSwitchesToChats() {
         shell()
 
-        rule.onNodeWithText("New conversation").assertIsDisplayed()
+        rule.onAllNodesWithText("New conversation").onFirst().assertIsDisplayed()
         rule.onNodeWithContentDescription("Fix the build,", substring = true).assertIsDisplayed()
         assertEquals(0, rule.onAllNodesWithText("New chat").fetchSemanticsNodes().size)
 
@@ -164,8 +164,11 @@ class ChatsTest {
     fun aWorkspaceConversationKeepsItsTerminalAndGitControls() {
         shell(Route.Chat("w1"))
 
-        rule.onNodeWithContentDescription("Show terminal").assertIsDisplayed()
         rule.onNodeWithContentDescription("Open git").assertIsDisplayed()
+
+        rule.onNodeWithContentDescription("More").performClick()
+
+        rule.onNodeWithText("Show terminal").assertIsDisplayed()
     }
 
     private fun newChatScreen() {

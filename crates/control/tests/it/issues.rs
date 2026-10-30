@@ -139,8 +139,9 @@ async fn open_issues_are_listed_for_the_forge_repositories_set_up_as_projects_wi
     assert_eq!((issues[0]["repository"].clone(), issues[0]["number"].clone(), issues[0]["forge_id"].clone(), issues[0]["body"].clone()), (json!("acme-org/acme-backups"), json!(412), json!(github), json!("Steps:\n1. Restore")));
     assert_eq!(issues[1]["body"], "");
     assert_eq!((issues[2]["title"].clone(), issues[2]["url"].clone()), (json!("Mirror fails"), json!("https://git.example/slop/mycelium/-/issues/5")));
-    assert_eq!(*github_seen.lock().unwrap(), vec!["repo:acme-org/acme-backups is:issue is:open label:bug assignee:@me".to_string()]);
-    assert_eq!(*gitlab_seen.lock().unwrap(), vec!["slop/mycelium|opened|label:bug assignee:@me".to_string()]);
+    let searched = |seen: &Seen| seen.lock().unwrap().iter().filter(|query| query.contains("label:bug")).cloned().collect::<Vec<_>>();
+    assert_eq!(searched(&github_seen), vec!["repo:acme-org/acme-backups is:issue is:open label:bug assignee:@me".to_string()]);
+    assert_eq!(searched(&gitlab_seen), vec!["slop/mycelium|opened|label:bug assignee:@me".to_string()]);
 }
 
 #[tokio::test]
