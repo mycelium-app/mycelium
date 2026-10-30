@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.18.0
+
+- Agents keep a to-do list for the conversation, pinned above the composer and expandable to its checklist. Claude Code and Codex fill it from their plans, other agents and chat models set it with a tool, and whoever continues the conversation on another model or account is given it.
+- New conversation chooses the project in the headline, with the place in a strip under the composer. The no-node notice is one line with Nodes inside it.
+- The phone connects as soon as the server answers instead of after loading everything, and coming back to the app reconnects a stale connection at once.
+- Move is a split button: move after this turn, interrupt and move now, or copy the conversation to another node and keep this one running.
+- The model menu shows names only, its account submenu has icons, and the Fast mode and Agent harness settings are gone from the composer bar.
+- Shorter switch and Any node lines, markdown tables with aligned cells, letter avatars for every assistant, and assistant actions that run on the assistant's own settings.
+- Fixed the model menu crashing when a favourite was saved twice, and favourites that differ only by account are kept.
+
 ## v0.17.0
 
 - One model selector combines agent accounts and chat models, with search, favourites and an account submenu. Favourites are the ordered Any model list. Selecting a particular account keeps it pinned when it reaches a usage limit.
