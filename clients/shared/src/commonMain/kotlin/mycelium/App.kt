@@ -59,7 +59,7 @@ private sealed interface Phase {
 
     data class SignedOut(val notice: String?) : Phase
 
-    data class SignedIn(val api: MyceliumApi, val me: Me) : Phase
+    data class SignedIn(val api: MyceliumApi, val me: Me, val store: Store? = null) : Phase
 }
 
 @Composable
@@ -135,9 +135,13 @@ private fun AppContent(platform: Platform) {
 
         val api = MyceliumApi(baseUrl, saved?.token)
 
+        val warm = if (saved?.token != null && approveCode == null) Store(api, scope, platform).also { it.start() } else null
+
         phase = try {
-            Phase.SignedIn(api, api.me())
+            Phase.SignedIn(api, api.me(), warm)
         } catch (failure: ApiException) {
+            warm?.stop()
+
             if (failure.status == 401) {
                 platform.saveConnection(null)
                 Phase.SignedOut(null)
@@ -145,6 +149,7 @@ private fun AppContent(platform: Platform) {
                 Phase.SignedOut(failure.message)
             }
         } catch (_: Exception) {
+            warm?.stop()
             Phase.SignedOut("Could not reach $baseUrl. Check your connection and try again.")
         }
     }
@@ -182,7 +187,7 @@ private fun AppContent(platform: Platform) {
                     if (code != null) {
                         ApproveScreen(current.api, code, platform.approveReturnTo(), platform::navigate, onDone = { approveCode = null }, onClose = platform::closeWindow)
                     } else {
-                        val store = remember(current.api) { Store(current.api, scope, platform) }
+                        val store = remember(current.api) { current.store ?: Store(current.api, scope, platform) }
 
                         DisposableEffect(store) {
                             store.start()

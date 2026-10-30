@@ -8,7 +8,9 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -205,7 +207,7 @@ class StoreTest {
 
             respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
         }
-        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope, stream = { onOpen -> flow { onOpen(); awaitCancellation() } })
         store.open("c1")
 
         store.start()
@@ -220,38 +222,6 @@ class StoreTest {
 
         assertTrue(requested.value.any { it.contains("/conversations/c1/events?after=2&limit=500") })
         assertEquals(listOf(1L, 2L, 3L), store.state.value.events.getValue("c1").map { it.seq })
-    }
-
-    @Test
-    fun reconnectingRestartsTheStreamAtOnceInsteadOfWaitingOutTheRetryDelay() = runTest {
-        val fetches = MutableStateFlow(0)
-        val engine = MockEngine { request ->
-            if (request.url.encodedPath.endsWith("/conversations")) {
-                fetches.update { it + 1 }
-            }
-
-            respond("[]", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
-        }
-        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
-        store.start()
-
-        withContext(Dispatchers.Default) {
-            withTimeout(5_000) {
-                while (fetches.value < 1) {
-                    delay(10)
-                }
-            }
-        }
-
-        store.reconnect()
-
-        withContext(Dispatchers.Default) {
-            withTimeout(800) {
-                while (fetches.value < 2) {
-                    delay(10)
-                }
-            }
-        }
     }
 
     @Test

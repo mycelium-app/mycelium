@@ -3,6 +3,7 @@ package mycelium.api
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.HttpClientEngine
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
@@ -49,6 +50,8 @@ sealed interface DevicePoll {
 
 private const val StreamPingMillis = 20_000L
 
+private const val ConnectTimeoutMillis = 10_000L
+
 class MyceliumApi(
     val baseUrl: String,
     private val clientToken: String? = null,
@@ -63,6 +66,7 @@ class MyceliumApi(
 
     private fun io.ktor.client.HttpClientConfig<*>.configure() {
         install(ContentNegotiation) { json(MyceliumJson) }
+        install(HttpTimeout) { connectTimeoutMillis = ConnectTimeoutMillis }
         install(WebSockets) { pingIntervalMillis = StreamPingMillis }
         expectSuccess = false
     }
@@ -1228,10 +1232,12 @@ class MyceliumApi(
         call("/conversations/$id/config") { client.post(it) { authorise(); json(request) } }
     }
 
-    fun stream(): Flow<StreamMessage> = flow {
+    fun stream(onOpen: suspend () -> Unit = {}): Flow<StreamMessage> = flow {
         val socketUrl = root.replaceFirst("http", "ws") + "/api/v1/stream"
 
         client.webSocket(socketUrl, request = { authorise() }) {
+            onOpen()
+
             for (frame in incoming) {
                 if (frame is Frame.Text) {
                     val message = runCatching { parseStreamMessage(frame.readText()) }.getOrNull()

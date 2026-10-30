@@ -4,8 +4,12 @@ import mycelium.api.LoginState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -15,7 +19,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
+import kotlin.random.Random
+import kotlin.time.TimeSource
 import mycelium.DefaultEventPageSize
 import mycelium.Platform
 import mycelium.api.Directories
@@ -65,18 +73,27 @@ import kotlin.time.Instant
 import mycelium.api.Hours
 import kotlin.io.encoding.Base64
 
-private const val FirstRetryMillis = 1_000L
+private const val FirstRetryMillis = 250L
 private const val LongestRetryMillis = 15_000L
+private const val StableConnectionMillis = 10_000L
+private const val RecentConnectAttemptMillis = 5_000L
+private const val ConcurrentOpens = 3
 private const val MaxCachedAttachments = 20
 
 private const val MaxCachedAvatars = 200
 private const val MaxCachedPreviews = 200
 
-class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val platform: Platform? = null) {
+class Store(
+    val api: MyceliumApi,
+    private val scope: CoroutineScope,
+    private val platform: Platform? = null,
+    private val stream: (suspend () -> Unit) -> Flow<StreamMessage> = api::stream,
+) {
     private val eventPageSize = platform?.eventPageSize ?: DefaultEventPageSize
     private val mutableState = MutableStateFlow(AppState())
     private val mutableProblem = MutableStateFlow<String?>(null)
     private var streaming: Job? = null
+    private var connectAttemptedAt = TimeSource.Monotonic.markNow()
     private val typed = Channel<Pair<String, String>>(Channel.UNLIMITED)
     private val attachmentCache = mutableMapOf<String, ByteArray>()
     private val previewCache = LinkedHashMap<String, ByteArray>()
@@ -165,24 +182,79 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
             var retry = FirstRetryMillis
 
             while (true) {
+                connectAttemptedAt = TimeSource.Monotonic.markNow()
+                var connectedAt: TimeSource.Monotonic.ValueTimeMark? = null
+
                 try {
-                    refresh()
-                    state.value.openedConversations.forEach { open(it) }
-                    mutableState.update { it.copy(connected = true) }
-                    retry = FirstRetryMillis
-                    api.stream().collect { message -> receive(message) }
+                    coroutineScope {
+                        stream {
+                            connectedAt = TimeSource.Monotonic.markNow()
+                            mutableState.update { it.copy(connected = true) }
+                            launch { refreshOverStream() }
+                        }.collect { message -> receive(message) }
+
+                        coroutineContext.cancelChildren()
+                    }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
-                    mutableState.update { it.copy(connected = false) }
                 }
 
                 mutableState.update { it.copy(connected = false) }
-                delay(retry)
+
+                val upFor = connectedAt?.elapsedNow()
+
+                if (upFor != null && upFor.inWholeMilliseconds >= StableConnectionMillis) {
+                    retry = FirstRetryMillis
+                } else {
+                    delay(jittered(retry))
+                    retry = minOf(retry * 2, LongestRetryMillis)
+                }
+            }
+        }
+    }
+
+    private suspend fun refreshOverStream() = coroutineScope {
+        launch { refreshExperiments() }
+        launch { wellness.load() }
+        launch { voice.load() }
+
+        val conversations = async { untilLoaded { api.conversations(archived = false) } }
+        val nodes = async { untilLoaded { api.nodes() } }
+
+        val listed = conversations.await()
+
+        mutableState.update {
+            it.copy(conversations = listed.associate { c -> c.id to (it.conversations[c.id]?.takeIf { held -> held.updatedAt > c.updatedAt } ?: c) })
+        }
+
+        val opening = Semaphore(ConcurrentOpens)
+
+        state.value.openedConversations.forEach { id ->
+            launch { opening.withPermit { untilLoaded { open(id) } } }
+        }
+
+        val listedNodes = nodes.await()
+
+        mutableState.update { it.copy(nodes = listedNodes.associateBy { n -> n.id }) }
+    }
+
+    private suspend fun <T> untilLoaded(block: suspend () -> T): T {
+        var retry = FirstRetryMillis
+
+        while (true) {
+            try {
+                return block()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                delay(jittered(retry))
                 retry = minOf(retry * 2, LongestRetryMillis)
             }
         }
     }
+
+    private fun jittered(millis: Long): Long = millis * 3 / 4 + Random.nextLong(millis / 2 + 1)
 
     fun receive(message: StreamMessage) {
         val before = state.value
@@ -266,7 +338,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     }
 
     fun reconnect() {
-        if (streaming == null) {
+        if (streaming == null || state.value.connected || connectAttemptedAt.elapsedNow().inWholeMilliseconds < RecentConnectAttemptMillis) {
             return
         }
 
@@ -896,45 +968,57 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         var after = if (reopened) state.value.events[conversationId]?.lastOrNull()?.seq ?: 0 else 0
         mutableState.update { it.copy(openedConversations = it.openedConversations + conversationId) }
 
-        val fetched = mutableListOf<mycelium.api.Event>()
+        coroutineScope {
+            launch {
+                val fetched = mutableListOf<mycelium.api.Event>()
 
-        if (reopened) {
-            while (true) {
-                val page = api.events(conversationId, after, eventPageSize)
-                fetched += page
+                if (reopened) {
+                    while (true) {
+                        val page = api.events(conversationId, after, eventPageSize)
+                        fetched += page
 
-                if (page.size < eventPageSize) {
-                    break
+                        if (page.size < eventPageSize) {
+                            break
+                        }
+
+                        after = page.maxOf { it.seq }
+                    }
+                } else {
+                    fetched += api.events(conversationId, before = Long.MAX_VALUE, limit = eventPageSize)
                 }
 
-                after = page.maxOf { it.seq }
+                mutableState.update {
+                    val delivered = fetched.filter { event -> event.kind == EventKinds.UserMessage }.mapNotNull { event -> (event.payload as? JsonObject)?.string("text") }
+                    val sending = delivered.fold(it.sending) { waiting, text -> waiting.withoutFirst(conversationId, text) }
+
+                    it.copy(events = it.events + (conversationId to mergeEvents(it.events[conversationId].orEmpty(), fetched)), sending = sending)
+                }
             }
-        } else {
-            fetched += api.events(conversationId, before = Long.MAX_VALUE, limit = eventPageSize)
+
+            launch {
+                val sessionUpdates = orNull { api.sessionUpdates(conversationId) }.orEmpty()
+                mutableState.update { it.copy(sessionUpdates = it.sessionUpdates + (conversationId to sessionUpdates)) }
+            }
+
+            launch {
+                val queue = api.queue(conversationId)
+                mutableState.update { it.copy(queues = it.queues + (conversationId to queue.sortedBy { q -> q.position })) }
+            }
+
+            launch {
+                val goal = orNull { api.goal(conversationId) }
+                mutableState.update { it.copy(goals = if (goal == null) it.goals - conversationId else it.goals + (conversationId to goal)) }
+            }
+
+            launch { loadEnvironment(conversationId) }
+
+            launch {
+                val walkthrough = orNull { api.walkthrough(conversationId) }
+                mutableState.update { it.copy(walkthroughs = if (walkthrough == null) it.walkthroughs - conversationId else it.walkthroughs + (conversationId to walkthrough)) }
+
+                walkthrough?.let { loadWalkthroughNotes(conversationId, it.id) }
+            }
         }
-
-        mutableState.update {
-            val delivered = fetched.filter { event -> event.kind == EventKinds.UserMessage }.mapNotNull { event -> (event.payload as? JsonObject)?.string("text") }
-            val sending = delivered.fold(it.sending) { waiting, text -> waiting.withoutFirst(conversationId, text) }
-
-            it.copy(events = it.events + (conversationId to mergeEvents(it.events[conversationId].orEmpty(), fetched)), sending = sending)
-        }
-
-        val sessionUpdates = orNull { api.sessionUpdates(conversationId) }.orEmpty()
-        mutableState.update { it.copy(sessionUpdates = it.sessionUpdates + (conversationId to sessionUpdates)) }
-
-        val queue = api.queue(conversationId)
-        mutableState.update { it.copy(queues = it.queues + (conversationId to queue.sortedBy { q -> q.position })) }
-
-        val goal = orNull { api.goal(conversationId) }
-        mutableState.update { it.copy(goals = if (goal == null) it.goals - conversationId else it.goals + (conversationId to goal)) }
-
-        loadEnvironment(conversationId)
-
-        val walkthrough = orNull { api.walkthrough(conversationId) }
-        mutableState.update { it.copy(walkthroughs = if (walkthrough == null) it.walkthroughs - conversationId else it.walkthroughs + (conversationId to walkthrough)) }
-
-        walkthrough?.let { loadWalkthroughNotes(conversationId, it.id) }
 
         val conversation = state.value.conversations[conversationId]
 
