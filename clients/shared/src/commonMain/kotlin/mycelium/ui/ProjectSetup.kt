@@ -36,7 +36,6 @@ data class SetupActions(
     val onCancel: () -> Unit,
     val onRetry: () -> Unit,
     val onStartOnAnyNode: () -> Unit,
-    val onRemove: () -> Unit,
 )
 
 fun checkoutOn(state: AppState, project: Project, nodeId: String): Project? = when {
@@ -68,9 +67,10 @@ fun SetupStrip(setup: ProjectSetup, actions: SetupActions) {
                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
                     Icon(MyIcon.Working, colors.statusWorking, Tokens.Size.IconSm)
                     Label("Cloning ${setup.project.name} on ${setup.node.name}", Modifier.weight(1f), Tokens.Type.MetaStrong)
-                    MyButton(actions.onCancel, text = "Cancel", description = "Cancel cloning ${setup.project.name} on ${setup.node.name}", size = ButtonSize.Sm, muted = true)
+                    MyButton(actions.onCancel, text = "Stop waiting", description = "Stop waiting for cloning ${setup.project.name} on ${setup.node.name}", size = ButtonSize.Sm, muted = true)
                 }
 
+                Label("Cloning continues on the node if you stop waiting.", style = Tokens.Type.Meta, color = colors.textMuted)
                 IndeterminateProgress("Cloning ${setup.project.name} on ${setup.node.name}")
             }
 
@@ -89,7 +89,6 @@ fun SetupStrip(setup: ProjectSetup, actions: SetupActions) {
                         listOf(
                             SplitAlternative("Show the full log", { showingLog = true }),
                             SplitAlternative("Start on Any node instead", actions.onStartOnAnyNode),
-                            SplitAlternative("Remove the checkout", actions.onRemove),
                         ),
                         variant = ButtonVariant.Outline,
                         size = ButtonSize.Sm,

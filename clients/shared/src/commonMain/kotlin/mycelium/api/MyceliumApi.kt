@@ -171,7 +171,8 @@ class MyceliumApi(
 
     suspend fun nodes(): List<NodeSummary> = call("/nodes") { client.get(it) { authorise() } }.body()
 
-    suspend fun anyNodePick(): AnyNodePick = call("/nodes/any") { client.get(it) { authorise() } }.body()
+    suspend fun anyNodePick(projectId: String? = null): AnyNodePick =
+        call("/nodes/any") { client.get(it) { authorise(); if (projectId != null) parameter("project_id", projectId) } }.body()
 
     suspend fun mintSshToken(nodeId: String): SshToken = call("/nodes/$nodeId/ssh-tokens") { client.post(it) { authorise() } }.body()
 

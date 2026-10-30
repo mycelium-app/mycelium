@@ -1,5 +1,5 @@
 use crate::common::Server;
-use mycelium_proto::link::{NodeToControl, ResourceSample};
+use mycelium_proto::link::{ControlToNode, NodeToControl, ResourceSample};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -100,4 +100,30 @@ async fn saving_agent_settings_without_node_preferences_leaves_the_stored_ones_a
 
     assert_eq!(status, 200, "{settings}");
     assert_eq!(settings["node_preferences"], json!({willow.id.to_string(): "avoid"}));
+}
+
+#[tokio::test]
+async fn the_any_node_preview_only_picks_nodes_holding_the_selected_project() {
+    let server = Server::start().await;
+    let mut atlas = server.online_node("atlas").await;
+    let mut orion = server.online_node("orion").await;
+    let user = server.user.clone();
+    let atlas_id = atlas.id;
+    let creating = tokio::spawn(async move {
+        user.json(user.post("/api/v1/projects").json(&json!({"node_id": atlas_id, "path": "/work/harbour"}))).await
+    });
+    let request_id = match atlas.next().await {
+        ControlToNode::Git { request_id, .. } => request_id,
+        other => panic!("expected project registration, got {other:?}"),
+    };
+    atlas.send(NodeToControl::GitResult { request_id, ok: true, output: json!({"path": "/work/harbour"}), error: None }).await;
+    let (status, project) = creating.await.unwrap();
+    assert_eq!(status, 201, "{project}");
+    atlas.send(NodeToControl::Resources { sample: sample(90.0, 20) }).await;
+    orion.send(NodeToControl::Resources { sample: sample(10.0, 80) }).await;
+
+    let (status, pick) = server.user.json(server.user.get(&format!("/api/v1/nodes/any?project_id={}", project["id"].as_str().unwrap()))).await;
+
+    assert_eq!(status, 200, "{pick}");
+    assert_eq!(pick["node_id"], json!(atlas.id));
 }

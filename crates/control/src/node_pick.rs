@@ -3,7 +3,7 @@ use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use mycelium_proto::link::{ControlToNode, ResourceSample};
 use mycelium_proto::routing::{AnyNodePick, NodePreference};
 use std::collections::HashMap;
@@ -71,8 +71,22 @@ pub async fn pick(state: &AppState, owner: Uuid, among: Option<&[Uuid]>) -> ApiR
     chosen.map(|(node_id, name)| AnyNodePick { node_id: *node_id, name: name.clone() }).ok_or_else(|| ApiError::conflict("no_node_available", "No node can start a conversation right now. Bring one online, or change a node set to Never in Settings, Agents."))
 }
 
-pub async fn preview(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<AnyNodePick>> {
-    Ok(Json(pick(&state, user.id, None).await?))
+#[derive(serde::Deserialize)]
+pub struct PreviewQuery {
+    project_id: Option<Uuid>,
+}
+
+pub async fn preview(State(state): State<AppState>, user: AuthUser, Query(query): Query<PreviewQuery>) -> ApiResult<Json<AnyNodePick>> {
+    let holding = match query.project_id {
+        Some(id) => {
+            let project = crate::projects::find_owned(&state, id, user.id).await?;
+
+            Some(crate::projects::nodes_holding(&state, user.id, &project).await?)
+        }
+        None => None,
+    };
+
+    Ok(Json(pick(&state, user.id, holding.as_deref()).await?))
 }
 
 #[cfg(test)]

@@ -70,6 +70,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var anyNode by remember { mutableStateOf(false) }
     var setup by remember { mutableStateOf<ProjectSetup?>(null) }
     var setupJob by remember { mutableStateOf<Job?>(null) }
+    var sendAfterSetup by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     var anyNodePick by remember { mutableStateOf<AnyNodePick?>(null) }
     var agent by remember { mutableStateOf<String?>(null) }
@@ -94,18 +95,20 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
         store.load { store.refreshProjects() }
     }
 
-    LaunchedEffect(placeMenuOpen, anyNode, nodes.size) {
-        if ((placeMenuOpen || anyNode) && nodes.isNotEmpty()) {
-            anyNodePick = runCatching { store.api.anyNodePick() }.getOrNull()
-        }
-    }
-
     val groupFilter = LocalGroupFilter.current
     val projects = state.projects.values.filter { inGroup(it.groupId, groupFilter) }.sortedBy { it.name }
     val recent = state.conversations.values.filter { it.projectId != null }.sortedByDescending { it.updatedAt }.mapNotNull { conversation -> projects.firstOrNull { it.id == conversation.projectId } }.distinct().take(RecentProjects)
     val project = if (withoutProject) null else state.projects[chosenProject] ?: recent.firstOrNull()
+    LaunchedEffect(placeMenuOpen, anyNode, state.nodes, project?.id) {
+        if ((placeMenuOpen || anyNode) && nodes.isNotEmpty()) {
+            anyNodePick = null
+            anyNodePick = runCatching { store.api.anyNodePick(project?.id) }.getOrNull()
+        }
+    }
+
     val previewedNode = anyNodePick?.let { state.nodes[it.nodeId] }
     val node = when {
+        setup != null -> setup?.node
         project != null && anyNode -> previewedNode ?: state.nodes[project.nodeId]
         project != null -> state.nodes[project.nodeId]
         anyNode -> previewedNode ?: nodes.firstOrNull()
@@ -135,6 +138,8 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val chosenModel = model.takeIf { picked -> models?.choices?.any { it.id == picked } == true }.orEmpty()
 
     fun startSetup(target: Project, onNode: NodeSummary) {
+        setupJob?.cancel()
+        sendAfterSetup = false
         setup = ProjectSetup.Running(target, onNode)
         setupJob = scope.launch {
             val failure = attempt {
@@ -153,7 +158,12 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     }
 
     fun create() {
-        if (nodes.isEmpty() || node == null || chosenAgent == null || setup is ProjectSetup.Running) {
+        if (setup is ProjectSetup.Running) {
+            sendAfterSetup = true
+            return
+        }
+
+        if (nodes.isEmpty() || node == null || chosenAgent == null || setup is ProjectSetup.Failed) {
             return
         }
 
@@ -195,6 +205,13 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
         }
     }
 
+    LaunchedEffect(setup, sendAfterSetup) {
+        if (setup == null && sendAfterSetup) {
+            sendAfterSetup = false
+            create()
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         Bar {
             if (LocalOpenList.current != null) {
@@ -226,10 +243,9 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                 SetupStrip(
                                     current,
                                     SetupActions(
-                                        onCancel = { setupJob?.cancel(); setup = null },
+                                        onCancel = { setupJob?.cancel(); sendAfterSetup = false; setup = null },
                                         onRetry = { startSetup(current.project, current.node) },
-                                        onStartOnAnyNode = { setup = null; anyNode = true },
-                                        onRemove = { setup = null },
+                                        onStartOnAnyNode = { setupJob?.cancel(); sendAfterSetup = false; setup = null; anyNode = true },
                                     ),
                                 )
                             }
@@ -257,6 +273,9 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                         onNewProject = { projectMenuOpen = false; settingUpProject = true },
                                     ) {
                                         projectMenuOpen = false
+                                        setupJob?.cancel()
+                                        sendAfterSetup = false
+                                        setup = null
                                         withoutProject = it == null
                                         chosenProject = it
                                         worktree = false
@@ -308,7 +327,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
 
                                             MenuItem(
                                                 "Any node",
-                                                onClick = { anyNode = true },
+                                                onClick = { setupJob?.cancel(); sendAfterSetup = false; setup = null; anyNode = true; placeMenuOpen = false },
                                                 checked = anyNode,
                                                 hint = anyNodePick?.let { "${it.name} now, most free" },
                                                 leading = MyIcon.Server,
@@ -320,7 +339,10 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                                     onClick = {
                                                         val held = project?.let { checkoutOn(state, it, option.id) }
 
+                                                        setupJob?.cancel()
+                                                        sendAfterSetup = false
                                                         setup = null
+                                                        placeMenuOpen = false
 
                                                         when {
                                                             project == null -> Unit
