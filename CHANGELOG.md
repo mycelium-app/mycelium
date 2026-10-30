@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.17.0
+
+- One model selector combines agent accounts and chat models, with search, favourites and an account submenu. Favourites are the ordered Any model list. Selecting a particular account keeps it pinned when it reaches a usage limit.
+- New conversation is the default screen. Schedules is in Settings; History, Tasks and Workflows are experiments, off by default. Groups have their own icons.
+- Terminals open below the conversation with Ctrl+`, with tabs, splits and draggable dividers. They keep running when you leave the conversation. Agents can read or type through the existing approval flow, and session permissions are available from the mode menu.
+- Any node chooses among the nodes holding the project, using free resources and the node preferences in Settings, Agents. The place menu can clone a project onto another node; sending while cloning waits for the checkout to finish. Conversations can be snoozed, and chat width can be Comfortable, Wide or Full.
+- GitHub, GitLab and Forgejo share the issues and pull requests list, with authors and assignees. Pull request previews show Summary, Timeline and Code, refresh when the forge changes, and can filter unresolved comments. Pull request state appears on conversation rows, and typing @ in the composer can refer to an issue or pull request.
+- Citations are inline composer chips, with surrounding text written in the composer. Path badges reveal local files in the system file browser and retain remote node context. Queued messages have a Send now split button, and assistant files and secrets are edited in dialogs.
+- Chat models pick up MCP tool changes between tool rounds. An OpenAI-compatible chat provider can also supply Decisions answers from token probabilities.
+- Fixed composer keyboard handling, overlapping daily activity, narrow sign-in screens, stale terminal scrollback and approval requests whose identifiers are reused. Codex credit exhaustion shows the explanation and recovery actions instead of Internal error, without inventing an automatic reset time.
+
 ## v0.16.1
 
 v0.16.0 was tagged but not published. Every screen change in this release was designed in the canonical design artefact first.
