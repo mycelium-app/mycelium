@@ -58,7 +58,7 @@ async fn the_any_model_list_never_holds_the_same_entry_twice() {
     let (status, saved) = save(&server, json!({"default_modes": {}, "any_model": [{"agent": "claude"}, {"agent": "claude", "account": "sam@example.com"}, {"agent": "codex"}, {"agent": "claude"}]})).await;
 
     assert_eq!(status, 200);
-    assert_eq!(saved["any_model"], json!([{"agent": "claude"}, {"agent": "codex"}]));
+    assert_eq!(saved["any_model"], json!([{"agent": "claude"}, {"agent": "claude", "account": "sam@example.com"}, {"agent": "codex"}]));
 
     sqlx::query("update user_settings set any_model = '[{\"agent\": \"claude\"}, {\"agent\": \"claude\"}]'::jsonb").execute(&server.pool).await.unwrap();
 

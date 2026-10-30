@@ -57,7 +57,7 @@ fn without_duplicates(entries: Vec<ModelChoice>) -> Vec<ModelChoice> {
     let mut kept: Vec<ModelChoice> = Vec::new();
 
     for entry in entries {
-        let listed = kept.iter().any(|held| held.agent == entry.agent && held.provider_id == entry.provider_id && held.model == entry.model && held.any_model == entry.any_model);
+        let listed = kept.iter().any(|held| held.agent == entry.agent && held.provider_id == entry.provider_id && held.model == entry.model && held.account == entry.account && held.any_model == entry.any_model);
 
         if !listed {
             kept.push(entry);
