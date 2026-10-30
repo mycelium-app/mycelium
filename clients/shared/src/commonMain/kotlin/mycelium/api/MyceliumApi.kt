@@ -886,6 +886,9 @@ class MyceliumApi(
     suspend fun startWorkspace(projectId: String, number: Long, agent: String): Conversation =
         call("/projects/$projectId/issues/$number/workspace") { client.post(it) { authorise(); json(StartWorkspaceRequest(agent)) } }.body()
 
+    suspend fun forgeAvatar(forgeId: String, url: String): ByteArray =
+        call("/forges/$forgeId/avatar") { client.get(it) { authorise(); parameter("url", url) } }.body()
+
     suspend fun pullRequests(query: String = ""): PullRequests =
         call("/pulls") { client.get(it) { authorise(); if (query.isNotBlank()) parameter("q", query.trim()) } }.body()
 

@@ -42,9 +42,9 @@ fun PullRequestList(store: Store, state: AppState, requests: List<PullRequestIte
             when (column) {
                 0 -> TableCell.Text(request.repository.substringAfterLast('/'), Tokens.Type.Meta, colors.textMuted)
                 1 -> TableCell.Slot { Icon(MyIcon.Branch, colors.textMuted, Tokens.Size.IconSm) }
-                2 -> TableCell.Text("#${request.number}", Tokens.Type.Code, colors.textFaint)
+                2 -> TableCell.Text(request.label.substringAfterLast(' '), Tokens.Type.Code, colors.textFaint)
                 3 -> TableCell.Text(request.title)
-                4 -> TableCell.Slot { PeopleStack(request.author, request.assignees) }
+                4 -> TableCell.Slot { PeopleStack(request.forgeId, request.author, request.assignees) }
                 else -> TableCell.Text(pullRequestStateName(request), Tokens.Type.Meta, if (request.state == PullRequestState.Open) colors.diffAdd else colors.textMuted)
             }
         },

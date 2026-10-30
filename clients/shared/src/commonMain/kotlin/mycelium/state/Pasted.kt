@@ -77,16 +77,24 @@ fun pasteInsertion(before: String, after: String): IntRange? {
     return prefix until end
 }
 
-fun expandedPastes(text: String, pastes: Map<Char, String>): String =
-    text.map { char -> if (isPasteMarker(char)) pastes[char] ?: char.toString() else char.toString() }.joinToString("")
+fun expandedPastes(text: String, pastes: Map<Char, String>, references: Map<Char, ForgeReference> = emptyMap()): String =
+    text.map { char -> if (isPasteMarker(char)) pastes[char] ?: references[char]?.let(::referenceText) ?: char.toString() else char.toString() }.joinToString("")
 
-fun serialisedPastes(text: String, pastes: Map<Char, String>): String =
-    text.map { char -> if (isPasteMarker(char)) pastes[char]?.let(::pastedBlock).orEmpty() else char.toString() }.joinToString("")
+fun serialisedPastes(text: String, pastes: Map<Char, String>, references: Map<Char, ForgeReference> = emptyMap()): String =
+    text.map { char ->
+        when {
+            !isPasteMarker(char) -> char.toString()
+            char in references -> referenceText(references.getValue(char))
+            else -> pastes[char]?.let(::pastedBlock).orEmpty()
+        }
+    }.joinToString("")
 
-class PasteDisplay(private val original: String, pastes: Map<Char, String>, images: Map<Char, String> = emptyMap()) {
+fun referenceText(reference: ForgeReference): String = "${reference.label} ${reference.url}"
+
+class PasteDisplay(private val original: String, pastes: Map<Char, String>, images: Map<Char, String> = emptyMap(), references: Map<Char, ForgeReference> = emptyMap()) {
     private val labels: Map<Char, String> = original
-        .filter { it in pastes || it in images }
-        .associateWith { marker -> images[marker]?.let(::imageLabel) ?: pastedLabel(pastedLineCount(pastes.getValue(marker))) }
+        .filter { it in pastes || it in images || it in references }
+        .associateWith { marker -> images[marker]?.let(::imageLabel) ?: references[marker]?.label ?: pastedLabel(pastedLineCount(pastes.getValue(marker))) }
 
     fun labelOf(char: Char): String? = labels[char]
 

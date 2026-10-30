@@ -71,6 +71,7 @@ fn conversation() -> Conversation {
         pull_request_label: None,
         pull_request_url: None,
         pull_request_state: None,
+        pull_request_number: None,
         assistant_id: None,
         teach_me: false,
         routing: None,

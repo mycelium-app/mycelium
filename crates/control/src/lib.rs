@@ -312,6 +312,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/forges", get(forges::list).post(forges::connect))
         .route("/api/v1/forges/{id}", delete(forges::disconnect))
         .route("/api/v1/forges/{id}/mcp", post(forges::link_mcp))
+        .route("/api/v1/forges/{id}/avatar", get(forges::avatar))
         .route("/api/v1/repositories", get(forges::repositories))
         .route("/api/v1/projects", get(projects::list).post(projects::create))
         .route("/api/v1/projects/{id}", patch(projects::patch))

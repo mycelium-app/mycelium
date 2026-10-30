@@ -104,6 +104,20 @@ class IssuesTest {
     }
 
     @Test
+    fun anIssueTitleOpensItsDescriptionInAPreviewAndCanStartAWorkspace() {
+        issues = """{"issues":[{"forge_id":"f1","repository":"slop/mycelium","number":5,"title":"Show the branch in the header","url":"https://example.org/issues/5","body":"Show the current branch beside the title."}],"failures":[]}"""
+        var opened: Conversation? = null
+        show(store(), waitFor = "Show the branch in the header", onOpened = { opened = it })
+
+        rule.onNodeWithContentDescription("Preview issue 5").performClick()
+        rule.onNodeWithText("Show the current branch beside the title.").assertExists()
+        rule.onNodeWithText("Create workspace").performClick()
+
+        rule.waitUntil(5_000) { opened != null }
+        assertEquals("/api/v1/projects/p3/issues/5/workspace", posts.single().first)
+    }
+
+    @Test
     fun anIssueWithAWorktreeOffersToOpenItAndOneWithoutOffersToCreateOne() {
         show(store())
 

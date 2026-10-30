@@ -665,9 +665,15 @@ impl ForgeApi {
                 let conversation = self.get(http, &format!("/repos/{repository}/issues/{number}/comments?per_page={PAGE_SIZE}")).await?;
                 let reviews = self.get(http, &format!("/repos/{repository}/pulls/{number}/comments?per_page={PAGE_SIZE}")).await.unwrap_or(Value::Null);
 
+                let threads = if self.kind == ForgeKind::Github { self.github_thread_resolution(http, repository, number).await } else { HashMap::new() };
+
                 for (comments, reviewed) in [(&conversation, false), (&reviews, true)] {
                     for comment in comments.as_array().into_iter().flatten() {
-                        let resolved = if self.kind == ForgeKind::Forgejo && reviewed { Some(!comment["resolver"].is_null()) } else { None };
+                        let resolved = match (self.kind, reviewed) {
+                            (ForgeKind::Forgejo, true) => Some(!comment["resolver"].is_null()),
+                            (ForgeKind::Github, true) => comment["id"].as_i64().and_then(|id| threads.get(&id).copied()),
+                            _ => None,
+                        };
 
                         timeline.push(PullRequestComment {
                             author: self.person(&comment["user"]),
@@ -701,6 +707,31 @@ impl ForgeApi {
         timeline.sort_by_key(|comment| comment.created_at);
 
         Ok(timeline)
+    }
+
+    async fn github_thread_resolution(&self, http: &reqwest::Client, repository: &str, number: i64) -> HashMap<i64, bool> {
+        let (owner, name) = repository.split_once('/').unwrap_or(("", repository));
+        let query = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100) { nodes { isResolved comments(first: 100) { nodes { databaseId } } } } } } }";
+        let body = serde_json::json!({"query": query, "variables": {"owner": owner, "name": name, "number": number}});
+        let address = if self.base_url == "https://github.com" { "https://api.github.com/graphql".to_string() } else { format!("{}/api/graphql", self.base_url) };
+        let sent = self.authorised(http.post(address)).json(&body).send().await;
+        let Ok(response) = sent else {
+            return HashMap::new();
+        };
+        let answer: Value = response.json().await.unwrap_or(Value::Null);
+        let mut resolution = HashMap::new();
+
+        for thread in answer["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"].as_array().into_iter().flatten() {
+            let resolved = thread["isResolved"].as_bool().unwrap_or(false);
+
+            for comment in thread["comments"]["nodes"].as_array().into_iter().flatten() {
+                if let Some(id) = comment["databaseId"].as_i64() {
+                    resolution.insert(id, resolved);
+                }
+            }
+        }
+
+        resolution
     }
 
     pub async fn pull_request_diff(&self, http: &reqwest::Client, repository: &str, number: i64) -> Result<String, ForgeError> {
@@ -1058,6 +1089,45 @@ pub async fn disconnect(State(state): State<AppState>, user: AuthUser, Path(id):
     state.publish(Some(user.id), mycelium_proto::stream::StreamMessage::IntegrationsChanged);
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct AvatarQuery {
+    url: String,
+}
+
+const AVATAR_LIMIT: usize = 1_000_000;
+const PUBLIC_AVATAR_HOSTS: [&str; 3] = ["avatars.githubusercontent.com", "secure.gravatar.com", "gravatar.com"];
+
+pub async fn avatar(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Query(query): Query<AvatarQuery>) -> ApiResult<axum::response::Response> {
+    use axum::response::IntoResponse;
+
+    let forge = find_owned(&state, id, user.id).await?;
+    let wanted = url::Url::parse(&query.url).ok().filter(|wanted| wanted.scheme() == "https" || wanted.scheme() == "http");
+    let forge_origin = url::Url::parse(&forge.base_url).ok().map(|base| base.origin());
+    let Some(wanted) = wanted else {
+        return Err(ApiError::bad_request("avatar_url_invalid", "Enter the address of an image."));
+    };
+    let host = wanted.host_str().unwrap_or_default().to_string();
+    let on_forge = forge_origin.as_ref() == Some(&wanted.origin());
+
+    if !wanted.username().is_empty() || wanted.password().is_some() || (!on_forge && (wanted.scheme() != "https" || wanted.port_or_known_default() != Some(443) || !PUBLIC_AVATAR_HOSTS.contains(&host.as_str()))) {
+        return Err(ApiError::not_found("That avatar"));
+    }
+
+    let api = ForgeApi::from_row(&forge)?;
+    let request = state.http.get(wanted).timeout(FORGE_TIMEOUT).header("user-agent", "mycelium");
+    let request = if on_forge { api.authorised(request) } else { request };
+    let response = request.send().await.map_err(|_| ApiError::not_found("That avatar"))?;
+    let media_type = response.headers().get("content-type").and_then(|value| value.to_str().ok()).unwrap_or_default().to_string();
+
+    if !response.status().is_success() || !media_type.starts_with("image/") || media_type.starts_with("image/svg") {
+        return Err(ApiError::not_found("That avatar"));
+    }
+
+    let bytes = crate::outbound::read_limited(response, AVATAR_LIMIT).await.map_err(|_| ApiError::not_found("That avatar"))?;
+
+    Ok(([("content-type", media_type), ("cache-control", "private, max-age=86400".to_string()), ("x-content-type-options", "nosniff".to_string())], bytes).into_response())
 }
 
 pub async fn repositories(State(state): State<AppState>, user: AuthUser, Query(query): Query<RepositoryQuery>) -> ApiResult<Json<Repositories>> {

@@ -12,7 +12,12 @@ import mycelium.api.PullRequestItem
 import mycelium.api.PullRequestState
 import mycelium.api.StreamMessage
 import mycelium.api.parseStreamMessage
+import mycelium.state.Store
 import mycelium.state.AppState
+import mycelium.state.ForgeReference
+import mycelium.state.PasteDisplay
+import mycelium.state.expandedPastes
+import mycelium.state.serialisedPastes
 import mycelium.state.conversationPullRequestText
 import mycelium.state.forgeReferences
 import mycelium.state.pullRequestFileDiffs
@@ -82,5 +87,42 @@ class ForgeItemsTest {
 
         assertEquals(PullRequestState.Merged, listing.pullRequests.single().state)
         assertEquals("samexample", listing.pullRequests.single().author?.name)
+    }
+
+    @Test
+    fun avatarCachingKeepsDifferentForgeAccountsSeparate() = runTest {
+        val fetched = mutableListOf<String>()
+        val engine = MockEngine { request ->
+            fetched += request.url.encodedPath
+            respond(request.url.encodedPath.encodeToByteArray())
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), this)
+        val avatar = "https://example.org/avatar"
+
+        assertEquals("/api/v1/forges/f1/avatar", store.forgeAvatarBytes("f1", avatar)?.decodeToString())
+        assertEquals("/api/v1/forges/f2/avatar", store.forgeAvatarBytes("f2", avatar)?.decodeToString())
+        store.forgeAvatarBytes("f1", avatar)
+        assertEquals(listOf("/api/v1/forges/f1/avatar", "/api/v1/forges/f2/avatar"), fetched)
+    }
+
+    @Test
+    fun referencesAndPastedTextKeepTheirOwnContentWhenSerialisedTogether() {
+        val reference = '\uE000'
+        val paste = '\uE001'
+        val references = mapOf(reference to ForgeReference("PR #9", "Newer change", "https://example.org/pull/9"))
+        val pastes = mapOf(paste to "A pasted note")
+
+        assertEquals("PR #9 https://example.org/pull/9 A pasted note", expandedPastes("$reference $paste", pastes, references))
+        assertEquals(serialisedPastes(paste.toString(), pastes), serialisedPastes(paste.toString(), pastes, references))
+        assertEquals("PR #9", PasteDisplay("$reference $paste", pastes, references = references).labelOf(reference))
+    }
+
+    @Test
+    fun aReferenceChipShowsItsLabelInTheComposerAndSendsItsLabelAndAddress() {
+        val chip = '\uE000'
+        val references = mapOf(chip to ForgeReference("PR #9", "Newer change", "https://x/pull/9"))
+
+        assertEquals("PR #9", PasteDisplay("see $chip", emptyMap(), references = references).labelOf(chip))
+        assertEquals("see PR #9 https://x/pull/9", serialisedPastes("see $chip", emptyMap(), references))
     }
 }

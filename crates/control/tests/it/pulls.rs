@@ -66,6 +66,24 @@ async fn fake_forgejo() -> String {
     serve(router).await
 }
 
+async fn fake_forgejo_with_avatar() -> String {
+    async fn avatar(headers: HeaderMap) -> ([(&'static str, &'static str); 1], Vec<u8>) {
+        assert_eq!(headers.get("authorization").and_then(|value| value.to_str().ok()), Some(format!("token {FORGEJO_TOKEN}").as_str()));
+
+        ([("content-type", "image/png")], vec![0x89, b'P', b'N', b'G'])
+    }
+
+    let router = Router::new()
+        .route("/api/v1/user", get(|| async { Json(json!({"login": "samexample"})) }))
+        .route("/api/v1/user/orgs", get(|| async { Json(json!([])) }))
+        .route("/avatars/sam", get(avatar))
+        .route("/avatars/large", get(|| async { ([("content-type", "image/png")], vec![0u8; 1_000_001]) }))
+        .route("/avatars/vector", get(|| async { ([("content-type", "image/svg+xml")], "<svg/>") }))
+        .route("/avatars/redirect", get(|| async { axum::response::Redirect::temporary("/avatars/sam") }));
+
+    serve(router).await
+}
+
 async fn fake_gitlab() -> String {
     async fn merge_requests() -> Json<Value> {
         Json(json!([{
@@ -105,6 +123,40 @@ async fn fake_gitlab() -> String {
         .route("/api/v4/projects/{project}/merge_requests/5", get(one))
         .route("/api/v4/projects/{project}/merge_requests/5/discussions", get(discussions))
         .route("/api/v4/projects/{project}/merge_requests/5/changes", get(changes));
+
+    serve(router).await
+}
+
+async fn fake_github() -> String {
+    async fn one() -> Json<Value> {
+        Json(json!({"number": 9, "title": "Newer change", "state": "open", "html_url": "https://forge.example/acme-org/acme-backups/pull/9", "head": {"ref": "topic"}, "base": {"ref": "main"}}))
+    }
+
+    async fn conversation() -> Json<Value> {
+        Json(json!([]))
+    }
+
+    async fn review_comments() -> Json<Value> {
+        Json(json!([
+            {"id": 101, "body": "Rename this", "created_at": "2026-10-02T12:00:00Z", "path": "src/restore.rs", "user": {"login": "riverexample"}},
+            {"id": 102, "body": "Done", "created_at": "2026-10-02T10:30:00Z", "path": "src/lib.rs", "user": {"login": "samexample"}},
+        ]))
+    }
+
+    async fn graphql() -> Json<Value> {
+        Json(json!({"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [
+            {"isResolved": false, "comments": {"nodes": [{"databaseId": 101}]}},
+            {"isResolved": true, "comments": {"nodes": [{"databaseId": 102}]}},
+        ]}}}}}))
+    }
+
+    let router = Router::new()
+        .route("/api/v3/user", get(|| async { Json(json!({"login": "samexample"})) }))
+        .route("/api/v3/user/orgs", get(|| async { Json(json!([])) }))
+        .route("/api/v3/repos/{owner}/{name}/pulls/9", get(one))
+        .route("/api/v3/repos/{owner}/{name}/pulls/9/comments", get(review_comments))
+        .route("/api/v3/repos/{owner}/{name}/issues/9/comments", get(conversation))
+        .route("/api/graphql", axum::routing::post(graphql));
 
     serve(router).await
 }
@@ -242,4 +294,46 @@ async fn a_pull_request_that_does_not_exist_is_not_found() {
     let (status, _) = server.user.json(server.user.get(&format!("/api/v1/forges/{gitlab}/pulls/6/diff?repository=slop%2Fmycelium"))).await;
 
     assert_eq!(status, 400, "the forge's own 404 is relayed as a forge failure");
+}
+
+#[tokio::test]
+async fn a_github_timeline_says_which_review_threads_are_resolved_from_graphql() {
+    let server = Server::start().await;
+    let github = connect_forge(&server, "github", &fake_github().await, "ghp_0123456789abcdefghijklmnopqrstuvwxyz").await;
+
+    let (status, detail) = server.user.json(server.user.get(&format!("/api/v1/forges/{github}/pulls/9?repository=acme-org%2Facme-backups"))).await;
+
+    assert_eq!(status, 200, "{detail}");
+    let timeline: Vec<(Value, Value)> = detail["timeline"].as_array().unwrap().iter().map(|comment| (comment["body"].clone(), comment["resolved"].clone())).collect();
+    assert_eq!(timeline, vec![(json!("Done"), json!(true)), (json!("Rename this"), json!(false))]);
+}
+
+#[tokio::test]
+async fn a_forge_avatar_is_fetched_through_the_control_plane_only_from_the_forge_or_a_public_avatar_host() {
+    let server = Server::start().await;
+    let base = fake_forgejo_with_avatar().await;
+    let forgejo = connect_forge(&server, "forgejo", &base, FORGEJO_TOKEN).await;
+    let own = url::form_urlencoded::byte_serialize(format!("{base}/avatars/sam").as_bytes()).collect::<String>();
+    let elsewhere = url::form_urlencoded::byte_serialize(b"https://internal.example.org/avatars/sam").collect::<String>();
+
+    let (status, _) = server.user.json(server.user.get(&format!("/api/v1/forges/{forgejo}/avatar?url={own}"))).await;
+    let (refused, _) = server.user.json(server.user.get(&format!("/api/v1/forges/{forgejo}/avatar?url={elsewhere}"))).await;
+
+    assert_eq!(status, 200);
+    assert_eq!(refused, 404);
+}
+
+#[tokio::test]
+async fn avatars_refuse_other_origins_redirects_active_images_and_oversized_bodies() {
+    let server = Server::start().await;
+    let base = fake_forgejo_with_avatar().await;
+    let forgejo = connect_forge(&server, "forgejo", &base, FORGEJO_TOKEN).await;
+    let other_origin = serve(Router::new().route("/avatar", get(|| async { axum::http::StatusCode::INTERNAL_SERVER_ERROR }))).await;
+
+    for address in [format!("{other_origin}/avatar"), format!("{base}/avatars/large"), format!("{base}/avatars/vector"), format!("{base}/avatars/redirect"), "http://avatars.githubusercontent.com/avatar".into(), "https://gravatar.com:8443/avatar".into()] {
+        let encoded = url::form_urlencoded::byte_serialize(address.as_bytes()).collect::<String>();
+        let (status, _) = server.user.json(server.user.get(&format!("/api/v1/forges/{forgejo}/avatar?url={encoded}"))).await;
+
+        assert_eq!(status, 404, "avatar destination {address}");
+    }
 }

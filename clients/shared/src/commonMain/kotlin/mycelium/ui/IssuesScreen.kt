@@ -41,6 +41,8 @@ private const val IssuesList = "issues"
 @Composable
 fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit) {
     val colors = MyTheme.colors
+    val platform = LocalPlatform.current
+    var previewedIssue by remember { mutableStateOf<Issue?>(null) }
     var draft by remember { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
     var listing by remember { mutableStateOf<Issues?>(null) }
@@ -89,6 +91,34 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
                 onOpened(store.api.startWorkspace(project.id, issue.number, agent))
             } finally {
                 starting = starting - issue.number
+            }
+        }
+    }
+
+    previewedIssue?.let { selected ->
+        val issue = issues.firstOrNull { it.forgeId == selected.forgeId && it.repository == selected.repository && it.number == selected.number } ?: selected
+        val projects = projectsOfIssue(state.projects.values, issue)
+        val existing = worktreesOfIssue(state.projects.values, worktrees, issue)
+
+        Dialog(onDismiss = { previewedIssue = null }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Label("#${issue.number} ${issue.title}", Modifier.weight(1f), Tokens.Type.UiStrong)
+                MyButton({ previewedIssue = null }, icon = MyIcon.Close, description = "Close the preview", muted = true)
+            }
+
+            PeopleStack(issue.forgeId, issue.author, issue.assignees)
+            Label(issue.body?.takeIf { it.isNotBlank() } ?: "No description.", Modifier.heightIn(max = 400.dp).verticalScrollWithBar())
+
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                platform?.let { MyButton({ it.openUrl(issue.url) }, text = "Open in browser", variant = ButtonVariant.Outline) }
+
+                for (project in projects.filter { existing.isEmpty() || it.id == existing.first().projectId }) {
+                    MyButton(
+                        { previewedIssue = null; start(project, issue) },
+                        text = if (existing.isNotEmpty()) "Open workspace" else if (projects.size == 1) "Create workspace" else "Create on ${state.nodes[project.nodeId]?.name ?: project.name}",
+                        variant = if (projects.size == 1 || existing.isNotEmpty()) ButtonVariant.Primary else ButtonVariant.Outline,
+                    )
+                }
             }
         }
     }
@@ -159,8 +189,10 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
                             0 -> TableCell.Text(issue.repository.substringAfterLast('/'), Tokens.Type.Meta, colors.textMuted)
                             1 -> TableCell.Slot { Icon(MyIcon.Issue, colors.textMuted, Tokens.Size.IconSm) }
                             2 -> TableCell.Text("#${issue.number}", Tokens.Type.Code, colors.textFaint)
-                            3 -> TableCell.Text(issue.title)
-                            4 -> TableCell.Slot { PeopleStack(issue.author, issue.assignees) }
+                            3 -> TableCell.Slot(issue.title) {
+                                Label(issue.title, Modifier.heightIn(min = Tokens.Size.ControlMd).pressable({ previewedIssue = issue }, description = "Preview issue ${issue.number}"))
+                            }
+                            4 -> TableCell.Slot { PeopleStack(issue.forgeId, issue.author, issue.assignees) }
                             5 -> TableCell.Slot(existing.maxByOrNull { it.branch.length }?.branch ?: "None", Tokens.Size.IconSm * 2 + Tokens.Space.S1_5 * 2) {
                                 Column {
                                     if (existing.isEmpty()) {

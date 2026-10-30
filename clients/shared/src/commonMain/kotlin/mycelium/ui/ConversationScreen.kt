@@ -129,7 +129,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     var panel by remember(id) {
         val saved = if (compact) null else platform?.loadPreference("$SidePanelPreference:$id")
 
-        mutableStateOf(SidePanel.entries.firstOrNull { it.name == saved && it != SidePanel.Outline && (conversation?.isChat != true || it == SidePanel.Environment) })
+        mutableStateOf(SidePanel.entries.firstOrNull { it.name == saved && it != SidePanel.Outline && (it != SidePanel.PullRequest || conversation?.pullRequestNumber != null) && (conversation?.isChat != true || it == SidePanel.Environment) })
     }
     var panelWidth by remember(workspace) {
         val saved = workspace?.let { platform?.loadPreference("$SidePanelWidthPreference:$it") } ?: platform?.loadPreference(SidePanelWidthPreference)
@@ -451,6 +451,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
                 SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, onOpenArtefact, Modifier.fillMaxSize()) }
                 SidePanel.Outline -> outlinePage?.let { page -> platform?.let { BrowserPanel(it, page.url, page.title, onClose = { openPanel(null) }) } }
+                SidePanel.PullRequest -> key(conversation.id) { ConversationPullRequestPanel(store, state, conversation, Modifier.fillMaxSize()) }
                 SidePanel.Environment -> key(conversation.id) { EnvironmentPanel(store, state, conversation, environmentFillsArea, { environmentExpanded = it }, { openPanel(null) }, onOpenNode, onOpenConversation, onOpenNodes) }
                 null -> Unit
             }
@@ -705,7 +706,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     }
                 }
 
-                Rail(if (narrow && chatForced) null else panel, outlinePage != null, conversation.scratch || chat) { chosen ->
+                Rail(if (narrow && chatForced) null else panel, outlinePage != null, conversation.pullRequestNumber != null, conversation.scratch || chat) { chosen ->
                     if (narrow) {
                         if (panel == chosen && !chatForced) {
                             chatForced = true
@@ -728,6 +729,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet), onExited = { openPanel(null) }) }
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, { openPanel(null); onOpenArtefact(it) }, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
+                SidePanel.PullRequest -> key(conversation.id) { ConversationPullRequestPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 SidePanel.Outline, SidePanel.Environment, null -> Unit
             }
         }
@@ -1001,10 +1003,10 @@ fun iconOf(status: ConversationStatus): MyIcon = when (status) {
 private const val ConversationTab = "Conversation"
 private const val WalkthroughTab = "Walkthrough"
 
-private enum class SidePanel { Details, Subagents, Terminal, Git, Artefacts, Outline, Environment }
+private enum class SidePanel { Details, Subagents, Terminal, Git, PullRequest, Artefacts, Outline, Environment }
 
 @Composable
-private fun Rail(open: SidePanel?, outlineOpen: Boolean, environmentOnly: Boolean, onToggle: (SidePanel) -> Unit) {
+private fun Rail(open: SidePanel?, outlineOpen: Boolean, hasPullRequest: Boolean, environmentOnly: Boolean, onToggle: (SidePanel) -> Unit) {
     val colors = MyTheme.colors
 
     Row(Modifier.fillMaxHeight()) {
@@ -1020,6 +1022,10 @@ private fun Rail(open: SidePanel?, outlineOpen: Boolean, environmentOnly: Boolea
 
                 MyButton({ onToggle(SidePanel.Terminal) }, icon = MyIcon.Terminal, description = if (open == SidePanel.Terminal) "Close terminal" else "Open terminal", muted = true, selected = open == SidePanel.Terminal)
                 MyButton({ onToggle(SidePanel.Git) }, icon = MyIcon.Branch, description = if (open == SidePanel.Git) "Close git" else "Open git", muted = true, selected = open == SidePanel.Git)
+                if (hasPullRequest) {
+                    MyButton({ onToggle(SidePanel.PullRequest) }, icon = MyIcon.PullRequest, description = if (open == SidePanel.PullRequest) "Close pull request" else "Open pull request", muted = true, selected = open == SidePanel.PullRequest)
+                }
+
                 MyButton({ onToggle(SidePanel.Artefacts) }, icon = MyIcon.Layers, description = if (open == SidePanel.Artefacts) "Close artefacts" else "Open artefacts", muted = true, selected = open == SidePanel.Artefacts)
             }
 

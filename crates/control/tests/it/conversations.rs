@@ -1892,7 +1892,7 @@ async fn the_branch_of_a_project_conversation_carries_its_open_pull_request() {
     answer_head(&mut link, Some("topic")).await;
     let recorded = branch_of(&server, id, Some("topic")).await;
     assert_eq!((recorded["pull_request_label"].clone(), recorded["pull_request_url"].clone()), (json!("PR #12"), json!("https://forge.example/acme-org/acme-backups/pull/12")));
-    assert_eq!((recorded["pull_request_state"].clone(), recorded["archived_at"].clone()), (json!("open"), serde_json::Value::Null));
+    assert_eq!((recorded["pull_request_state"].clone(), recorded["pull_request_number"].clone(), recorded["archived_at"].clone()), (json!("open"), json!(12), serde_json::Value::Null));
 }
 
 async fn fake_github_with_merged_pull_request() -> String {
@@ -1923,5 +1923,6 @@ async fn a_conversation_whose_pull_request_was_merged_is_archived_with_the_state
     let recorded = branch_of(&server, id, Some("topic")).await;
 
     assert_eq!(recorded["pull_request_state"], "merged");
+    assert_eq!(recorded["pull_request_number"], 12);
     assert!(recorded["archived_at"].is_string(), "{recorded}");
 }

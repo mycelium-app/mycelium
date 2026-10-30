@@ -93,6 +93,7 @@ import mycelium.state.sideChatOf
 import mycelium.state.SlashCommand
 import mycelium.state.mentionAt
 import mycelium.state.expandedPastes
+import mycelium.state.referenceText
 import mycelium.state.freePasteMarker
 import mycelium.state.isPasteMarker
 import mycelium.state.BadgeGap
@@ -176,6 +177,7 @@ fun Composer(
     val platform = LocalPlatform.current
     var text by remember(conversation.id) { mutableStateOf(initialText) }
     var pastes by remember(conversation.id) { mutableStateOf(emptyMap<Char, String>()) }
+    var chipReferences by remember(conversation.id) { mutableStateOf(emptyMap<Char, ForgeReference>()) }
     var images by remember(conversation.id) { mutableStateOf(initialImages) }
     var history by remember(conversation.id) { mutableStateOf(EditHistory<ComposerEdit>()) }
     val reportText by rememberUpdatedState(onTextChange)
@@ -188,7 +190,7 @@ fun Composer(
         val live = drafts.map { it.id }.toSet()
         val cleaned = withoutImageMarkers(MarkedText(text.text, text.selection.end, images), images.values.toSet() - live)
         val fresh = drafts.filter { isImage(it.file.mediaType) && it.id !in cleaned.images.values }.map { it.id }
-        val marked = withImageMarkers(cleaned, fresh, pastes.keys)
+        val marked = withImageMarkers(cleaned, fresh, pastes.keys + chipReferences.keys)
 
         if (marked.text != text.text) {
             text = TextFieldValue(marked.text, TextRange(marked.cursor))
@@ -214,7 +216,7 @@ fun Composer(
 
     LaunchedEffect(conversation.id) {
         snapshotFlow { text to pastes }.collect { (value, held) ->
-            val expanded = expandedPastes(value.text, held)
+            val expanded = expandedPastes(value.text, held, chipReferences)
 
             reportText(if (expanded == value.text) value else TextFieldValue(expanded, TextRange(expanded.length)))
         }
@@ -227,15 +229,15 @@ fun Composer(
     val query = text.text.takeIf { it.startsWith("/") && it.none(Char::isWhitespace) }?.drop(1)
     val mention = if (query == null) mentionAt(text.text, text.selection.end) else null
     var files by remember { mutableStateOf(emptyList<String>()) }
-    var references by remember { mutableStateOf(emptyList<ForgeReference>()) }
+    var suggestions by remember { mutableStateOf(emptyList<ForgeReference>()) }
 
     LaunchedEffect(mention?.query) {
         files = emptyList()
-        references = emptyList()
+        suggestions = emptyList()
         val wanted = mention?.query ?: return@LaunchedEffect
         delay(FileSearchDelayMillis)
         attempt { files = onSearchFiles(wanted) }
-        attempt { references = onSearchReferences(wanted) }
+        attempt { suggestions = onSearchReferences(wanted) }
     }
 
     fun insert(start: Int, completed: String) {
@@ -243,10 +245,21 @@ fun Composer(
         text = TextFieldValue(updated, TextRange(start + completed.length))
     }
 
+    fun insertChip(start: Int, reference: ForgeReference) {
+        val marker = freePasteMarker(pastes.keys + chipReferences.keys + text.text.filter(::isPasteMarker).toSet())
+
+        if (marker == null) {
+            insert(start, "${referenceText(reference)} ")
+        } else {
+            chipReferences = chipReferences + (marker to reference)
+            insert(start, "$marker ")
+        }
+    }
+
     val matches = when {
         query != null -> (SideChatCommands + commands.filterNot { command -> SideChatCommands.any { it.name == command.name } }).filter { it.name.contains(query, ignoreCase = true) }.sortedBy { !it.name.startsWith(query, ignoreCase = true) }
             .map { command -> Completion(command.name, command.description) { insert(0, "/${command.name} ") } }
-        mention != null -> references.map { reference -> Completion(reference.label, reference.title) { insert(mention.start, "${reference.label} ${reference.url} ") } } +
+        mention != null -> suggestions.map { reference -> Completion(reference.label, reference.title) { insertChip(mention.start, reference) } } +
             files.map { path -> Completion(path, "") { insert(mention.start, "@$path ") } }
         else -> emptyList()
     }
@@ -261,7 +274,7 @@ fun Composer(
     }
 
     fun submit() {
-        val trimmed = serialisedPastes(text.text, pastes).trim()
+        val trimmed = serialisedPastes(text.text, pastes, chipReferences).trim()
 
         if (queueEdit != null) {
             queueEdit.onSave(trimmed)
@@ -281,6 +294,7 @@ fun Composer(
             sent = text.text
             text = TextFieldValue("")
             pastes = emptyMap()
+            chipReferences = emptyMap()
             images = emptyMap()
             history = EditHistory()
         } else if (queue.isNotEmpty()) {
@@ -297,8 +311,8 @@ fun Composer(
         images = cleaned.images
     }
 
-    val display = remember(text.text, pastes, images, drafts) {
-        PasteDisplay(text.text, pastes, images.mapNotNull { (marker, id) -> drafts.firstOrNull { it.id == id }?.let { marker to it.file.name } }.toMap())
+    val display = remember(text.text, pastes, images, drafts, chipReferences) {
+        PasteDisplay(text.text, pastes, images.mapNotNull { (marker, id) -> drafts.firstOrNull { it.id == id }?.let { marker to it.file.name } }.toMap(), chipReferences)
     }
     val unmarked = attachments?.let { held -> AttachmentControls(held.drafts.filter { it.id !in images.values }, held.problem, held.onAdd, held.onRemove) }
 
@@ -313,7 +327,7 @@ fun Composer(
 
         val next = if (stale == null) changed else TextFieldValue(changed.text.removePrefix(stale), TextRange(changed.selection.end - stale.length))
         val range = pasteInsertion(text.text, next.text)
-        val marker = freePasteMarker(pastes.keys + text.text.filter(::isPasteMarker).toSet())
+        val marker = freePasteMarker(pastes.keys + chipReferences.keys + text.text.filter(::isPasteMarker).toSet())
 
         if (range == null || marker == null) {
             text = next

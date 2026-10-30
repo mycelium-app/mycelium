@@ -205,7 +205,7 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
     val wellness by store.wellness.state.collectAsState()
     val onBreak = (wellness.clock.phase == BreakPhase.OnBreak && wellness.breakEndsAt != null) || (wellness.clock.phase == BreakPhase.Noting && wellness.ended != null)
 
-    CompositionLocalProvider(LocalAttachmentBytes provides store::attachmentBytes) {
+    CompositionLocalProvider(LocalAttachmentBytes provides store::attachmentBytes, LocalForgeAvatar provides store::forgeAvatarBytes) {
         Box(Modifier.noticingInput(store.wellness).voiceShortcut(store.voice).focusProperties { onEnter = { if (onBreak) cancelFocusChange() } }.focusGroup().then(if (onBreak) Modifier.clearAndSetSemantics {} else Modifier)) {
             ShellFor(store, platform, me, onSignOut, initialRoute)
         }

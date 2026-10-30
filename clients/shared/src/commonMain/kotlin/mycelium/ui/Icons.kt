@@ -100,6 +100,7 @@ enum class MyIcon(vararg val paths: String) {
     Palette("M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z", "M13.5 6.5h.01M17.5 10.5h.01M6.5 12.5h.01M8.5 7.5h.01"),
     Tag("M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42Z", circle(7.5f, 7.5f, 1f)),
     Branch("M6 3v12", circle(18f, 6f, 3f), circle(6f, 18f, 3f), "M18 9a9 9 0 0 1-9 9"),
+    PullRequest(circle(18f, 18f, 3f), circle(6f, 6f, 3f), "M13 6h3a2 2 0 0 1 2 2v7", "M6 9v12"),
     Diff("M12 3v8M8 7h8M8 17h8"),
     Person(circle(12f, 8f, 4f), "M4 21a8 8 0 0 1 16 0"),
     Clock(circle(12f, 12f, 9f), "M12 7v5l3 2"),
