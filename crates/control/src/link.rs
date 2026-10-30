@@ -262,11 +262,10 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
         }
         NodeToControl::TerminalOutput { terminal_id, data } => {
             if let Some(owner) = state.hub.terminal_owner(terminal_id).filter(|owner| owner.node_id == node_id) {
-                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&data) {
-                    state.hub.append_terminal_output(terminal_id, &bytes);
-                }
+                let bytes = base64::engine::general_purpose::STANDARD.decode(&data).unwrap_or_default();
+                let offset = state.hub.append_terminal_output(terminal_id, &bytes).unwrap_or_default();
 
-                state.publish(Some(owner.user_id), StreamMessage::TerminalOutput { terminal_id, data });
+                state.publish(Some(owner.user_id), StreamMessage::TerminalOutput { terminal_id, data, offset });
             }
 
             Ok(())

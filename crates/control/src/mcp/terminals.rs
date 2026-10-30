@@ -73,7 +73,7 @@ pub async fn call(call: ToolCall<'_>) -> crate::error::ApiResult<ToolReply> {
 
     if call.tool == "terminal_read" {
         let wanted = call.arguments["lines"].as_u64().map_or(DEFAULT_LINES, |lines| (lines as usize).clamp(1, MAX_LINES));
-        let scrollback = state.hub.terminal_scrollback(terminal_id).unwrap_or_default();
+        let (scrollback, _) = state.hub.terminal_scrollback(terminal_id).unwrap_or_default();
 
         return Ok(ToolReply::text(&last_lines(&plain_text(&scrollback), wanted), false));
     }

@@ -78,6 +78,7 @@ import kotlin.io.encoding.Base64
 import kotlin.math.floor
 import kotlinx.coroutines.delay
 import mycelium.api.Conversation
+import mycelium.api.OpenTerminal
 import mycelium.state.AppState
 import mycelium.state.CellStyle
 import mycelium.state.Store
@@ -100,7 +101,7 @@ fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, mod
     val colors = MyTheme.colors
     val id = conversation.id
     var workspace by remember(id) { mutableStateOf(store.terminalWorkspaces[id] ?: TerminalWorkspace()) }
-    var scrollbacks by remember(id) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var scrollbacks by remember(id) { mutableStateOf<Map<String, OpenTerminal>>(emptyMap()) }
     var loaded by remember(id) { mutableStateOf(false) }
     val tabs = workspace.tabs
     val current = tabs.current
@@ -125,7 +126,7 @@ fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, mod
             restored = if (open.isEmpty()) restored.copy(tabs = TerminalTabs().open()) else TerminalWorkspace().adopting(open.map { it.terminalId })
         }
 
-        scrollbacks = open.associate { it.terminalId to it.scrollback }
+        scrollbacks = open.associateBy { it.terminalId }
         workspace = restored
         loaded = true
     }
@@ -230,7 +231,7 @@ fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, mod
 }
 
 @Composable
-private fun TerminalView(store: Store, state: AppState, conversation: Conversation, modifier: Modifier, existing: String?, scrollback: String?, active: Boolean, onStarted: (String) -> Unit, onFocus: () -> Unit, onExited: () -> Unit) {
+private fun TerminalView(store: Store, state: AppState, conversation: Conversation, modifier: Modifier, existing: String?, scrollback: OpenTerminal?, active: Boolean, onStarted: (String) -> Unit, onFocus: () -> Unit, onExited: () -> Unit) {
     val colors = MyTheme.colors
     val touch = LocalTouch.current
     val density = LocalDensity.current
@@ -254,7 +255,8 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
     val emulator = remember(conversation.id, attempt) { Terminal(DefaultColumns, DefaultRows) }
     var revision by remember(emulator) { mutableIntStateOf(0) }
     val sentSize = remember(emulator) { intArrayOf(0, 0) }
-    val consumed = remember(emulator) { intArrayOf(existing?.let { state.terminalOutput[it]?.received } ?: 0) }
+    val consumed = remember(emulator) { intArrayOf(0) }
+    var replayed by remember(emulator) { mutableStateOf(existing == null || scrollback == null) }
     val id = terminalId
     val exited = id != null && id in state.exitedTerminals
     val feed = id?.let { state.terminalOutput[it] }
@@ -290,16 +292,21 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
         }
     }
 
-    LaunchedEffect(emulator) {
-        if (existing != null && scrollback != null) {
-            emulator.feed(Base64.decode(scrollback))
+    LaunchedEffect(emulator, columns > 0 && rows > 0) {
+        if (!replayed && columns > 0 && rows > 0 && existing != null && scrollback != null) {
+            val current = state.terminalOutput[existing]
+
+            emulator.feed(Base64.decode(scrollback.scrollback))
+            current?.after(scrollback.offset)?.forEach { emulator.feed(it) }
+            consumed[0] = current?.received ?: 0
+            replayed = true
             revision++
         }
     }
 
-    LaunchedEffect(id, feed?.received) {
-        if (feed != null) {
-            feed.unseen(consumed[0]).forEach { emulator.feed(Base64.decode(it)) }
+    LaunchedEffect(id, feed?.received, replayed) {
+        if (feed != null && replayed) {
+            feed.after(scrollback?.offset ?: 0, consumed[0]).forEach { emulator.feed(it) }
             consumed[0] = feed.received
             revision++
         }

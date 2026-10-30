@@ -44,7 +44,11 @@ pub async fn open(State(state): State<AppState>, user: AuthUser, Path(id): Path<
         .hub
         .terminals_of_conversation(id)
         .into_iter()
-        .map(|terminal_id| OpenTerminal { terminal_id, scrollback: base64::engine::general_purpose::STANDARD.encode(state.hub.terminal_scrollback(terminal_id).unwrap_or_default()) })
+        .map(|terminal_id| {
+            let (scrollback, offset) = state.hub.terminal_scrollback(terminal_id).unwrap_or_default();
+
+            OpenTerminal { terminal_id, scrollback: base64::engine::general_purpose::STANDARD.encode(scrollback), offset }
+        })
         .collect();
 
     Ok(Json(open))

@@ -4,17 +4,99 @@ import kotlinx.serialization.json.Json
 import mycelium.api.Event
 import mycelium.state.AgentTerminalActivity
 import mycelium.state.SplitDirection
+import mycelium.state.TerminalFeed
+import mycelium.state.Terminal
+import mycelium.state.TerminalChunkLimit
+import mycelium.api.StreamMessage
+import mycelium.api.parseStreamMessage
+import mycelium.state.AppState
+import mycelium.state.reduce
+import kotlin.test.assertIs
 import mycelium.state.TerminalTabs
 import mycelium.state.TerminalWorkspace
 import mycelium.state.agentTerminalActivity
 import mycelium.state.dividers
 import mycelium.state.paneIds
 import mycelium.state.rects
+import kotlin.io.encoding.Base64
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class TerminalWorkspaceTest {
     private fun call(seq: Long, title: String, terminalId: String) = Event("c1", seq, "acp_update", Json.parseToJsonElement("""{"update":{"sessionUpdate":"tool_call","title":"$title","rawInput":{"terminal_id":"$terminalId"}}}"""))
+
+    private fun feed() = listOf("abc" to 0L, "def" to 3L, "ghi" to 6L).fold(TerminalFeed()) { feed, (text, offset) -> feed.with(Base64.encode(text.encodeToByteArray()), offset) }
+
+    private fun replayed(end: Long) = feed().after(end).joinToString("|") { it.decodeToString() }
+
+    @Test
+    fun outputTheScrollbackAlreadyCoversIsDroppedAndTheRestIsKept() {
+        assertEquals("ef|ghi", replayed(4))
+    }
+
+    @Test
+    fun aChunkEntirelyBeforeTheScrollbackEndIsDropped() {
+        assertEquals("ghi", replayed(6))
+    }
+
+    @Test
+    fun nothingIsReplayedWhenTheScrollbackCoversEverything() {
+        assertEquals("", replayed(9))
+    }
+
+    @Test
+    fun everythingIsReplayedWhenTheScrollbackWasEmpty() {
+        assertEquals("abc|def|ghi", replayed(0))
+    }
+
+    @Test
+    fun outputWithNoKnownOffsetIsKept() {
+        val unknown = TerminalFeed().with(Base64.encode("xy".encodeToByteArray()))
+
+        assertEquals("xy", unknown.after(100).joinToString("") { it.decodeToString() })
+    }
+
+    @Test
+    fun outputDeliveredAfterTheSnapshotStillDropsBytesAlreadyReplayed() {
+        val terminal = Terminal(40, 4)
+        val initial = TerminalFeed().with(Base64.encode("abc".encodeToByteArray()), 0)
+        terminal.feed("abcdef".encodeToByteArray())
+        initial.after(6).forEach { terminal.feed(it) }
+
+        val updated = initial.with(Base64.encode("defghi".encodeToByteArray()), 3)
+        updated.after(6, initial.received).forEach { terminal.feed(it) }
+
+        assertEquals("abcdefghi", terminal.screenText().trimEnd())
+        assertEquals(emptyList(), updated.after(6, updated.received))
+    }
+
+    @Test
+    fun replayOffsetsCountBytesWhenTheSnapshotEndsInsideAUtf8Character() {
+        val terminal = Terminal(40, 4)
+        terminal.feed(byteArrayOf(0xc2.toByte()))
+        val feed = TerminalFeed().with(Base64.encode("£x".encodeToByteArray()), 0)
+        feed.after(1).forEach { terminal.feed(it) }
+
+        assertEquals("£x", terminal.screenText().trimEnd())
+    }
+
+    @Test
+    fun offsetsStillMatchChunksAfterOldOutputIsDiscarded() {
+        val feed = (0..TerminalChunkLimit).fold(TerminalFeed()) { feed, offset ->
+            feed.with(Base64.encode("x".encodeToByteArray()), offset.toLong())
+        }
+
+        assertEquals("x", feed.after(TerminalChunkLimit.toLong(), feed.received - 1).single().decodeToString())
+        assertEquals(emptyList(), feed.after(TerminalChunkLimit.toLong() + 1))
+    }
+
+    @Test
+    fun aStreamedByteOffsetReachesTheTerminalReplayFeed() {
+        val message = parseStreamMessage("""{"type":"terminal_output","terminal_id":"t1","data":"YWJj","offset":3}""")
+        val state = reduce(AppState(), assertIs<StreamMessage.TerminalOutput>(message))
+
+        assertEquals("bc", state.terminalOutput.getValue("t1").after(4).single().decodeToString())
+    }
 
     @Test
     fun theAgentIsShownReadingOrTypingInTheTerminalItLastUsedWhileItWorks() {
