@@ -25,8 +25,6 @@ enum class BarGroup { Tools, Pickers, Usage, Turn }
 
 enum class BarControl(val group: BarGroup) {
     Attach(BarGroup.Tools),
-    Project(BarGroup.Tools),
-    Place(BarGroup.Tools),
     Actions(BarGroup.Tools),
     Dictate(BarGroup.Tools),
     TeachMe(BarGroup.Tools),
@@ -64,8 +62,6 @@ fun barControls(kind: ConversationKind, harness: HarnessReport): List<BarControl
 
     return listOfNotNull(
         BarControl.Attach,
-        BarControl.Project.takeIf { kind == ConversationKind.NewConversation },
-        BarControl.Place.takeIf { kind == ConversationKind.NewConversation },
         BarControl.Actions.takeIf { kind == ConversationKind.Assistant },
         BarControl.Dictate.takeIf { harness.voice && !starting },
         BarControl.TeachMe.takeIf { harness.teachMe && !starting },

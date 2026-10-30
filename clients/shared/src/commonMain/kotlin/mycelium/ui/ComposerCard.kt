@@ -285,6 +285,17 @@ fun ComposerCard(
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
         setup?.invoke()
 
+        if (project != null || place != null) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScrollFaded().semantics { contentDescription = "Start options" },
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                project?.invoke()
+                place?.invoke()
+            }
+        }
+
         Column(
             Modifier
                 .fillMaxWidth()
@@ -318,8 +329,6 @@ fun ComposerCard(
             val control: @Composable (BarControl) -> Unit = { which ->
                 when (which) {
                     BarControl.Attach -> MyButton({ platform?.pickFiles(attachments.onAdd) }, icon = MyIcon.Paperclip, description = "Attach files", muted = true)
-                    BarControl.Project -> project?.invoke()
-                    BarControl.Place -> place?.invoke()
                     BarControl.Actions -> assistantActions?.let { ActionsButton(it) }
                     BarControl.Model -> model?.invoke()
                     BarControl.Send -> MyButton(onSubmit, icon = MyIcon.Send, description = "Send", muted = true)
@@ -328,12 +337,8 @@ fun ComposerCard(
             }
 
             if (LocalTouch.current && kind == ConversationKind.NewConversation) {
-                Row(
-                    Modifier.fillMaxWidth().horizontalScrollFaded().semantics { contentDescription = "Start options" },
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    listOf(BarControl.Project, BarControl.Place, BarControl.Model).forEach { control(it) }
+                Row(Modifier.fillMaxWidth().horizontalScrollFaded(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                    control(BarControl.Model)
                 }
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {

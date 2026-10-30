@@ -500,7 +500,6 @@ fun Composer(
     val control: @Composable (BarControl) -> Unit = { which ->
         when (which) {
             BarControl.Attach -> MyButton({ attachments?.let { platform?.pickFiles(it.onAdd) } }, icon = MyIcon.Paperclip, description = "Attach files", muted = true)
-            BarControl.Project, BarControl.Place -> Unit
             BarControl.Actions -> assistantActions?.let { ActionsButton(it) }
             BarControl.Dictate -> MyButton(::toggleDictation, icon = MyIcon.Microphone, description = if (listening) "Stop dictating" else "Dictate", selected = listening, muted = !listening)
             BarControl.TeachMe -> MyButton(
