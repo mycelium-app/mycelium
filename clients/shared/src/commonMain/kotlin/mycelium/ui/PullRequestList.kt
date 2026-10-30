@@ -32,7 +32,7 @@ fun PullRequestList(store: Store, state: AppState, requests: List<PullRequestIte
             Col("", 24.dp, preferred = 24.dp),
             Col("", 40.dp, numeric = true, priority = 1),
             Col("Pull request", 100.dp, weight = 1f, overflow = Overflow.Wrap),
-            Col("People", 60.dp, priority = 2),
+            Col("People", 60.dp, preferred = 60.dp, priority = 2),
             Col("State", 70.dp, priority = 1),
         ),
         requests.size,

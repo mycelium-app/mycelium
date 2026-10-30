@@ -174,7 +174,7 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
                         Col("", 24.dp, preferred = 24.dp),
                         Col("", 40.dp, numeric = true, priority = 1),
                         Col("Issue", 100.dp, weight = 1f, overflow = Overflow.Wrap),
-                        Col("People", 60.dp, priority = 2),
+                        Col("People", 60.dp, preferred = 60.dp, priority = 2),
                         Col("Worktree", 120.dp, max = 240.dp, priority = 1),
                         Col("Pull request", 120.dp, max = 280.dp, priority = 1),
                         Col("", 150.dp, preferred = 150.dp, align = ColumnAlign.End),

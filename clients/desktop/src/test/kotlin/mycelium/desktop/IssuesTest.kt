@@ -2,6 +2,8 @@ package mycelium.desktop
 
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -111,7 +113,7 @@ class IssuesTest {
 
         rule.onNodeWithContentDescription("Preview issue 5").performClick()
         rule.onNodeWithText("Show the current branch beside the title.").assertExists()
-        rule.onNodeWithText("Create workspace").performClick()
+        rule.onNode(hasText("Create workspace") and !hasContentDescription("Create a workspace for issue 5")).performClick()
 
         rule.waitUntil(5_000) { opened != null }
         assertEquals("/api/v1/projects/p3/issues/5/workspace", posts.single().first)
