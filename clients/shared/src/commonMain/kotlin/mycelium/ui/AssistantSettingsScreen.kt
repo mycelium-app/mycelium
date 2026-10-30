@@ -187,7 +187,7 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
             TextInput(name, { name = it; nameError = null }, label = "Name", placeholder = "Stand-up", error = nameError, modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
         }
 
-        TextInput(description, { description = it }, label = "Description", placeholder = "Leave empty to use the first line of the instructions", modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
+        TextInput(description, { description = it }, label = "Description", modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("Group", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
@@ -230,7 +230,6 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
 
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 Label("Turn voice off", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                Label("Hides the microphone. The Voice thread and its row stay. Change it any time in Privacy.", style = Tokens.Type.Meta, color = colors.textMuted)
 
                 Row {
                     MyButton({ store.openScreen("settings/privacy") }, text = "Turn voice off", icon = MyIcon.Mode, variant = ButtonVariant.Outline)

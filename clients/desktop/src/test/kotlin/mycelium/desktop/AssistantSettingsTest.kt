@@ -113,6 +113,14 @@ class AssistantSettingsTest {
     }
 
     @Test
+    fun theIdentityPageHasNoHelperTextUnderTheDescription() {
+        shell()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Description").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, rule.onAllNodesWithText("Leave empty", substring = true).fetchSemanticsNodes().size)
+    }
+
+    @Test
     fun modelPreferencesReorderWithMoveUpAndAreSavedInThatOrder() {
         shell()
         openSection("Models and nodes")
