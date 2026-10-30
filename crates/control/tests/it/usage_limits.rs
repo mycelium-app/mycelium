@@ -83,6 +83,32 @@ async fn a_usage_limit_failure_records_which_window_and_when_it_resets() {
 }
 
 #[tokio::test]
+async fn a_generic_failure_after_exhausted_credits_records_the_limit_and_keeps_the_explanation() {
+    let server = Server::start().await;
+    let mut link = server.online_node("atlas").await;
+    let id = working_conversation(&server, &mut link).await;
+    let explanation = "This workspace is out of credits. Refill the balance to continue.";
+
+    let windows = json!([{"name": "five_hour", "used_percent": 0, "resets_at": Utc::now() + Duration::hours(2)}]);
+    sqlx::query("insert into logins (node_id, agent, account, method, state, usage_windows) values ($1, 'claude', 'sam@example.com', 'oauth', 'signed_in', $2)")
+        .bind(link.id)
+        .bind(sqlx::types::Json(windows))
+        .execute(&server.pool)
+        .await
+        .unwrap();
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 3, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": explanation}}}) }).await;
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 4, message: "Internal error".into() }).await;
+    common::eventually("the conversation to fail", || async { (server.conversation(id).await["status"] == "failed").then_some(()) }).await;
+
+    let payload = last_error(&server, id).await;
+    assert_eq!(payload["usage_limit"]["window"], "credits");
+    assert_eq!(payload["message"], explanation);
+    assert!(payload["usage_limit"]["resets_at"].is_null());
+    assert!(resume_at(&server, id).await.is_none());
+}
+
+#[tokio::test]
 async fn another_failure_is_not_a_usage_limit() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
@@ -250,6 +276,18 @@ async fn the_default_is_to_resume_automatically_and_the_choice_is_kept() {
 
     assert_eq!(initial["on_usage_limit"], "resume");
     assert_eq!(chosen["on_usage_limit"], "ask");
+}
+
+#[tokio::test]
+async fn the_old_switch_preference_migrates_to_waiting_for_reset() {
+    let server = Server::start().await;
+    choose_to_be_asked(&server).await;
+    sqlx::query("update user_settings set on_usage_limit = 'switch'").execute(&server.pool).await.unwrap();
+    sqlx::raw_sql(include_str!("../../migrations/0146_remove_usage_limit_switch.sql")).execute(&server.pool).await.unwrap();
+
+    let (status, chosen) = server.user.json(server.user.get("/api/v1/usage-limit")).await;
+    assert_eq!(status, 200);
+    assert_eq!(chosen["on_usage_limit"], "resume");
 }
 
 #[tokio::test]

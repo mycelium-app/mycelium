@@ -1,7 +1,6 @@
 use crate::account_usage::windows_of;
 use crate::auth::AuthUser;
 use crate::boot::run_while_ready;
-use crate::chats::CHAT_AGENT;
 use crate::error::{ApiError, ApiResult};
 use crate::nodes::node_offline;
 use crate::prompts::{continue_unless_queued, retry_failed};
@@ -40,6 +39,10 @@ pub fn detect(message: &str, now: DateTime<Utc>, fallback_zone: Tz) -> Option<Us
 }
 
 fn window_of(lower: &str) -> Option<&'static str> {
+    if lower.contains("workspace is out of credits") {
+        return Some("credits");
+    }
+
     if lower.contains("session limit") || lower.contains("5-hour limit") || lower.contains("five-hour limit") {
         return Some("five_hour");
     }
@@ -130,7 +133,6 @@ fn zoned(zone: Tz, date: NaiveDate, time: NaiveTime) -> Option<DateTime<Utc>> {
 pub struct Detected {
     pub payload: Value,
     pub resume_at: Option<DateTime<Utc>>,
-    pub switch_to: Option<String>,
     pub account: Option<String>,
 }
 
@@ -163,31 +165,17 @@ pub async fn inspect(state: &AppState, node_id: Uuid, conversation_id: Uuid, mes
         return Ok(None);
     };
 
-    if limit.resets_at.is_none() {
+    if limit.resets_at.is_none() && limit.window != "credits" {
         let windows = windows_of(state, node_id, parse_enum(&agent)?, account.as_deref()).await?;
         let wanted = windows.iter().filter(|window| window.name == limit.window).filter_map(|window| window.resets_at);
         let any = windows.iter().filter_map(|window| window.resets_at);
         limit.resets_at = wanted.filter(|at| *at > now).min().or_else(|| any.filter(|at| *at > now).min());
     }
 
-    let automatic = matches!(on_usage_limit.as_str(), "resume" | "switch") && !side_chat && resumes < AUTOMATIC_RESUME_CAP;
-    let switching = on_usage_limit == "switch" && !side_chat && agent != CHAT_AGENT;
-    let switch_to = if switching {
-        sqlx::query_scalar::<_, String>(
-            "select account from logins where node_id = $1 and agent = $2 and state = 'signed_in' and account is not null and account is distinct from $3 and coalesce(usage_left, 0) > 0
-             order by usage_left desc, account limit 1",
-        )
-        .bind(node_id)
-        .bind(&agent)
-        .bind(&account)
-        .fetch_optional(&state.pool)
-        .await?
-    } else {
-        None
-    };
+    let automatic = on_usage_limit == "resume" && !side_chat && resumes < AUTOMATIC_RESUME_CAP;
     let resume_at = limit.resets_at.filter(|_| automatic).map(|at| at + Duration::seconds(RESUME_DELAY_SECONDS));
 
-    Ok(Some(Detected { payload: json!({"message": message, "usage_limit": {"window": limit.window, "resets_at": limit.resets_at}}), resume_at, switch_to, account }))
+    Ok(Some(Detected { payload: json!({"message": message, "usage_limit": {"window": limit.window, "resets_at": limit.resets_at}}), resume_at, account }))
 }
 
 pub async fn inspect_reply(state: &AppState, node_id: Uuid, conversation_id: Uuid) -> ApiResult<Option<(String, Detected)>> {
@@ -424,6 +412,13 @@ mod tests {
         let limit = detected("You've hit your usage limit. Upgrade to Pro or try again later.", "2026-10-23T12:00:00Z").unwrap();
 
         assert_eq!(limit, UsageLimit { window: "usage".into(), resets_at: None });
+    }
+
+    #[test]
+    fn exhausted_credits_are_a_limit_without_a_reset_time() {
+        let limit = detected("This workspace is out of credits. Refill the balance to continue.", "2026-10-23T12:00:00Z").unwrap();
+
+        assert_eq!(limit, UsageLimit { window: "credits".into(), resets_at: None });
     }
 
     #[test]

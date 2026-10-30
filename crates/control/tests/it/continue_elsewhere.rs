@@ -420,11 +420,6 @@ pub fn limit_message() -> String {
     format!("Internal error: You've hit your session limit · resets {} (UTC)", resets.format("%-I:%M%P"))
 }
 
-async fn switch_on_usage_limit(server: &Server) {
-    let (status, _) = server.user.json(server.user.put("/api/v1/usage-limit").json(&json!({"on_usage_limit": "switch"}))).await;
-    assert_eq!(status, 200);
-}
-
 pub fn with_usage(account: &str, left: u8) -> LoginInfo {
     LoginInfo { managed: false, usage_left: Some(left), ..login(account, LoginState::SignedIn) }
 }
@@ -440,34 +435,22 @@ async fn working_on(server: &Server, link: &mut NodeLink, account: &str) -> Uuid
 }
 
 #[tokio::test]
-async fn a_full_window_switches_to_the_account_with_most_usage_left() {
+async fn a_pinned_account_waits_for_reset_even_when_another_account_has_usage_left() {
     let server = Server::start().await;
-    switch_on_usage_limit(&server).await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 0), with_usage("work@example.org", 30), with_usage("spare@example.org", 80)]).await;
     let id = working_on(&server, &mut link, "sam@example.com").await;
 
     link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: limit_message() }).await;
+    let user = server.user.clone();
+    common::eventually("the resume to be scheduled", || async { (!user.json(user.get(&format!("/api/v1/conversations/{id}"))).await.1["resume_at"].is_null()).then_some(()) }).await;
 
-    match next_command(&mut link).await {
-        ControlToNode::CloseSession { conversation_id } => assert_eq!(conversation_id, id),
-        other => panic!("expected close_session, got {other:?}"),
-    }
-    match next_command(&mut link).await {
-        ControlToNode::StartSession { resume, account, .. } => assert_eq!((resume.as_deref(), account.as_deref()), (Some("acp-1"), Some("spare@example.org"))),
-        other => panic!("expected start_session, got {other:?}"),
-    }
-    assert_eq!(expect_prompt(&mut link).await, "The usage limit was reached on sam@example.com. Continue from where you stopped.");
-
-    let events = server.events(id).await;
-    let continued = events.iter().find(|event| event["kind"] == "continued").expect("a continued event");
-    assert_eq!((continued["payload"]["reason"].clone(), continued["payload"]["account"].clone()), (json!("usage_limit"), json!("spare@example.org")));
-    assert!(server.conversation(id).await["resume_at"].is_null());
+    assert_eq!(server.conversation(id).await["account"], "sam@example.com");
+    assert!(server.events(id).await.iter().all(|event| event["kind"] != "continued"));
 }
 
 #[tokio::test]
-async fn a_goal_is_held_not_stopped_when_the_switch_fails_and_no_reset_is_known() {
+async fn a_goal_is_held_when_a_pinned_account_reaches_a_limit_without_a_known_reset() {
     let server = Server::start().await;
-    switch_on_usage_limit(&server).await;
     let mut link = node_with_accounts(&server, "v0.9.0", vec![with_usage("sam@example.com", 0), with_usage("work@example.org", 80)]).await;
     let id = working_on(&server, &mut link, "sam@example.com").await;
     server.user.json(server.user.put(&format!("/api/v1/conversations/{id}/goal")).json(&json!({"text": "Every test passes", "token_budget": 100000}))).await;
@@ -481,7 +464,6 @@ async fn a_goal_is_held_not_stopped_when_the_switch_fails_and_no_reset_is_known(
 #[tokio::test]
 async fn a_full_window_with_no_other_account_waits_for_the_reset() {
     let server = Server::start().await;
-    switch_on_usage_limit(&server).await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 0), with_usage("work@example.org", 0)]).await;
     let id = working_on(&server, &mut link, "sam@example.com").await;
 

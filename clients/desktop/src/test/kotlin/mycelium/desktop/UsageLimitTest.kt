@@ -1,5 +1,13 @@
 package mycelium.desktop
 
+import androidx.compose.ui.graphics.asSkiaBitmap
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -29,7 +37,7 @@ import kotlin.test.assertEquals
 private val ResetsToday = kotlin.time.Clock.System.now().toString().substringBefore('T') + "T15:30:00Z"
 private val ResumesToday = kotlin.time.Clock.System.now().toString().substringBefore('T') + "T15:31:00Z"
 
-private fun failedJson(resumeAt: String?) = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Plan the rollout","status":"failed",
+private fun failedJson(resumeAt: String?, agent: String = "claude") = """{"id":"c1","owner":"u","node_id":"n1","agent":"$agent","cwd":"/work/app","title":"Plan the rollout","status":"failed",
 "acp_session_id":"s1","mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null,"resume_at":${resumeAt?.let { "\"$it\"" }}}"""
 
 private fun limitEvent(resetsAt: String?) = """[{"conversation_id":"c1","seq":1,"kind":"error","payload":{"message":"Internal error: You've hit your session limit","usage_limit":{"window":"five_hour","resets_at":${resetsAt?.let { "\"$it\"" }}}}}]"""
@@ -44,7 +52,7 @@ class UsageLimitTest {
     private val calls = CopyOnWriteArrayList<String>()
     private val bodies = CopyOnWriteArrayList<String>()
 
-    private fun store(resumeAt: String? = null, resetsAt: String? = ResetsToday, setting: String = "ask", experiments: String = "{}", events: String? = null): Store {
+    private fun store(resumeAt: String? = null, resetsAt: String? = ResetsToday, setting: String = "ask", agent: String = "claude", experiments: String = "{}", events: String? = null): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -57,8 +65,8 @@ class UsageLimitTest {
             }
 
             val body = when {
-                path.endsWith("/conversations") -> "[${failedJson(resumeAt)}]"
-                path.endsWith("/conversations/c1") -> failedJson(resumeAt)
+                path.endsWith("/conversations") -> "[${failedJson(resumeAt, agent)}]"
+                path.endsWith("/conversations/c1") -> failedJson(resumeAt, agent)
                 path.endsWith("/events") -> events ?: limitEvent(resetsAt)
                 path.endsWith("/usage-limit") -> """{"on_usage_limit":"$setting"}"""
                 path.endsWith("/experiments") -> experiments
@@ -84,6 +92,22 @@ class UsageLimitTest {
 
         rule.onNodeWithText("Paused until Claude Code's 5-hour limit resets at 15:30.").assertExists()
         rule.onNodeWithContentDescription("Error: Internal error: You've hit your session limit").assertDoesNotExist()
+    }
+
+    @Test
+    fun codexWithoutCreditsShowsTheLimitCardWithoutAnAutomaticResume() {
+        val events = """[{"conversation_id":"c1","seq":1,"kind":"error","payload":{"message":"This workspace is out of credits. Refill the balance to continue.","usage_limit":{"window":"credits","resets_at":null}}}]"""
+        show(store(agent = "codex", events = events))
+
+        rule.onNodeWithText("Codex is out of credits.").assertExists()
+        rule.onNodeWithContentDescription("Retry this conversation now").assertExists()
+        rule.onNodeWithText("Resume at", substring = true).assertDoesNotExist()
+        rule.onNodeWithText("Internal error").assertDoesNotExist()
+
+        val png = org.jetbrains.skia.Image.makeFromBitmap(rule.onRoot().captureToImage().asSkiaBitmap()).encodeToData(org.jetbrains.skia.EncodedImageFormat.PNG)!!.bytes
+        val out = java.io.File("build/screens/codex-credits.png")
+        out.parentFile.mkdirs()
+        out.writeBytes(png)
     }
 
     @Test
@@ -155,12 +179,15 @@ class UsageLimitTest {
     }
 
     @Test
-    fun theSettingDefaultsToAskAndCanBeChangedToResumeAutomatically() {
+    fun theSettingCanBeChangedFromAskToResumeUsingTheKeyboard() {
         val store = store()
         rule.setContent { MyceliumTheme(true) { AgentsSettings(store) } }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Wait and resume automatically").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Wait and resume automatically").performClick()
+        rule.onNodeWithText("Ask me").performSemanticsAction(SemanticsActions.RequestFocus)
+        rule.onNodeWithText("Ask me").performKeyInput { pressKey(Key.Tab) }
+        rule.onNodeWithText("Wait and resume automatically").assertIsFocused()
+        rule.onNodeWithText("Wait and resume automatically").performKeyInput { pressKey(Key.Enter) }
 
         rule.waitUntil(5_000) { calls.isNotEmpty() }
 
@@ -169,21 +196,17 @@ class UsageLimitTest {
     }
 
     @Test
-    fun continuingOnAnotherAccountIsOfferedWithNoExperimentOn() {
-        val plain = store()
-        rule.setContent { MyceliumTheme(true) { AgentsSettings(plain) } }
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continue on another account").fetchSemanticsNodes().isNotEmpty() }
-    }
+    fun usageLimitsOnlyOfferAskingOrWaiting() {
+        rule.setContent { MyceliumTheme(true) { AgentsSettings(store()) } }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Wait and resume automatically").fetchSemanticsNodes().isNotEmpty() }
 
-    @Test
-    fun theSettingCanBeChangedToContinueOnAnotherAccount() {
-        val store = store(experiments = EnabledExperiments)
-        rule.setContent { MyceliumTheme(true) { AgentsSettings(store) } }
+        rule.onNodeWithText("Ask me").assertExists()
+        rule.onNodeWithText("Wait and resume automatically").assertExists()
+        rule.onNodeWithText("Continue on another account").assertDoesNotExist()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continue on another account").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Continue on another account").performClick()
-        rule.waitUntil(5_000) { calls.isNotEmpty() }
-
-        assertEquals("""{"on_usage_limit":"switch"}""", bodies.single())
+        val png = org.jetbrains.skia.Image.makeFromBitmap(rule.onRoot().captureToImage().asSkiaBitmap()).encodeToData(org.jetbrains.skia.EncodedImageFormat.PNG)!!.bytes
+        val out = java.io.File("build/screens/usage-limit-settings.png")
+        out.parentFile.mkdirs()
+        out.writeBytes(png)
     }
 }

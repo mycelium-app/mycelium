@@ -39,8 +39,6 @@ import mycelium.state.withFavourite
 
 private val UsageLimitChoices = listOf("Ask me" to "ask", "Wait and resume automatically" to "resume")
 
-private val SwitchChoice = "Continue on another account" to "switch"
-
 private val DefaultModeNameWidth = 120.dp
 
 private const val SameAsAgent = ""
@@ -64,7 +62,6 @@ fun AgentsSettings(store: Store) {
     var editingList by remember { mutableStateOf(false) }
     val options = modelOptions(state.nodes.values, null, providers)
     val runner = rememberAction()
-    val choices = UsageLimitChoices + SwitchChoice
     val accounts = splitSignedOut(agentAccounts(state.nodes.values)).accounts.filter { account -> account.nodes.any { it.state == LoginState.SignedIn } }
 
     LaunchedEffect(Unit) {
@@ -137,10 +134,10 @@ fun AgentsSettings(store: Store) {
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                 Label("When a usage limit is reached", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
                 Segmented(
-                    choices.map { it.first },
-                    (choices.firstOrNull { it.second == chosen } ?: UsageLimitChoices.first { it.second == "resume" }).first,
+                    UsageLimitChoices.map { it.first },
+                    (UsageLimitChoices.firstOrNull { it.second == chosen } ?: UsageLimitChoices.first { it.second == "resume" }).first,
                     { label ->
-                        val picked = choices.first { it.first == label }.second
+                        val picked = UsageLimitChoices.first { it.first == label }.second
                         onUsageLimit = picked
                         store.act { store.api.saveUsageLimitSetting(UsageLimitSetting(picked)) }
                     },

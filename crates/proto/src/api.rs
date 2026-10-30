@@ -1080,7 +1080,6 @@ pub struct Extensions {
 pub enum OnUsageLimit {
     Ask,
     Resume,
-    Switch,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

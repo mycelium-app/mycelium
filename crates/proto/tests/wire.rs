@@ -14,6 +14,15 @@ fn round_trip<T: Serialize + DeserializeOwned + PartialEq + std::fmt::Debug>(val
     json
 }
 
+#[test]
+fn usage_limit_policy_only_asks_or_waits_for_reset() {
+    for policy in [OnUsageLimit::Ask, OnUsageLimit::Resume] {
+        round_trip(&UsageLimitSetting { on_usage_limit: policy });
+    }
+
+    assert!(serde_json::from_value::<UsageLimitSetting>(json!({"on_usage_limit": "switch"})).is_err());
+}
+
 fn id() -> Uuid {
     Uuid::from_u128(7)
 }

@@ -54,7 +54,12 @@ internal fun LimitNote(limit: UsageLimitNote, agent: String, actions: LimitActio
     val time: (String) -> String = { iso -> clockTime(iso) { millis -> platform?.localDateTime(millis) } }
     val reset = limit.resetsAt?.let(time)
     val name = "${agentName(agent).ifEmpty { "The agent" }}'s ${limitName(limit.window)}"
-    val headline = if (reset != null) "Paused until $name resets at $reset." else "Paused at $name. Mycelium does not know when it resets."
+    val headline = when {
+        limit.window == "credits" -> "${agentName(agent).ifEmpty { "The agent" }} is out of credits."
+        reset != null -> "Paused until $name resets at $reset."
+        else -> "Paused at $name. Mycelium does not know when it resets."
+    }
+
     val resumeTime = limit.resetsAt?.let(::resumeTimeAfter)?.let(time)
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {

@@ -197,7 +197,7 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             state.remove_session(node_id, conversation_id).await
         }
-        NodeToControl::SessionFailed { conversation_id, seq, message } => {
+        NodeToControl::SessionFailed { conversation_id, seq, mut message } => {
             state.remove_session(node_id, conversation_id).await?;
             state.hub.forget_prompts_of(conversation_id);
             state.hub.take_send_now(conversation_id);
@@ -207,7 +207,14 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
                 crate::moves::session_failed(state, owner, conversation_id);
             }
 
-            let limit = crate::usage_limits::inspect(state, node_id, conversation_id, &message).await?;
+            let mut limit = crate::usage_limits::inspect(state, node_id, conversation_id, &message).await?;
+
+            if limit.is_none() && message.eq_ignore_ascii_case("Internal error") {
+                if let Some((reply, detected)) = crate::usage_limits::inspect_reply(state, node_id, conversation_id).await? {
+                    message = reply;
+                    limit = Some(detected);
+                }
+            }
 
             stop_for_failure(state, node_id, conversation_id, owner, Some(seq), &message, limit).await
         }
@@ -418,7 +425,6 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
 async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid, owner: Option<Uuid>, seq: Option<i64>, message: &str, limit: Option<crate::usage_limits::Detected>) -> ApiResult<()> {
     let resume_at = limit.as_ref().and_then(|limit| limit.resume_at);
-    let switch_to = limit.as_ref().and_then(|limit| limit.switch_to.clone());
     let limited_account = limit.as_ref().and_then(|limit| limit.account.clone());
     let limited_window = limit.as_ref().and_then(|limit| limit.payload["usage_limit"]["window"].as_str().map(str::to_string));
 
@@ -456,29 +462,6 @@ async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid
             match crate::routing::carry_on(state, owner, conversation_id, &text).await {
                 Ok(()) => switched = true,
                 Err(error) => tracing::warn!("carrying on {conversation_id} after it moved account failed: {}", error.message()),
-            }
-        }
-    }
-
-    if let Some((owner, account)) = owner.zip(switch_to).filter(|_| recorded && !switched) {
-        let agent = sqlx::query_scalar::<_, String>("select agent from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
-        let target = crate::continuation::Target { agent, account: Some(account), provider_id: None, model: None, node_id: None, cwd: None };
-        let moved = crate::continuation::continue_on(state, owner, conversation_id, target, Some("usage_limit")).await;
-
-        match moved {
-            Ok(_) => {
-                let text = format!("The usage limit was reached on {}. Continue from where you stopped.", limited_account.as_deref().unwrap_or("the account in use"));
-
-                crate::prompts::retry_failed(state, owner, conversation_id).await?;
-
-                if !crate::goals::resumed(state, owner, conversation_id).await? {
-                    crate::prompts::continue_unless_queued(state, owner, conversation_id, &text).await?;
-                }
-
-                switched = true;
-            }
-            Err(error) => {
-                tracing::warn!("switching {conversation_id} to another account after its usage limit failed: {}", error.message());
             }
         }
     }
