@@ -53,13 +53,27 @@ fn valid_entry(entry: &ModelChoice) -> ApiResult<()> {
     Ok(())
 }
 
+fn without_duplicates(entries: Vec<ModelChoice>) -> Vec<ModelChoice> {
+    let mut kept: Vec<ModelChoice> = Vec::new();
+
+    for entry in entries {
+        let listed = kept.iter().any(|held| held.agent == entry.agent && held.provider_id == entry.provider_id && held.model == entry.model && held.any_model == entry.any_model);
+
+        if !listed {
+            kept.push(entry);
+        }
+    }
+
+    kept
+}
+
 pub async fn get(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<AgentSettings>> {
     Ok(Json(read(&state, user.id).await?))
 }
 
 pub async fn read(state: &AppState, owner: Uuid) -> ApiResult<AgentSettings> {
     let stored = sqlx::query_as::<_, (Option<String>, Option<String>, Sql<Vec<ModelChoice>>, Sql<HashMap<Uuid, NodePreference>>)>("select default_mode_claude, default_mode_codex, any_model, node_preferences from user_settings where owner = $1").bind(owner).fetch_optional(&state.pool).await?;
-    let (claude, codex, any_model, node_preferences) = stored.map_or((None, None, Vec::new(), HashMap::new()), |(claude, codex, any_model, node_preferences)| (claude, codex, any_model.0, node_preferences.0));
+    let (claude, codex, any_model, node_preferences) = stored.map_or((None, None, Vec::new(), HashMap::new()), |(claude, codex, any_model, node_preferences)| (claude, codex, without_duplicates(any_model.0), node_preferences.0));
     let overrides = sqlx::query_as::<_, (String, String, String)>("select agent, account, default_mode from account_settings where owner = $1 and default_mode is not null order by agent, account").bind(owner).fetch_all(&state.pool).await?;
     let mut account_modes = Vec::new();
 
@@ -79,11 +93,13 @@ pub async fn save(State(state): State<AppState>, user: AuthUser, Json(request): 
         valid_mode(AgentId::Codex, mode)?;
     }
 
-    if request.any_model.len() > ANY_MODEL_LIMIT {
+    let any_model = without_duplicates(request.any_model);
+
+    if any_model.len() > ANY_MODEL_LIMIT {
         return Err(ApiError::bad_request("any_model_too_long", format!("The Any model list holds up to {ANY_MODEL_LIMIT} entries. Remove one to add another.")));
     }
 
-    for entry in &request.any_model {
+    for entry in &any_model {
         valid_entry(entry)?;
     }
 
@@ -94,7 +110,7 @@ pub async fn save(State(state): State<AppState>, user: AuthUser, Json(request): 
     .bind(user.id)
     .bind(&request.default_modes.claude)
     .bind(&request.default_modes.codex)
-    .bind(Sql(&request.any_model))
+    .bind(Sql(&any_model))
     .bind(request.node_preferences.as_ref().map(Sql))
     .execute(&state.pool)
     .await?;

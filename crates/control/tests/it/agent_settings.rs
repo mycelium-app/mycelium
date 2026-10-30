@@ -53,6 +53,21 @@ async fn a_mode_the_agent_does_not_have_is_refused_in_plain_words() {
 }
 
 #[tokio::test]
+async fn the_any_model_list_never_holds_the_same_entry_twice() {
+    let server = Server::start().await;
+    let (status, saved) = save(&server, json!({"default_modes": {}, "any_model": [{"agent": "claude"}, {"agent": "claude", "account": "sam@example.com"}, {"agent": "codex"}, {"agent": "claude"}]})).await;
+
+    assert_eq!(status, 200);
+    assert_eq!(saved["any_model"], json!([{"agent": "claude"}, {"agent": "codex"}]));
+
+    sqlx::query("update user_settings set any_model = '[{\"agent\": \"claude\"}, {\"agent\": \"claude\"}]'::jsonb").execute(&server.pool).await.unwrap();
+
+    let (_, stored) = server.user.json(server.user.get("/api/v1/agent-settings")).await;
+
+    assert_eq!(stored["any_model"], json!([{"agent": "claude"}]));
+}
+
+#[tokio::test]
 async fn an_any_model_entry_must_be_one_kind_of_choice() {
     let server = Server::start().await;
 

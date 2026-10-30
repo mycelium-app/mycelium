@@ -244,7 +244,7 @@ fun ModelPicker(controls: ModelPickerControls, maxWidth: Dp = Tokens.Size.Accoun
                             }
                         }
 
-                        val starred = favourites.matching(query)
+                        val starred = favourites.matching(query).distinctBy { it.key }
 
                         if (starred.isNotEmpty()) {
                             item(key = "favourites") { MenuHeading("Favourites") }

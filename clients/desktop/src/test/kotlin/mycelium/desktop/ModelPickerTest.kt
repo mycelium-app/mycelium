@@ -120,6 +120,14 @@ class ModelPickerTest {
     }
 
     @Test
+    fun aFavouriteListedTwiceStillOpensTheMenu() {
+        showPicker(favourites = listOf(ModelChoice(agent = "claude"), ModelChoice(agent = "claude")))
+
+        rule.onNodeWithContentDescription("Search models").assertIsDisplayed()
+        rule.onNodeWithText("Favourites").assertIsDisplayed()
+    }
+
+    @Test
     fun choosingAModelReportsItAndClosesTheMenu() {
         var picked: ModelOption? = null
         showPicker(onPickModel = { picked = it })

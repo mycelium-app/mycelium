@@ -53,7 +53,7 @@ fun List<ModelChoice>.favouriteOptions(options: List<ModelOption>, providers: Li
 
         options.firstOrNull { it.isChosen(held) }
             ?: ModelOption(favourite.agent, favourite.providerId, favourite.model.orEmpty(), favourite.model?.takeIf { favourite.agent == null } ?: modelChoiceName(held, providers), available = false)
-    }
+    }.distinctBy { it.key }
 
 fun List<ModelChoice>.isFavourite(option: ModelOption): Boolean = any { option.isChosen(it.copy(account = null)) }
 
