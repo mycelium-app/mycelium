@@ -312,7 +312,7 @@ fun MyButton(
     }
 }
 
-data class SplitAlternative(val label: String, val onClick: () -> Unit, val hint: String? = null, val separated: Boolean = false)
+data class SplitAlternative(val label: String, val onClick: () -> Unit, val hint: String? = null, val separated: Boolean = false, val icon: MyIcon? = null)
 
 @Composable
 fun SplitButton(
@@ -357,7 +357,7 @@ fun SplitButton(
                             Hairline(Modifier.padding(vertical = Tokens.Space.S1))
                         }
 
-                        MenuItem(alternative.label, { open = false; alternative.onClick() }, hint = alternative.hint)
+                        MenuItem(alternative.label, { open = false; alternative.onClick() }, hint = alternative.hint, leading = alternative.icon)
                     }
                 }
             }

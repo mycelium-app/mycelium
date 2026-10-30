@@ -15,39 +15,15 @@ import mycelium.api.MyceliumApi
 import mycelium.api.StreamMessage
 import mycelium.api.parseStreamMessage
 import mycelium.state.AppState
-import mycelium.state.goesWithText
 import mycelium.state.reduce
-import mycelium.state.staysHereText
 import kotlin.test.Test
-import kotlin.test.assertContains
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
-
-private fun plan(changed: Int = 3, session: Boolean = true, clones: Boolean = false, ports: List<Int> = emptyList(), processes: List<String> = emptyList()) =
-    MovePlan(movable = true, branch = "main", changedFiles = changed, clonesProject = clones, agentSession = session, staysPorts = ports, staysProcesses = processes)
 
 private const val MoveJson = """{"type":"move","conversation_id":"c1","node_id":"n2","fork":false,"state":"waiting"}"""
 
 class MovesTest {
-    @Test
-    fun whatGoesWithTheConversationNamesTheBranchTheChangedFilesAndTheSession() {
-        assertContains(goesWithText(plan()), "3 changed files")
-        assertContains(goesWithText(plan(changed = 1)), "1 changed file")
-        assertFalse(goesWithText(plan(changed = 0, session = false)).contains("changed"))
-        assertContains(goesWithText(plan(changed = 0, clones = true)), "cloned")
-    }
-
-    @Test
-    fun whatStaysBehindNamesThePortsAndTheProcessesLeftRunning() {
-        assertContains(staysHereText(plan(ports = listOf(5173))), "5173")
-        val both = staysHereText(plan(ports = listOf(3000, 5173), processes = listOf("node")))
-        assertContains(both, "3000")
-        assertContains(both, "node")
-        assertFalse(staysHereText(plan()).contains("5173"))
-    }
-
     @Test
     fun aMoveMessageOnTheStreamIsKeptPerConversation() {
         val message = parseStreamMessage(MoveJson)

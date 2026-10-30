@@ -38,13 +38,13 @@ class ButtonLabelsTest {
             MyceliumTheme {
                 FlowRow(Modifier.width(220.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     MyButton({}, text = "Move after this turn")
-                    MyButton({}, text = "Fork instead")
+                    MyButton({}, text = "Cancel move")
                     MyButton({}, text = "Start the exercise", variant = ButtonVariant.Primary)
                 }
             }
         }
 
-        listOf("Move after this turn", "Fork instead", "Start the exercise").forEach { assertFalse(overflows(it), "$it is cut off") }
+        listOf("Move after this turn", "Cancel move", "Start the exercise").forEach { assertFalse(overflows(it), "$it is cut off") }
 
         val first = rule.onNodeWithText("Move after this turn").getUnclippedBoundsInRoot()
         val last = rule.onNodeWithText("Start the exercise").getUnclippedBoundsInRoot()

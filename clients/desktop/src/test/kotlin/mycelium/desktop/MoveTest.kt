@@ -95,8 +95,8 @@ class MoveTest {
         return store
     }
 
-    private fun sheet(store: Store) {
-        val conversation = Conversation("c1", "u", "n1", "claude", "/work/backups", "Backups", ConversationStatus.Done, createdAt = "2026-10-22T10:00:00Z", updatedAt = "2026-10-22T10:00:00Z")
+    private fun sheet(store: Store, status: ConversationStatus = ConversationStatus.Done) {
+        val conversation = Conversation("c1", "u", "n1", "claude", "/work/backups", "Backups", status, createdAt = "2026-10-22T10:00:00Z", updatedAt = "2026-10-22T10:00:00Z")
 
         rule.setContent {
             MyceliumTheme(true) {
@@ -108,7 +108,7 @@ class MoveTest {
     }
 
     private fun waitForPlan() {
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Goes with it", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { requests.any { it.first.endsWith("/move-plan") } }
     }
 
     private fun waitForText(text: String) {
@@ -133,15 +133,6 @@ class MoveTest {
     }
 
     @Test
-    fun theSheetSaysWhatGoesWithTheConversationAndWhatStaysBehind() {
-        sheet(store(Movable, progress("moving")))
-        waitForPlan()
-
-        rule.onNodeWithText("3 changed files", substring = true).assertIsDisplayed()
-        rule.onNodeWithText("5173", substring = true).assertIsDisplayed()
-    }
-
-    @Test
     fun moveAsksTheControlPlaneToMoveToTheChosenNode() {
         sheet(store(Movable, progress("waiting")))
         waitForPlan()
@@ -155,16 +146,41 @@ class MoveTest {
     }
 
     @Test
-    fun forkInsteadAsksForAForkAndOpensTheNewConversationWhenItIsReady() {
+    fun copyingFromTheMoveMenuAsksForAForkAndOpensTheNewConversationWhenItIsReady() {
         sheet(store(Movable, progress("done", fork = true, result = "c2")))
         waitForPlan()
 
-        rule.onNodeWithText("Fork instead").performClick()
+        rule.onNodeWithContentDescription("More ways to move").performClick()
+        rule.onNodeWithText("Copy to build-01, keep this running").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/move" } }
         assertEquals("""{"node_id":"n2","fork":true}""", requests.last { it.first == "POST /api/v1/conversations/c1/move" }.second)
         rule.waitUntil(5_000) { opened.size >= 2 }
         assertEquals(listOf("dismissed", "c2"), opened)
+    }
+
+    @Test
+    fun interruptingAndMovingNowQueuesTheMoveThenStopsTheTurn() {
+        sheet(store(Movable, progress("waiting")), ConversationStatus.Working)
+        waitForPlan()
+
+        rule.onNodeWithContentDescription("More ways to move after this turn").performClick()
+        rule.onNodeWithText("Interrupt and move now").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/cancel" } }
+        val order = requests.map { it.first }.filter { it.startsWith("POST") }
+        assertEquals(listOf("POST /api/v1/conversations/c1/move", "POST /api/v1/conversations/c1/cancel"), order)
+    }
+
+    @Test
+    fun anIdleConversationOffersNoInterrupt() {
+        sheet(store(Movable, progress("moving")))
+        waitForPlan()
+
+        rule.onNodeWithContentDescription("More ways to move").performClick()
+
+        rule.onNodeWithText("Copy to build-01, keep this running").assertIsDisplayed()
+        assertEquals(0, rule.onAllNodesWithText("Interrupt and move now").fetchSemanticsNodes().size)
     }
 
     @Test

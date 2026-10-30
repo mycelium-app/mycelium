@@ -25,8 +25,6 @@ import mycelium.api.MoveRequest
 import mycelium.api.MoveState
 import mycelium.state.AppState
 import mycelium.state.Store
-import mycelium.state.goesWithText
-import mycelium.state.staysHereText
 
 @Composable
 fun MoveSheet(store: Store, state: AppState, conversation: Conversation, onDismiss: () -> Unit, onOpenConversation: (String) -> Unit, preferredNodeId: String? = null) {
@@ -40,7 +38,6 @@ fun MoveSheet(store: Store, state: AppState, conversation: Conversation, onDismi
     var plan by remember(target?.id) { mutableStateOf<MovePlan?>(null) }
     val progress = state.moves[conversation.id]?.takeIf { it.state == MoveState.Waiting || it.state == MoveState.Moving || requested }
     val busy = progress?.state == MoveState.Waiting || progress?.state == MoveState.Moving
-    val summary = plan?.takeIf { it.movable }?.let { "${goesWithText(it)} ${staysHereText(it)}" }
     val problem = failure ?: progress?.message.takeIf { progress?.state == MoveState.Failed } ?: plan?.reason.takeIf { plan?.movable == false }
 
     LaunchedEffect(target?.id) {
@@ -56,7 +53,7 @@ fun MoveSheet(store: Store, state: AppState, conversation: Conversation, onDismi
         }
     }
 
-    fun submit(fork: Boolean) {
+    fun submit(fork: Boolean, interrupt: Boolean = false) {
         val chosen = target
 
         if (chosen == null) {
@@ -76,6 +73,10 @@ fun MoveSheet(store: Store, state: AppState, conversation: Conversation, onDismi
 
         scope.launch {
             failure = attempt { store.requestMove(conversation.id, MoveRequest(chosen.id, fork)) }
+
+            if (failure == null && interrupt) {
+                failure = attempt { store.api.cancel(conversation.id) }
+            }
 
             if (failure != null) {
                 requested = false
@@ -106,8 +107,6 @@ fun MoveSheet(store: Store, state: AppState, conversation: Conversation, onDismi
                 }
             }
 
-            summary?.let { Label(it, style = Tokens.Type.Meta, color = colors.textMuted) }
-
             if (progress != null) {
                 when (progress.state) {
                     MoveState.Waiting -> Label("Waiting for the turn to end. The move starts as soon as it does.", style = Tokens.Type.Meta, color = colors.textMuted)
@@ -122,8 +121,13 @@ fun MoveSheet(store: Store, state: AppState, conversation: Conversation, onDismi
                 if (progress?.state == MoveState.Waiting) {
                     MyButton({ scope.launch { failure = attempt { store.cancelMove(conversation.id) } } }, text = "Cancel move", size = ButtonSize.Sm, muted = true)
                 } else if (!busy) {
-                    MyButton({ submit(true) }, text = "Fork instead", size = ButtonSize.Sm, tooltip = "Copy this conversation to the node and leave the original where it is")
-                    MyButton({ submit(false) }, text = if (conversation.status == ConversationStatus.Working || conversation.status == ConversationStatus.Input) "Move after this turn" else "Move", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+                    val running = conversation.status == ConversationStatus.Working || conversation.status == ConversationStatus.Input
+                    val alternatives = listOfNotNull(
+                        if (running) SplitAlternative("Interrupt and move now", { submit(false, interrupt = true) }, icon = MyIcon.Stop) else null,
+                        SplitAlternative("Copy to ${target?.name ?: "the node"}, keep this running", { submit(true) }, icon = MyIcon.Copy),
+                    )
+
+                    SplitButton(if (running) "Move after this turn" else "Move", { submit(false) }, alternatives, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
                 }
             }
         }
