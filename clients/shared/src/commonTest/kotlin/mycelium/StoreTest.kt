@@ -114,7 +114,7 @@ class StoreTest {
 
         store.open("c1")
 
-        assertEquals("https://mycelium.test/api/v1/conversations/c1/events?before=${Long.MAX_VALUE}&limit=500", requested.value.first())
+        assertEquals(listOf("https://mycelium.test/api/v1/conversations/c1/events?before=${Long.MAX_VALUE}&limit=500"), requested.value.filter { "/events" in it })
         assertEquals(1, requested.value.count { it.contains("/events") })
         assertEquals(listOf(1L, 2L), store.state.value.events.getValue("c1").map { it.seq })
         assertFalse(store.state.value.hasOlderEvents("c1"))
