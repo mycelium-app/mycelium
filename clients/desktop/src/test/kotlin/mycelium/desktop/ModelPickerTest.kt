@@ -9,6 +9,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -101,7 +102,7 @@ class ModelPickerTest {
         rule.onNodeWithText("Any model").assertIsDisplayed()
 
         for (heading in listOf("Favourites", "Claude Code", "Codex", "Chat")) {
-            rule.onNode(hasScrollAction()).performScrollToNode(hasText(heading))
+            rule.onAllNodes(hasScrollAction()).onLast().performScrollToNode(hasText(heading))
             rule.onAllNodesWithText(heading).onFirst().assertIsDisplayed()
         }
     }
@@ -111,7 +112,7 @@ class ModelPickerTest {
         var picked: ModelOption? = null
         showPicker(onPickModel = { picked = it })
 
-        rule.onNode(hasScrollAction()).performScrollToNode(hasText("GPT-6.1 Sol"))
+        rule.onAllNodes(hasScrollAction()).onLast().performScrollToNode(hasText("GPT-6.1 Sol"))
         rule.onNodeWithText("On orion").assertExists()
         rule.onNodeWithContentDescription("Codex: GPT-6.1 Sol, on orion").performClick()
 

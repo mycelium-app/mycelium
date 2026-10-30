@@ -118,8 +118,8 @@ class AgentsAndPriceTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Edit list").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Edit list").performClick()
-        rule.onNodeWithContentDescription("Add model: Add").performClick()
-        rule.onNodeWithText("Codex, any account").performClick()
+        rule.onNodeWithContentDescription("Model: Add a favourite").performClick()
+        rule.onNodeWithContentDescription("Codex: Codex").performClick()
         rule.onNodeWithText("Save").performClick()
 
         waitFor("PUT /api/v1/agent-settings")

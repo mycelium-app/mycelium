@@ -150,14 +150,13 @@ class WorktreesTest {
     }
 
     @Test
-    fun theModelMenuOffersTheDefaultAndTheListTheNodeReportedAndTheChoiceIsSent() {
+    fun theModelMenuOffersTheListTheNodeReportedAndTheChoiceIsSent() {
         val store = store()
         var created = false
         show(store) { created = true }
 
-        rule.onNodeWithContentDescription("Model: Default model").performClick()
-        rule.onNodeWithText("Claude Code on laptop, ", substring = true).assertExists()
-        rule.onNodeWithText("Sonnet 5.5").performClick()
+        rule.onNodeWithContentDescription("Model: Opus 5.5").performClick()
+        rule.onNodeWithContentDescription("Claude Code: Sonnet 5.5").performClick()
         rule.onNodeWithContentDescription("Send").performClick()
 
         rule.waitUntil(5_000) { created }
