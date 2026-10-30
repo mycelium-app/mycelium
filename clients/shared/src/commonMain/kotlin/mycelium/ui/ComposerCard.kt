@@ -169,7 +169,7 @@ fun ModelPicker(controls: ModelPickerControls, maxWidth: Dp = Tokens.Size.Accoun
                             val rowRefusal = refusal?.takeIf { it.rowId == row.id }
 
                             MenuItem(
-                                row.label,
+                                if (row.signIn) "${row.usage} · ${row.account}" else row.label,
                                 leading = agentIcon(row.agent),
                                 onClick = { chooseAccount(row.id) },
                                 checked = row.id == controls.account,
@@ -265,8 +265,7 @@ fun ComposerCard(
     modifier: Modifier = Modifier,
     error: String? = null,
     assistantActions: AssistantActionControls? = null,
-    project: (@Composable () -> Unit)? = null,
-    place: (@Composable () -> Unit)? = null,
+    strip: (@Composable () -> Unit)? = null,
     notice: (@Composable () -> Unit)? = null,
     setup: (@Composable () -> Unit)? = null,
     model: (@Composable () -> Unit)? = null,
@@ -282,19 +281,8 @@ fun ComposerCard(
         onDispose { platform?.listenForFiles(null) }
     }
 
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+    Column(modifier.fillMaxWidth()) {
         setup?.invoke()
-
-        if (project != null || place != null) {
-            Row(
-                Modifier.fillMaxWidth().horizontalScrollFaded().semantics { contentDescription = "Start options" },
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                project?.invoke()
-                place?.invoke()
-            }
-        }
 
         Column(
             Modifier
@@ -350,8 +338,26 @@ fun ComposerCard(
             }
         }
 
+        if (strip != null) {
+            val stripShape = RoundedCornerShape(bottomStart = Tokens.Radius.Block, bottomEnd = Tokens.Radius.Block)
+
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Tokens.Space.S4)
+                    .background(colors.bgPanel, stripShape)
+                    .border(Tokens.Size.Hairline, colors.border, stripShape)
+                    .padding(horizontal = Tokens.Space.S1, vertical = Tokens.Space.S0_5)
+                    .semantics { contentDescription = "Place" },
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                strip()
+            }
+        }
+
         if (error != null) {
-            Row(Modifier.semantics { liveRegion = LiveRegionMode.Assertive }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.padding(top = Tokens.Space.S1).semantics { liveRegion = LiveRegionMode.Assertive }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                 Icon(MyIcon.Failed, colors.statusFailed, Tokens.Size.IconSm)
                 Label(error, style = Tokens.Type.Meta, color = colors.statusFailed)
             }

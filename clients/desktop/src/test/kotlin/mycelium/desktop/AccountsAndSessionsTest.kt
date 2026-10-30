@@ -292,7 +292,7 @@ class AccountsAndSessionsTest {
 
         rule.onNodeWithContentDescription("Model: Claude Opus 5.5").performClick()
         rule.onNodeWithText("Account").performClick()
-        rule.onNodeWithText("Sign in on willow").performClick()
+        rule.onNodeWithText("Sign in on willow · side@example.com").performClick()
 
         assertEquals("sign in:side@example.com", picked)
     }

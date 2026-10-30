@@ -2,6 +2,8 @@ package mycelium.ui
 
 import mycelium.state.favouriteOptions
 import mycelium.state.modelOptions
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -163,6 +166,18 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
         }
     }
 
+    fun chooseProject(id: String?) {
+        projectMenuOpen = false
+        setupJob?.cancel()
+        sendAfterSetup = false
+        setup = null
+        withoutProject = id == null
+        chosenProject = id
+        worktree = false
+        cwdError = null
+        branchError = null
+    }
+
     fun create() {
         if (setup is ProjectSetup.Running) {
             sendAfterSetup = true
@@ -233,7 +248,41 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6),
             ) {
-                Label("What are we working on?", style = Tokens.Type.Display)
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Label("What should we build in ", style = Tokens.Type.Display)
+
+                        Box {
+                            Row(
+                                Modifier.pressable({ projectMenuOpen = true }, description = "Project: ${project?.name ?: "No project"}", shape = ControlShape),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Label(project?.name ?: "No project", style = Tokens.Type.Display)
+                                Icon(MyIcon.ChevronDown, colors.textMuted)
+                            }
+
+                            if (projectMenuOpen) {
+                                ProjectMenu(
+                                    projects,
+                                    state.nodes,
+                                    project?.id,
+                                    "Project",
+                                    onDismiss = { projectMenuOpen = false },
+                                    recent = recent,
+                                    noProjectLabel = "No project, choose a folder",
+                                    onNewProject = { projectMenuOpen = false; settingUpProject = true },
+                                    onSelect = ::chooseProject,
+                                )
+                            }
+                        }
+
+                        Label("?", style = Tokens.Type.Display)
+                    }
+
+                    if (project != null) {
+                        MyButton({ chooseProject(null) }, text = "or start without a project", size = ButtonSize.Sm, muted = true)
+                    }
+                }
 
                 Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
                     ComposerCard(
@@ -256,42 +305,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                 )
                             }
                         },
-                        project = {
-                            Box {
-                                MyButton(
-                                    { projectMenuOpen = true },
-                                    text = project?.name ?: "No project",
-                                    icon = MyIcon.Folder,
-                                    description = "Project: ${project?.name ?: "No project"}",
-                                    muted = true,
-                                    trailingIcon = MyIcon.ChevronDown,
-                                )
-
-                                if (projectMenuOpen) {
-                                    ProjectMenu(
-                                        projects,
-                                        state.nodes,
-                                        project?.id,
-                                        "Project",
-                                        onDismiss = { projectMenuOpen = false },
-                                        recent = recent,
-                                        noProjectLabel = "No project, choose a folder",
-                                        onNewProject = { projectMenuOpen = false; settingUpProject = true },
-                                    ) {
-                                        projectMenuOpen = false
-                                        setupJob?.cancel()
-                                        sendAfterSetup = false
-                                        setup = null
-                                        withoutProject = it == null
-                                        chosenProject = it
-                                        worktree = false
-                                        cwdError = null
-                                        branchError = null
-                                    }
-                                }
-                            }
-                        },
-                        place = if (nodes.isEmpty()) lastNode?.let { last ->
+                        strip = if (nodes.isEmpty()) lastNode?.let { last ->
                             {
                                 MyButton(
                                     onOpenNodes,
@@ -411,18 +425,20 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                             }
                         },
                         notice = if (nodes.isEmpty()) ({
+                            val shape = RoundedCornerShape(Tokens.Radius.Block)
+
                             Row(
-                                Modifier.fillMaxWidth().padding(bottom = Tokens.Space.S2),
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = Tokens.Space.S2)
+                                    .background(colors.bgContent, shape)
+                                    .border(Tokens.Size.Hairline, colors.border, shape)
+                                    .padding(start = Tokens.Space.S2, top = Tokens.Space.S1_5, end = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
                                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Icon(MyIcon.Alert, colors.statusAttention, Tokens.Size.IconSm)
-
-                                Column(Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite }) {
-                                    NoNodeNotice(colors.textMuted)
-                                    Label("Your message stays here.", color = colors.textMuted)
-                                }
-
+                                Label("No node is online.", Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite }, color = colors.textMuted)
                                 MyButton(onOpenNodes, text = "Nodes", description = "Nodes", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
                             }
                         }) else null,

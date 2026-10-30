@@ -43,8 +43,7 @@ class ComposerCardTest {
                     onSubmit = {},
                     attachments = AttachmentControls(emptyList(), null, {}, {}),
                     kind = ConversationKind.NewConversation,
-                    project = { MyButton({}, text = "harbour", description = "Project: harbour") },
-                    place = { MyButton({}, text = "orion", description = "Place: orion") },
+                    strip = { MyButton({}, text = "orion", description = "Place: orion") },
                     model = { MyButton({}, text = "Opus", description = "Model: Opus") },
                 )
             }
@@ -56,18 +55,15 @@ class ComposerCardTest {
     private fun SemanticsNodeInteraction.typed(): String = fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text.orEmpty()
 
     @Test
-    fun theProjectAndPlacePickersSitAboveTheComposerBoxLeftAlignedWithIt() {
+    fun thePlaceStripIsAttachedBelowTheComposerBoxAndTheModelPickerStaysInTheBar() {
         show()
 
         val box = field().getBoundsInRoot()
-        val project = rule.onNodeWithContentDescription("Project: harbour").getBoundsInRoot()
+        val card = rule.onNodeWithContentDescription("Model: Opus").getBoundsInRoot()
         val place = rule.onNodeWithContentDescription("Place: orion").getBoundsInRoot()
-        val model = rule.onNodeWithContentDescription("Model: Opus").getBoundsInRoot()
 
-        assertTrue(project.bottom <= box.top, "project picker is above the text field")
-        assertTrue(place.bottom <= box.top, "place picker is above the text field")
-        assertTrue(model.top >= box.bottom, "model picker stays in the bar below the text field")
-        assertTrue(place.left > project.left)
+        assertTrue(card.top >= box.bottom, "model picker stays in the bar below the text field")
+        assertTrue(place.top >= card.bottom, "place strip sits below the card")
     }
 
     @Test

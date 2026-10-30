@@ -105,6 +105,29 @@ class NewConversationPlaceTest {
     }
 
     @Test
+    fun theProjectIsChosenInTheHeadlineAndReplacesItsName() {
+        show(store())
+
+        rule.onNodeWithText("What should we build in ", substring = true).assertExists()
+        rule.onNodeWithContentDescription("Project: harbour").performClick()
+        rule.onNodeWithText("atlas").performClick()
+
+        rule.onNodeWithContentDescription("Project: atlas").assertExists()
+        rule.onNodeWithContentDescription("Project: harbour").assertDoesNotExist()
+    }
+
+    @Test
+    fun startingWithoutAProjectFromTheHeadlineAsksForAFolder() {
+        show(store())
+
+        rule.onNodeWithText("or start without a project").performClick()
+
+        rule.onNodeWithContentDescription("Project: No project").assertExists()
+        rule.onNodeWithContentDescription("Place: orion, choose a folder").assertExists()
+        rule.onNodeWithText("or start without a project").assertDoesNotExist()
+    }
+
+    @Test
     fun theProjectMenuListsRecentProjectsBeforeAllProjects() {
         show(store())
 
@@ -165,7 +188,8 @@ class NewConversationPlaceTest {
         val store = store(nodes = "[]")
         show(store, onOpenNodes = { openedNodes = true })
 
-        rule.onNodeWithText("No node is online.", substring = true).assertExists()
+        rule.onNodeWithText("No node is online.").assertExists()
+        rule.onNodeWithText("Your message stays here.", substring = true).assertDoesNotExist()
         rule.onNodeWithContentDescription("Message").performTextInput("Restore the copy")
         rule.onNodeWithContentDescription("Send").performClick()
         rule.onNodeWithContentDescription("Nodes").performClick()
@@ -186,10 +210,10 @@ class NewConversationPlaceTest {
     }
 
     @Test
-    fun onAPhoneThePickersScrollSidewaysAboveAttachAndSend() {
+    fun onAPhoneTheProjectIsInTheHeadlineAndThePlaceStripSitsWithAttachAndSend() {
         show(store(), phone = true)
 
-        rule.onNodeWithContentDescription("Start options").assertExists()
+        rule.onNodeWithContentDescription("Place").assertExists()
         rule.onNodeWithContentDescription("Project: harbour").assertExists()
         rule.onNodeWithContentDescription("Place: orion, existing checkout").assertExists()
         rule.onNodeWithContentDescription("Attach files").assertExists()
