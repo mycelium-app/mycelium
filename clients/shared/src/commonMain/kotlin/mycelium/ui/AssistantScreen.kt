@@ -92,7 +92,7 @@ private fun RowScope.AssistantTitle(state: AppState, assistant: Assistant, onBac
         BackButton("Assistants", onBack)
     }
 
-    AssistantAvatar(assistant.name, voice = assistant.builtinKey == VoiceAssistantKey)
+    AssistantAvatar(assistant.name)
     Label(assistant.name, Modifier.semantics { heading() }, Tokens.Type.Title, maxLines = 1)
     groupName?.let { Label(it, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted, maxLines = 1) }
 }

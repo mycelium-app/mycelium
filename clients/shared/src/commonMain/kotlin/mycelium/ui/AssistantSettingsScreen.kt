@@ -74,7 +74,7 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String, 
         Bar {
             OpenListButton()
             BackButton(current?.name ?: "the assistant", onBack)
-            current?.let { AssistantAvatar(it.name, builtIn = it.builtinKey != null, voice = it.builtinKey == VoiceAssistantKey) }
+            current?.let { AssistantAvatar(it.name) }
             BarTitle("${current?.name ?: "Assistant"} settings")
 
             if (current?.builtinKey != null) {

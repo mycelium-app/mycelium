@@ -4,6 +4,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -26,6 +27,7 @@ import mycelium.ui.MyceliumTheme
 import mycelium.ui.Route
 import mycelium.ui.Shell
 import org.junit.Rule
+import androidx.compose.ui.unit.dp
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -95,6 +97,19 @@ class AssistantsTest {
         rule.onNodeWithContentDescription("Show all assistants").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open War room").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun theConversationsLabelSitsApartFromTheAssistantsAndLinesUpWithTheirLabel() {
+        shell(mutableListOf(assistantJson("Stand-up")))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Stand-up, Idle").fetchSemanticsNodes().isNotEmpty() }
+        val row = rule.onNodeWithContentDescription("Stand-up, Idle").getBoundsInRoot()
+        val heading = rule.onNodeWithText("Assistants").getBoundsInRoot()
+        val label = rule.onNodeWithText("Conversations").getBoundsInRoot()
+
+        assertTrue(label.top - row.bottom >= 16.dp, "the label is ${label.top - row.bottom} below the last assistant")
+        assertEquals(heading.left, label.left)
     }
 
     @Test

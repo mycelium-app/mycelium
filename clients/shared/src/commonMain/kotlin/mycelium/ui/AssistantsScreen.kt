@@ -36,7 +36,6 @@ import mycelium.api.ConversationStatus
 import mycelium.state.AllGroups
 import mycelium.state.AllStates
 import mycelium.state.ArchivedState
-import mycelium.state.VoiceAssistantKey
 import mycelium.state.AppState
 import mycelium.state.Choice
 import mycelium.state.GroupByGroup
@@ -54,15 +53,9 @@ private val StateChoices = listOf(Choice(AllStates, "All states"), Choice("worki
 private val GroupByChoices = listOf(Choice(GroupByNone, "No grouping"), Choice(GroupByGroup, "Group"), Choice(GroupByState, "State"))
 
 @Composable
-internal fun AssistantAvatar(name: String, size: androidx.compose.ui.unit.Dp = Tokens.Size.Avatar, builtIn: Boolean = false, voice: Boolean = false) {
+internal fun AssistantAvatar(name: String, size: androidx.compose.ui.unit.Dp = Tokens.Size.Avatar) {
     Box(Modifier.size(size).clip(CircleShape).background(MyTheme.colors.bgSelected).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
-        if (voice) {
-            Icon(MyIcon.Microphone, MyTheme.colors.textMuted, Tokens.Size.IconSm)
-        } else if (builtIn) {
-            Icon(MyIcon.Leaf, MyTheme.colors.leaf, Tokens.Size.IconSm)
-        } else {
-            Label(name.trim().take(1).uppercase(), style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
-        }
+        Label(name.trim().take(1).uppercase(), style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
     }
 }
 
@@ -130,7 +123,7 @@ internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, 
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                AssistantAvatar(assistant.name, builtIn = assistant.builtinKey != null, voice = assistant.builtinKey == VoiceAssistantKey)
+                AssistantAvatar(assistant.name)
                 Label(assistant.name, Modifier.weight(1f), maxLines = 1)
 
                 when (assistant.state) {
@@ -147,7 +140,7 @@ internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, 
     }
 
     item(key = "assistants-gap") {
-        Spacer(Modifier.height(Tokens.Space.S3))
+        Spacer(Modifier.height(Tokens.Space.S4))
     }
 }
 
@@ -234,7 +227,7 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
                                     horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    AssistantAvatar(assistant.name, builtIn = assistant.builtinKey != null, voice = assistant.builtinKey == VoiceAssistantKey)
+                                    AssistantAvatar(assistant.name)
                                     Label(assistant.name, maxLines = 1)
 
                                     if (assistant.builtinKey != null) {
