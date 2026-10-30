@@ -916,7 +916,7 @@ fn encode_segments(path: &str) -> String {
 
 pub fn display_name(kind: ForgeKind) -> &'static str {
     match kind {
-        ForgeKind::Github | ForgeKind::Forgejo => "GitHub",
+        ForgeKind::Github => "GitHub",
         ForgeKind::Gitlab => "GitLab",
         ForgeKind::Forgejo => "Forgejo",
     }
@@ -943,7 +943,7 @@ pub fn token_hint(token: &str) -> String {
 
 fn normalised_base_url(kind: ForgeKind, entered: Option<&str>) -> ApiResult<String> {
     let default = match kind {
-        ForgeKind::Github | ForgeKind::Forgejo => "https://github.com",
+        ForgeKind::Github => "https://github.com",
         ForgeKind::Gitlab => "https://gitlab.com",
         ForgeKind::Forgejo => "https://codeberg.org",
     };
@@ -1171,4 +1171,33 @@ pub async fn repositories(State(state): State<AppState>, user: AuthUser, Query(q
     result.repositories.sort_by(|first, second| second.updated_at.cmp(&first.updated_at));
 
     Ok(Json(result))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ForgeError, normalised_base_url};
+    use mycelium_proto::api::ForgeKind;
+
+    #[test]
+    fn an_omitted_or_blank_forge_address_uses_that_forges_public_host() {
+        for (kind, expected) in [(ForgeKind::Github, "https://github.com"), (ForgeKind::Gitlab, "https://gitlab.com"), (ForgeKind::Forgejo, "https://codeberg.org")] {
+            for entered in [None, Some(""), Some("   ")] {
+                assert_eq!(normalised_base_url(kind, entered).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn a_forgejo_connection_keeps_its_entered_address() {
+        assert_eq!(normalised_base_url(ForgeKind::Forgejo, Some("  https://forge.example.org/  ")).unwrap(), "https://forge.example.org");
+    }
+
+    #[test]
+    fn forgejo_failures_name_the_forge_that_refused_the_operation() {
+        let rejected = ForgeError::Rejected.into_api(ForgeKind::Forgejo, "https://forge.example.org");
+        let conflict = ForgeError::Conflict.into_api(ForgeKind::Forgejo, "https://forge.example.org");
+
+        assert!(rejected.message().starts_with("Forgejo did not accept this token."));
+        assert!(conflict.message().contains("changed on Forgejo"));
+    }
 }

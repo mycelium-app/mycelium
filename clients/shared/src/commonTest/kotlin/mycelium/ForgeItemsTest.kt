@@ -96,7 +96,7 @@ class ForgeItemsTest {
             fetched += request.url.encodedPath
             respond(request.url.encodedPath.encodeToByteArray())
         }
-        val store = Store(MyceliumApi("https://mycelium.test", null, engine), this)
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
         val avatar = "https://example.org/avatar"
 
         assertEquals("/api/v1/forges/f1/avatar", store.forgeAvatarBytes("f1", avatar)?.decodeToString())
