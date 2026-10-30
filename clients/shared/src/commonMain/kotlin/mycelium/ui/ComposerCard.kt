@@ -79,37 +79,13 @@ private fun PickerAccount.description(): String = when {
 }
 
 @Composable
-private fun AccountDetail(row: PickerAccount) {
-    val muted = MyTheme.colors.textMuted
-    val node = row.node
-
-    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
-        if (node == null && !row.signIn) {
-            Label(NoNodeOnline, style = Tokens.Type.Meta, color = muted, maxLines = 1)
-
-            return@Row
-        }
-
-        if (node != null && !row.signIn) {
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-                Icon(nodeIcon(node), muted, Tokens.Size.IconSm)
-                Label(if (row.here) ThisDevice else node.name, style = Tokens.Type.Meta, color = muted, maxLines = 1)
-            }
-        }
-
-        Label(row.usage, style = Tokens.Type.Meta, color = muted, maxLines = 1)
-    }
-}
-
-@Composable
-private fun ModelRow(option: ModelOption, controls: ModelPickerControls, favourite: Boolean, showHarness: Boolean, onChoose: (ModelOption) -> Unit) {
+private fun ModelRow(option: ModelOption, controls: ModelPickerControls, favourite: Boolean, onChoose: (ModelOption) -> Unit) {
     val chosen = controls.chosen?.let(option::isChosen) == true
 
     MenuItem(
         option.name,
         onClick = { onChoose(option) },
         checked = chosen,
-        hint = option.where ?: option.harness.takeIf { showHarness },
         leadingContent = { Icon(option.agent?.let(::agentIcon) ?: MyIcon.Chat, if (option.available) MyTheme.colors.textMuted else MyTheme.colors.textFaint) },
         greyed = !option.available,
         description = "${option.harness}: ${option.name}${option.where?.let { ", ${it.replaceFirstChar(Char::lowercase)}" }.orEmpty()}",
@@ -187,7 +163,7 @@ fun ModelPicker(controls: ModelPickerControls, maxWidth: Dp = Tokens.Size.Accoun
                     Column(Modifier.semantics { contentDescription = "Account" }) {
                         MenuItem("Back to models", onClick = { choosingAccount = false; refusal = null }, leading = MyIcon.ChevronLeft)
                         MenuLabel("Runs on")
-                        MenuItem(AnyAccount, onClick = { chooseAccount(null) }, checked = controls.account == null, hint = "Switches as usage runs out", leading = MyIcon.Person)
+                        MenuItem(AnyAccount, onClick = { chooseAccount(null) }, checked = controls.account == null, description = "$AnyAccount, switches as usage runs out", leading = MyIcon.Person)
 
                         for (row in controls.accounts) {
                             val rowRefusal = refusal?.takeIf { it.rowId == row.id }
@@ -198,7 +174,6 @@ fun ModelPicker(controls: ModelPickerControls, maxWidth: Dp = Tokens.Size.Accoun
                                 onClick = { chooseAccount(row.id) },
                                 checked = row.id == controls.account,
                                 description = row.description(),
-                                hintContent = { AccountDetail(row) },
                                 checkSlot = true,
                             )
 
@@ -238,7 +213,7 @@ fun ModelPicker(controls: ModelPickerControls, maxWidth: Dp = Tokens.Size.Accoun
                                     "Any model",
                                     onClick = { controls.onPickAny?.invoke(); open = false },
                                     checked = controls.anyChosen,
-                                    hint = anyModelHint(favourites),
+                                    description = "Any model: ${anyModelHint(favourites)}",
                                     leading = MyIcon.Layers,
                                 )
                             }
@@ -248,12 +223,12 @@ fun ModelPicker(controls: ModelPickerControls, maxWidth: Dp = Tokens.Size.Accoun
 
                         if (starred.isNotEmpty()) {
                             item(key = "favourites") { MenuHeading("Favourites") }
-                            items(starred, key = { "favourite|${it.key}" }) { ModelRow(it, controls, favourite = true, showHarness = true, onChoose = ::choose) }
+                            items(starred, key = { "favourite|${it.key}" }) { ModelRow(it, controls, favourite = true, onChoose = ::choose) }
                         }
 
                         for ((harness, options) in found.sortedBy { it.section ?: "" }.groupBy { it.section ?: it.harness }) {
                             item(key = "heading|$harness") { MenuHeading(harness) }
-                            items(options, key = { "model|${it.key}" }) { ModelRow(it, controls, favourite = controls.favourites.isFavourite(it), showHarness = false, onChoose = ::choose) }
+                            items(options, key = { "model|${it.key}" }) { ModelRow(it, controls, favourite = controls.favourites.isFavourite(it), onChoose = ::choose) }
                         }
 
                         if (found.isEmpty() && !anyListed && favourites.matching(query).isEmpty()) {
@@ -266,7 +241,7 @@ fun ModelPicker(controls: ModelPickerControls, maxWidth: Dp = Tokens.Size.Accoun
                                 MenuItem(
                                     "Account",
                                     onClick = { choosingAccount = true },
-                                    hint = controls.accounts.firstOrNull { it.id == controls.account }?.label ?: "Any signed-in account",
+                                    description = "Account: ${controls.accounts.firstOrNull { it.id == controls.account }?.label ?: "Any signed-in account"}",
                                     leading = MyIcon.Person,
                                     trailing = { Icon(MyIcon.ChevronRight, MyTheme.colors.textMuted) },
                                 )

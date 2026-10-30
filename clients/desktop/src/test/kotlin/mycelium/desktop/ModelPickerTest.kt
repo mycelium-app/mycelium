@@ -108,15 +108,29 @@ class ModelPickerTest {
     }
 
     @Test
-    fun aModelTheChosenNodeLacksIsGreyedAndSaysWhereItLives() {
+    fun aModelTheChosenNodeLacksIsGreyedAndStaysUnpickable() {
         var picked: ModelOption? = null
         showPicker(onPickModel = { picked = it })
 
         rule.onAllNodes(hasScrollAction()).onLast().performScrollToNode(hasText("GPT-6.1 Sol"))
-        rule.onNodeWithText("On orion").assertExists()
+        rule.onNodeWithText("On orion").assertDoesNotExist()
         rule.onNodeWithContentDescription("Codex: GPT-6.1 Sol, on orion").performClick()
 
         assertEquals(null, picked)
+    }
+
+    @Test
+    fun menuRowsCarryNoSubtext() {
+        showPicker()
+
+        rule.onNodeWithText("Claude Opus 5.5, then Claude Opus 5.5").assertDoesNotExist()
+        rule.onNodeWithText("Any signed-in account").assertDoesNotExist()
+        rule.onNodeWithText("Account").performClick()
+
+        rule.onNodeWithText("Switches as usage runs out").assertDoesNotExist()
+        rule.onNodeWithText("64% left").assertDoesNotExist()
+        rule.onNodeWithText("No node online").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Claude Code · work@example.org on atlas, 64% left").assertIsDisplayed()
     }
 
     @Test
