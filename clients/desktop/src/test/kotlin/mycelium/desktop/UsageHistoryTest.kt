@@ -127,9 +127,8 @@ class UsageHistoryTest {
         open()
 
         rule.onNodeWithText("All time").performClick()
-        rule.waitForIdle()
 
-        assertEquals("range=all", asked.last())
+        rule.waitUntil(5_000) { asked.lastOrNull() == "range=all" }
     }
 
     @Test
