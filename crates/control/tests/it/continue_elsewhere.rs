@@ -266,6 +266,25 @@ async fn continuing_on_another_harness_seeds_the_first_prompt_with_the_handoff()
 }
 
 #[tokio::test]
+async fn the_handoff_tells_the_new_agent_the_current_to_do_list() {
+    let server = Server::start().await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
+    let id = idle_conversation(&server, &mut link, "sam@example.com").await;
+    let plan = json!({"update": {"sessionUpdate": "plan", "entries": [{"content": "Reproduce the flake", "status": "completed"}, {"content": "Fix the race", "status": "in_progress"}, {"content": "Open a merge request", "status": "pending"}]}});
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 10, update: plan }).await;
+    link.barrier(id, 11).await;
+
+    continue_on(&server, id, json!({"agent": "codex"})).await;
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "Carry on"}))).await;
+    next_command(&mut link).await;
+    next_command(&mut link).await;
+    link.start_session(id, "codex-1").await;
+    let first = expect_prompt(&mut link).await;
+
+    assert!(first.contains("- [completed] Reproduce the flake\n- [in_progress] Fix the race\n- [pending] Open a merge request"), "{first}");
+}
+
+#[tokio::test]
 async fn a_refused_start_after_continuing_elsewhere_fails_the_conversation_and_the_next_prompt_starts_afresh() {
     let server = Server::start().await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;

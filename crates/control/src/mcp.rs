@@ -19,6 +19,7 @@ mod server_tools;
 mod ssh_access;
 mod tasks;
 mod terminals;
+mod todos;
 mod workflows;
 
 use crate::error::{ApiError, ApiResult};
@@ -56,6 +57,7 @@ enum Area {
     Learning,
     Instructions,
     GoalAndUsage,
+    Todos,
     ProjectIcon,
     Outline,
     Screens,
@@ -80,6 +82,7 @@ fn area_of(tool: &str) -> Option<Area> {
         "walkthrough" | "save_reflection" | "propose_exercise" | "note_learned" | "save_exercise_review" => Some(Area::Learning),
         "get_instructions" | "propose_instructions_edit" => Some(Area::Instructions),
         "get_goal" | "report_goal" | "get_account_usage" => Some(Area::GoalAndUsage),
+        "set_todos" => Some(Area::Todos),
         "set_project_icon" => Some(Area::ProjectIcon),
         "open_outline" => Some(Area::Outline),
         "open_screen" => Some(Area::Screens),
@@ -108,6 +111,7 @@ async fn call_area(area: Area, call: ToolCall<'_>) -> ApiResult<ToolReply> {
         Area::Learning => learning::call(call).await,
         Area::Instructions => instructions::call(call).await,
         Area::GoalAndUsage => goal_and_usage::call(call).await,
+        Area::Todos => todos::call(call).await,
         Area::ProjectIcon => project_icon::call(call).await,
         Area::Outline => outline::call(call).await,
         Area::Screens => screens::call(call).await,
@@ -145,6 +149,7 @@ pub fn tool_definitions() -> Value {
         learning::definitions(),
         instructions::definitions(),
         goal_and_usage::definitions(),
+        todos::definitions(),
         project_icon::definitions(),
         outline::definitions(),
         screens::definitions(),

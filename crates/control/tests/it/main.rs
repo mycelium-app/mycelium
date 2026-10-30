@@ -67,6 +67,7 @@ mod workflows;
 mod stoat;
 mod tandoor;
 mod tasks;
+mod todos;
 mod terminal_tools;
 mod transcriptions;
 mod usage_history;
