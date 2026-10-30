@@ -72,6 +72,8 @@ sealed interface StreamMessage {
 
     data object IntegrationsChanged : StreamMessage
 
+    data object ForgeChanged : StreamMessage
+
     data object WellnessChanged : StreamMessage
 
     data class ScreenOpened(val route: String) : StreamMessage
@@ -146,6 +148,7 @@ fun parseStreamMessage(text: String): StreamMessage? {
         "node" -> StreamMessage.NodeChanged(MyceliumJson.decodeFromJsonElement(NodeSummary.serializer(), element))
         "node_removed" -> StreamMessage.NodeRemoved(element.requireString("node_id"))
         "integrations_changed" -> StreamMessage.IntegrationsChanged
+        "forge_changed" -> StreamMessage.ForgeChanged
         "wellness_changed" -> StreamMessage.WellnessChanged
         "open_screen" -> StreamMessage.ScreenOpened(element.requireString("route"))
         "node_resources" -> StreamMessage.NodeResourcesSampled(

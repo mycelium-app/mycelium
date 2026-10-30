@@ -27,19 +27,24 @@ import mycelium.api.Forge
 import mycelium.api.StartChatToolServerOAuthRequest
 import mycelium.state.Store
 
-private val ForgeKinds = mapOf("GitHub" to "github", "GitLab" to "gitlab")
+private val ForgeKinds = mapOf("GitHub" to "github", "GitLab" to "gitlab", "Forgejo" to "forgejo")
 
 private val ForgeTokenHints = mapOf(
     "github" to "Use a token with the repo scope, or a fine-grained token with Contents, Issues and Pull requests permissions.",
     "gitlab" to "Use a token with the api scope. read_api is enough to browse only.",
+    "forgejo" to "Use an access token with read and write access to user, repository and issue.",
 )
-private val ForgeDefaultHosts = mapOf("github" to "https://github.com", "gitlab" to "https://gitlab.com")
+private val ForgeDefaultHosts = mapOf("github" to "https://github.com", "gitlab" to "https://gitlab.com", "forgejo" to "https://codeberg.org")
 
-private fun forgeName(forge: Forge): String = if (forge.kind == "gitlab") "GitLab" else "GitHub"
+private fun forgeName(forge: Forge): String = when (forge.kind) {
+    "gitlab" -> "GitLab"
+    "forgejo" -> "Forgejo"
+    else -> "GitHub"
+}
 
 internal fun mcpAddress(forge: Forge): String = if (forge.kind == "gitlab") "${forge.baseUrl.trimEnd('/')}/api/v4/mcp" else "https://api.githubcopilot.com/mcp/"
 
-private fun mcpOffered(kind: String, baseUrl: String): Boolean = kind == "gitlab" || baseUrl.isBlank() || baseUrl.trim().trimEnd('/') == "https://github.com"
+private fun mcpOffered(kind: String, baseUrl: String): Boolean = kind != "forgejo" && (kind == "gitlab" || baseUrl.isBlank() || baseUrl.trim().trimEnd('/') == "https://github.com")
 
 @Composable
 fun ForgesSettings(store: Store) {

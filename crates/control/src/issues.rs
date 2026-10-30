@@ -70,6 +70,8 @@ pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Q
         }
     }
 
+    result.issues.sort_by(|first, second| second.updated_at.cmp(&first.updated_at));
+
     Ok(Json(result))
 }
 

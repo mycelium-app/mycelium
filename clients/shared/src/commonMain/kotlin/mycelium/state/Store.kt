@@ -68,6 +68,8 @@ import kotlin.io.encoding.Base64
 private const val FirstRetryMillis = 1_000L
 private const val LongestRetryMillis = 15_000L
 private const val MaxCachedAttachments = 20
+
+private const val MaxCachedAvatars = 200
 private const val MaxCachedPreviews = 200
 
 class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val platform: Platform? = null) {
@@ -1030,6 +1032,23 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         val walkthrough = state.value.walkthroughs[conversationId] ?: return
         mutableState.update { it.copy(walkthroughs = it.walkthroughs + (conversationId to walkthrough.copy(dismissed = dismissed))) }
         act { if (dismissed) api.dismissWalkthrough(walkthrough.id) else api.reopenWalkthrough(walkthrough.id) }
+    }
+
+    private val avatarCache = mutableMapOf<Pair<String, String>, ByteArray>()
+
+    suspend fun forgeAvatarBytes(forgeId: String, url: String): ByteArray? {
+        val key = forgeId to url
+        avatarCache[key]?.let { return it }
+
+        val bytes = orNull { api.forgeAvatar(forgeId, url) } ?: return null
+
+        if (avatarCache.size >= MaxCachedAvatars) {
+            avatarCache.clear()
+        }
+
+        avatarCache[key] = bytes
+
+        return bytes
     }
 
     suspend fun attachmentBytes(sha256: String): ByteArray? {

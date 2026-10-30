@@ -68,6 +68,7 @@ import mycelium.api.NodeSummary
 import mycelium.api.ModelProvider
 import mycelium.api.PatchConversationRequest
 import mycelium.api.PatchQueueRequest
+import mycelium.state.forgeReferences
 import mycelium.state.Annotation
 import mycelium.state.QueueEditing
 import mycelium.state.ComposerDraft
@@ -141,7 +142,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     var panel by remember(id) {
         val saved = if (compact) null else platform?.loadPreference("$SidePanelPreference:$id")
 
-        mutableStateOf(SidePanel.entries.firstOrNull { it.name == saved && it != SidePanel.Outline && (conversation?.isChat != true || it == SidePanel.Environment) })
+        mutableStateOf(SidePanel.entries.firstOrNull { it.name == saved && it != SidePanel.Outline && (it != SidePanel.PullRequest || conversation?.pullRequestNumber != null) && (conversation?.isChat != true || it == SidePanel.Environment) })
     }
     var panelWidth by remember(workspace) {
         val saved = workspace?.let { platform?.loadPreference("$SidePanelWidthPreference:$it") } ?: platform?.loadPreference(SidePanelWidthPreference)
@@ -491,6 +492,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
                 SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, onOpenArtefact, Modifier.fillMaxSize()) }
                 SidePanel.Outline -> outlinePage?.let { page -> platform?.let { BrowserPanel(it, page.url, page.title, onClose = { openPanel(null) }) } }
+                SidePanel.PullRequest -> key(conversation.id) { ConversationPullRequestPanel(store, state, conversation, Modifier.fillMaxSize()) }
                 SidePanel.Environment -> key(conversation.id) { EnvironmentPanel(store, state, conversation, environmentFillsArea, { environmentExpanded = it }, { openPanel(null) }, onOpenNode, onOpenConversation, onOpenNodes) }
                 null -> Unit
             }
@@ -722,6 +724,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             permissions = SessionPermissions(sessionGrants(state.events[id].orEmpty()), if (chat) ({ tool -> store.act { api.revokePermission(id, tool) } }) else null),
                             onSetModel = { model -> store.act { api.setConfig(id, ConfigRequest(model = model)) } },
                             onSearchFiles = { query -> api.files(id, query) },
+                            onSearchReferences = { query -> forgeReferences(api.issues().issues, api.pullRequests().pullRequests, query) },
                             onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
                             onSideChat = { kind, text -> store.act { onOpenConversation(api.startSideChat(id, sideKind(kind), text.ifEmpty { null }).id) } },
                             onTeachMe = { on -> store.act { api.patchConversation(id, PatchConversationRequest(teachMe = on)) } },
@@ -773,7 +776,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     }
                 }
 
-                Rail(if (narrow && chatForced) null else panel, outlinePage != null, conversation.scratch || chat) { chosen ->
+                Rail(if (narrow && chatForced) null else panel, outlinePage != null, conversation.pullRequestNumber != null, conversation.scratch || chat) { chosen ->
                     if (narrow) {
                         if (panel == chosen && !chatForced) {
                             chatForced = true
@@ -794,6 +797,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 SidePanel.Subagents -> SubagentsList(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation, store::closeSession)
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, { openPanel(null); onOpenArtefact(it) }, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
+                SidePanel.PullRequest -> key(conversation.id) { ConversationPullRequestPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 SidePanel.Outline, SidePanel.Environment, null -> Unit
             }
         }
@@ -1070,10 +1074,10 @@ fun iconOf(status: ConversationStatus): MyIcon = when (status) {
 private const val ConversationTab = "Conversation"
 private const val WalkthroughTab = "Walkthrough"
 
-private enum class SidePanel { Subagents, Git, Artefacts, Outline, Environment }
+private enum class SidePanel { Subagents, Git, PullRequest, Artefacts, Outline, Environment }
 
 @Composable
-private fun Rail(open: SidePanel?, outlineOpen: Boolean, environmentOnly: Boolean, onToggle: (SidePanel) -> Unit) {
+private fun Rail(open: SidePanel?, outlineOpen: Boolean, hasPullRequest: Boolean, environmentOnly: Boolean, onToggle: (SidePanel) -> Unit) {
     val colors = MyTheme.colors
 
     Row(Modifier.fillMaxHeight()) {
@@ -1087,6 +1091,10 @@ private fun Rail(open: SidePanel?, outlineOpen: Boolean, environmentOnly: Boolea
                 MyButton({ onToggle(SidePanel.Subagents) }, icon = MyIcon.Agent, description = if (open == SidePanel.Subagents) "Close subagents" else "Open subagents", muted = true, selected = open == SidePanel.Subagents)
 
                 MyButton({ onToggle(SidePanel.Git) }, icon = MyIcon.Branch, description = if (open == SidePanel.Git) "Close git" else "Open git", muted = true, selected = open == SidePanel.Git)
+                if (hasPullRequest) {
+                    MyButton({ onToggle(SidePanel.PullRequest) }, icon = MyIcon.PullRequest, description = if (open == SidePanel.PullRequest) "Close pull request" else "Open pull request", muted = true, selected = open == SidePanel.PullRequest)
+                }
+
                 MyButton({ onToggle(SidePanel.Artefacts) }, icon = MyIcon.Layers, description = if (open == SidePanel.Artefacts) "Close artefacts" else "Open artefacts", muted = true, selected = open == SidePanel.Artefacts)
             }
 

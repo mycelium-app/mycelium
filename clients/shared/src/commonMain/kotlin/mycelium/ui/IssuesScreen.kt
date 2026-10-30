@@ -24,6 +24,8 @@ import mycelium.state.ColumnAlign
 import mycelium.api.Conversation
 import mycelium.api.Issue
 import mycelium.api.Issues
+import mycelium.api.PullRequestItem
+import mycelium.api.PullRequests
 import mycelium.api.Project
 import mycelium.api.PullRequestState
 import mycelium.api.Worktree
@@ -39,6 +41,8 @@ private const val IssuesList = "issues"
 @Composable
 fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit) {
     val colors = MyTheme.colors
+    val platform = LocalPlatform.current
+    var previewedIssue by remember { mutableStateOf<Issue?>(null) }
     var draft by remember { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
     var listing by remember { mutableStateOf<Issues?>(null) }
@@ -48,6 +52,9 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
     var starting by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var dismissed by remember { mutableStateOf<Set<String>>(emptySet()) }
     var failure by remember { mutableStateOf<String?>(null) }
+    var view by remember { mutableStateOf("Issues") }
+    var requests by remember { mutableStateOf<PullRequests?>(null) }
+    var previewed by remember { mutableStateOf<PullRequestItem?>(null) }
 
     LaunchedEffect(Unit) {
         store.load { store.refreshProjects() }
@@ -58,14 +65,15 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
     }
 
     val loadFailures by store.loadFailures.collectAsState()
-    val load = { store.load(IssuesList) { listing = store.api.issues(query) } }
+    val load = { store.load(IssuesList) { listing = store.api.issues(query); requests = store.api.pullRequests(query) } }
 
-    LaunchedEffect(query) {
+    LaunchedEffect(query, state.forgeRevision) {
         load()
     }
 
     val issues = listing?.issues.orEmpty()
     val shown = issues.filter { chosen == null || (it.forgeId to it.repository) == chosen }
+    val shownRequests = requests?.pullRequests.orEmpty().filter { chosen == null || (it.forgeId to it.repository) == chosen }
 
     fun start(project: Project, issue: Issue) {
         val node = state.nodes[project.nodeId]
@@ -87,6 +95,34 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
         }
     }
 
+    previewedIssue?.let { selected ->
+        val issue = issues.firstOrNull { it.forgeId == selected.forgeId && it.repository == selected.repository && it.number == selected.number } ?: selected
+        val projects = projectsOfIssue(state.projects.values, issue)
+        val existing = worktreesOfIssue(state.projects.values, worktrees, issue)
+
+        Dialog(onDismiss = { previewedIssue = null }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Label("#${issue.number} ${issue.title}", Modifier.weight(1f), Tokens.Type.UiStrong)
+                MyButton({ previewedIssue = null }, icon = MyIcon.Close, description = "Close the preview", muted = true)
+            }
+
+            PeopleStack(issue.forgeId, issue.author, issue.assignees)
+            Label(issue.body?.takeIf { it.isNotBlank() } ?: "No description.", Modifier.heightIn(max = 400.dp).verticalScrollWithBar())
+
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                platform?.let { MyButton({ it.openUrl(issue.url) }, text = "Open in browser", variant = ButtonVariant.Outline) }
+
+                for (project in projects.filter { existing.isEmpty() || it.id == existing.first().projectId }) {
+                    MyButton(
+                        { previewedIssue = null; start(project, issue) },
+                        text = if (existing.isNotEmpty()) "Open workspace" else if (projects.size == 1) "Create workspace" else "Create on ${state.nodes[project.nodeId]?.name ?: project.name}",
+                        variant = if (projects.size == 1 || existing.isNotEmpty()) ButtonVariant.Primary else ButtonVariant.Outline,
+                    )
+                }
+            }
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         Bar {
             OpenListButton()
@@ -95,7 +131,7 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
 
         failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
-        for (problem in listing?.failures.orEmpty().filter { it.forgeId !in dismissed }) {
+        for (problem in (listing?.failures.orEmpty() + requests?.failures.orEmpty()).distinct().filter { it.forgeId !in dismissed }) {
             ErrorBanner(problem.message, onDismiss = { dismissed = dismissed + problem.forgeId })
         }
 
@@ -105,6 +141,7 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
+            Segmented(listOf("Issues", "Pull requests"), view, { view = it; previewed = null }, groupLabel = "List")
             ListSearch(draft, { draft = it }, "issues", placeholder = "is:open assignee:@me", mono = true, onSubmit = { query = draft })
 
             for (entry in issueCounts(issues)) {
@@ -129,10 +166,15 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
             if (state.projects.values.none { it.forgeId != null }) {
                 Label("Issues come from forge repositories you have set up as projects. Set one up in Projects first.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
             } else {
-                Table(
+                if (view == "Pull requests") {
+                    PullRequestList(store, state, shownRequests, previewed, { previewed = it }, onOpened)
+                } else Table(
                     listOf(
+                        Col("Project", 80.dp, max = 160.dp, priority = 2),
+                        Col("", 24.dp, preferred = 24.dp),
                         Col("", 40.dp, numeric = true, priority = 1),
                         Col("Issue", 100.dp, weight = 1f, overflow = Overflow.Wrap),
+                        Col("People", 60.dp, priority = 2),
                         Col("Worktree", 120.dp, max = 240.dp, priority = 1),
                         Col("Pull request", 120.dp, max = 280.dp, priority = 1),
                         Col("", 150.dp, preferred = 150.dp, align = ColumnAlign.End),
@@ -144,9 +186,14 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
                         val existing = worktreesOfIssue(state.projects.values, worktrees, issue)
 
                         when (column) {
-                            0 -> TableCell.Text("#${issue.number}", Tokens.Type.Code, colors.textFaint)
-                            1 -> TableCell.Text(issue.title)
-                            2 -> TableCell.Slot(existing.maxByOrNull { it.branch.length }?.branch ?: "None", Tokens.Size.IconSm * 2 + Tokens.Space.S1_5 * 2) {
+                            0 -> TableCell.Text(issue.repository.substringAfterLast('/'), Tokens.Type.Meta, colors.textMuted)
+                            1 -> TableCell.Slot { Icon(MyIcon.Issue, colors.textMuted, Tokens.Size.IconSm) }
+                            2 -> TableCell.Text("#${issue.number}", Tokens.Type.Code, colors.textFaint)
+                            3 -> TableCell.Slot(issue.title) {
+                                Label(issue.title, Modifier.heightIn(min = Tokens.Size.ControlMd).pressable({ previewedIssue = issue }, description = "Preview issue ${issue.number}"))
+                            }
+                            4 -> TableCell.Slot { PeopleStack(issue.forgeId, issue.author, issue.assignees) }
+                            5 -> TableCell.Slot(existing.maxByOrNull { it.branch.length }?.branch ?: "None", Tokens.Size.IconSm * 2 + Tokens.Space.S1_5 * 2) {
                                 Column {
                                     if (existing.isEmpty()) {
                                         Label("None", color = colors.textFaint)
@@ -167,7 +214,7 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
                                 }
                             }
 
-                            3 -> TableCell.Slot(issue.pullRequests.orEmpty().maxOfOrNull { pullRequestText(it) } ?: "Unknown") {
+                            6 -> TableCell.Slot(issue.pullRequests.orEmpty().maxOfOrNull { pullRequestText(it) } ?: "Unknown") {
                                 Column {
                                     val requests = issue.pullRequests
 
@@ -230,7 +277,7 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
 
             if (listing == null && IssuesList in loadFailures) {
                 LoadFailedState("issues", load, Modifier.fillMaxWidth().padding(vertical = Tokens.Space.S4))
-            } else if (listing != null && shown.isEmpty() && state.projects.values.any { it.forgeId != null }) {
+            } else if (view == "Issues" && listing != null && shown.isEmpty() && state.projects.values.any { it.forgeId != null }) {
                 Label("No open issues match.", Modifier.padding(Tokens.Space.S2), color = colors.textMuted)
             }
         }

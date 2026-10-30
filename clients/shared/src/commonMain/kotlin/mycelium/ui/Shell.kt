@@ -99,6 +99,7 @@ import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.Me
 import mycelium.api.ModelProviderUsage
+import mycelium.state.conversationPullRequestText
 import mycelium.state.VoiceAssistantKey
 import mycelium.state.VoicePhase
 import mycelium.state.wakePhraseName
@@ -203,7 +204,7 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
     val wellness by store.wellness.state.collectAsState()
     val onBreak = (wellness.clock.phase == BreakPhase.OnBreak && wellness.breakEndsAt != null) || (wellness.clock.phase == BreakPhase.Noting && wellness.ended != null)
 
-    CompositionLocalProvider(LocalAttachmentBytes provides store::attachmentBytes) {
+    CompositionLocalProvider(LocalAttachmentBytes provides store::attachmentBytes, LocalForgeAvatar provides store::forgeAvatarBytes) {
         Box(Modifier.noticingInput(store.wellness).voiceShortcut(store.voice).focusProperties { onEnter = { if (onBreak) cancelFocusChange() } }.focusGroup().then(if (onBreak) Modifier.clearAndSetSemantics {} else Modifier)) {
             ShellFor(store, platform, me, onSignOut, initialRoute)
         }
@@ -1061,7 +1062,8 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
     val indent = Tokens.Space.S3 * depth
     val projectName = project?.takeIf { !row.isChat }?.name
     val shownTitle = projectName?.let { "$it ${row.title}" } ?: row.title
-    val place = listOfNotNull(row.branch, row.pullRequestLabel).joinToString("  ")
+    val pullRequestText = conversationPullRequestText(row.pullRequestLabel, row.pullRequestState)
+    val place = listOfNotNull(row.branch, pullRequestText).joinToString("  ")
 
     Box(
         Modifier
@@ -1098,7 +1100,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                     onClick,
                     selected = selected || menu.open,
                     shape = BlockShape,
-                    description = "$shownTitle, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.isSubagent) ", subagent" else ", side chat" }.orEmpty()}${if (!row.isChat && place.isNotEmpty()) ", " + listOfNotNull(row.branch?.let { "branch $it" }, row.pullRequestLabel).joinToString(", ") else ""}",
+                    description = "$shownTitle, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.isSubagent) ", subagent" else ", side chat" }.orEmpty()}${if (!row.isChat && place.isNotEmpty()) ", " + listOfNotNull(row.branch?.let { "branch $it" }, pullRequestText).joinToString(", ") else ""}",
                 )
                 .padding(start = Tokens.Space.S2 + (if (row.isChat && sideChats == 0) 0.dp else Tokens.Space.S3) + indent, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),

@@ -79,16 +79,18 @@ fun pasteInsertion(before: String, after: String): IntRange? {
     return prefix until end
 }
 
-fun expandedPastes(text: String, pastes: Map<Char, String>, citations: Map<Char, String> = emptyMap()): String =
-    text.map { char -> if (isPasteMarker(char)) pastes[char] ?: citations[char] ?: char.toString() else char.toString() }.joinToString("")
+fun expandedPastes(text: String, pastes: Map<Char, String>, citations: Map<Char, String> = emptyMap(), references: Map<Char, ForgeReference> = emptyMap()): String =
+    text.map { char -> if (isPasteMarker(char)) pastes[char] ?: citations[char] ?: references[char]?.let(::referenceText) ?: char.toString() else char.toString() }.joinToString("")
 
-fun serialisedPastes(text: String, pastes: Map<Char, String>, citations: Map<Char, String> = emptyMap()): String =
-    text.map { char -> if (isPasteMarker(char)) pastes[char]?.let(::pastedBlock) ?: citations[char]?.let(::citationBlock).orEmpty() else char.toString() }.joinToString("")
+fun serialisedPastes(text: String, pastes: Map<Char, String>, citations: Map<Char, String> = emptyMap(), references: Map<Char, ForgeReference> = emptyMap()): String =
+    text.map { char -> if (isPasteMarker(char)) pastes[char]?.let(::pastedBlock) ?: citations[char]?.let(::citationBlock) ?: references[char]?.let(::referenceText).orEmpty() else char.toString() }.joinToString("")
 
-class PasteDisplay(private val original: String, pastes: Map<Char, String>, images: Map<Char, String> = emptyMap(), citations: Map<Char, String> = emptyMap()) {
+fun referenceText(reference: ForgeReference): String = "${reference.label} ${reference.url}"
+
+class PasteDisplay(private val original: String, pastes: Map<Char, String>, images: Map<Char, String> = emptyMap(), citations: Map<Char, String> = emptyMap(), references: Map<Char, ForgeReference> = emptyMap()) {
     private val labels: Map<Char, String> = original
-        .filter { it in pastes || it in images || it in citations }
-        .associateWith { marker -> images[marker]?.let(::imageLabel) ?: citations[marker]?.let { annotationLabel(Annotation(it, "")) } ?: pastedLabel(pastedLineCount(pastes.getValue(marker))) }
+        .filter { it in pastes || it in images || it in citations || it in references }
+        .associateWith { marker -> images[marker]?.let(::imageLabel) ?: citations[marker]?.let { annotationLabel(Annotation(it, "")) } ?: references[marker]?.label ?: pastedLabel(pastedLineCount(pastes.getValue(marker))) }
 
     fun labelOf(char: Char): String? = labels[char]
 

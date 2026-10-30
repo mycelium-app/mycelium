@@ -381,6 +381,9 @@ pub enum GitCommand {
     AddWorktree {
         branch: String,
     },
+    AddRemoteWorktree {
+        branch: String,
+    },
     MovePlan,
     Snapshot {
         #[serde(default, skip_serializing_if = "Option::is_none")]

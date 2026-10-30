@@ -80,6 +80,8 @@ fn conversation() -> Conversation {
         branch: None,
         pull_request_label: None,
         pull_request_url: None,
+        pull_request_state: None,
+        pull_request_number: None,
         assistant_id: None,
         teach_me: false,
         routing: None,
@@ -429,6 +431,11 @@ fn permission_answer_and_login_bodies_round_trip() {
 #[test]
 fn the_integrations_changed_stream_message_is_tagged_by_name() {
     assert_eq!(round_trip(&StreamMessage::IntegrationsChanged)["type"], "integrations_changed");
+}
+
+#[test]
+fn the_forge_changed_stream_message_is_tagged_by_name() {
+    assert_eq!(round_trip(&StreamMessage::ForgeChanged)["type"], "forge_changed");
 }
 
 #[test]

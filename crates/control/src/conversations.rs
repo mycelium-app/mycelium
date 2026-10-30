@@ -424,7 +424,9 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
              teach_me = coalesce($12, teach_me),
              snoozed_until = case when $13 then null else coalesce($14, snoozed_until) end,
              pull_request_label = case when $10 or $11 is not null then null else pull_request_label end,
-             pull_request_url = case when $10 or $11 is not null then null else pull_request_url end
+             pull_request_url = case when $10 or $11 is not null then null else pull_request_url end,
+             pull_request_state = case when $10 or $11 is not null then null else pull_request_state end,
+             pull_request_number = case when $10 or $11 is not null then null else pull_request_number end
          where id = $1
          returning {CONVERSATION_COLUMNS}",
     )),
@@ -539,21 +541,29 @@ async fn refresh_branch(state: &AppState, conversation_id: Uuid) -> ApiResult<()
         None => Err(None),
     };
     let pull_request = match lookup {
-        Ok(found) => branch.as_ref().and_then(|name| found.get(name)).map(|request| (request.label.clone(), request.url.clone())),
-        Err(_) if row.branch == branch => row.pull_request_label.clone().zip(row.pull_request_url.clone()),
+        Ok(found) => branch.as_ref().and_then(|name| found.get(name)).map(|request| (request.label.clone(), request.url.clone(), request.state.to_string(), Some(request.number))),
+        Err(_) if row.branch == branch => row.pull_request_label.clone().zip(row.pull_request_url.clone()).zip(row.pull_request_state.clone()).map(|((label, url), state)| (label, url, state, row.pull_request_number)),
         Err(_) => None,
     };
-    let (label, url) = pull_request.unzip();
+    let (label, url, pull_request_state, number) = match pull_request {
+        Some((label, url, state, number)) => (Some(label), Some(url), Some(state), number),
+        None => (None, None, None, None),
+    };
+    let just_merged = pull_request_state.as_deref() == Some("merged") && row.pull_request_state.as_deref() != Some("merged");
 
     let changed = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
-        "update conversations set branch = $2, pull_request_label = $3, pull_request_url = $4
-         where id = $1 and (branch, pull_request_label, pull_request_url) is distinct from ($2::text, $3::text, $4::text)
+        "update conversations set branch = $2, pull_request_label = $3, pull_request_url = $4, pull_request_state = $5, pull_request_number = $7,
+             archived_at = case when $6 and status not in ('working', 'input') then coalesce(archived_at, now()) else archived_at end
+         where id = $1 and (branch, pull_request_label, pull_request_url, pull_request_state, pull_request_number) is distinct from ($2::text, $3::text, $4::text, $5::text, $7::bigint)
          returning {CONVERSATION_COLUMNS}",
     )))
     .bind(conversation_id)
     .bind(&branch)
     .bind(&label)
     .bind(&url)
+    .bind(&pull_request_state)
+    .bind(just_merged)
+    .bind(number)
     .fetch_optional(&state.pool)
     .await?;
 

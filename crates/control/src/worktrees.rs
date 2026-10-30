@@ -35,8 +35,17 @@ pub async fn create(state: &AppState, project: &ProjectRow, branch: &str, issue_
     }
 
     let answer = relay(state, project.node_id, project.path.clone(), GitCommand::AddWorktree { branch: branch.to_string() }).await?;
-    let path = answer["path"].as_str().unwrap_or_default();
 
+    record(state, project, branch, answer["path"].as_str().unwrap_or_default(), issue_number).await
+}
+
+pub async fn create_from_remote_branch(state: &AppState, project: &ProjectRow, branch: &str) -> ApiResult<WorktreeRow> {
+    let answer = relay(state, project.node_id, project.path.clone(), GitCommand::AddRemoteWorktree { branch: branch.to_string() }).await?;
+
+    record(state, project, branch, answer["path"].as_str().unwrap_or_default(), None).await
+}
+
+async fn record(state: &AppState, project: &ProjectRow, branch: &str, path: &str, issue_number: Option<i64>) -> ApiResult<WorktreeRow> {
     let row = sqlx::query_as::<_, WorktreeRow>(sqlx::AssertSqlSafe(format!(
         "insert into worktrees (project_id, branch, path, issue_number) values ($1, $2, $3, $4)
          on conflict (project_id, branch) do update set path = excluded.path, issue_number = excluded.issue_number

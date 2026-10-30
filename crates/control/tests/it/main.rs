@@ -53,6 +53,7 @@ mod nodes;
 mod paperless;
 mod project_icons;
 mod projects;
+mod pulls;
 mod provider_usage;
 mod puzzles;
 mod routing;
