@@ -9,7 +9,7 @@ use crate::login::LoginManager;
 use crate::resources::Watcher;
 use crate::ssh::SshServer;
 use crate::environment::EnvironmentManager;
-use crate::terminal::{TerminalManager, find_on_path, user_shell};
+use crate::terminal::{TerminalManager, user_shell};
 use crate::pod::PodRuntime;
 use crate::session::{Launch, SessionHandle, SessionSpec, next_failure_seq, spawn_session};
 use crate::transcripts::TranscriptFollower;
@@ -125,7 +125,7 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     let daemon = Arc::new(Daemon {
         logins: LoginManager::new(out.clone(), login_report),
         usage,
-        terminals: TerminalManager::new(out.clone(), find_on_path("tmux"), user_shell()),
+        terminals: TerminalManager::new(out.clone(), user_shell()),
         environments: EnvironmentManager::new(out.clone(), std::env::var_os("PATH").unwrap_or_default()),
         ssh: SshServer::new(out.clone(), config.ssh_host_key_path(), options.home.clone(), user_shell()),
         watcher: Watcher::new(out.clone(), PathBuf::from("/proc"), watched_disks(&config.projects_root), RESOURCE_INTERVAL),
@@ -351,7 +351,7 @@ impl Daemon {
             ControlToNode::LoginInput { login_id, text } => self.logins.input(login_id, &text),
             ControlToNode::StopLogin { login_id } => self.logins.stop(login_id),
             ControlToNode::RemoveLogin { agent, account } => self.remove_login(agent, &account),
-            ControlToNode::StartTerminal { terminal_id, conversation_id, cwd, cols, rows } => self.terminals.start(terminal_id, conversation_id, &cwd, cols, rows),
+            ControlToNode::StartTerminal { terminal_id, cwd, cols, rows, .. } => self.terminals.start(terminal_id, &cwd, cols, rows),
             ControlToNode::TerminalInput { terminal_id, data } => self.terminals.input(terminal_id, &data),
             ControlToNode::ResizeTerminal { terminal_id, cols, rows } => self.terminals.resize(terminal_id, cols, rows),
             ControlToNode::StopTerminal { terminal_id } => self.terminals.stop(terminal_id),

@@ -83,7 +83,7 @@ class ChatToolCardsTest {
     }
 
     @Test
-    fun aPendingApprovalNamesTheToolTheServerAndTheArgumentsAndOffersApproveDenyAndAlwaysApprove() {
+    fun aPendingApprovalNamesTheToolTheServerAndTheArgumentsAndOffersApproveDenyAndApproveForThisSession() {
         show(ChatToolThread)
 
         rule.onNodeWithText("Server: lab").assertExists()
@@ -92,7 +92,7 @@ class ChatToolCardsTest {
         rule.onNodeWithText("Approve").assertExists()
         rule.onNodeWithText("Deny").assertExists()
         rule.onNodeWithContentDescription("More ways to approve").performClick()
-        rule.onNodeWithText("Always approve").assertExists()
+        rule.onNodeWithText("Approve for this session").assertExists()
     }
 
     @Test
@@ -101,7 +101,7 @@ class ChatToolCardsTest {
         show(ChatToolThread, answered)
 
         rule.onNodeWithContentDescription("More ways to approve").performClick()
-        rule.onNodeWithText("Always approve").performClick()
+        rule.onNodeWithText("Approve for this session").performClick()
 
         assertEquals(listOf("call_2" to "allow_always"), answered)
 

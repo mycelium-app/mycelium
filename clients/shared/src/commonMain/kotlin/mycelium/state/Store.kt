@@ -1068,6 +1068,8 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         return bytes
     }
 
+    val terminalWorkspaces = mutableMapOf<String, TerminalWorkspace>()
+
     fun typeIntoTerminal(terminalId: String, text: String) {
         typed.trySend(terminalId to text)
     }

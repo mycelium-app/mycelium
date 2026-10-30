@@ -78,6 +78,7 @@ pub enum StreamMessage {
     TerminalOutput {
         terminal_id: Uuid,
         data: String,
+        offset: u64,
     },
     TerminalExited {
         terminal_id: Uuid,

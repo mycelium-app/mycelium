@@ -10,13 +10,28 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.key
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.ui.unit.Dp
+import mycelium.api.ConversationStatus
+import mycelium.state.AgentTerminalActivity
+import mycelium.state.TerminalWorkspace
+import mycelium.state.agentTerminalActivity
+import mycelium.state.dividers
+import mycelium.state.paneIds
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -63,12 +78,16 @@ import kotlin.io.encoding.Base64
 import kotlin.math.floor
 import kotlinx.coroutines.delay
 import mycelium.api.Conversation
+import mycelium.api.OpenTerminal
 import mycelium.state.AppState
 import mycelium.state.CellStyle
 import mycelium.state.Store
+import mycelium.state.SplitDirection
 import mycelium.state.Terminal
 import mycelium.state.TerminalColor
 import mycelium.state.TerminalKey
+import mycelium.state.TerminalTabs
+import mycelium.state.rects
 import mycelium.state.codePointString
 import mycelium.state.projectName
 import mycelium.state.terminalControlInput
@@ -80,19 +99,139 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, modifier: Modifier = Modifier, onExited: () -> Unit = {}) {
     val colors = MyTheme.colors
+    val id = conversation.id
+    var workspace by remember(id) { mutableStateOf(store.terminalWorkspaces[id] ?: TerminalWorkspace()) }
+    var scrollbacks by remember(id) { mutableStateOf<Map<String, OpenTerminal>>(emptyMap()) }
+    var loaded by remember(id) { mutableStateOf(false) }
+    val tabs = workspace.tabs
+    val current = tabs.current
+    val activity = agentTerminalActivity(state.events[id].orEmpty(), conversation.status == ConversationStatus.Working)
 
-    Column(modifier.background(colors.bgPanel)) {
-        Bar {
-            PanelTitle("Terminal")
-            Label("tmux  ·  ${projectName(conversation.cwd)}", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+    fun change(next: (TerminalTabs) -> TerminalTabs) {
+        val before = workspace.tabs.tabs.flatMap { it.layout.paneIds() }.toSet()
+        val changed = next(workspace.tabs)
+        val removed = before - changed.tabs.flatMap { it.layout.paneIds() }.toSet()
+
+        removed.forEach { pane -> workspace.panes[pane]?.let(store::stopTerminal) }
+        workspace = workspace.copy(tabs = changed, panes = workspace.panes - removed)
+    }
+
+    LaunchedEffect(id) {
+        val open = runCatching { store.api.openTerminals(id) }.getOrDefault(emptyList())
+        val running = open.map { it.terminalId }.toSet()
+        val gone = workspace.panes.filterValues { it !in running }.keys
+        var restored = workspace.copy(tabs = gone.fold(workspace.tabs) { result, pane -> result.closePane(pane) }, panes = workspace.panes - gone)
+
+        if (restored.tabs.tabs.isEmpty()) {
+            restored = if (open.isEmpty()) restored.copy(tabs = TerminalTabs().open()) else TerminalWorkspace().adopting(open.map { it.terminalId })
         }
 
-        TerminalView(store, state, conversation, Modifier.weight(1f).fillMaxWidth(), onExited)
+        scrollbacks = open.associateBy { it.terminalId }
+        workspace = restored
+        loaded = true
+    }
+
+    SideEffect {
+        if (loaded) {
+            store.terminalWorkspaces[id] = workspace
+        }
+    }
+
+    LaunchedEffect(loaded, tabs.tabs.isEmpty()) {
+        if (loaded && tabs.tabs.isEmpty()) {
+            onExited()
+        }
+    }
+
+    Column(modifier.background(colors.bgPanel).semantics { contentDescription = "Terminal" }) {
+        Row(Modifier.fillMaxWidth().height(Tokens.Size.Bar).padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+            MainTabStrip(
+                tabs = tabs.tabs.map { tab ->
+                    val seen = tab.layout.paneIds().mapNotNull { pane -> workspace.panes[pane]?.let(activity::get) }
+                    val agent = if (AgentTerminalActivity.Typing in seen) AgentTerminalActivity.Typing else seen.firstOrNull()
+
+                    MainTab(
+                        tab.id,
+                        tab.title,
+                        "Close ${tab.title}",
+                        badge = when (agent) {
+                            AgentTerminalActivity.Typing -> MyIcon.Keyboard
+                            AgentTerminalActivity.Reading -> MyIcon.Eye
+                            null -> null
+                        },
+                        badgeLabel = if (agent == AgentTerminalActivity.Typing) "Agent is typing in this terminal" else "Agent is reading this terminal",
+                    )
+                },
+                selected = tabs.selected.orEmpty(),
+                onSelect = { workspace = workspace.copy(tabs = tabs.select(it)) },
+                onClose = { tabId -> change { it.closeTab(tabId) } },
+                groupLabel = "Terminals",
+                modifier = Modifier.weight(1f),
+            )
+            MyButton({ change { it.split(SplitDirection.Right) } }, icon = MyIcon.SplitRight, description = "Split right", muted = true)
+            MyButton({ change { it.split(SplitDirection.Down) } }, icon = MyIcon.SplitDown, description = "Split down", muted = true)
+            MyButton({ change { it.open() } }, icon = MyIcon.Plus, description = "New terminal", muted = true)
+            MyButton({ change { it.closeFocused() } }, icon = MyIcon.Close, description = "Close terminal", muted = true)
+        }
+
+        Hairline()
+
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            for (tab in tabs.tabs.takeIf { loaded }.orEmpty()) {
+                key(tab.id) {
+                    val shown = tab.id == current?.id
+
+                    for ((paneId, rect) in tab.layout.rects()) {
+                        key(paneId) {
+                            val placement = if (shown) Modifier.offset(maxWidth * rect.x, maxHeight * rect.y).size(maxWidth * rect.width, maxHeight * rect.height) else Modifier.size(0.dp)
+                            val existing = workspace.panes[paneId]
+
+                            TerminalView(
+                                store,
+                                state,
+                                conversation,
+                                placement.clipToBounds().drawBehind {
+                                    if (rect.x > 0f) {
+                                        drawLine(colors.border, Offset(0f, 0f), Offset(0f, size.height))
+                                    }
+
+                                    if (rect.y > 0f) {
+                                        drawLine(colors.border, Offset(0f, 0f), Offset(size.width, 0f))
+                                    }
+                                },
+                                existing = existing,
+                                scrollback = existing?.let(scrollbacks::get),
+                                active = shown && tab.focused == paneId,
+                                onStarted = { terminalId -> workspace = workspace.copy(panes = workspace.panes + (paneId to terminalId)) },
+                                onFocus = { workspace = workspace.copy(tabs = workspace.tabs.focus(paneId)) },
+                                onExited = { change { it.closePane(paneId) } },
+                            )
+                        }
+                    }
+                }
+            }
+
+            for (divider in current?.layout?.dividers().orEmpty()) {
+                val area = divider.area
+                val across = if (divider.direction == SplitDirection.Right) maxWidth * area.width else maxHeight * area.height
+                val resize = { moved: Dp -> workspace = workspace.copy(tabs = workspace.tabs.resize(current!!.id, divider.path, divider.ratio + moved / across)) }
+
+                if (divider.direction == SplitDirection.Right) {
+                    Box(Modifier.offset(maxWidth * (area.x + area.width * divider.ratio), maxHeight * area.y).height(maxHeight * area.height).width(Tokens.Size.Hairline)) {
+                        ResizeHandle("Resize the split", onMove = resize)
+                    }
+                } else {
+                    Box(Modifier.offset(maxWidth * area.x, maxHeight * (area.y + area.height * divider.ratio)).width(maxWidth * area.width).height(Tokens.Size.Hairline)) {
+                        ResizeHandle("Resize the split", Orientation.Vertical, resize)
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun TerminalView(store: Store, state: AppState, conversation: Conversation, modifier: Modifier, onExited: () -> Unit) {
+private fun TerminalView(store: Store, state: AppState, conversation: Conversation, modifier: Modifier, existing: String?, scrollback: OpenTerminal?, active: Boolean, onStarted: (String) -> Unit, onFocus: () -> Unit, onExited: () -> Unit) {
     val colors = MyTheme.colors
     val touch = LocalTouch.current
     val density = LocalDensity.current
@@ -109,7 +248,7 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
     val focusRequester = remember { FocusRequester() }
     var attempt by remember(conversation.id) { mutableIntStateOf(0) }
     var area by remember { mutableStateOf(IntSize.Zero) }
-    var terminalId by remember(conversation.id, attempt) { mutableStateOf<String?>(null) }
+    var terminalId by remember(conversation.id, attempt) { mutableStateOf(existing.takeIf { attempt == 0 }) }
     var failure by remember(conversation.id, attempt) { mutableStateOf<String?>(null) }
     val columns = if (cellWidth > 0f) (area.width / cellWidth).toInt() else 0
     val rows = if (cellHeight > 0f) (area.height / cellHeight).toInt() else 0
@@ -117,6 +256,7 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
     var revision by remember(emulator) { mutableIntStateOf(0) }
     val sentSize = remember(emulator) { intArrayOf(0, 0) }
     val consumed = remember(emulator) { intArrayOf(0) }
+    var replayed by remember(emulator) { mutableStateOf(existing == null || scrollback == null) }
     val id = terminalId
     val exited = id != null && id in state.exitedTerminals
     val feed = id?.let { state.terminalOutput[it] }
@@ -130,7 +270,9 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
     LaunchedEffect(emulator, columns > 0 && rows > 0) {
         if (columns > 0 && rows > 0 && terminalId == null) {
             failure = attempt {
-                terminalId = store.api.startTerminal(conversation.id, columns, rows).terminalId
+                val started = store.api.startTerminal(conversation.id, columns, rows).terminalId
+                terminalId = started
+                onStarted(started)
                 sentSize[0] = columns
                 sentSize[1] = rows
             }
@@ -150,9 +292,21 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
         }
     }
 
-    LaunchedEffect(id, feed?.received) {
-        if (feed != null) {
-            feed.unseen(consumed[0]).forEach { emulator.feed(Base64.decode(it)) }
+    LaunchedEffect(emulator, columns > 0 && rows > 0) {
+        if (!replayed && columns > 0 && rows > 0 && existing != null && scrollback != null) {
+            val current = state.terminalOutput[existing]
+
+            emulator.feed(Base64.decode(scrollback.scrollback))
+            current?.after(scrollback.offset)?.forEach { emulator.feed(it) }
+            consumed[0] = current?.received ?: 0
+            replayed = true
+            revision++
+        }
+    }
+
+    LaunchedEffect(id, feed?.received, replayed) {
+        if (feed != null && replayed) {
+            feed.after(scrollback?.offset ?: 0, consumed[0]).forEach { emulator.feed(it) }
             consumed[0] = feed.received
             revision++
         }
@@ -167,17 +321,9 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
         }
     }
 
-    LaunchedEffect(id) {
-        if (id != null && !touch) {
+    LaunchedEffect(id, active) {
+        if (id != null && active && !touch) {
             focusRequester.requestFocus()
-        }
-    }
-
-    DisposableEffect(id) {
-        onDispose {
-            if (id != null) {
-                store.stopTerminal(id)
-            }
         }
     }
 
@@ -219,7 +365,7 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
                     typed != null
                 }
                 .focusable(interactionSource = source)
-                .pointerInput(Unit) { detectTapGestures { focusRequester.requestFocus() } }
+                .pointerInput(Unit) { detectTapGestures { onFocus(); focusRequester.requestFocus() } }
                 .semantics { contentDescription = "Terminal for ${projectName(conversation.cwd)}. Press Shift and Tab to leave it." },
         ) {
             Canvas(Modifier.fillMaxSize()) {

@@ -18,6 +18,7 @@ mod screens;
 mod server_tools;
 mod ssh_access;
 mod tasks;
+mod terminals;
 mod workflows;
 
 use crate::error::{ApiError, ApiResult};
@@ -65,6 +66,7 @@ enum Area {
     Artifacts,
     Environment,
     BrowserTask,
+    Terminals,
 }
 
 fn area_of(tool: &str) -> Option<Area> {
@@ -88,6 +90,7 @@ fn area_of(tool: &str) -> Option<Area> {
         "find_artifacts" | "request_artifact_access" | "create_artifact" | "update_artifact" | "design_set_artboard" | "design_remove_item" | "read_artifact" | "read_artifact_feedback" => Some(Area::Artifacts),
         "environment_start" | "environment_screenshot" | "environment_click" | "environment_type" | "environment_scroll" | "environment_key" | "environment_launch" => Some(Area::Environment),
         "browser_task" => Some(Area::BrowserTask),
+        "terminal_list" | "terminal_read" | "terminal_type" => Some(Area::Terminals),
         name if name.contains("__") => Some(Area::ServerTools),
         _ => None,
     }
@@ -115,6 +118,7 @@ async fn call_area(area: Area, call: ToolCall<'_>) -> ApiResult<ToolReply> {
         Area::Artifacts => artifacts::call(call).await,
         Area::Environment => environment::call(call).await,
         Area::BrowserTask => browser_task::call(call).await,
+        Area::Terminals => terminals::call(call).await,
     }
 }
 
@@ -151,6 +155,7 @@ pub fn tool_definitions() -> Value {
         artifacts::definitions(),
         environment::definitions(),
         browser_task::definitions(),
+        terminals::definitions(),
     ];
 
     Value::Array(areas.into_iter().flat_map(|definitions| definitions.as_array().cloned().unwrap_or_default()).collect())

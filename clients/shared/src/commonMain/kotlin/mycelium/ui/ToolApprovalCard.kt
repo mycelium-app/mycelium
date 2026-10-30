@@ -13,7 +13,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import mycelium.state.PermissionOption
 import mycelium.state.ThreadItem
-import mycelium.state.chatToolName
 
 private const val Approve = "approve"
 private const val ApproveEdit = "approve_edit"
@@ -33,7 +32,6 @@ fun approvalChoices(permission: ThreadItem.Permission): ApprovalChoices {
     val edit = allowing.firstOrNull { it.id == ApproveEdit }
     val approve = allowing.firstOrNull { it.id == Approve } ?: allowing.firstOrNull { !isAlways(it) && it.id != ApproveEdit }
     val primary = if (edit != null && permission.editsByDefault) edit else approve ?: edit ?: always
-    val tool = chatToolName(permission.title)?.tool ?: permission.title
     val others = allowing.filter { it != primary && it != approve && it != edit && it != always }
     val alternatives = buildList {
         if (primary == edit && approve != null) {
@@ -45,7 +43,7 @@ fun approvalChoices(permission: ThreadItem.Permission): ApprovalChoices {
         }
 
         if (always != null && primary != always) {
-            add(always to "Stop asking for $tool")
+            add(always to "Stop asking in this conversation")
         }
 
         others.forEach { add(it to null) }
@@ -57,7 +55,7 @@ fun approvalChoices(permission: ThreadItem.Permission): ApprovalChoices {
 private fun label(option: PermissionOption): String = when {
     option.id == Approve -> "Approve"
     option.id == ApproveEdit -> "Approve and edit response"
-    isAlways(option) -> "Always approve"
+    isAlways(option) -> "Approve for this session"
     isDeny(option) -> "Deny"
     isAllow(option) -> "Approve"
     else -> option.name

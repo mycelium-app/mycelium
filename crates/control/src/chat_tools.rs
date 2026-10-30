@@ -25,6 +25,7 @@ pub const APPROVE: &str = "approve";
 pub const APPROVE_EDIT: &str = "approve_edit";
 pub const ALWAYS: &str = "always";
 pub const DENY: &str = "deny";
+pub const REVOKED: &str = "revoked";
 pub const DECLINED_TEXT: &str = "The person declined this tool call.";
 
 #[derive(Clone)]
@@ -149,16 +150,9 @@ impl Toolbox {
         .await?;
         loaded.extend(searched.into_iter().filter(|name| tools.iter().any(|tool| &tool.name == name)));
 
-        let always_allowed = sqlx::query_scalar::<_, String>(
-            "select distinct r.payload->'toolCall'->>'title' from events r join events s on s.conversation_id = r.conversation_id and s.kind = 'permission_resolved' and s.payload->>'request_id' = r.payload->>'request_id'
-             where r.conversation_id = $1 and r.kind = 'permission_request' and s.payload->>'option_id' = any($2)",
-        )
-        .bind(conversation_id)
-        .bind(vec![ALWAYS.to_string(), "allow_always".to_string()])
-        .fetch_all(&state.pool)
-        .await?;
+        let always_allowed = granted_titles(state, conversation_id).await?;
 
-        Ok(Toolbox { tools, loaded, always_allowed: always_allowed.into_iter().collect(), connections: HashMap::new(), chat_node: chat_node(state, owner).await?, provider, changes })
+        Ok(Toolbox { tools, loaded, always_allowed: always_allowed.into_iter().map(|(title, _)| title).collect(), connections: HashMap::new(), chat_node: chat_node(state, owner).await?, provider, changes })
     }
 
     pub async fn reload_if_changed(&mut self, state: &AppState, owner: Uuid, conversation_id: Uuid) -> ApiResult<()> {
@@ -372,10 +366,6 @@ async fn outcome_of(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolb
 
         if answered == ALWAYS {
             toolbox.always_allowed.insert(tool.name.clone());
-
-            if let Some(server) = tool.server_row() {
-                stop_asking(state, owner, server, &tool.original).await?;
-            }
         }
 
         if !is_approved(&answered) {
@@ -464,6 +454,22 @@ pub async fn record_call(state: &AppState, owner: Uuid, server: &ServerRow, tool
     }
 }
 
+const GRANTED_SQL: &str = "select r.payload->'toolCall'->>'title', r.payload->>'request_id' from events r join events s on s.conversation_id = r.conversation_id and s.kind = 'permission_resolved' and s.payload->>'request_id' = r.payload->>'request_id'
+     where r.conversation_id = $1 and r.kind = 'permission_request' and s.payload->>'option_id' = any($2)
+     and not exists (select 1 from events x where x.conversation_id = r.conversation_id and x.kind = 'permission_resolved' and x.payload->>'request_id' = r.payload->>'request_id' and x.payload->>'option_id' = $3)";
+
+async fn granted_titles(state: &AppState, conversation_id: Uuid) -> ApiResult<Vec<(String, String)>> {
+    let granted = sqlx::query_as::<_, (String, String)>(GRANTED_SQL).bind(conversation_id).bind(vec![ALWAYS.to_string(), "allow_always".to_string()]).bind(REVOKED).fetch_all(&state.pool).await?;
+
+    Ok(granted)
+}
+
+pub async fn granting_requests(state: &AppState, conversation_id: Uuid, tool: &str) -> ApiResult<Vec<String>> {
+    let granted = granted_titles(state, conversation_id).await?;
+
+    Ok(granted.into_iter().filter(|(title, _)| title == tool).map(|(_, request_id)| request_id).collect())
+}
+
 pub struct Approval<'a> {
     pub title: &'a str,
     pub input: &'a Value,
@@ -478,7 +484,7 @@ pub async fn request_approval(state: &AppState, owner: Uuid, id: Uuid, request_i
     let options = json!([
         {"optionId": APPROVE, "name": "Approve", "kind": "allow_once"},
         {"optionId": APPROVE_EDIT, "name": "Approve and edit response", "kind": "allow_once"},
-        {"optionId": ALWAYS, "name": "Always approve", "kind": "allow_always"},
+        {"optionId": ALWAYS, "name": "Approve for this session", "kind": "allow_always"},
         {"optionId": DENY, "name": "Deny", "kind": "reject_once"},
     ]);
     let request = json!({

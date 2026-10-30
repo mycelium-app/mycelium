@@ -209,6 +209,13 @@ pub struct StartTerminalResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpenTerminal {
+    pub terminal_id: Uuid,
+    pub scrollback: String,
+    pub offset: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TerminalInputRequest {
     pub data: String,
 }
@@ -353,6 +360,11 @@ pub struct MoveQueuedRequest {
 pub struct PermissionAnswer {
     pub request_id: String,
     pub option_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RevokePermissionRequest {
+    pub tool: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]

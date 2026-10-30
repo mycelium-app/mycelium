@@ -191,6 +191,9 @@ data class StartTerminalRequest(val cols: Int, val rows: Int)
 data class StartTerminalResponse(@SerialName("terminal_id") val terminalId: String)
 
 @Serializable
+data class OpenTerminal(@SerialName("terminal_id") val terminalId: String, val scrollback: String, val offset: Long = 0)
+
+@Serializable
 data class TerminalInputRequest(val data: String)
 
 @Serializable

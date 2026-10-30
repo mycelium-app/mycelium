@@ -305,7 +305,7 @@ fn stream_login_and_queue_messages_round_trip() {
     let finished = round_trip(&StreamMessage::LoginFinished { login_id: id(), ok: false });
     assert_eq!(finished["type"], "login_finished");
 
-    let terminal = round_trip(&StreamMessage::TerminalOutput { terminal_id: id(), data: "aGk=".into() });
+    let terminal = round_trip(&StreamMessage::TerminalOutput { terminal_id: id(), data: "aGk=".into(), offset: 7 });
     assert_eq!(terminal["type"], "terminal_output");
 
     let exited = round_trip(&StreamMessage::TerminalExited { terminal_id: id() });

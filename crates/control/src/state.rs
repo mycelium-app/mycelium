@@ -42,6 +42,15 @@ pub struct LoginOwner {
     pub user_id: Uuid,
 }
 
+const TERMINAL_SCROLLBACK_BYTES: usize = 64 * 1024;
+
+struct TerminalSession {
+    owner: LoginOwner,
+    conversation_id: Uuid,
+    scrollback: Vec<u8>,
+    total: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct UnacknowledgedPrompt {
     pub node_id: Uuid,
@@ -214,7 +223,7 @@ node_answers! {
 pub struct Hub {
     nodes: Mutex<HashMap<Uuid, NodeConnection>>,
     logins: Mutex<HashMap<Uuid, LoginOwner>>,
-    terminals: Mutex<HashMap<Uuid, LoginOwner>>,
+    terminals: Mutex<HashMap<Uuid, TerminalSession>>,
     send_now: Mutex<HashMap<Uuid, Uuid>>,
     stale_secrets: Mutex<HashSet<Uuid>>,
     unacknowledged: Mutex<Vec<UnacknowledgedPrompt>>,
@@ -615,14 +624,42 @@ impl Hub {
         finished
     }
 
-    pub fn track_terminal(&self, terminal_id: Uuid, node_id: Uuid, user_id: Uuid) {
+    pub fn track_terminal(&self, terminal_id: Uuid, node_id: Uuid, user_id: Uuid, conversation_id: Uuid) {
         if let Ok(mut terminals) = self.terminals.lock() {
-            terminals.insert(terminal_id, LoginOwner { node_id, user_id });
+            terminals.insert(terminal_id, TerminalSession { owner: LoginOwner { node_id, user_id }, conversation_id, scrollback: Vec::new(), total: 0 });
         }
     }
 
     pub fn terminal_owner(&self, terminal_id: Uuid) -> Option<LoginOwner> {
-        self.terminals.lock().ok().and_then(|terminals| terminals.get(&terminal_id).copied())
+        self.terminals.lock().ok().and_then(|terminals| terminals.get(&terminal_id).map(|session| session.owner))
+    }
+
+    pub fn terminals_of_conversation(&self, conversation_id: Uuid) -> Vec<Uuid> {
+        let Ok(terminals) = self.terminals.lock() else {
+            return Vec::new();
+        };
+        let mut found: Vec<Uuid> = terminals.iter().filter(|(_, session)| session.conversation_id == conversation_id).map(|(terminal_id, _)| *terminal_id).collect();
+        found.sort();
+
+        found
+    }
+
+    pub fn append_terminal_output(&self, terminal_id: Uuid, bytes: &[u8]) -> Option<u64> {
+        let mut terminals = self.terminals.lock().ok()?;
+        let session = terminals.get_mut(&terminal_id)?;
+        let start = session.total;
+
+        session.scrollback.extend_from_slice(bytes);
+        session.total += bytes.len() as u64;
+
+        let excess = session.scrollback.len().saturating_sub(TERMINAL_SCROLLBACK_BYTES);
+        session.scrollback.drain(..excess);
+
+        Some(start)
+    }
+
+    pub fn terminal_scrollback(&self, terminal_id: Uuid) -> Option<(Vec<u8>, u64)> {
+        self.terminals.lock().ok().and_then(|terminals| terminals.get(&terminal_id).map(|session| (session.scrollback.clone(), session.total)))
     }
 
     pub fn finish_terminal(&self, terminal_id: Uuid) {
@@ -635,9 +672,9 @@ impl Hub {
         let Ok(mut terminals) = self.terminals.lock() else {
             return Vec::new();
         };
-        let finished: Vec<(Uuid, LoginOwner)> = terminals.iter().filter(|(_, owner)| owner.node_id == node_id).map(|(terminal_id, owner)| (*terminal_id, *owner)).collect();
+        let finished: Vec<(Uuid, LoginOwner)> = terminals.iter().filter(|(_, session)| session.owner.node_id == node_id).map(|(terminal_id, session)| (*terminal_id, session.owner)).collect();
 
-        terminals.retain(|_, owner| owner.node_id != node_id);
+        terminals.retain(|_, session| session.owner.node_id != node_id);
 
         finished
     }
@@ -771,6 +808,23 @@ pub fn hash_token(token: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_offsets_count_all_bytes_even_after_old_scrollback_is_discarded() {
+        let hub = Hub::default();
+        let terminal_id = Uuid::new_v4();
+        hub.track_terminal(terminal_id, Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+
+        assert_eq!(hub.terminal_scrollback(terminal_id), Some((Vec::new(), 0)));
+        assert_eq!(hub.append_terminal_output(terminal_id, &vec![b'a'; TERMINAL_SCROLLBACK_BYTES]), Some(0));
+        assert_eq!(hub.append_terminal_output(terminal_id, b"bc"), Some(TERMINAL_SCROLLBACK_BYTES as u64));
+
+        let (scrollback, end) = hub.terminal_scrollback(terminal_id).unwrap();
+
+        assert_eq!(scrollback.len(), TERMINAL_SCROLLBACK_BYTES);
+        assert_eq!(&scrollback[TERMINAL_SCROLLBACK_BYTES - 2..], b"bc");
+        assert_eq!(end, TERMINAL_SCROLLBACK_BYTES as u64 + 2);
+    }
 
     #[test]
     fn an_answer_from_another_node_is_ignored() {

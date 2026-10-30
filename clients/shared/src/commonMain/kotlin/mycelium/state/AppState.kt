@@ -6,6 +6,7 @@ import mycelium.api.ArtifactAccessRequest
 import mycelium.api.Conversation
 import mycelium.api.Workflow
 import mycelium.api.ConversationStatus
+import kotlin.io.encoding.Base64
 import kotlinx.serialization.json.JsonObject
 import mycelium.api.Event
 import mycelium.api.Goal
@@ -35,10 +36,19 @@ const val TerminalChunkLimit = 1024
 const val ResourceHistoryLimit = 200
 const val EnvironmentActionLimit = 50
 
-data class TerminalFeed(val received: Int = 0, val chunks: List<String> = emptyList()) {
+data class TerminalFeed(val received: Int = 0, val chunks: List<String> = emptyList(), val offsets: List<Long?> = emptyList()) {
+    fun after(end: Long, consumed: Int = 0): List<ByteArray> = chunks.mapIndexedNotNull { index, chunk ->
+        if (index < chunks.size - (received - consumed).coerceIn(0, chunks.size)) return@mapIndexedNotNull null
+
+        val bytes = Base64.decode(chunk)
+        val skipped = offsets.getOrNull(index)?.let { start -> (end - start).coerceIn(0, bytes.size.toLong()).toInt() } ?: 0
+
+        if (skipped >= bytes.size) null else bytes.copyOfRange(skipped, bytes.size)
+    }
+
     fun unseen(consumed: Int): List<String> = chunks.takeLast((received - consumed).coerceIn(0, chunks.size))
 
-    fun with(chunk: String): TerminalFeed = TerminalFeed(received + 1, (chunks + chunk).takeLast(TerminalChunkLimit))
+    fun with(chunk: String, offset: Long? = null): TerminalFeed = TerminalFeed(received + 1, (chunks + chunk).takeLast(TerminalChunkLimit), (offsets + offset).takeLast(TerminalChunkLimit))
 }
 
 data class AppState(
@@ -237,7 +247,7 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
         state.copy(finishedLogins = state.finishedLogins + (message.loginId to message.ok))
 
     is StreamMessage.TerminalOutput ->
-        state.copy(terminalOutput = state.terminalOutput + (message.terminalId to (state.terminalOutput[message.terminalId] ?: TerminalFeed()).with(message.data)))
+        state.copy(terminalOutput = state.terminalOutput + (message.terminalId to (state.terminalOutput[message.terminalId] ?: TerminalFeed()).with(message.data, message.offset)))
 
     is StreamMessage.TerminalExited ->
         state.copy(exitedTerminals = state.exitedTerminals + message.terminalId)

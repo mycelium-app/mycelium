@@ -86,6 +86,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/conversations/{id}/queue/{queue_id}/move",
     "POST /api/v1/conversations/{id}/queue/send-all-now",
     "POST /api/v1/conversations/{id}/permission",
+    "POST /api/v1/conversations/{id}/permission/revoke",
     "POST /api/v1/conversations/{id}/responses/{request_id}",
     "POST /api/v1/conversations/{id}/responses/{request_id}/filter",
     "POST /api/v1/conversations/{id}/config",
@@ -624,6 +625,45 @@ async fn start_terminal(server: &Server, link: &mut NodeLink, conversation_id: U
 }
 
 #[tokio::test]
+async fn a_returning_client_lists_the_open_terminals_with_what_they_printed() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    let terminal_id = start_terminal(&server, &mut link, conversation.id).await;
+    link.send(NodeToControl::TerminalOutput { terminal_id, data: "bHM=".into() }).await;
+
+    let listed = common::eventually("the output to be kept", || async {
+        let (_, open) = server.user.json(server.user.get(&format!("/api/v1/conversations/{}/terminals", conversation.id))).await;
+
+        (open[0]["scrollback"] == "bHM=").then_some(open)
+    })
+    .await;
+
+    assert_eq!(listed[0]["terminal_id"], json!(terminal_id));
+    assert_eq!(listed[0]["offset"], 2);
+}
+
+#[tokio::test]
+async fn each_terminal_output_carries_the_offset_it_starts_at() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    let mut stream = server.user.stream().await;
+    let terminal_id = start_terminal(&server, &mut link, conversation.id).await;
+
+    link.send(NodeToControl::TerminalOutput { terminal_id, data: "bHM=".into() }).await;
+    link.send(NodeToControl::TerminalOutput { terminal_id, data: "bHM=".into() }).await;
+
+    let first = stream.until(|message| matches!(message, StreamMessage::TerminalOutput { .. }).then_some(message)).await;
+    let second = stream.until(|message| matches!(message, StreamMessage::TerminalOutput { .. }).then_some(message)).await;
+    let seen = vec![first, second];
+
+    assert_eq!(seen, vec![StreamMessage::TerminalOutput { terminal_id, data: "bHM=".into(), offset: 0 }, StreamMessage::TerminalOutput { terminal_id, data: "bHM=".into(), offset: 2 }]);
+}
+
+#[tokio::test]
 async fn terminal_output_and_its_end_are_streamed_only_to_the_person_who_opened_it() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
@@ -633,7 +673,7 @@ async fn terminal_output_and_its_end_are_streamed_only_to_the_person_who_opened_
     let terminal_id = start_terminal(&server, &mut link, conversation.id).await;
 
     link.send(NodeToControl::TerminalOutput { terminal_id, data: "bHM=".into() }).await;
-    stream.until(|message| matches!(message, StreamMessage::TerminalOutput { terminal_id: id, data } if id == terminal_id && data == "bHM=").then_some(())).await;
+    stream.until(|message| matches!(message, StreamMessage::TerminalOutput { terminal_id: id, data, offset: 0 } if id == terminal_id && data == "bHM=").then_some(())).await;
 
     link.send(NodeToControl::TerminalExited { terminal_id }).await;
     stream.until(|message| matches!(message, StreamMessage::TerminalExited { terminal_id: id } if id == terminal_id).then_some(())).await;
@@ -699,7 +739,7 @@ async fn a_node_cannot_stream_output_for_a_terminal_it_does_not_own() {
     owner.send(NodeToControl::TerminalOutput { terminal_id, data: "cmVhbA==".into() }).await;
 
     let first = stream.until(|message| matches!(message, StreamMessage::TerminalOutput { .. } | StreamMessage::TerminalExited { .. }).then_some(message)).await;
-    assert_eq!(first, StreamMessage::TerminalOutput { terminal_id, data: "cmVhbA==".into() });
+    assert_eq!(first, StreamMessage::TerminalOutput { terminal_id, data: "cmVhbA==".into(), offset: 0 });
 }
 
 #[tokio::test]
