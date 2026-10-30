@@ -797,7 +797,7 @@ private fun continuedItem(key: String, payload: JsonObject): ThreadItem.Continue
     val reason = payload.string("reason")?.let { switchReason(it, payload, from) }
 
     return when {
-        payload.string("kind") == "any_node" -> ThreadItem.Continued(key, "Started on $node, picked from Any node")
+        payload.string("kind") == "any_node" -> ThreadItem.Continued(key, "Picked $node")
         payload.string("kind") == "scratch" -> ThreadItem.Continued(key, "Started in a scratch folder on $node. It is deleted with the chat.")
         reason != null -> ThreadItem.Continued(key, "Continued with ${node?.let { "$target on $it" } ?: target}", from, reason.replaceFirstChar { it.uppercase() })
         node != null -> ThreadItem.Continued(key, "Moved to $node", from)

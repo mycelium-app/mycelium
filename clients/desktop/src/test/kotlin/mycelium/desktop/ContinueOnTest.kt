@@ -117,6 +117,14 @@ class ContinueOnTest {
     }
 
     @Test
+    fun aConversationStartedOnAnyNodeNamesTheNodeThatWasPicked() {
+        shell(EnabledExperiments, Continued.replace("\"kind\":\"handoff\"", "\"kind\":\"any_node\",\"node_name\":\"Laptop\""))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Picked Laptop").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Picked Laptop").assertIsDisplayed()
+    }
+
+    @Test
     fun aFallbackDividerSaysWhyTheTurnMoved() {
         shell(EnabledExperiments, Continued.replace("\"kind\":\"handoff\"", "\"kind\":\"handoff\",\"reason\":\"usage_limit\",\"window\":\"five_hour\""))
 
