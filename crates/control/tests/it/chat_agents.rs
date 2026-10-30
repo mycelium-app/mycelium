@@ -116,6 +116,8 @@ async fn deleting_a_chat_on_an_agent_deletes_its_scratch_folder() {
     assert!(matches!(link.next().await, ControlToNode::WriteFolder { .. }));
     link.expect_start_session().await;
     link.start_session(id, "acp-1").await;
+    let user = server.user.clone();
+    common::eventually("the session", || async { (!user.json(user.get(&format!("/api/v1/conversations/{id}"))).await.1["acp_session_id"].is_null()).then_some(()) }).await;
     server.user.json(server.user.patch(&format!("/api/v1/conversations/{id}")).json(&json!({"archived": true}))).await;
     assert_eq!(link.next().await, ControlToNode::CloseSession { conversation_id: id });
 
