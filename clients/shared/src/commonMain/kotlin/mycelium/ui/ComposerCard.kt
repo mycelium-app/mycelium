@@ -163,14 +163,14 @@ fun ModelPicker(controls: ModelPickerControls, maxWidth: Dp = Tokens.Size.Accoun
                     Column(Modifier.semantics { contentDescription = "Account" }) {
                         MenuItem("Back to models", onClick = { choosingAccount = false; refusal = null }, leading = MyIcon.ChevronLeft)
                         MenuLabel("Runs on")
-                        MenuItem(AnyAccount, onClick = { chooseAccount(null) }, checked = controls.account == null, description = "$AnyAccount, switches as usage runs out", leading = MyIcon.Person)
+                        MenuItem(AnyAccount, onClick = { chooseAccount(null) }, checked = controls.account == null, description = "$AnyAccount, switches as usage runs out", leading = MyIcon.Refresh)
 
                         for (row in controls.accounts) {
                             val rowRefusal = refusal?.takeIf { it.rowId == row.id }
 
                             MenuItem(
                                 if (row.signIn) "${row.usage} · ${row.account}" else row.label,
-                                leading = agentIcon(row.agent),
+                                leading = MyIcon.Person,
                                 onClick = { chooseAccount(row.id) },
                                 checked = row.id == controls.account,
                                 description = row.description(),
