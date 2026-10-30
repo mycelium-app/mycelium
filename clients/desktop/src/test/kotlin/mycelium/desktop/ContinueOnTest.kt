@@ -112,32 +112,32 @@ class ContinueOnTest {
     fun aContinuedEventIsShownInTheThreadAsADivider() {
         shell(EnabledExperiments, Continued)
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continued on Codex as codex@example.com").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Continued on Codex as codex@example.com").assertIsDisplayed()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continued on Codex as codex").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Continued on Codex as codex").assertIsDisplayed()
     }
 
     @Test
     fun aFallbackDividerSaysWhyTheTurnMoved() {
         shell(EnabledExperiments, Continued.replace("\"kind\":\"handoff\"", "\"kind\":\"handoff\",\"reason\":\"usage_limit\",\"window\":\"five_hour\""))
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continued with Codex as codex@example.com").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Continued with Codex as codex@example.com").assertIsDisplayed()
-        rule.onNodeWithText("From Claude Code as sam@example.com: 5-hour limit reached").assertIsDisplayed()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continued with Codex as codex").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Continued with Codex as codex").assertIsDisplayed()
+        rule.onNodeWithText("5-hour limit reached").assertIsDisplayed()
     }
 
     @Test
     fun aMoveBecauseEveryAccountIsAtItsLimitSaysSo() {
         shell(EnabledExperiments, Continued.replace("\"kind\":\"handoff\"", "\"kind\":\"handoff\",\"reason\":\"usage_limit\",\"window\":\"seven_day\",\"every_account\":true"))
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("From Claude Code as sam@example.com: weekly limit reached on every Claude Code account").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Weekly limit reached on every Claude Code account").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
     fun aMoveBackUpTheListSaysTheHarnessHasUsageAgain() {
         shell(EnabledExperiments, Continued.replace("\"kind\":\"handoff\"", "\"kind\":\"handoff\",\"reason\":\"usage_returned\"").replace("\"agent\":\"codex\",\"account\":\"codex@example.com\"", "\"agent\":\"claude\",\"account\":\"sam@example.com\"").replace("\"from\":{\"agent\":\"claude\",\"account\":\"sam@example.com\"}", "\"from\":{\"agent\":\"codex\",\"account\":\"codex@example.com\",\"model\":\"gpt-5.5\"}"))
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continued with Claude Code as sam@example.com").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("From Codex as codex@example.com, gpt-5.5: Claude Code has usage again").assertIsDisplayed()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continued with Claude Code as sam").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Claude Code has usage again").assertIsDisplayed()
     }
 
     @Test

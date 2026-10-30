@@ -764,7 +764,7 @@ fun diffLines(oldText: String, newText: String): List<DiffLine> {
 private fun sideLabel(agent: String, account: String?, model: String?, provider: String?): String =
     when {
         agent == "chat" -> listOfNotNull(provider, model).joinToString(" · ")
-        else -> listOfNotNull(if (account != null) "${agentName(agent)} as $account" else agentName(agent), model).joinToString(", ")
+        else -> listOfNotNull(if (account != null) "${agentName(agent)} as ${account.substringBefore("@")}" else agentName(agent), model).joinToString(", ")
     }
 
 private fun limitName(window: String?): String = when (window) {
@@ -795,12 +795,11 @@ private fun continuedItem(key: String, payload: JsonObject): ThreadItem.Continue
     val from = (payload["from"] as? JsonObject)?.let { ContinuedFrom(it.string("agent").orEmpty(), it.string("account"), it.string("model"), it.string("provider_name")) }
     val node = payload.string("node_name")
     val reason = payload.string("reason")?.let { switchReason(it, payload, from) }
-    val source = from?.let { sideLabel(it.agent, it.account, it.model, it.provider) }
 
     return when {
         payload.string("kind") == "any_node" -> ThreadItem.Continued(key, "Started on $node, picked from Any node")
         payload.string("kind") == "scratch" -> ThreadItem.Continued(key, "Started in a scratch folder on $node. It is deleted with the chat.")
-        reason != null -> ThreadItem.Continued(key, "Continued with ${node?.let { "$target on $it" } ?: target}", from, if (source != null) "From $source: $reason" else reason.replaceFirstChar { it.uppercase() })
+        reason != null -> ThreadItem.Continued(key, "Continued with ${node?.let { "$target on $it" } ?: target}", from, reason.replaceFirstChar { it.uppercase() })
         node != null -> ThreadItem.Continued(key, "Moved to $node", from)
         else -> ThreadItem.Continued(key, "Continued on $target", from)
     }
