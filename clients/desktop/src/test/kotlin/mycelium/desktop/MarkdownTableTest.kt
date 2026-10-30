@@ -41,6 +41,19 @@ class MarkdownTableTest {
     }
 
     @Test
+    fun aShortCellIsCentredBesideACellWhoseTextWraps() {
+        val long = "Keeps the outcome and progress version with no log observer, plus the new finish rule for complete or warn and the cancelled or failed title, and errors come from the outcome."
+        val message = "| File | Resolution | Lines |\n|---|---|--:|\n| restore.svelte | $long | 12 |"
+        rule.setContent { MyceliumTheme(true) { ThreadView(listOf(ThreadItem.AgentMessage("m1", message)), onAnswer = { _, _ -> }, onStopWorkflow = {}) } }
+
+        val wrapped = rule.onNodeWithText(long, useUnmergedTree = true).getBoundsInRoot()
+        val short = rule.onNodeWithText("12", useUnmergedTree = true).getBoundsInRoot()
+        val offset = (wrapped.top + wrapped.bottom) / 2 - (short.top + short.bottom) / 2
+
+        assertTrue(offset.value < 1f && offset.value > -1f, "the short cell is $offset off the centre of the wrapped one")
+    }
+
+    @Test
     fun aShortTableIsNarrowerThanTheThread() {
         val table = "| Check | Result |\n|---|---|\n| sig | ok |\n| sha | ok |"
         val prose = "A long enough paragraph that the thread is clearly wider than a two column table of short words."

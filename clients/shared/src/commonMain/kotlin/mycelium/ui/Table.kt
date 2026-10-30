@@ -140,6 +140,7 @@ fun Table(
     lazy: Boolean = rows > 50,
     fill: Boolean = true,
     card: Boolean = true,
+    centred: Boolean = false,
     rowKey: ((Int) -> Any)? = null,
     onRow: ((Int) -> Unit)? = null,
     rowDescription: (Int) -> String = { "Row ${it + 1}" },
@@ -204,7 +205,7 @@ fun Table(
         val resolved = resolveTable(outerMin, outerNatural, visible.map { columns[it].weight }, available, fill)
         val totalWidth = with(density) { resolved.total.toDp() }
         val outerWidth = if (resolved.scroll) maxWidth else with(density) { (resolved.total + borderTotal).toDp() }
-        val topAligned = visible.any { columns[it].overflow == Overflow.Wrap }
+        val wraps = visible.any { columns[it].overflow == Overflow.Wrap }
         val scroll = rememberScrollState()
         val list = rememberLazyListState()
         val boundedHeight = constraints.hasBoundedHeight
@@ -229,7 +230,7 @@ fun Table(
                 if (spanned != null) {
                     spanned()
                 } else {
-                    TableRow(resolved.widths, minHeight, topAligned, press) {
+                    TableRow(resolved.widths, minHeight, wraps, centred, press) {
                         visible.forEachIndexed { position, column ->
                             val spec = columns[column]
                             val source = if (head) headerCell(column) else cell(index, column)
@@ -270,8 +271,8 @@ fun Table(
 }
 
 @Composable
-private fun TableRow(widths: List<Int>, minHeight: Dp, topAligned: Boolean, modifier: Modifier, content: @Composable () -> Unit) {
-    val verticalPad = if (topAligned) Tokens.Space.S2 else 0.dp
+private fun TableRow(widths: List<Int>, minHeight: Dp, wraps: Boolean, centred: Boolean, modifier: Modifier, content: @Composable () -> Unit) {
+    val verticalPad = if (wraps) Tokens.Space.S2 else 0.dp
 
     Layout(content, modifier) { cells, constraints ->
         val placeables = cells.mapIndexed { index, cell -> cell.measure(Constraints(minWidth = widths[index], maxWidth = widths[index])) }
@@ -283,7 +284,7 @@ private fun TableRow(widths: List<Int>, minHeight: Dp, topAligned: Boolean, modi
             var x = 0
 
             placeables.forEachIndexed { index, placeable ->
-                placeable.place(x, if (topAligned) pad + maxOf(0, (firstLine - placeable.height) / 2) else (height - placeable.height) / 2)
+                placeable.place(x, if (wraps && !centred) pad + maxOf(0, (firstLine - placeable.height) / 2) else (height - placeable.height) / 2)
                 x += widths[index]
             }
         }

@@ -674,6 +674,7 @@ internal fun TableBlock(table: MarkdownBlock.Table) {
         { row, column -> TableCell.Rich(body[row][column], Tokens.Type.Prose) },
         fill = false,
         lazy = false,
+        centred = true,
         headerCell = { column -> TableCell.Rich(header[column], Tokens.Type.UiStrong) },
     )
 }
