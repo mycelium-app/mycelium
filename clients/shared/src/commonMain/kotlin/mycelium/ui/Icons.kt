@@ -32,6 +32,8 @@ private const val SpinMillis = 900
 
 private val MyIcon.filled: Boolean get() = this == MyIcon.ClaudeMark
 
+private val MyIcon.solidFrom: Int get() = if (this == MyIcon.TodoNow) 1 else Int.MAX_VALUE
+
 internal fun circle(cx: Float, cy: Float, r: Float) =
     "M${cx - r} ${cy}a$r $r 0 1 0 ${2 * r} 0a$r $r 0 1 0 ${-2 * r} 0"
 
@@ -40,6 +42,7 @@ internal fun rect(x: Float, y: Float, w: Float, h: Float, r: Float) =
 
 enum class MyIcon(vararg val paths: String) {
     ChevronDown("m6 9 6 6 6-6"),
+    ChevronUp("m18 15-6-6-6 6"),
     ArrowUp("M12 19V5M5 12l7-7 7 7"),
     ArrowDown("M12 5v14M19 12l-7 7-7-7"),
     ChevronLeft("m15 6-6 6 6 6"),
@@ -145,6 +148,9 @@ enum class MyIcon(vararg val paths: String) {
     Task(rect(3f, 3f, 18f, 18f, 2f), "m9 12 2 2 4-4"),
     AppWindow(rect(2f, 4f, 20f, 16f, 2f), "M10 4v4M2 8h20M6 4v4"),
     ChefHat("M17 21a1 1 0 0 0 1-1v-5.35c0-.457.316-.844.727-1.041a4 4 0 0 0-2.134-7.589 5 5 0 0 0-9.186 0 4 4 0 0 0-2.134 7.588c.411.198.727.585.727 1.041V20a1 1 0 0 0 1 1Z", "M6 17h12"),
+    TodoPending(circle(12f, 12f, 9f)),
+    TodoNow(circle(12f, 12f, 9f), "M12 7a5 5 0 0 1 0 10Z"),
+    TodoDone(circle(12f, 12f, 9f), "m8 12.5 2.5 2.5 5.5-6"),
     Receipt("M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z", "M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8", "M12 17.5v-11"),
 }
 
@@ -200,19 +206,19 @@ fun Icon(icon: MyIcon, tint: Color, size: Dp = Tokens.Size.IconMd, modifier: Mod
         modifier
     }
 
-    StrokedPaths(icon.paths.asList(), tint, size, turned, filled = icon.filled)
+    StrokedPaths(icon.paths.asList(), tint, size, turned, filled = icon.filled, solidFrom = icon.solidFrom)
 }
 
 @Composable
-internal fun StrokedPaths(paths: List<String>, tint: Color, size: Dp, modifier: Modifier = Modifier, filled: Boolean = false) {
+internal fun StrokedPaths(paths: List<String>, tint: Color, size: Dp, modifier: Modifier = Modifier, filled: Boolean = false, solidFrom: Int = Int.MAX_VALUE) {
     val parsed = remember(paths) { paths.map { PathParser().parsePathString(it).toPath().apply { fillType = PathFillType.NonZero } } }
 
     Canvas(modifier.size(size)) {
         val scale = this.size.width / ViewBox
 
         withTransform({ scale(scale, scale, pivot = Offset.Zero) }) {
-            for (path in parsed) {
-                drawPath(path, tint, style = if (filled) Fill else Stroke(width = StrokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            for ((index, path) in parsed.withIndex()) {
+                drawPath(path, tint, style = if (filled || index >= solidFrom) Fill else Stroke(width = StrokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round))
             }
         }
     }

@@ -5,6 +5,8 @@ import mycelium.api.Routing
 import mycelium.state.ContinueModelPrefix
 import mycelium.state.RoutingPrefix
 import mycelium.state.anyAccountId
+import mycelium.state.currentTodos
+import mycelium.state.todosAreShown
 import mycelium.state.conversationModelLabel
 import mycelium.state.modelOptions
 import androidx.compose.foundation.background
@@ -728,6 +730,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
                             onSideChat = { kind, text -> store.act { onOpenConversation(api.startSideChat(id, sideKind(kind), text.ifEmpty { null }).id) } },
                             onTeachMe = { on -> store.act { api.patchConversation(id, PatchConversationRequest(teachMe = on)) } },
+                            todos = remember(thread, state.events[id]) { currentTodos(thread).takeIf { todosAreShown(it, turnIsOpen(state.events[id].orEmpty())) }.orEmpty() },
                             goal = GoalControls(
                                 goal = state.goals[id],
                                 onSet = { text, limits -> store.act { store.setGoal(id, text, limits) } },

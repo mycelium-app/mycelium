@@ -202,6 +202,15 @@ fun buildThread(events: List<Event>): List<ThreadItem> = ThreadBuilder().build(e
 
 fun turnIsOpen(events: List<Event>): Boolean = events.lastOrNull { it.kind == EventKinds.UserMessage || it.kind == EventKinds.TurnEnd }?.kind == EventKinds.UserMessage
 
+fun currentTodos(items: List<ThreadItem>): List<PlanEntry> = items.filterIsInstance<ThreadItem.Plan>().lastOrNull()?.entries.orEmpty()
+
+fun todoCurrentIndex(entries: List<PlanEntry>): Int =
+    entries.indexOfFirst { it.status == PlanStatus.Running }.takeIf { it >= 0 }
+        ?: entries.indexOfFirst { it.status == PlanStatus.Pending }.takeIf { it >= 0 }
+        ?: entries.lastIndex
+
+fun todosAreShown(entries: List<PlanEntry>, turnOpen: Boolean): Boolean = entries.isNotEmpty() && (turnOpen || entries.any { it.status != PlanStatus.Done })
+
 class ThreadBuilder {
     private val items = mutableListOf<ThreadItem>()
     private var folded = 0

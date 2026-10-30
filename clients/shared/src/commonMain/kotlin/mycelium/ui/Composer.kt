@@ -84,6 +84,7 @@ import androidx.compose.ui.window.PopupProperties
 import mycelium.Dictation
 import mycelium.DictationProblem
 import mycelium.state.Choice
+import mycelium.state.PlanEntry
 import mycelium.state.ForgeReference
 import mycelium.state.Annotation
 import mycelium.state.SessionOptions
@@ -160,6 +161,7 @@ fun Composer(
     pendingCitations: List<Annotation> = emptyList(),
     onCitationPlaced: (Annotation) -> Unit = {},
     goal: GoalControls? = null,
+    todos: List<PlanEntry> = emptyList(),
     attachments: AttachmentControls? = null,
     dictation: Dictation? = null,
     initialText: TextFieldValue = TextFieldValue(""),
@@ -551,6 +553,10 @@ fun Composer(
             ) {
                 goal?.goal?.let { GoalBar(it, goal) }
 
+                if (todos.isNotEmpty()) {
+                    TodoList(todos, conversation.id)
+                }
+
                 if (queue.isNotEmpty() || sending.isNotEmpty()) {
                     QueuedMessages(queue, sending, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onMoveQueued, onRemoveQueued)
                 }
@@ -601,6 +607,12 @@ fun Composer(
         goal?.goal?.let { held ->
             Box(measured) {
                 GoalBar(held, goal)
+            }
+        }
+
+        if (todos.isNotEmpty()) {
+            Box(measured) {
+                TodoList(todos, conversation.id)
             }
         }
 

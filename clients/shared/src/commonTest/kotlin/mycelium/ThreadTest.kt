@@ -5,11 +5,16 @@ import mycelium.api.Event
 import mycelium.api.EventKinds
 import mycelium.api.MyceliumJson
 import mycelium.state.DiffLine
+import mycelium.state.PlanEntry
+import mycelium.state.PlanStatus
 import mycelium.state.ThreadItem
 import mycelium.state.ToolStatus
 import mycelium.state.buildThread
+import mycelium.state.currentTodos
 import mycelium.state.diffLines
 import mycelium.state.suggestedReplies
+import mycelium.state.todoCurrentIndex
+import mycelium.state.todosAreShown
 import mycelium.state.turnIsOpen
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -203,6 +208,42 @@ class ThreadTest {
 
         val plan = assertIs<ThreadItem.Plan>(thread.single())
         assertEquals(listOf("Bump", "Test"), plan.entries.map { it.content })
+    }
+
+    @Test
+    fun theLatestPlanIsTheCurrentTodoList() {
+        val thread = buildThread(
+            listOf(
+                update(1, """{"sessionUpdate":"plan","entries":[{"content":"Old","status":"pending"}]}"""),
+                chunk(2, "Working"),
+                update(3, """{"sessionUpdate":"plan","entries":[{"content":"Bump","status":"completed"},{"content":"Test","status":"in_progress"}]}"""),
+            ),
+        )
+
+        assertEquals(listOf("Bump", "Test"), currentTodos(thread).map { it.content })
+        assertEquals(emptyList(), currentTodos(buildThread(listOf(chunk(1, "Hello")))))
+    }
+
+    @Test
+    fun theCurrentTodoIsTheRunningOneThenTheFirstPendingThenTheLast() {
+        val running = listOf(PlanEntry("a", PlanStatus.Done), PlanEntry("b", PlanStatus.Running), PlanEntry("c", PlanStatus.Pending))
+        val onlyPending = listOf(PlanEntry("a", PlanStatus.Done), PlanEntry("b", PlanStatus.Pending))
+        val finished = listOf(PlanEntry("a", PlanStatus.Done), PlanEntry("b", PlanStatus.Done))
+
+        assertEquals(1, todoCurrentIndex(running))
+        assertEquals(1, todoCurrentIndex(onlyPending))
+        assertEquals(1, todoCurrentIndex(finished))
+    }
+
+    @Test
+    fun aFinishedTodoListIsHiddenOnceTheTurnEnds() {
+        val finished = listOf(PlanEntry("a", PlanStatus.Done))
+        val open = listOf(PlanEntry("a", PlanStatus.Done), PlanEntry("b", PlanStatus.Pending))
+
+        assertEquals(true, todosAreShown(finished, turnOpen = true))
+        assertEquals(false, todosAreShown(finished, turnOpen = false))
+        assertEquals(true, todosAreShown(open, turnOpen = false))
+        assertEquals(false, todosAreShown(emptyList(), turnOpen = true))
     }
 
     @Test
