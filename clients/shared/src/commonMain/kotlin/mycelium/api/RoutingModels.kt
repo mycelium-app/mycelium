@@ -20,13 +20,27 @@ data class AgentSettings(
     @SerialName("default_modes") val defaultModes: DefaultModes = DefaultModes(),
     @SerialName("account_modes") val accountModes: List<AccountMode> = emptyList(),
     @SerialName("any_model") val anyModel: List<ModelChoice> = emptyList(),
+    @SerialName("node_preferences") val nodePreferences: Map<String, String> = emptyMap(),
 )
 
 @Serializable
 data class SaveAgentSettingsRequest(
     @SerialName("default_modes") val defaultModes: DefaultModes = DefaultModes(),
     @SerialName("any_model") val anyModel: List<ModelChoice> = emptyList(),
+    @SerialName("node_preferences") val nodePreferences: Map<String, String>? = null,
 )
+
+object NodePreference {
+    const val Preferred = "preferred"
+    const val Normal = "normal"
+    const val Avoid = "avoid"
+    const val Never = "never"
+}
+
+const val AnyNodeId = "00000000-0000-0000-0000-000000000000"
+
+@Serializable
+data class AnyNodePick(@SerialName("node_id") val nodeId: String, val name: String)
 
 @Serializable
 data class SetAccountModeRequest(val agent: String, val account: String, val mode: String? = null)

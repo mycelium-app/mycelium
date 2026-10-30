@@ -345,9 +345,12 @@ fun needsInputIn(conversations: Collection<Conversation>, filter: String): Int =
 fun pinnedConversations(conversations: Collection<Conversation>, filter: String = AllGroups): List<Conversation> =
     topLevel(conversations, filter).filter { it.pinnedAt != null }.sortedBy { it.pinnedAt }
 
+fun snoozedConversations(conversations: Collection<Conversation>, filter: String = AllGroups): List<Conversation> =
+    topLevel(conversations, filter).filter { it.pinnedAt == null && it.snoozedUntil != null }.sortedBy { it.snoozedUntil }
+
 fun sidebarSections(conversations: Collection<Conversation>, filter: String = AllGroups): List<SidebarSection> {
     return topLevel(conversations, filter)
-        .filter { it.pinnedAt == null }
+        .filter { it.pinnedAt == null && it.snoozedUntil == null }
         .groupBy { if (it.resumeAt != null) ConversationStatus.Working else it.status }
         .map { (status, rows) -> SidebarSection(status, if (status == ConversationStatus.Done) SettledName else statusSectionName(status), rows.sortedByDescending { it.updatedAt }) }
         .sortedBy { statusRank(it.status) }

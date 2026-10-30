@@ -171,6 +171,9 @@ class MyceliumApi(
 
     suspend fun nodes(): List<NodeSummary> = call("/nodes") { client.get(it) { authorise() } }.body()
 
+    suspend fun anyNodePick(projectId: String? = null): AnyNodePick =
+        call("/nodes/any") { client.get(it) { authorise(); if (projectId != null) parameter("project_id", projectId) } }.body()
+
     suspend fun mintSshToken(nodeId: String): SshToken = call("/nodes/$nodeId/ssh-tokens") { client.post(it) { authorise() } }.body()
 
     suspend fun drainNode(id: String, draining: Boolean) {
@@ -791,6 +794,9 @@ class MyceliumApi(
 
     suspend fun createProject(request: CreateProjectRequest): Project =
         call("/projects") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun checkoutProject(id: String, nodeId: String): Project =
+        call("/projects/$id/checkout") { client.post(it) { authorise(); json(CheckoutProjectRequest(nodeId)) } }.body()
 
     suspend fun worktrees(): List<Worktree> = call("/worktrees") { client.get(it) { authorise() } }.body()
 

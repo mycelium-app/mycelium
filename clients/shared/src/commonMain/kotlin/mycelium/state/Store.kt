@@ -1194,6 +1194,14 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         }
     }
 
+    fun snooze(conversation: Conversation, until: String?) {
+        act {
+            val request = if (until == null) PatchConversationRequest(clearSnooze = true) else PatchConversationRequest(snoozedUntil = until)
+            val updated = api.patchConversation(conversation.id, request)
+            mutableState.update { it.copy(conversations = it.conversations + (updated.id to updated)) }
+        }
+    }
+
     fun setConversationProject(conversation: Conversation, projectId: String?) {
         mutableState.update { it.copy(conversations = it.conversations + (conversation.id to conversation.copy(projectId = projectId))) }
 

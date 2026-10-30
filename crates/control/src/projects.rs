@@ -11,7 +11,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::body::Bytes;
 use axum::http::{HeaderMap, StatusCode};
-use mycelium_proto::api::{CreateProjectRequest, PatchProjectRequest, Project};
+use mycelium_proto::api::{CheckoutProjectRequest, CreateProjectRequest, PatchProjectRequest, Project};
 use mycelium_proto::link::GitCommand;
 use mycelium_proto::stream::StreamMessage;
 use serde_json::Value;
@@ -47,6 +47,18 @@ pub async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<Pr
     let row = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("select {PROJECT_COLUMNS} from projects where id = $1 and owner = $2"))).bind(id).bind(owner).fetch_optional(&state.pool).await?;
 
     row.ok_or_else(|| ApiError::not_found("That project"))
+}
+
+pub async fn nodes_holding(state: &AppState, owner: Uuid, project: &ProjectRow) -> ApiResult<Vec<Uuid>> {
+    let siblings = sqlx::query_scalar::<_, Uuid>("select node_id from projects where owner = $1 and forge_id = $2 and repository = $3").bind(owner).bind(project.forge_id).bind(&project.repository).fetch_all(&state.pool).await?;
+
+    Ok(std::iter::once(project.node_id).chain(siblings).collect())
+}
+
+pub async fn sibling_on(state: &AppState, owner: Uuid, project: &ProjectRow, node_id: Uuid) -> ApiResult<ProjectRow> {
+    let row = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("select {PROJECT_COLUMNS} from projects where owner = $1 and node_id = $2 and forge_id = $3 and repository = $4"))).bind(owner).bind(node_id).bind(project.forge_id).bind(&project.repository).fetch_optional(&state.pool).await?;
+
+    row.ok_or_else(|| ApiError::bad_request("project_not_on_node", "This project is not set up on that node. Choose a node it is set up on."))
 }
 
 pub async fn clone_repository(state: &AppState, forge: &forges::ForgeRow, repository: &str, node_id: Uuid) -> ApiResult<String> {
@@ -207,6 +219,24 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         Err(sqlx::Error::Database(cause)) if cause.is_unique_violation() => Err(ApiError::conflict("project_exists", "This folder is already a project on this node.")),
         Err(cause) => Err(cause.into()),
     }
+}
+
+pub async fn checkout(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<CheckoutProjectRequest>) -> ApiResult<(StatusCode, Json<Project>)> {
+    let project = find_owned(&state, id, user.id).await?;
+
+    if project.node_id == request.node_id {
+        return Ok((StatusCode::OK, Json(project.to_proto())));
+    }
+
+    let (Some(forge_id), Some(repository)) = (project.forge_id, project.repository.clone()) else {
+        return Err(ApiError::bad_request("project_not_cloneable", "This project has no forge repository to clone. Register its folder on that node instead."));
+    };
+
+    if let Ok(existing) = sibling_on(&state, user.id, &project, request.node_id).await {
+        return Ok((StatusCode::OK, Json(existing.to_proto())));
+    }
+
+    create(State(state), user, Json(CreateProjectRequest { node_id: request.node_id, forge_id: Some(forge_id), repository: Some(repository), path: None, new_repository: false })).await
 }
 
 pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchProjectRequest>) -> ApiResult<Json<Project>> {

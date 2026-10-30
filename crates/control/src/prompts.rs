@@ -122,7 +122,7 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         .execute(&mut *tx)
         .await?;
 
-    let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set status = 'working', agent_active = true, last_activity_at = now(), updated_at = now(), resume_at = null where id = $1 returning {CONVERSATION_COLUMNS}")))
+    let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set status = 'working', agent_active = true, last_activity_at = now(), updated_at = now(), resume_at = null, snoozed_until = null where id = $1 returning {CONVERSATION_COLUMNS}")))
         .bind(conversation_id)
         .fetch_one(&mut *tx)
         .await?;

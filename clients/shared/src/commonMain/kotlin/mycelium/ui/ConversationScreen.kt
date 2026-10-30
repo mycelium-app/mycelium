@@ -549,6 +549,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     onSetUp = { store.act { store.createProject(CreateProjectRequest(conversation.nodeId, path = conversation.cwd)) } },
                     onRename = { title -> store.rename(conversation, title) },
                     onPin = { store.pin(conversation, conversation.pinnedAt == null) },
+                    onSnooze = { until -> store.snooze(conversation, until) },
                     onCloseSession = { store.closeSession(conversation) },
                     onArchive = {
                         val archiving = conversation.archivedAt == null
@@ -634,6 +635,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     onCancelResume = { store.act { api.cancelResume(id) } },
                     continueOn = accountPicker,
                 )
+
+                conversation.snoozedUntil?.let { until -> SnoozedLine(until, onWake = { store.snooze(conversation, null) }) }
 
                 CompositionLocalProvider(LocalResponseActions provides responses, LocalPausedWorkflow provides PausedWorkflow(conversation.agent, limitActions)) {
                     ThreadView(
@@ -837,6 +840,7 @@ private fun ConversationHeader(
     onSetUp: () -> Unit,
     onRename: (String) -> Unit,
     onPin: () -> Unit,
+    onSnooze: (String?) -> Unit,
     onCloseSession: () -> Unit,
     onArchive: () -> Unit,
     onDelete: () -> Unit,
@@ -849,6 +853,7 @@ private fun ConversationHeader(
     var nodeMenuOpen by remember { mutableStateOf(false) }
     var moveOpen by remember { mutableStateOf(false) }
     var projectMenuOpen by remember { mutableStateOf(false) }
+    var snoozeMenuOpen by remember { mutableStateOf(false) }
     var ideMenuOpen by remember { mutableStateOf(false) }
     val archived = conversation.archivedAt != null
     val density = LocalDensity.current
@@ -1004,6 +1009,7 @@ private fun ConversationHeader(
                     }
 
                     MenuItem(if (conversation.pinnedAt == null) "Pin" else "Unpin", onClick = { menuOpen = false; onPin() }, leading = MyIcon.Pin)
+                    MenuItem(if (conversation.snoozedUntil == null) "Snooze" else "Wake now", onClick = { menuOpen = false; if (conversation.snoozedUntil == null) snoozeMenuOpen = true else onSnooze(null) }, leading = MyIcon.Clock)
 
                     if (!chat && !conversation.scratch) {
                         MenuItem(if (terminalShown) "Hide terminal" else "Show terminal", onClick = { menuOpen = false; onTerminal() }, hint = "Ctrl+`", leading = MyIcon.Terminal)
@@ -1031,6 +1037,10 @@ private fun ConversationHeader(
             projectMenuOpen = false
             onProject(it)
         }
+    }
+
+    if (snoozeMenuOpen) {
+        SnoozeMenu(onSnooze = onSnooze, onDismiss = { snoozeMenuOpen = false })
     }
 
     if (confirmingDelete) {

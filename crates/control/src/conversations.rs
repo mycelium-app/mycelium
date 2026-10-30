@@ -17,6 +17,7 @@ use axum::http::StatusCode;
 use mycelium_proto::api::{CreateChatRequest, CreateConversationRequest, EventsQuery, PatchConversationRequest, StartSideChatRequest};
 use mycelium_proto::conversation::{AgentId, Conversation, ConversationStatus, Event, EventKind, SideKind};
 use mycelium_proto::link::{ControlToNode, GitCommand};
+use mycelium_proto::routing::ANY_NODE;
 use mycelium_proto::stream::StreamMessage;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -75,10 +76,28 @@ pub async fn start(state: &AppState, owner: Uuid, request: CreateConversationReq
 }
 
 pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConversationRequest, assistant_id: Option<Uuid>, scratch: bool) -> ApiResult<Conversation> {
-    let project = match request.project_id {
+    let mut any_node_name = None;
+    let mut project = match request.project_id {
         Some(project_id) => Some(projects::find_owned(state, project_id, owner).await?),
         None => None,
     };
+    let any_node = request.node_id == ANY_NODE;
+
+    if any_node {
+        let holding = match &project {
+            Some(project) => Some(projects::nodes_holding(state, owner, project).await?),
+            None => None,
+        };
+        let picked = crate::node_pick::pick(state, owner, holding.as_deref()).await?;
+
+        request.node_id = picked.node_id;
+
+        if let Some(held) = &project && held.node_id != picked.node_id {
+            project = Some(projects::sibling_on(state, owner, held, picked.node_id).await?);
+        }
+
+        any_node_name = Some(picked.name);
+    }
 
     if project.as_ref().is_some_and(|project| project.node_id != request.node_id) {
         return Err(ApiError::bad_request("project_not_on_node", "This project is not set up on that node. Choose a node it is set up on."));
@@ -208,6 +227,10 @@ pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConvers
         started_event = append_event(&mut tx, row.id, EventKind::Continued, &json!({"kind": "scratch", "node_name": node_name}), None).await?;
     }
 
+    if let Some(node_name) = any_node_name {
+        started_event = append_event(&mut tx, row.id, EventKind::Continued, &json!({"kind": "any_node", "node_name": node_name}), None).await?;
+    }
+
     if let Some(prompt) = prompt {
         sqlx::query("insert into queued_prompts (conversation_id, position, text) values ($1, 1, $2)").bind(row.id).bind(prompt).execute(&mut *tx).await?;
     }
@@ -334,6 +357,10 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
         return Err(ApiError::bad_request("title_required", "Enter a title for this conversation."));
     }
 
+    if request.snoozed_until.is_some_and(|until| until <= chrono::Utc::now()) {
+        return Err(ApiError::bad_request("snooze_in_the_past", "Choose a time in the future to snooze this conversation until."));
+    }
+
     let mut tx = state.pool.begin().await?;
     let before = lock_owned(&mut tx, id, user.id).await?;
     let account = request.account.as_deref().map(str::trim).filter(|account| !account.is_empty());
@@ -395,6 +422,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
              pinned_at = case when $9::bool is null then pinned_at when $9 then coalesce(pinned_at, now()) else null end,
              project_id = case when $10 then null else coalesce($11, project_id) end,
              teach_me = coalesce($12, teach_me),
+             snoozed_until = case when $13 then null else coalesce($14, snoozed_until) end,
              pull_request_label = case when $10 or $11 is not null then null else pull_request_label end,
              pull_request_url = case when $10 or $11 is not null then null else pull_request_url end
          where id = $1
@@ -413,6 +441,8 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .bind(request.clear_project == Some(true))
     .bind(request.project_id)
     .bind(request.teach_me)
+    .bind(request.clear_snooze == Some(true))
+    .bind(request.snoozed_until)
     .fetch_one(&mut *tx)
     .await?;
     let teach_change = match request.teach_me {
@@ -453,6 +483,25 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     }
 
     Ok(Json(conversation))
+}
+
+pub async fn wake_regularly(state: AppState) {
+    crate::boot::run_while_ready(&state, "wake the snoozed conversations", state.config.scheduler_tick, || wake_due(&state)).await;
+}
+
+async fn wake_due(state: &AppState) -> ApiResult<()> {
+    let woken = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
+        "update conversations set snoozed_until = null where snoozed_until <= now() returning {CONVERSATION_COLUMNS}",
+    )))
+    .fetch_all(&state.pool)
+    .await?;
+
+    for row in woken {
+        let owner = row.owner;
+        state.publish(Some(owner), StreamMessage::Conversation(row.to_proto()?));
+    }
+
+    Ok(())
 }
 
 pub fn spawn_branch_refresh(state: &AppState, conversation_id: Uuid) {

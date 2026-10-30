@@ -7,8 +7,9 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use mycelium_proto::api::ModelChoice;
 use mycelium_proto::conversation::AgentId;
-use mycelium_proto::routing::{AccountMode, AgentSettings, DefaultModes, SaveAgentSettingsRequest, SetAccountModeRequest};
+use mycelium_proto::routing::{AccountMode, AgentSettings, DefaultModes, NodePreference, SaveAgentSettingsRequest, SetAccountModeRequest};
 use sqlx::types::Json as Sql;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 const CLAUDE_MODES: [&str; 4] = ["default", "plan", "acceptEdits", "bypassPermissions"];
@@ -57,8 +58,8 @@ pub async fn get(State(state): State<AppState>, user: AuthUser) -> ApiResult<Jso
 }
 
 pub async fn read(state: &AppState, owner: Uuid) -> ApiResult<AgentSettings> {
-    let stored = sqlx::query_as::<_, (Option<String>, Option<String>, Sql<Vec<ModelChoice>>)>("select default_mode_claude, default_mode_codex, any_model from user_settings where owner = $1").bind(owner).fetch_optional(&state.pool).await?;
-    let (claude, codex, any_model) = stored.map_or((None, None, Vec::new()), |(claude, codex, any_model)| (claude, codex, any_model.0));
+    let stored = sqlx::query_as::<_, (Option<String>, Option<String>, Sql<Vec<ModelChoice>>, Sql<HashMap<Uuid, NodePreference>>)>("select default_mode_claude, default_mode_codex, any_model, node_preferences from user_settings where owner = $1").bind(owner).fetch_optional(&state.pool).await?;
+    let (claude, codex, any_model, node_preferences) = stored.map_or((None, None, Vec::new(), HashMap::new()), |(claude, codex, any_model, node_preferences)| (claude, codex, any_model.0, node_preferences.0));
     let overrides = sqlx::query_as::<_, (String, String, String)>("select agent, account, default_mode from account_settings where owner = $1 and default_mode is not null order by agent, account").bind(owner).fetch_all(&state.pool).await?;
     let mut account_modes = Vec::new();
 
@@ -66,7 +67,7 @@ pub async fn read(state: &AppState, owner: Uuid) -> ApiResult<AgentSettings> {
         account_modes.push(AccountMode { agent: parse_enum(&agent)?, account, mode });
     }
 
-    Ok(AgentSettings { default_modes: DefaultModes { claude, codex }, account_modes, any_model })
+    Ok(AgentSettings { default_modes: DefaultModes { claude, codex }, account_modes, any_model, node_preferences })
 }
 
 pub async fn save(State(state): State<AppState>, user: AuthUser, Json(request): Json<SaveAgentSettingsRequest>) -> ApiResult<Json<AgentSettings>> {
@@ -87,13 +88,14 @@ pub async fn save(State(state): State<AppState>, user: AuthUser, Json(request): 
     }
 
     sqlx::query(
-        "insert into user_settings (owner, default_mode_claude, default_mode_codex, any_model) values ($1, $2, $3, $4)
-         on conflict (owner) do update set default_mode_claude = excluded.default_mode_claude, default_mode_codex = excluded.default_mode_codex, any_model = excluded.any_model",
+        "insert into user_settings (owner, default_mode_claude, default_mode_codex, any_model, node_preferences) values ($1, $2, $3, $4, coalesce($5, '{}'::jsonb))
+         on conflict (owner) do update set default_mode_claude = excluded.default_mode_claude, default_mode_codex = excluded.default_mode_codex, any_model = excluded.any_model, node_preferences = coalesce($5, user_settings.node_preferences)",
     )
     .bind(user.id)
     .bind(&request.default_modes.claude)
     .bind(&request.default_modes.codex)
     .bind(Sql(&request.any_model))
+    .bind(request.node_preferences.as_ref().map(Sql))
     .execute(&state.pool)
     .await?;
 

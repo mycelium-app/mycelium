@@ -21,8 +21,7 @@ enum class RowDensity(val label: String, val scale: Float) {
 }
 
 enum class ChatWidth(val label: String, val measure: Dp) {
-    Narrow("Narrow", 560.dp),
-    Standard("Standard", 720.dp),
+    Comfortable("Comfortable", 720.dp),
     Wide("Wide", 920.dp),
     Full("Full", 4000.dp),
 }
@@ -53,7 +52,7 @@ enum class TimestampStyle(val label: String) {
 data class Display(
     val textSize: TextSize = TextSize.Default,
     val density: RowDensity = RowDensity.Comfortable,
-    val chatWidth: ChatWidth = ChatWidth.Standard,
+    val chatWidth: ChatWidth = ChatWidth.Comfortable,
     val codeSize: CodeSize = CodeSize.Regular,
     val reducedMotion: MotionSetting = MotionSetting.System,
     val timestamps: TimestampStyle = TimestampStyle.Relative,

@@ -1093,6 +1093,41 @@ async fn pinning_a_conversation_keeps_pin_order_and_unpinning_clears_it() {
 }
 
 #[tokio::test]
+async fn a_snoozed_conversation_wakes_by_itself_when_its_time_comes() {
+    let server = Server::start_with(|config| config.scheduler_tick = std::time::Duration::from_millis(50)).await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    let url = format!("/api/v1/conversations/{id}");
+    let until = chrono::Utc::now() + chrono::Duration::seconds(1);
+
+    let (_, snoozed) = server.user.json(server.user.patch(&url).json(&json!({"snoozed_until": until}))).await;
+    assert!(snoozed["snoozed_until"].is_string());
+
+    common::eventually("the snooze to end", || async {
+        let (_, woken) = server.user.json(server.user.get(&url)).await;
+        woken["snoozed_until"].is_null().then_some(())
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_snooze_can_be_ended_early_and_cannot_be_set_in_the_past() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    let url = format!("/api/v1/conversations/{id}");
+    let past = chrono::Utc::now() - chrono::Duration::minutes(1);
+    let later = chrono::Utc::now() + chrono::Duration::hours(3);
+
+    let rejected = server.user.patch(&url).json(&json!({"snoozed_until": past})).send().await.unwrap();
+    assert_eq!(rejected.status(), 400);
+
+    server.user.json(server.user.patch(&url).json(&json!({"snoozed_until": later}))).await;
+    let (_, woken) = server.user.json(server.user.patch(&url).json(&json!({"clear_snooze": true}))).await;
+    assert!(woken["snoozed_until"].is_null());
+}
+
+#[tokio::test]
 async fn renaming_or_archiving_a_conversation_leaves_its_last_activity_alone() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

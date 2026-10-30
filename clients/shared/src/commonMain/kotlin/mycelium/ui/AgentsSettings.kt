@@ -23,6 +23,7 @@ import mycelium.api.AgentSettings
 import mycelium.api.LoginState
 import mycelium.api.ModelChoice
 import mycelium.api.ModelProvider
+import mycelium.api.NodePreference
 import mycelium.api.SaveAgentSettingsRequest
 import mycelium.api.SetAccountModeRequest
 import mycelium.api.UsageLimitSetting
@@ -175,6 +176,29 @@ fun AgentsSettings(store: Store) {
                     )
                 }
             }
+
+            if (state.nodes.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                    Label("Any node", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                    Label("Any node starts a conversation on the node with the most free CPU and memory, weighted by these preferences.", style = Tokens.Type.Meta, color = colors.textMuted)
+
+                    for (node in state.nodes.values.sortedBy { it.name.lowercase() }) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                            Label(node.name, Modifier.width(DefaultModeNameWidth))
+                            Segmented(
+                                NodePreferenceChoices.map { it.second },
+                                NodePreferenceChoices.first { it.first == (current.nodePreferences[node.id] ?: NodePreference.Normal) }.second,
+                                { label ->
+                                    val picked = NodePreferenceChoices.first { it.second == label }.first
+
+                                    runner { settings = store.api.saveAgentSettings(SaveAgentSettingsRequest(current.defaultModes, current.anyModel, current.nodePreferences + (node.id to picked))) }
+                                },
+                                groupLabel = "Any node preference for ${node.name}",
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -295,3 +319,10 @@ fun rememberFavouriteModels(store: Store): FavouriteModels {
         store.act { store.api.saveAgentSettings(SaveAgentSettingsRequest(settings.defaultModes, saved)) }
     }
 }
+
+private val NodePreferenceChoices = listOf(
+    NodePreference.Preferred to "Preferred",
+    NodePreference.Normal to "Normal",
+    NodePreference.Avoid to "Avoid",
+    NodePreference.Never to "Never",
+)

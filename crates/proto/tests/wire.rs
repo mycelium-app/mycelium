@@ -76,6 +76,7 @@ fn conversation() -> Conversation {
         archived_at: None,
         pinned_at: None,
         resume_at: None,
+        snoozed_until: None,
         branch: None,
         pull_request_label: None,
         pull_request_url: None,

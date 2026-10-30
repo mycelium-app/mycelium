@@ -98,7 +98,7 @@ fun App(platform: Platform, dark: Boolean? = null) {
 private fun loadDisplay(platform: Platform): Display = Display(
     textSize = TextSize.entries.firstOrNull { it.name == platform.loadPreference("text-size") } ?: TextSize.Default,
     density = RowDensity.entries.firstOrNull { it.name == platform.loadPreference("density") } ?: RowDensity.Comfortable,
-    chatWidth = ChatWidth.entries.firstOrNull { it.name == platform.loadPreference("chat-width") } ?: ChatWidth.Standard,
+    chatWidth = ChatWidth.entries.firstOrNull { it.name == platform.loadPreference("chat-width") } ?: ChatWidth.Comfortable,
     codeSize = CodeSize.entries.firstOrNull { it.name == platform.loadPreference("code-size") } ?: CodeSize.Regular,
     reducedMotion = MotionSetting.entries.firstOrNull { it.name == platform.loadPreference("reduced-motion") } ?: MotionSetting.System,
     timestamps = TimestampStyle.entries.firstOrNull { it.name == platform.loadPreference("timestamps") } ?: TimestampStyle.Relative,

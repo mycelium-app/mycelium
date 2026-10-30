@@ -270,6 +270,10 @@ pub struct PatchConversationRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pinned: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snoozed_until: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clear_snooze: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub use_default_account: Option<bool>,
@@ -1559,6 +1563,11 @@ pub struct CreateProjectRequest {
     pub path: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub new_repository: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CheckoutProjectRequest {
+    pub node_id: Uuid,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
