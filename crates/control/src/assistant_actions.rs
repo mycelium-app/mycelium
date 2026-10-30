@@ -203,8 +203,8 @@ fn name_taken(name: &str) -> ApiError {
     ApiError::conflict("name_taken", format!("This assistant already has an action called {name}. Choose another name."))
 }
 
-async fn validate_place(state: &AppState, owner: Uuid, model: &Option<ModelChoice>, node_id: Option<Uuid>) -> ApiResult<()> {
-    let preferences = mycelium_proto::api::AssistantPreferences { models: model.iter().cloned().collect(), nodes: node_id.into_iter().collect(), ..Default::default() };
+async fn validate_place(state: &AppState, owner: Uuid, node_id: Option<Uuid>) -> ApiResult<()> {
+    let preferences = mycelium_proto::api::AssistantPreferences { nodes: node_id.into_iter().collect(), ..Default::default() };
 
     assistants::validate_preferences(state, owner, &preferences).await
 }
@@ -281,17 +281,16 @@ async fn insert(state: &AppState, owner: Uuid, assistant_id: Uuid, request: Save
     let prompt = valid_prompt(&request.prompt)?;
     let inputs = valid_inputs(request.inputs)?;
 
-    validate_place(state, owner, &request.model, request.node_id).await?;
+    validate_place(state, owner, request.node_id).await?;
 
     let inserted = sqlx::query_as::<_, ActionRow>(sqlx::AssertSqlSafe(format!(
-        "insert into assistant_actions (assistant_id, name, prompt, inputs, model, node_id, pinned, position)
-         values ($1, $2, $3, $4, $5, $6, $7, (select coalesce(max(position) + 1, 0) from assistant_actions where assistant_id = $1)) returning {ACTION_COLUMNS}",
+        "insert into assistant_actions (assistant_id, name, prompt, inputs, node_id, pinned, position)
+         values ($1, $2, $3, $4, $5, $6, (select coalesce(max(position) + 1, 0) from assistant_actions where assistant_id = $1)) returning {ACTION_COLUMNS}",
     )))
     .bind(assistant_id)
     .bind(&name)
     .bind(prompt)
     .bind(Jsonb(&inputs))
-    .bind(request.model.as_ref().map(Jsonb))
     .bind(request.node_id)
     .bind(request.pinned)
     .fetch_one(&state.pool)
@@ -321,17 +320,16 @@ pub async fn update(State(state): State<AppState>, user: AuthUser, Path((assista
     let prompt = valid_prompt(&request.prompt)?;
     let inputs = valid_inputs(request.inputs)?;
 
-    validate_place(&state, user.id, &request.model, request.node_id).await?;
+    validate_place(&state, user.id, request.node_id).await?;
 
     let updated = sqlx::query_as::<_, ActionRow>(sqlx::AssertSqlSafe(format!(
-        "update assistant_actions set name = $3, prompt = $4, inputs = $5, model = $6, node_id = $7, pinned = $8, updated_at = now() where id = $1 and assistant_id = $2 returning {ACTION_COLUMNS}",
+        "update assistant_actions set name = $3, prompt = $4, inputs = $5, model = null, node_id = $6, pinned = $7, updated_at = now() where id = $1 and assistant_id = $2 returning {ACTION_COLUMNS}",
     )))
     .bind(action_id)
     .bind(assistant_id)
     .bind(&name)
     .bind(prompt)
     .bind(Jsonb(&inputs))
-    .bind(request.model.as_ref().map(Jsonb))
     .bind(request.node_id)
     .bind(request.pinned)
     .fetch_one(&state.pool)
@@ -411,7 +409,7 @@ pub async fn run(state: &AppState, owner: Uuid, assistant_id: Uuid, action_id: U
         }
     }
 
-    let overrides = StartOverrides { model: action.model, node_id: action.node_id };
+    let overrides = StartOverrides { model: None, node_id: action.node_id };
 
     assistants::wake(state, owner, assistant_id, PromptRequest { text, ..Default::default() }, &overrides).await
 }

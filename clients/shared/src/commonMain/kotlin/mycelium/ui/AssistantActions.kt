@@ -26,8 +26,6 @@ import mycelium.api.ActionInput
 import mycelium.api.ActionProposal
 import mycelium.api.Assistant
 import mycelium.api.AssistantAction
-import mycelium.api.ModelChoice
-import mycelium.api.ModelProvider
 import mycelium.api.SaveActionRequest
 import mycelium.state.AppState
 import mycelium.state.Choice
@@ -215,7 +213,7 @@ internal fun ActionDialog(title: String, initial: SaveActionRequest?, onDismiss:
         }
 
         runner {
-            onSave(SaveActionRequest(name.trim(), prompt.trim(), inputs, initial?.model, initial?.nodeId, pinned))
+            onSave(SaveActionRequest(name.trim(), prompt.trim(), inputs, nodeId = initial?.nodeId, pinned = pinned))
             onDismiss()
         }
     }
@@ -290,11 +288,9 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
     var creating by remember(assistant.id) { mutableStateOf(false) }
     var scheduling by remember(assistant.id) { mutableStateOf(false) }
     var editingSchedule by remember(assistant.id) { mutableStateOf<mycelium.api.Schedule?>(null) }
-    var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
     val runner = rememberAction(assistant.id)
 
     LaunchedEffect(assistant.id) {
-        store.act { providers = store.api.modelProviders() }
         store.act { store.refreshAssistantActions(assistant.id) }
         store.act { store.refreshActionProposals(assistant.id) }
         store.act { store.refreshSchedules() }
@@ -338,7 +334,7 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
                                 Checkbox(
                                     action.pinned,
                                     "Pinned: ${action.name}",
-                                    { runner { store.api.saveAssistantAction(assistant.id, action.id, SaveActionRequest(action.name, action.prompt, action.inputs, action.model, action.nodeId, !action.pinned)); store.refreshAssistantActions(assistant.id) } },
+                                    { runner { store.api.saveAssistantAction(assistant.id, action.id, SaveActionRequest(action.name, action.prompt, action.inputs, nodeId = action.nodeId, pinned = !action.pinned)); store.refreshAssistantActions(assistant.id) } },
                                     checkedState = "Pinned",
                                     uncheckedState = "Not pinned",
                                 )
@@ -366,7 +362,7 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
                 Label("Proposed actions", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
                 for (proposal in proposals) {
-                    ProposedActionCard(store, state, proposal, providers)
+                    ProposedActionCard(store, state, proposal)
                 }
             }
         }
@@ -413,7 +409,7 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
     editing?.let { action ->
         ActionDialog(
             "Edit action",
-            SaveActionRequest(action.name, action.prompt, action.inputs, action.model, action.nodeId, action.pinned),
+            SaveActionRequest(action.name, action.prompt, action.inputs, nodeId = action.nodeId, pinned = action.pinned),
             onDismiss = { editing = null },
             onSave = { request -> store.api.saveAssistantAction(assistant.id, action.id, request); store.refreshAssistantActions(assistant.id) },
         )
@@ -429,7 +425,7 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
 }
 
 @Composable
-internal fun ProposedActionCard(store: Store, state: AppState, proposal: ActionProposal, providers: List<ModelProvider> = emptyList()) {
+internal fun ProposedActionCard(store: Store, state: AppState, proposal: ActionProposal) {
     val colors = MyTheme.colors
     var editing by remember(proposal.id) { mutableStateOf(false) }
     val runner = rememberAction(proposal.id)

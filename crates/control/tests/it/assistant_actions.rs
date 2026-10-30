@@ -116,6 +116,27 @@ async fn running_an_action_sends_the_expanded_prompt_to_the_assistant() {
 }
 
 #[tokio::test]
+async fn an_action_saved_with_a_model_still_runs_on_the_assistants_own_settings() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let assistant = assistant_on(&server, &link).await;
+    let mut body = summary_action();
+    body["model"] = json!({"agent": "codex", "model": "gpt-5.5"});
+    let (status, created) = save_action(&server.user, &assistant, body).await;
+    assert_eq!((status, created["model"].clone()), (201, Value::Null), "{created}");
+    let id = created["id"].as_str().unwrap();
+
+    server.user.json(server.user.post(&format!("/api/v1/assistants/{assistant}/actions/{id}/run")).json(&json!({"inputs": {"meeting": "the design review"}}))).await;
+    let agent = next_matching(&mut link, |message| match message {
+        ControlToNode::StartSession { agent, .. } => Some(serde_json::to_value(agent).unwrap()),
+        _ => None,
+    })
+    .await;
+
+    assert_eq!(agent, json!("claude"));
+}
+
+#[tokio::test]
 async fn running_an_action_without_a_required_input_or_with_a_bad_choice_says_what_to_fix() {
     let server = Server::start().await;
     let link = server.online_node("laptop").await;

@@ -33,7 +33,7 @@ private fun assistant() =
 
 private const val Actions = """[
 {"id":"x1","assistant_id":"a1","name":"Daily summary","prompt":"Summarise yesterday.","inputs":[],"pinned":true,"position":0},
-{"id":"x2","assistant_id":"a1","name":"Meeting notes","prompt":"Notes for {meeting}.","inputs":[{"name":"meeting","kind":"text","required":true}],"pinned":false,"position":1}
+{"id":"x2","assistant_id":"a1","name":"Meeting notes","prompt":"Notes for {meeting}.","inputs":[{"name":"meeting","kind":"text","required":true}],"model":{"agent":"claude","model":"opus"},"pinned":false,"position":1}
 ]"""
 
 private const val RunConversation =
@@ -61,7 +61,7 @@ class AssistantActionsTest {
 
     private val requests = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
 
-    private fun shell() {
+    private fun shell(route: Route = Route.Assistant("a1")) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -72,6 +72,7 @@ class AssistantActionsTest {
                 path.endsWith("/experiments") -> EnabledExperiments
                 path.endsWith("/assistants/a1/actions") -> Actions
                 path.endsWith("/run") -> RunConversation
+                path.endsWith("/assistants/a1") -> assistant()
                 path.endsWith("/assistants") -> "[${assistant()}]"
                 path.endsWith("/events") || path.endsWith("/queue") || path.endsWith("/conversations") || path.endsWith("/model-providers") || path.endsWith("/groups") || path.endsWith("/projects") || path.endsWith("/nodes") || path.endsWith("/action-proposals") -> "[]"
                 else -> "{}"
@@ -82,7 +83,7 @@ class AssistantActionsTest {
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
 
-        rule.setContent { MyceliumTheme(true) { Shell(store, ActionsPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Assistant("a1")) } }
+        rule.setContent { MyceliumTheme(true) { Shell(store, ActionsPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = route) } }
     }
 
     @Test
@@ -113,5 +114,18 @@ class AssistantActionsTest {
 
         rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/assistants/a1/actions/x2/run" } }
         assertEquals("""{"inputs":{"meeting":"Planning"}}""", requests.last { it.first.endsWith("/x2/run") }.second)
+    }
+
+    @Test
+    fun savingAnActionNoLongerSendsAModelSoItRunsOnTheChatsOwnSettings() {
+        shell(Route.AssistantSettings("a1"))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Schedules and actions").fetchSemanticsNodes().isNotEmpty() }
+        rule.onAllNodesWithText("Schedules and actions")[0].performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Pinned: Meeting notes").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Pinned: Meeting notes").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/assistants/a1/actions/x2" } }
+        assertEquals(false, requests.last { it.first == "PUT /api/v1/assistants/a1/actions/x2" }.second.contains("model"))
     }
 }
