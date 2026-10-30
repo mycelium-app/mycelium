@@ -6,8 +6,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.hasText
@@ -34,6 +39,7 @@ import mycelium.state.PickerAccount
 import mycelium.state.Choice
 import mycelium.state.IdeLauncher
 import mycelium.state.SessionOptions
+import mycelium.state.Setting
 import mycelium.state.Store
 import mycelium.ui.BarControl
 import mycelium.ui.Composer
@@ -82,7 +88,7 @@ class ComposerBarTest {
     private fun conversation(agent: String = "claude", status: ConversationStatus = ConversationStatus.Done, scratch: Boolean = false, assistantId: String? = null) =
         Conversation("c1", "u", "n1", agent, "/work", "t", status, scratch = scratch, assistantId = assistantId, createdAt = Now, updatedAt = Now)
 
-    private fun showBar(conversation: Conversation, working: Boolean = false) {
+    private fun showBar(conversation: Conversation, working: Boolean = false, settings: List<Setting> = emptyList()) {
         val chatModel = conversation.agent == "chat"
         val providers = listOf(ModelProvider("p1", "ollama", "Ollama", models = listOf("llama3"), createdAt = Now))
         val accounts = listOf(PickerAccount("account:sam", "claude", "sam@example.com", null, false, ""), PickerAccount("agent:claude:work", "claude", "work@example.com", null, false, ""))
@@ -92,7 +98,7 @@ class ComposerBarTest {
                 Composer(
                     conversation = conversation, working = working, queue = emptyList(), sending = emptyList(), onSend = {}, onStop = {},
                     onSendQueuedNow = {}, onEditQueued = {}, onRemoveQueued = {},
-                    options = SessionOptions(listOf(Choice("default", "Default"), Choice("auto", "Auto")), "auto", listOf(Choice("opus", "Opus 5.5")), "opus", emptyList()),
+                    options = SessionOptions(listOf(Choice("default", "Default"), Choice("auto", "Auto")), "auto", listOf(Choice("opus", "Opus 5.5")), "opus", settings),
                     commands = emptyList(), onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },
                     accountPicker = ModelPickerControls(
                         label = if (chatModel) "llama3" else "Claude Opus 5.5",
@@ -176,6 +182,17 @@ class ComposerBarTest {
     }
 
     @Test
+    fun fastModeAndAgentSettingsAreNotOfferedOnTheBar() {
+        val choices = listOf(Choice("on", "On"), Choice("off", "Off"))
+        val settings = listOf(Setting("fast", "Fast mode", "model_config", "off", choices), Setting("agent", "Agent", null, "off", choices), Setting("effort", "Effort", "thought_level", "on", choices))
+        showBar(conversation(status = ConversationStatus.Done), settings = settings)
+
+        rule.onNode(described("Effort: ")).assertExists()
+        rule.onNode(described("Fast mode: ")).assertDoesNotExist()
+        rule.onNode(described("Agent: ")).assertDoesNotExist()
+    }
+
+    @Test
     fun aNewConversationHasOneModelControlWithNoSeparateAccount() {
         val everything = HarnessReport(voice = true, working = true, models = true, modes = true, settings = true)
 
@@ -241,6 +258,19 @@ class ComposerBarTest {
             }
         }
         rule.waitForIdle()
+    }
+
+    @Test
+    fun upArrowMovesTheCaretToThePreviousLineInAConversationsComposer() {
+        showHeader(1200)
+
+        val field = rule.onNode(hasSetTextAction())
+
+        field.performTextInput("one\ntwo")
+        field.performKeyInput { pressKey(Key.DirectionUp) }
+        field.performTextInput("X")
+
+        assertEquals("oneX\ntwo", field.fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text)
     }
 
     @Test

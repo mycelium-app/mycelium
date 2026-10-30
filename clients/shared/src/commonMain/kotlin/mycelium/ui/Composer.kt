@@ -228,7 +228,7 @@ fun Composer(
     var sent by remember(conversation.id) { mutableStateOf<String?>(null) }
     val source = remember { MutableInteractionSource() }
     val modes = options.modes.ifEmpty { fallbackModes(conversation.agent) }
-    val settings = options.settings.filterNot { (it.category == "mode" && options.modes.isNotEmpty()) || (it.category == "model" && options.models.isNotEmpty()) }
+    val settings = options.settings.filterNot { it.id in HiddenHarnessSettings || (it.category == "mode" && options.modes.isNotEmpty()) || (it.category == "model" && options.models.isNotEmpty()) }
     val query = text.text.takeIf { it.startsWith("/") && it.none(Char::isWhitespace) }?.drop(1)
     val mention = if (query == null) mentionAt(text.text, text.selection.end) else null
     var files by remember { mutableStateOf(emptyList<String>()) }
@@ -937,6 +937,8 @@ fun OptionMenu(
 private const val SearchableChoices = 7
 
 private const val FileSearchDelayMillis = 120L
+
+private val HiddenHarnessSettings = setOf("fast", "agent")
 
 private class Completion(val label: String, val description: String, val apply: () -> Unit)
 
