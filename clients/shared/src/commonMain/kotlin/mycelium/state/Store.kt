@@ -23,6 +23,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlin.random.Random
+import kotlin.time.TimeMark
 import kotlin.time.TimeSource
 import mycelium.DefaultEventPageSize
 import mycelium.Platform
@@ -77,6 +78,7 @@ private const val FirstRetryMillis = 250L
 private const val LongestRetryMillis = 15_000L
 private const val StableConnectionMillis = 10_000L
 private const val RecentConnectAttemptMillis = 5_000L
+private const val RecentlyHeardMillis = 5_000L
 private const val ConcurrentOpens = 3
 private const val MaxCachedAttachments = 20
 
@@ -88,12 +90,15 @@ class Store(
     private val scope: CoroutineScope,
     private val platform: Platform? = null,
     private val stream: (suspend () -> Unit) -> Flow<StreamMessage> = api::stream,
+    private val timeSource: TimeSource = TimeSource.Monotonic,
 ) {
     private val eventPageSize = platform?.eventPageSize ?: DefaultEventPageSize
     private val mutableState = MutableStateFlow(AppState())
     private val mutableProblem = MutableStateFlow<String?>(null)
     private var streaming: Job? = null
-    private var connectAttemptedAt = TimeSource.Monotonic.markNow()
+    private var connectAttemptedAt = timeSource.markNow()
+    private var lastHeardAt = timeSource.markNow()
+    private val streamedConversations = MutableStateFlow<Set<String>>(emptySet())
     private val typed = Channel<Pair<String, String>>(Channel.UNLIMITED)
     private val attachmentCache = mutableMapOf<String, ByteArray>()
     private val previewCache = LinkedHashMap<String, ByteArray>()
@@ -182,16 +187,20 @@ class Store(
             var retry = FirstRetryMillis
 
             while (true) {
-                connectAttemptedAt = TimeSource.Monotonic.markNow()
-                var connectedAt: TimeSource.Monotonic.ValueTimeMark? = null
+                connectAttemptedAt = timeSource.markNow()
+                var connectedAt: TimeMark? = null
 
                 try {
                     coroutineScope {
                         stream {
-                            connectedAt = TimeSource.Monotonic.markNow()
+                            connectedAt = timeSource.markNow()
+                            lastHeardAt = connectedAt
                             mutableState.update { it.copy(connected = true) }
                             launch { refreshOverStream() }
-                        }.collect { message -> receive(message) }
+                        }.collect { message ->
+                            lastHeardAt = timeSource.markNow()
+                            receive(message)
+                        }
 
                         coroutineContext.cancelChildren()
                     }
@@ -219,13 +228,17 @@ class Store(
         launch { wellness.load() }
         launch { voice.load() }
 
+        streamedConversations.value = emptySet()
         val conversations = async { untilLoaded { api.conversations(archived = false) } }
         val nodes = async { untilLoaded { api.nodes() } }
 
         val listed = conversations.await()
 
         mutableState.update {
-            it.copy(conversations = listed.associate { c -> c.id to (it.conversations[c.id]?.takeIf { held -> held.updatedAt > c.updatedAt } ?: c) })
+            val fetched = listed.associate { c -> c.id to (it.conversations[c.id]?.takeIf { held -> held.updatedAt > c.updatedAt } ?: c) }
+            val streamed = it.conversations.filterKeys { id -> id in streamedConversations.value && id !in fetched }
+
+            it.copy(conversations = fetched + streamed)
         }
 
         val opening = Semaphore(ConcurrentOpens)
@@ -259,6 +272,10 @@ class Store(
     fun receive(message: StreamMessage) {
         val before = state.value
         mutableState.update { reduce(it, message) }
+
+        if (message is StreamMessage.ConversationChanged) {
+            streamedConversations.update { it + message.conversation.id }
+        }
 
         if (message is StreamMessage.WalkthroughNotesChanged) {
             mutableWalkthroughNotes.update { it + (message.conversationId to message.notes) }
@@ -338,7 +355,15 @@ class Store(
     }
 
     fun reconnect() {
-        if (streaming == null || state.value.connected || connectAttemptedAt.elapsedNow().inWholeMilliseconds < RecentConnectAttemptMillis) {
+        if (streaming == null) {
+            return
+        }
+
+        val connected = state.value.connected
+        val healthy = connected && lastHeardAt.elapsedNow().inWholeMilliseconds < RecentlyHeardMillis
+        val connecting = !connected && connectAttemptedAt.elapsedNow().inWholeMilliseconds < RecentConnectAttemptMillis
+
+        if (healthy || connecting) {
             return
         }
 

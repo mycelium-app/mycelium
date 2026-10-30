@@ -18,8 +18,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import mycelium.api.MyceliumApi
 import mycelium.api.StreamMessage
+import mycelium.api.parseStreamMessage
 import mycelium.state.Store
 import kotlin.test.Test
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TestTimeSource
+import kotlin.time.TimeSource
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -37,7 +41,7 @@ class StoreConnectionTest {
         }
     }
 
-    private fun TestScope.store(sockets: Sockets, route: (String) -> String?): Store {
+    private fun TestScope.store(sockets: Sockets, clock: TimeSource = TimeSource.Monotonic, route: (String) -> String?): Store {
         val engine = MockEngine { request ->
             val body = route(request.url.encodedPath)
 
@@ -48,7 +52,7 @@ class StoreConnectionTest {
             }
         }
 
-        return Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope, stream = sockets::stream)
+        return Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope, stream = sockets::stream, timeSource = clock)
     }
 
     private suspend fun Store.untilConnected() = withContext(Dispatchers.Default) { withTimeout(5_000) { state.first { it.connected } } }
@@ -109,5 +113,43 @@ class StoreConnectionTest {
 
         assertEquals(1, sockets.opened)
         assertTrue(store.state.value.connected)
+    }
+
+    @Test
+    fun resumingAfterALongSilenceRestartsTheSocketAtOnce() = runTest {
+        val sockets = Sockets()
+        val clock = TestTimeSource()
+        val store = store(sockets, clock) { "[]" }
+
+        store.start()
+        store.untilConnected()
+        clock += 30.seconds
+        store.reconnect()
+
+        withContext(Dispatchers.Default) { withTimeout(5_000) { while (sockets.opened < 2) delay(10) } }
+
+        assertEquals(2, sockets.opened)
+    }
+
+    @Test
+    fun aConversationStreamedDuringTheFirstListingIsKept() = runTest {
+        val release = CompletableDeferred<Unit>()
+        val sockets = Sockets()
+        val engine = MockEngine { request ->
+            if (request.url.encodedPath.endsWith("/conversations")) {
+                release.await()
+            }
+
+            respond("[]", HttpStatusCode.OK, json)
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope, stream = sockets::stream)
+
+        store.start()
+        store.untilConnected()
+        store.receive(parseStreamMessage("""{"type":"conversation",${conversation.removePrefix("{")}""")!!)
+        release.complete(Unit)
+        withContext(Dispatchers.Default) { delay(200) }
+
+        assertEquals(listOf("c1"), store.state.value.conversations.keys.toList())
     }
 }
