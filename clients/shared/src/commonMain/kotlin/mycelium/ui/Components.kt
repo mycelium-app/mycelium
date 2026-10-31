@@ -215,7 +215,7 @@ fun Modifier.hoverHighlight(): Modifier {
     return this.hoverable(source).drawBehind { if (hovered) drawRect(colors.bgHover) }
 }
 
-enum class ButtonVariant { Ghost, Outline, Primary, Danger }
+enum class ButtonVariant { Ghost, Outline, Filled, Primary, Danger }
 
 enum class ButtonSize { Sm, Md, Lg }
 
@@ -253,7 +253,7 @@ fun MyButton(
     val gap = if (size == ButtonSize.Sm) Tokens.Space.S1 else Tokens.Space.S1_5
     val iconSize = if (size == ButtonSize.Sm) Tokens.Size.IconSm else Tokens.Size.IconMd
     val contentColor = when {
-        variant == ButtonVariant.Primary -> colors.onAccent
+        variant == ButtonVariant.Primary || (variant == ButtonVariant.Filled && selected) -> colors.onAccent
         variant == ButtonVariant.Danger -> colors.statusFailed
         muted -> colors.textMuted
         else -> colors.text
@@ -275,8 +275,12 @@ fun MyButton(
                     onClick = onClick,
                     description = description,
                     shape = ControlShape,
-                    base = if (variant == ButtonVariant.Primary) colors.accent else Color.Transparent,
-                    selected = selected,
+                    base = when {
+                        variant == ButtonVariant.Primary || (variant == ButtonVariant.Filled && selected) -> colors.accent
+                        variant == ButtonVariant.Filled -> colors.bgHover
+                        else -> Color.Transparent
+                    },
+                    selected = selected && variant != ButtonVariant.Filled,
                     stateDescription = stateDescription,
                     source = source,
                 )

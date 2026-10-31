@@ -163,8 +163,15 @@ fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, mod
 
     Column(modifier.background(colors.bgPanel).semantics { contentDescription = "Terminal" }) {
         if (touch) {
+            val entries = tabs.tabs.flatMap { tab ->
+                val panes = tab.layout.paneIds()
+
+                panes.mapIndexed { index, pane -> Triple(tab, pane, if (panes.size == 1) tab.title else "${tab.title}, pane ${index + 1}") }
+            }
+            val shownLabel = entries.firstOrNull { (tab, pane) -> tab.id == current?.id && pane == tab.focused }?.third.orEmpty()
+
             Row(Modifier.fillMaxWidth().height(Tokens.Size.BarTouch).background(colors.bgChrome).padding(start = Tokens.Space.S1, end = Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                MyButton({ switching = true }, text = current?.title.orEmpty(), icon = MyIcon.Terminal, trailingIcon = MyIcon.ChevronDown, description = "${current?.title.orEmpty()} of ${tabs.tabs.size}, switch terminal")
+                MyButton({ switching = true }, text = shownLabel, icon = MyIcon.Terminal, trailingIcon = MyIcon.ChevronDown, description = "$shownLabel of ${entries.size}, switch terminal")
                 Spacer(Modifier.weight(1f))
                 MyButton({ change { it.open() } }, icon = MyIcon.Plus, description = "New terminal", muted = true)
                 MyButton(onClose, icon = MyIcon.Close, description = "Close the terminal", muted = true)
@@ -172,13 +179,13 @@ fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, mod
 
             if (switching) {
                 MenuPopup(onDismiss = { switching = false }) {
-                    for (tab in tabs.tabs) {
+                    for ((tab, pane, label) in entries) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.weight(1f)) {
-                                MenuItem(tab.title, onClick = { workspace = workspace.copy(tabs = tabs.select(tab.id)); switching = false }, checked = tab.id == current?.id)
+                                MenuItem(label, onClick = { workspace = workspace.copy(tabs = tabs.select(tab.id).focus(pane)); switching = false }, checked = tab.id == current?.id && pane == tab.focused)
                             }
 
-                            MyButton({ switching = false; change { it.closeTab(tab.id) } }, icon = MyIcon.Close, description = "End ${tab.title}", muted = true)
+                            MyButton({ switching = false; change { it.closePane(pane) } }, icon = MyIcon.Close, description = "End $label", muted = true)
                         }
                     }
                 }
@@ -224,7 +231,7 @@ fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, mod
 
                     for ((paneId, rect) in tab.layout.rects()) {
                         key(paneId) {
-                            val placement = if (shown) Modifier.offset(maxWidth * rect.x, maxHeight * rect.y).size(maxWidth * rect.width, maxHeight * rect.height) else Modifier.size(0.dp)
+                            val placement = if (touch) (if (shown && tab.focused == paneId) Modifier.fillMaxSize() else Modifier.size(0.dp)) else if (shown) Modifier.offset(maxWidth * rect.x, maxHeight * rect.y).size(maxWidth * rect.width, maxHeight * rect.height) else Modifier.size(0.dp)
                             val existing = workspace.panes[paneId]
 
                             TerminalView(
@@ -232,11 +239,11 @@ fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, mod
                                 state,
                                 conversation,
                                 placement.clipToBounds().drawBehind {
-                                    if (rect.x > 0f) {
+                                    if (!touch && rect.x > 0f) {
                                         drawLine(colors.border, Offset(0f, 0f), Offset(0f, size.height))
                                     }
 
-                                    if (rect.y > 0f) {
+                                    if (!touch && rect.y > 0f) {
                                         drawLine(colors.border, Offset(0f, 0f), Offset(size.width, 0f))
                                     }
                                 },
@@ -252,7 +259,7 @@ fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, mod
                 }
             }
 
-            for (divider in current?.layout?.dividers().orEmpty()) {
+            for (divider in current?.layout?.dividers().orEmpty().takeIf { !touch }.orEmpty()) {
                 val area = divider.area
                 val across = if (divider.direction == SplitDirection.Right) maxWidth * area.width else maxHeight * area.height
                 val resize = { moved: Dp -> workspace = workspace.copy(tabs = workspace.tabs.resize(current!!.id, divider.path, divider.ratio + moved / across)) }
@@ -510,19 +517,19 @@ private fun TerminalKeys(ctrl: Boolean, onCtrl: () -> Unit, onPress: (String) ->
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        MyButton({ onPress(terminalKeyInput(TerminalKey.Escape)) }, text = "Esc", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
-        MyButton({ onPress(terminalKeyInput(TerminalKey.Tab)) }, text = "Tab", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
-        MyButton(onCtrl, text = "Ctrl", size = ButtonSize.Sm, variant = ButtonVariant.Outline, selected = ctrl, stateDescription = if (ctrl) "On" else "Off")
+        MyButton({ onPress(terminalKeyInput(TerminalKey.Escape)) }, text = "Esc", size = ButtonSize.Sm, variant = ButtonVariant.Filled)
+        MyButton({ onPress(terminalKeyInput(TerminalKey.Tab)) }, text = "Tab", size = ButtonSize.Sm, variant = ButtonVariant.Filled)
+        MyButton(onCtrl, text = "Ctrl", size = ButtonSize.Sm, variant = ButtonVariant.Filled, selected = ctrl, stateDescription = if (ctrl) "On" else "Off")
 
         Row(Modifier.semantics { contentDescription = "Arrow keys" }) {
-            MyButton({ onPress(terminalKeyInput(TerminalKey.Left, applicationCursorKeys)) }, icon = MyIcon.ArrowLeft, description = "Left", muted = true)
-            MyButton({ onPress(terminalKeyInput(TerminalKey.Up, applicationCursorKeys)) }, icon = MyIcon.ArrowUp, description = "Up", muted = true)
-            MyButton({ onPress(terminalKeyInput(TerminalKey.Down, applicationCursorKeys)) }, icon = MyIcon.ArrowDown, description = "Down", muted = true)
-            MyButton({ onPress(terminalKeyInput(TerminalKey.Right, applicationCursorKeys)) }, icon = MyIcon.ArrowRight, description = "Right", muted = true)
+            MyButton({ onPress(terminalKeyInput(TerminalKey.Left, applicationCursorKeys)) }, icon = MyIcon.ArrowLeft, description = "Left", variant = ButtonVariant.Filled)
+            MyButton({ onPress(terminalKeyInput(TerminalKey.Up, applicationCursorKeys)) }, icon = MyIcon.ArrowUp, description = "Up", variant = ButtonVariant.Filled)
+            MyButton({ onPress(terminalKeyInput(TerminalKey.Down, applicationCursorKeys)) }, icon = MyIcon.ArrowDown, description = "Down", variant = ButtonVariant.Filled)
+            MyButton({ onPress(terminalKeyInput(TerminalKey.Right, applicationCursorKeys)) }, icon = MyIcon.ArrowRight, description = "Right", variant = ButtonVariant.Filled)
         }
 
         Spacer(Modifier.weight(1f))
-        MyButton(onPaste, icon = MyIcon.Clipboard, description = "Paste", muted = true)
+        MyButton(onPaste, icon = MyIcon.Clipboard, description = "Paste", variant = ButtonVariant.Filled)
     }
 }
 

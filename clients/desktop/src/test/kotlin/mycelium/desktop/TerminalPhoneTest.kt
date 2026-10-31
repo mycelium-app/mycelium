@@ -30,7 +30,11 @@ import mycelium.api.Conversation
 import mycelium.api.MyceliumApi
 import mycelium.api.MyceliumJson
 import mycelium.state.AppState
+import mycelium.state.SplitDirection
 import mycelium.state.Store
+import mycelium.state.TerminalTabs
+import mycelium.state.TerminalWorkspace
+import mycelium.state.paneIds
 import mycelium.ui.ConversationScreen
 import mycelium.ui.LocalTouch
 import mycelium.ui.MyceliumTheme
@@ -50,6 +54,7 @@ class TerminalPhoneTest {
     val compose = createComposeRule()
 
     private val sent = CopyOnWriteArrayList<String>()
+    private var openTerminals = "[]"
     private val json = headersOf(HttpHeaders.ContentType, "application/json")
 
     private fun store(): Store {
@@ -64,7 +69,8 @@ class TerminalPhoneTest {
                 path.endsWith("/conversations") -> respond("[$PhoneConversationJson]", HttpStatusCode.OK, json)
                 path.endsWith("/conversations/c1") -> respond(PhoneConversationJson, HttpStatusCode.OK, json)
                 path.endsWith("/terminal") -> respond("""{"terminal_id":"t1"}""", HttpStatusCode.OK, json)
-                path.endsWith("/events") || path.endsWith("/queue") || path.endsWith("/nodes") || path.endsWith("/terminals") -> respond("[]", HttpStatusCode.OK, json)
+                path.endsWith("/terminals") -> respond(openTerminals, HttpStatusCode.OK, json)
+                path.endsWith("/events") || path.endsWith("/queue") || path.endsWith("/nodes") -> respond("[]", HttpStatusCode.OK, json)
                 else -> respond("{}", HttpStatusCode.OK, json)
             }
         }
@@ -72,9 +78,13 @@ class TerminalPhoneTest {
         return Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
     }
 
-    private fun showPanel() {
+    private fun showPanel(workspace: TerminalWorkspace? = null) {
         val conversation = MyceliumJson.decodeFromString(Conversation.serializer(), PhoneConversationJson)
         val store = store()
+
+        if (workspace != null) {
+            store.terminalWorkspaces["c1"] = workspace
+        }
 
         compose.setContent {
             MyceliumTheme(true) {
@@ -97,6 +107,23 @@ class TerminalPhoneTest {
         compose.onNodeWithContentDescription("Split down").assertDoesNotExist()
         compose.onNodeWithContentDescription("New terminal").assertExists()
         compose.onNodeWithContentDescription("Close the terminal").assertExists()
+    }
+
+    @Test
+    fun aSplitWorkspaceShowsOneTerminalAtATimeAndListsEveryPane() {
+        val split = TerminalTabs().open().split(SplitDirection.Right)
+        val panes = split.current!!.layout.paneIds()
+        openTerminals = """[{"terminal_id":"t1","scrollback":""},{"terminal_id":"t2","scrollback":""}]"""
+
+        showPanel(TerminalWorkspace(split, mapOf(panes[0] to "t1", panes[1] to "t2")))
+
+        compose.onNodeWithContentDescription("Resize the split").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Terminal 1, pane 2 of 2, switch terminal").performClick()
+        compose.onNodeWithText("Terminal 1, pane 1").assertExists()
+        compose.onNodeWithContentDescription("End Terminal 1, pane 2").assertExists()
+        compose.onNodeWithText("Terminal 1, pane 1").performClick()
+
+        compose.onNodeWithContentDescription("Terminal 1, pane 1 of 2, switch terminal").assertExists()
     }
 
     @Test
