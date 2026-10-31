@@ -75,7 +75,7 @@ struct Launched {
     directory: SessionDirectory,
     session: SessionEnv,
     port: u16,
-    browser: String,
+    browser: Option<String>,
 }
 
 struct Entry {
@@ -113,10 +113,6 @@ impl Tools {
 
         if self.grim.is_none() {
             missing.push("grim".to_string());
-        }
-
-        if self.browser.is_none() {
-            missing.push("Chromium".to_string());
         }
 
         missing
@@ -328,16 +324,19 @@ async fn launch(tools: &Tools, width: u32, height: u32, apps: &[DesktopApp]) -> 
         return Err(format!("This node is missing {}. Install them, then start the environment again.", missing.join(", ")));
     }
 
-    let (Some(compositor), Some(wayvnc), Some(browser)) = (&tools.compositor, &tools.wayvnc, &tools.browser) else {
+    let (Some(compositor), Some(wayvnc)) = (&tools.compositor, &tools.wayvnc) else {
         return Err("This node is missing tools the environment needs. Install them, then start the environment again.".to_string());
     };
     let directory = SessionDirectory::create()?;
     let runtime_dir = directory.path.clone();
     let port = free_loopback_port()?;
     let debug_port = free_loopback_port()?;
-    let mut launched = Launched { children: Vec::new(), pids: Vec::new(), directory, session: SessionEnv { runtime_dir: runtime_dir.clone(), display: String::new(), debug_port }, port, browser: String::new() };
-    let browser_version = version_of(browser, true).await;
-    launched.browser = browser_version.map(|major| format!("Chromium {major}")).unwrap_or_else(|| "Chromium".to_string());
+    let mut launched = Launched { children: Vec::new(), pids: Vec::new(), directory, session: SessionEnv { runtime_dir: runtime_dir.clone(), display: String::new(), debug_port }, port, browser: None };
+
+    if let Some(browser) = &tools.browser {
+        let browser_version = version_of(browser, true).await;
+        launched.browser = Some(browser_version.map(|major| format!("Chromium {major}")).unwrap_or_else(|| "Chromium".to_string()));
+    }
 
     let name = match compositor.kind {
         CompositorKind::Sway => "sway",
@@ -527,7 +526,7 @@ impl EnvironmentManager {
                     entry.ready = true;
                     entry.port = launched.port;
                     entry.session = Some(launched.session.clone());
-                    entry.browser = Some(launched.browser.clone());
+                    entry.browser = launched.browser.clone();
                     entry.pids = launched.pids.clone();
                     entry.stop = Some(stop);
                 }
@@ -535,7 +534,7 @@ impl EnvironmentManager {
             }
         }
 
-        self.send_changed(conversation_id, EnvironmentState::Running, None, Some(launched.browser.clone()));
+        self.send_changed(conversation_id, EnvironmentState::Running, None, launched.browser.clone());
 
         let swaymsg = find_in_path("swaymsg", &self.path).filter(|_| tools.compositor.as_ref().is_some_and(|compositor| compositor.kind == CompositorKind::Sway));
         let mut ticker = tokio::time::interval(WINDOW_POLL);
@@ -845,7 +844,7 @@ mod tests {
         let capability = probe(&path, "linux", &[]).await;
 
         assert!(!capability.available);
-        assert_eq!(capability.missing, vec!["sway", "wayvnc", "grim", "Chromium"]);
+        assert_eq!(capability.missing, vec!["sway", "wayvnc", "grim"]);
         assert_eq!(capability.versions, EnvironmentVersions::default());
     }
 
@@ -870,6 +869,18 @@ mod tests {
 
         assert!(capability.available);
         assert_eq!(capability.versions.compositor.as_deref(), Some("0.2.0"));
+    }
+
+    #[tokio::test]
+    async fn a_node_without_a_browser_is_available() {
+        let (directory, path) = stocked_path();
+        std::fs::remove_file(directory.path().join("chromium")).unwrap();
+
+        let capability = probe(&path, "linux", &[]).await;
+
+        assert!(capability.available);
+        assert!(capability.missing.is_empty());
+        assert_eq!(capability.versions.browser, None);
     }
 
     #[tokio::test]
@@ -945,6 +956,6 @@ mod tests {
             panic!("expected a state change");
         };
         assert_eq!(state, EnvironmentState::Failed);
-        assert!(failure.unwrap().contains("sway, wayvnc, grim, Chromium"));
+        assert!(failure.unwrap().contains("sway, wayvnc, grim"));
     }
 }

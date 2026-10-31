@@ -74,7 +74,7 @@ fn act_script(action: &BrowserAction) -> String {
 }
 
 async fn page_socket(debug_port: u16) -> Result<String, String> {
-    let listed = reqwest::get(format!("http://127.0.0.1:{debug_port}/json/list")).await.map_err(|_| "The environment's browser is not answering. Try again in a moment.".to_string())?;
+    let listed = reqwest::get(format!("http://127.0.0.1:{debug_port}/json/list")).await.map_err(|_| "No Chromium-based browser is answering in the environment. Open Chromium or Chrome from the app launcher, then try again.".to_string())?;
     let pages: Vec<Value> = listed.json().await.map_err(|_| "The environment's browser answered in a shape the node does not know.".to_string())?;
 
     pages
@@ -211,7 +211,7 @@ mod tests {
 
         let outcome = read(free).await;
 
-        assert_eq!(outcome.unwrap_err(), "The environment's browser is not answering. Try again in a moment.");
+        assert_eq!(outcome.unwrap_err(), "No Chromium-based browser is answering in the environment. Open Chromium or Chrome from the app launcher, then try again.");
     }
 
     #[test]
