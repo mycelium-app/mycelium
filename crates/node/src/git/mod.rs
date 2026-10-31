@@ -10,7 +10,7 @@ pub(crate) mod test_support;
 use crate::changes;
 use anyhow::{Result, anyhow, bail};
 use commits::{changed, commit, push, remote, undo_last_commit};
-use folder::{directories, edit_file, read_file};
+use folder::{create_directory, directories, edit_file, read_file};
 use history::{branches, diff, graph, head, log, scope_diff, show, status, switch};
 use moves::{apply, move_plan, snapshot, undo};
 use mycelium_proto::link::GitCommand;
@@ -35,6 +35,7 @@ pub fn run_in(root: &Path, cwd: &str, command: GitCommand) -> Result<Value> {
             clone(&within(root, cwd)?, &url, credentials.as_ref())
         }
         GitCommand::Register => register(&within(root, cwd)?),
+        GitCommand::CreateDirectory { name } => create_directory(root, cwd, &name),
         GitCommand::Directories => directories(root, cwd),
         GitCommand::AddWorktree { branch } => add_worktree(&within(root, cwd)?, &branch),
         GitCommand::AddRemoteWorktree { branch } => add_remote_worktree(&within(root, cwd)?, &branch),
@@ -76,7 +77,7 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value> {
         GitCommand::ReadFile { path } => read_file(cwd, &path),
         GitCommand::FindLogo => Ok(crate::logo::find(cwd)),
         GitCommand::Head => head(cwd),
-        GitCommand::Clone { .. } | GitCommand::Register | GitCommand::Directories | GitCommand::AddWorktree { .. } | GitCommand::AddRemoteWorktree { .. } => bail!("This needs the node's projects folder, not a conversation's folder."),
+        GitCommand::Clone { .. } | GitCommand::Register | GitCommand::CreateDirectory { .. } | GitCommand::Directories | GitCommand::AddWorktree { .. } | GitCommand::AddRemoteWorktree { .. } => bail!("This needs the node's projects folder, not a conversation's folder."),
     }
 }
 

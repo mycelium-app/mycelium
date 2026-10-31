@@ -197,6 +197,19 @@ pub async fn remove_login(State(state): State<AppState>, user: AuthUser, Path((i
 }
 
 #[derive(Deserialize)]
+pub struct CreateDirectoryRequest {
+    #[serde(default)]
+    path: String,
+    name: String,
+}
+
+pub async fn create_directory(State(state): State<AppState>, _user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<CreateDirectoryRequest>) -> ApiResult<(StatusCode, Json<Value>)> {
+    let answer = crate::git::relay(&state, id, request.path, GitCommand::CreateDirectory { name: request.name }).await?;
+
+    Ok((StatusCode::CREATED, Json(answer)))
+}
+
+#[derive(Deserialize)]
 pub struct DirectoriesQuery {
     #[serde(default)]
     path: String,

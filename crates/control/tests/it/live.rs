@@ -200,6 +200,7 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/assistants/{id}/backup/pull",
     "PUT /api/v1/assistants/{id}/secrets/{name}",
     "DELETE /api/v1/assistants/{id}/secrets/{name}",
+    "POST /api/v1/nodes/{id}/directories",
     "POST /api/v1/groups",
     "PATCH /api/v1/groups/{id}",
     "DELETE /api/v1/groups/{id}",

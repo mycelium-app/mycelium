@@ -7,6 +7,24 @@ use std::path::Path;
 const MOST_READ_FILE_BYTES: u64 = 20 * 1024 * 1024;
 const MOST_LISTED_DIRECTORIES: usize = 500;
 
+pub(super) fn create_directory(root: &Path, parent: &str, name: &str) -> Result<Value> {
+    let name = name.trim();
+
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
+        bail!("A folder name cannot be empty or contain slashes. Enter a name such as quiet-otter.");
+    }
+
+    let folder = super::within(root, &Path::new(parent).join(name).to_string_lossy())?;
+
+    if folder.exists() {
+        bail!("{name} already exists in {}. Choose another name.", folder.parent().unwrap_or(&folder).display());
+    }
+
+    std::fs::create_dir_all(&folder).map_err(|cause| anyhow!("Could not create {}: {cause}.", folder.display()))?;
+
+    Ok(json!({"path": folder.to_string_lossy(), "name": name}))
+}
+
 pub(super) fn directories(root: &Path, requested: &str) -> Result<Value> {
     let canonical_root = root.canonicalize().map_err(|cause| anyhow!("The projects folder {} cannot be read: {cause}.", root.display()))?;
     let wanted = if requested.is_empty() { canonical_root.clone() } else { canonical_root.join(requested) };
@@ -105,6 +123,48 @@ mod tests {
     use crate::git::run;
     use crate::git::test_support::*;
     use mycelium_proto::link::GitCommand;
+
+    #[test]
+    fn creating_a_folder_makes_it_under_the_given_parent_and_reports_its_path() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("sites")).unwrap();
+        let sites = root.path().join("sites").canonicalize().unwrap();
+
+        let created = run_in(root.path(), &sites.to_string_lossy(), GitCommand::CreateDirectory { name: " quiet-otter ".into() }).unwrap();
+        let fresh = run_in(root.path(), "projects", GitCommand::CreateDirectory { name: "calm-heron".into() }).unwrap();
+
+        assert_eq!(created["path"], sites.join("quiet-otter").to_string_lossy().as_ref());
+        assert!(sites.join("quiet-otter").is_dir());
+        assert!(root.path().join("projects/calm-heron").is_dir());
+        assert_eq!(fresh["name"], "calm-heron");
+    }
+
+    #[test]
+    fn creating_a_folder_refuses_slashes_blank_names_and_folders_that_exist() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("taken")).unwrap();
+
+        for name in ["a/b", "..", "  ", "a\\b"] {
+            let error = run_in(root.path(), "", GitCommand::CreateDirectory { name: name.into() }).unwrap_err().to_string();
+
+            assert!(error.contains("cannot be empty or contain slashes"), "{name}: {error}");
+        }
+
+        let error = run_in(root.path(), "", GitCommand::CreateDirectory { name: "taken".into() }).unwrap_err().to_string();
+
+        assert!(error.contains("taken already exists"), "{error}");
+    }
+
+    #[test]
+    fn creating_a_folder_outside_the_projects_root_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+
+        let error = run_in(root.path(), &outside.path().to_string_lossy(), GitCommand::CreateDirectory { name: "x".into() }).unwrap_err().to_string();
+
+        assert!(error.contains("Choose a folder inside it."), "{error}");
+        assert!(!outside.path().join("x").exists());
+    }
 
     #[test]
     fn directories_lists_the_folders_under_the_projects_root_and_marks_git_checkouts() {

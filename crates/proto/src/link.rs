@@ -396,6 +396,9 @@ pub enum GitCommand {
     },
     Register,
     Head,
+    CreateDirectory {
+        name: String,
+    },
     Directories,
     AddWorktree {
         branch: String,

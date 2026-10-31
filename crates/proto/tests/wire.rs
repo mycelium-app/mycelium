@@ -184,6 +184,7 @@ fn git_commands_are_tagged_snake_case() {
     assert_eq!(round_trip(&GitCommand::UndoLastCommit), json!({"type": "undo_last_commit"}));
     assert_eq!(round_trip(&GitCommand::Register), json!({"type": "register"}));
     assert_eq!(round_trip(&GitCommand::Head), json!({"type": "head"}));
+    assert_eq!(round_trip(&GitCommand::CreateDirectory { name: "quiet-otter".into() }), json!({"type": "create_directory", "name": "quiet-otter"}));
     assert_eq!(round_trip(&GitCommand::Directories), json!({"type": "directories"}));
     assert_eq!(round_trip(&GitCommand::AddWorktree { branch: "b".into() }), json!({"type": "add_worktree", "branch": "b"}));
     assert_eq!(

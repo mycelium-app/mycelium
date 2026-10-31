@@ -355,6 +355,40 @@ async fn the_folders_on_a_node_are_listed_through_the_node() {
 }
 
 #[tokio::test]
+async fn a_folder_is_created_on_a_node_under_the_given_parent_and_a_refusal_is_reported() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let user = server.user.clone();
+    let id = link.id;
+    let creating = tokio::spawn(async move { user.json(user.post(&format!("/api/v1/nodes/{id}/directories")).json(&json!({"path": "/work", "name": "quiet-otter"}))).await });
+
+    let (request_id, cwd, command) = loop {
+        match link.next().await {
+            ControlToNode::Git { request_id, cwd, command } => break (request_id, cwd, command),
+            _ => continue,
+        }
+    };
+    link.send(NodeToControl::GitResult { request_id, ok: true, output: json!({"path": "/work/quiet-otter", "name": "quiet-otter"}), error: None }).await;
+    let (status, body) = creating.await.unwrap();
+
+    assert_eq!((status, cwd.as_str(), command), (201, "/work", mycelium_proto::link::GitCommand::CreateDirectory { name: "quiet-otter".into() }));
+    assert_eq!(body["path"], "/work/quiet-otter");
+
+    let user = server.user.clone();
+    let refused = tokio::spawn(async move { user.json(user.post(&format!("/api/v1/nodes/{id}/directories")).json(&json!({"path": "/work", "name": "quiet-otter"}))).await });
+    let (request_id, _, _) = loop {
+        match link.next().await {
+            ControlToNode::Git { request_id, cwd, command } => break (request_id, cwd, command),
+            _ => continue,
+        }
+    };
+    link.send(NodeToControl::GitResult { request_id, ok: false, output: serde_json::Value::Null, error: Some("quiet-otter already exists in /work. Choose another name.".into()) }).await;
+    let (status, body) = refused.await.unwrap();
+
+    assert_eq!((status, body["message"].as_str()), (409, Some("quiet-otter already exists in /work. Choose another name.")));
+}
+
+#[tokio::test]
 async fn listing_folders_on_an_offline_node_says_it_is_offline() {
     let server = Server::start().await;
     let (id, _) = server.join("node", "laptop").await;
