@@ -2,6 +2,7 @@ package mycelium.desktop
 
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -78,12 +79,12 @@ class ProjectBreadcrumbTest {
     }
 
     @Test
-    fun a_new_conversation_starts_on_no_project_and_the_breadcrumb_picks_one() {
+    fun a_new_conversation_starts_on_a_new_project_and_the_breadcrumb_picks_an_existing_one() {
         val store = store()
         var created: Conversation? = null
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = { created = it }) } }
 
-        rule.onNodeWithContentDescription("Project: No project").performClick()
+        rule.onNode(hasContentDescription("Project: ", substring = true) and hasContentDescription(", new", substring = true)).performClick()
         rule.onNodeWithText("acme-backups").performClick()
         rule.onNodeWithContentDescription("Project: acme-backups").assertExists()
         rule.onNodeWithContentDescription("Send").performClick()
