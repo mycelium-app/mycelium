@@ -30,7 +30,7 @@ async fn version(headers: HeaderMap) -> Response {
 }
 
 async fn projects() -> Json<Value> {
-    Json(json!([{"uuid": "p1", "name": "Agents"}, {"uuid": "p2", "name": "Sites"}]))
+    Json(json!([{"uuid": "p1", "name": "Agents"}, {"uuid": "p2", "name": "Sites"}, {"uuid": "p3", "name": "Empty"}]))
 }
 
 async fn servers() -> Json<Value> {
@@ -42,14 +42,16 @@ async fn one_server() -> Json<Value> {
 }
 
 async fn environments(Path(project): Path<String>) -> Json<Value> {
-    let id = if project == "p1" { 7 } else { 8 };
-
-    Json(json!([{"id": id, "name": "production"}]))
+    match project.as_str() {
+        "p1" => Json(json!([{"id": 9, "name": "dev"}, {"id": 7, "name": "production"}])),
+        "p2" => Json(json!([{"id": 8, "name": "staging"}])),
+        _ => Json(json!([])),
+    }
 }
 
 async fn applications() -> Json<Value> {
     Json(json!([
-        {"uuid": "a1", "name": "notes", "status": "running:healthy", "fqdn": "https://notes.apps.example.com", "environment_id": 7, "git_repository": "slop/notes", "git_branch": "main"},
+        {"uuid": "a1", "name": "notes", "status": "running:healthy", "fqdn": "https://notes.apps.example.com", "environment_id": 7, "destination": {"server": {"name": "Main"}}, "git_repository": "slop/notes", "git_branch": "main"},
         {"uuid": "site", "name": "landing", "status": "running:healthy", "environment_id": 8},
         {"uuid": "other", "name": "elsewhere", "status": "running:healthy", "environment_id": 99}
     ]))
@@ -372,7 +374,7 @@ async fn a_whole_instance_account_needs_no_server_when_there_is_one_and_asks_for
     let created = fake.created.lock().unwrap().clone();
 
     assert_eq!(unclear["result"]["isError"], true);
-    assert_eq!(text(&unclear), "Say which project to use in project. The choices are: Agents, Sites.");
+    assert_eq!(text(&unclear), "Say which project to use in project. The choices are: Agents, Sites, Empty.");
     assert_eq!(chosen["result"]["isError"], json!(false), "{chosen}");
     assert_eq!(created[0]["server_uuid"], "s1");
 }
@@ -419,4 +421,48 @@ async fn widening_a_project_account_to_the_whole_instance_clears_its_scope() {
     assert_eq!(widened["settings"].get("project_uuid"), None);
     assert_eq!(widened["settings"].get("project_name"), None);
     assert_eq!(apps["apps"].as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn creating_in_a_whole_instance_project_uses_its_production_environment_else_its_first_or_the_one_named() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, fake) = fake_coolify().await;
+    add_whole_instance(&server, &base).await;
+    let repository = "https://git.example.com/slop/notes";
+
+    server.approved_agent_mcp(&node.token, mcp("create_app", json!({"name": "Notes", "project": "Agents", "git_repository": repository}))).await;
+    server.approved_agent_mcp(&node.token, mcp("create_app", json!({"name": "Notes", "project": "Sites", "git_repository": repository}))).await;
+    server.approved_agent_mcp(&node.token, mcp("create_app", json!({"name": "Notes", "project": "Agents", "environment": "dev", "git_repository": repository}))).await;
+    let created = fake.created.lock().unwrap().clone();
+
+    assert_eq!(created.iter().map(|body| body["environment_name"].clone()).collect::<Vec<_>>(), vec![json!("production"), json!("staging"), json!("dev")]);
+}
+
+#[tokio::test]
+async fn creating_in_a_project_with_no_environment_or_an_unknown_one_says_what_to_do() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, _) = fake_coolify().await;
+    add_whole_instance(&server, &base).await;
+    let repository = "https://git.example.com/slop/notes";
+
+    let none = server.approved_agent_mcp(&node.token, mcp("create_app", json!({"name": "Notes", "project": "Empty", "git_repository": repository}))).await;
+    let unknown = server.approved_agent_mcp(&node.token, mcp("create_app", json!({"name": "Notes", "project": "Agents", "environment": "qa", "git_repository": repository}))).await;
+
+    assert_eq!(text(&none), "The project Empty has no environments. Create one in Coolify first.");
+    assert_eq!(text(&unknown), "The project Agents has no environment called qa. Choose one of: dev, production.");
+}
+
+#[tokio::test]
+async fn an_app_says_which_project_and_server_it_lives_in_as_coolify_reports_it() {
+    let server = Server::start().await;
+    let (base, _) = fake_coolify().await;
+    add_whole_instance(&server, &base).await;
+
+    let (_, apps) = server.user.json(server.user.get("/api/v1/apps")).await;
+    let found = |name: &str| apps["apps"].as_array().unwrap().iter().find(|app| app["name"] == name).unwrap().clone();
+
+    assert_eq!((found("notes")["project"].clone(), found("notes")["server"].clone()), (json!("Agents"), json!("Main")));
+    assert_eq!((found("landing")["project"].clone(), found("landing")["server"].clone()), (json!("Sites"), Value::Null));
 }

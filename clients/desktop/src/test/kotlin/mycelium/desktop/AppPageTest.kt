@@ -4,6 +4,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -32,7 +33,7 @@ class AppPageTest {
     private val platform = AppsPlatform()
     private val requests = mutableListOf<Pair<String, String>>()
 
-    private fun show(tab: String = "Overview", deployment: String? = null) {
+    private fun show(tab: String = "Overview", deployment: String? = null, detail: String = AppDetailJson) {
         val store = appsStore(scopes.create()) { request ->
             val path = request.url.encodedPath
             requests += "${request.method.value} $path" to request.url.parameters.entries().joinToString("&") { "${it.key}=${it.value.first()}" }
@@ -42,7 +43,7 @@ class AppPageTest {
                 path.endsWith("/apps/a1/envs") -> json(EnvsJson)
                 path.endsWith("/apps/a1/logs") -> json(LogsJson)
                 path.contains("/apps/a1/envs/") && request.method.value == "PUT" -> json(EnvsJson.removePrefix("[").substringBefore("},{") + "}")
-                path.endsWith("/apps/a1") -> json(AppDetailJson)
+                path.endsWith("/apps/a1") -> json(detail)
                 else -> json("{}")
             }
         }
@@ -71,6 +72,18 @@ class AppPageTest {
         tab("Logs").performClick()
         rule.onNodeWithText("Follow").assertExists()
         rule.waitUntil(5_000) { rule.onAllNodesWithText("14:03:51 INFO Listening on :8080").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun theOverviewSaysWhereTheAppLivesInCoolifyAndOmitsItWhenCoolifyDoesNotSay() {
+        show()
+        rule.onNodeWithText("Mycelium apps project, atlas-box server").assertExists()
+    }
+
+    @Test
+    fun anAppWithNoReportedProjectOrServerHasNoCoolifyLocation() {
+        show(detail = AppDetailJson.replace("\"project\":\"Mycelium apps\",\"server\":\"atlas-box\",", ""))
+        rule.onAllNodesWithText("In Coolify").assertCountEquals(0)
     }
 
     @Test

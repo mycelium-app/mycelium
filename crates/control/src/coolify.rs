@@ -9,6 +9,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -107,6 +108,7 @@ pub fn tools() -> Vec<StoredTool> {
                 "name": {"type": "string"},
                 "project": {"type": "string", "description": "The project's name or uuid."},
                 "server": {"type": "string", "description": "The server's name or uuid."},
+                "environment": {"type": "string", "description": "The project's environment. Defaults to production, or the project's first one."},
                 "git_repository": {"type": "string", "description": "The repository's address. Leave out for a docker image."},
                 "git_branch": {"type": "string", "description": "Defaults to main."},
                 "base_directory": {"type": "string", "description": "Where the app lives in the repository. Defaults to /."},
@@ -389,6 +391,30 @@ impl Account {
         Ok(apps.into_iter().filter(|app| app["environment_id"].as_i64().is_some_and(|id| ids.contains(&id))).collect())
     }
 
+    async fn project_names(&self) -> HashMap<i64, String> {
+        let mut names = HashMap::new();
+        let Ok(listed) = self.call(reqwest::Method::GET, "projects", None).await else {
+            return names;
+        };
+
+        for project in list_of(&listed, "projects") {
+            let (Some(uuid), Some(name)) = (project["uuid"].as_str(), project["name"].as_str()) else {
+                continue;
+            };
+            let Ok(environments) = self.call(reqwest::Method::GET, &format!("projects/{uuid}/environments"), None).await else {
+                continue;
+            };
+
+            for environment in list_of(&environments, "environments") {
+                if let Some(id) = environment["id"].as_i64() {
+                    names.insert(id, name.to_string());
+                }
+            }
+        }
+
+        names
+    }
+
     async fn choose(&self, path: &str, noun: &str, wanted: Option<&str>, fallback_name: Option<&str>) -> Outcome<Value> {
         let body = self.call(reqwest::Method::GET, path, None).await?;
         let entries: Vec<Value> = list_of(&body, path).into_iter().filter(|entry| entry["uuid"].is_string()).collect();
@@ -466,7 +492,7 @@ impl Account {
             .collect())
     }
 
-    async fn app_view(&self, state: &AppState, app: &Value, deployments: Option<&[Value]>) -> Value {
+    async fn app_view(&self, state: &AppState, app: &Value, deployments: Option<&[Value]>, projects: &HashMap<i64, String>) -> Value {
         let uuid = app["uuid"].as_str().unwrap_or_default();
         let (built_in, triggers) = self.recorded(state, uuid).await;
         let mut status = app_status(app["status"].as_str().unwrap_or_default());
@@ -493,8 +519,8 @@ impl Account {
             "branch": app["git_branch"],
             "base_directory": app["base_directory"],
             "build_pack": app["build_pack"],
-            "project": self.credentials.settings["project_name"],
-            "server": self.credentials.settings["server_name"],
+            "project": app["environment_id"].as_i64().and_then(|id| projects.get(&id)),
+            "server": app["destination"]["server"]["name"],
             "created_at": app["created_at"],
             "latest_deployment": latest,
         })
@@ -602,22 +628,33 @@ impl Account {
         let Some(name) = arguments["name"].as_str().map(str::trim).filter(|name| !name.is_empty()) else {
             return Err(Failure::Other("Give the app a name.".to_string()));
         };
-        let (project_uuid, server_uuid, wildcard) = match self.scoped() {
-            true => (self.target("project_uuid"), self.target("server_uuid"), self.target("wildcard_domain")),
+        let (project_uuid, server_uuid, wildcard, environment_name) = match self.scoped() {
+            true => (self.target("project_uuid"), self.target("server_uuid"), self.target("wildcard_domain"), self.credentials.settings["environment_name"].as_str().unwrap_or(DEFAULT_ENVIRONMENT).to_string()),
             false => {
                 let project = self.choose("projects", "project", arguments["project"].as_str().map(str::trim).filter(|wanted| !wanted.is_empty()), Some(DEFAULT_PROJECT)).await?;
                 let server = self.choose("servers", "server", arguments["server"].as_str().map(str::trim).filter(|wanted| !wanted.is_empty()), None).await?;
                 let server_uuid = server["uuid"].as_str().unwrap_or_default().to_string();
                 let detail = self.call(reqwest::Method::GET, &format!("servers/{server_uuid}"), None).await.unwrap_or(Value::Null);
 
-                (project["uuid"].as_str().unwrap_or_default().to_string(), server_uuid, detail["settings"]["wildcard_domain"].as_str().unwrap_or_default().to_string())
+                let project_uuid = project["uuid"].as_str().unwrap_or_default().to_string();
+                let environments = self.call(reqwest::Method::GET, &format!("projects/{project_uuid}/environments"), None).await?;
+                let environments = list_of(&environments, "environments");
+                let names = environments.iter().filter_map(|environment| environment["name"].as_str()).collect::<Vec<_>>();
+                let wanted = arguments["environment"].as_str().map(str::trim).filter(|wanted| !wanted.is_empty());
+                let same = |name: &&str, other: &str| name.eq_ignore_ascii_case(other);
+                let environment = match wanted {
+                    Some(wanted) => names.iter().find(|name| same(name, wanted)).ok_or_else(|| Failure::Other(format!("The project {} has no environment called {wanted}. Choose one of: {}.", project["name"].as_str().unwrap_or_default(), names.join(", "))))?,
+                    None => names.iter().find(|name| same(name, DEFAULT_ENVIRONMENT)).or(names.first()).ok_or_else(|| Failure::Other(format!("The project {} has no environments. Create one in Coolify first.", project["name"].as_str().unwrap_or_default())))?,
+                };
+
+                (project_uuid, server_uuid, detail["settings"]["wildcard_domain"].as_str().unwrap_or_default().to_string(), environment.to_string())
             }
         };
         let address = address_for(name, &wildcard);
         let mut body = json!({
             "project_uuid": project_uuid,
             "server_uuid": server_uuid,
-            "environment_name": self.credentials.settings["environment_name"].as_str().unwrap_or(DEFAULT_ENVIRONMENT),
+            "environment_name": environment_name,
             "name": name,
             "instant_deploy": false,
         });
@@ -772,10 +809,11 @@ pub async fn call(state: &AppState, _owner: Uuid, server: &ServerRow, credential
         match tool {
             "list_apps" => {
                 let apps = handle.applications().await?;
+                let projects = handle.project_names().await;
                 let mut views = Vec::new();
 
                 for entry in &apps {
-                    views.push(handle.app_view(state, entry, None).await);
+                    views.push(handle.app_view(state, entry, None, &projects).await);
                 }
 
                 Ok(Value::Array(views))
@@ -793,7 +831,7 @@ pub async fn call(state: &AppState, _owner: Uuid, server: &ServerRow, credential
                         let entry = handle.application(&uuid).await?;
                         let deployments = handle.deployment_views(state, &uuid).await.unwrap_or_default();
 
-                        Ok(handle.app_view(state, &entry, Some(deployments.as_slice())).await)
+                        Ok(handle.app_view(state, &entry, Some(deployments.as_slice()), &handle.project_names().await).await)
                     }
                     "list_deployments" => Ok(Value::Array(handle.deployment_views(state, &uuid).await?)),
                     "get_logs" => {
@@ -900,10 +938,11 @@ pub async fn list_apps(State(state): State<AppState>, user: AuthUser) -> ApiResu
         return Ok(Json(json!({"apps": []})));
     };
     let apps = handle.applications().await.map_err(failed)?;
+    let projects = handle.project_names().await;
     let mut views = Vec::new();
 
     for entry in &apps {
-        views.push(handle.app_view(&state, entry, None).await);
+        views.push(handle.app_view(&state, entry, None, &projects).await);
     }
 
     Ok(Json(json!({"apps": views})))
@@ -914,7 +953,7 @@ pub async fn get_app(State(state): State<AppState>, user: AuthUser, Path(uuid): 
     let entry = handle.application(&uuid).await.map_err(failed)?;
     let deployments = handle.deployment_views(&state, &uuid).await.unwrap_or_default();
 
-    Ok(Json(handle.app_view(&state, &entry, Some(deployments.as_slice())).await))
+    Ok(Json(handle.app_view(&state, &entry, Some(deployments.as_slice()), &handle.project_names().await).await))
 }
 
 pub async fn deployments(State(state): State<AppState>, user: AuthUser, Path(uuid): Path<String>) -> ApiResult<Json<Value>> {
