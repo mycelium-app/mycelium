@@ -821,20 +821,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn terminal_offsets_count_all_bytes_even_after_old_scrollback_is_discarded() {
+    fn terminal_offsets_continue_from_the_total_the_node_reported() {
         let hub = Hub::default();
         let terminal_id = Uuid::new_v4();
-        hub.track_terminal(terminal_id, Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        hub.track_terminal(terminal_id, Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4(), 300_000);
 
-        assert_eq!(hub.terminal_scrollback(terminal_id), Some((Vec::new(), 0)));
-        assert_eq!(hub.append_terminal_output(terminal_id, &vec![b'a'; TERMINAL_SCROLLBACK_BYTES]), Some(0));
-        assert_eq!(hub.append_terminal_output(terminal_id, b"bc"), Some(TERMINAL_SCROLLBACK_BYTES as u64));
-
-        let (scrollback, end) = hub.terminal_scrollback(terminal_id).unwrap();
-
-        assert_eq!(scrollback.len(), TERMINAL_SCROLLBACK_BYTES);
-        assert_eq!(&scrollback[TERMINAL_SCROLLBACK_BYTES - 2..], b"bc");
-        assert_eq!(end, TERMINAL_SCROLLBACK_BYTES as u64 + 2);
+        assert_eq!(hub.append_terminal_output(terminal_id, b"abc"), Some(300_000));
+        assert_eq!(hub.append_terminal_output(terminal_id, b"de"), Some(300_003));
     }
 
     #[test]
