@@ -1,6 +1,7 @@
 package mycelium.desktop
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -73,11 +74,23 @@ class CoolifyAccountPageTest {
         open()
 
         rule.onNodeWithText("Change where apps go").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Agents create every app in this project. Apps in other projects stay out of their reach.").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Apps get an address under its wildcard domain, like harbour-status.apps.example.com.").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Save").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first.endsWith("/coolify-target") } }
         assertTrue(requests.any { it.first == "PUT /api/v1/chat-tool-servers/c1/coolify-target" })
+    }
+
+    @Test
+    fun choosingTheWholeInstanceHidesTheServerAndSavesWithoutAProject() {
+        open()
+
+        rule.onNodeWithText("Change where apps go").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Server").fetchSemanticsNodes().size > 1 }
+        rule.onAllNodesWithText("Mycelium apps")[1].performClick()
+        rule.onNodeWithText("Whole instance").performClick()
+
+        rule.onAllNodesWithText("Server").assertCountEquals(1)
     }
 
     @Test

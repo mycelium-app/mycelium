@@ -20,13 +20,10 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import mycelium.api.ApiException
 import mycelium.api.ControlPlaneUnreachable
 import mycelium.api.AppsCredentialRequest
 import mycelium.api.ChatToolServer
-import mycelium.api.CoolifyOptions
 import mycelium.api.CoolifyTested
 import mycelium.api.CreateChatToolServerRequest
 import mycelium.api.TandoorTested
@@ -43,7 +40,7 @@ private const val DateLength = 10
 
 private val AppsExpiryChoices = ExpiryPresets.map { Choice(it.toString(), "$it days") } + listOf(Choice(AppsCustomExpiry, "Custom date"), Choice(AppsNoExpiry, "No expiration"))
 
-private val CoolifySteps = listOf("Address", "Credential", "Test", "Deploy to", "Name")
+private val CoolifySteps = listOf("Address", "Credential", "Test", "Name")
 private val TandoorSteps = listOf("Address and token", "Test", "Name")
 
 private sealed interface AppsTest {
@@ -81,14 +78,10 @@ internal fun AppsSetupFlow(
     var expiry by remember { mutableStateOf(if (coolify) AppsNoExpiry else AppsCustomExpiry) }
     var customDate by remember { mutableStateOf(if (coolify) "" else expiryIn(DaysInYear).take(DateLength)) }
     var name by remember { mutableStateOf("") }
-    var project by remember { mutableStateOf<String?>(null) }
-    var server by remember { mutableStateOf<String?>(null) }
     var addressProblem by remember { mutableStateOf<String?>(null) }
     var tokenProblem by remember { mutableStateOf<String?>(null) }
     var dateProblem by remember { mutableStateOf<String?>(null) }
-    var targetProblem by remember { mutableStateOf<String?>(null) }
     var test by remember { mutableStateOf<AppsTest?>(null) }
-    var options by remember { mutableStateOf(CoolifyOptions()) }
     var attempts by remember { mutableStateOf(0) }
     var confirmingClose by remember { mutableStateOf(false) }
     val runner = rememberAction()
@@ -160,18 +153,6 @@ internal fun AppsSetupFlow(
             }
 
             "Test" -> step += 1
-
-            "Deploy to" -> {
-                targetProblem = when {
-                    project == null -> "Choose a project for agents to create apps in."
-                    server == null -> "Choose a server for apps to run on."
-                    else -> null
-                }
-
-                if (targetProblem == null) {
-                    step += 1
-                }
-            }
         }
     }
 
@@ -191,8 +172,7 @@ internal fun AppsSetupFlow(
         }
 
         runner {
-            val settings = if (coolify) JsonObject(mapOf("project_uuid" to JsonPrimitive(project.orEmpty()), "server_uuid" to JsonPrimitive(server.orEmpty()))) else null
-            val added = store.api.createChatToolServer(CreateChatToolServerRequest(name.trim(), address.trim(), token.trim(), kind = kind, settings = settings, tokenExpiresAt = chosenExpiry()))
+            val added = store.api.createChatToolServer(CreateChatToolServerRequest(name.trim(), address.trim(), token.trim(), kind = kind, tokenExpiresAt = chosenExpiry()))
             onAdded(added)
             onFinished(added)
         }
@@ -210,9 +190,6 @@ internal fun AppsSetupFlow(
 
             if (coolify) {
                 val result = store.api.testCoolify(request)
-                options = CoolifyOptions(result.projects, result.servers)
-                project = result.projects.firstOrNull()?.uuid
-                server = result.servers.firstOrNull()?.uuid
                 test = AppsTest.Coolify(result)
             } else {
                 test = AppsTest.Tandoor(store.api.testTandoor(request))
@@ -345,11 +322,6 @@ internal fun AppsSetupFlow(
                         MyButton({ attempts += 1 }, text = "Try again", variant = ButtonVariant.Outline)
                     }
                 }
-            }
-
-            "Deploy to" -> {
-                CoolifyTargetFields(options, project, server, { project = it; targetProblem = null }, { server = it; targetProblem = null })
-                targetProblem?.let { Label(it, style = Tokens.Type.MetaStrong, color = colors.statusFailed, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }) }
             }
 
             "Name" -> {

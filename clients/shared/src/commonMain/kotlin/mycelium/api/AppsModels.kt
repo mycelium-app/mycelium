@@ -24,7 +24,7 @@ data class CoolifyTested(
 )
 
 @Serializable
-data class CoolifyTargetRequest(@SerialName("project_uuid") val projectUuid: String, @SerialName("server_uuid") val serverUuid: String)
+data class CoolifyTargetRequest(@SerialName("project_uuid") val projectUuid: String? = null, @SerialName("server_uuid") val serverUuid: String? = null)
 
 @Serializable
 data class TandoorTested(val host: String, val space: String, val user: String, val recipes: Int = 0)

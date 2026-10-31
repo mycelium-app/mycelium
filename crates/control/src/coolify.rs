@@ -20,6 +20,8 @@ const DELETE_APP: &str = "delete_app";
 const SET_ENV: &str = "set_env";
 const DELETE_ENV: &str = "delete_env";
 const DEFAULT_ENVIRONMENT: &str = "production";
+const DEFAULT_PROJECT: &str = "default";
+const SCOPE_KEYS: [&str; 6] = ["project_uuid", "server_uuid", "project_name", "server_name", "wildcard_domain", "environment_name"];
 const DEFAULT_LOG_LINES: u64 = 100;
 const MAX_LOG_LINES: u64 = 1000;
 const TAIL_LINES: usize = 12;
@@ -52,8 +54,10 @@ pub struct TestRequest {
 
 #[derive(serde::Deserialize)]
 pub struct TargetRequest {
-    project_uuid: String,
-    server_uuid: String,
+    #[serde(default)]
+    project_uuid: Option<String>,
+    #[serde(default)]
+    server_uuid: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -80,7 +84,9 @@ pub fn tools() -> Vec<StoredTool> {
     let by_app = |description: &str| json!({"type": "object", "properties": {"app": app.clone()}, "required": ["app"], "description": description});
 
     vec![
-        StoredTool { name: "list_apps".to_string(), description: "List the apps in the project Coolify builds apps in, with their status and address.".to_string(), input_schema: json!({"type": "object", "properties": {}}), read_only: None },
+        StoredTool { name: "list_apps".to_string(), description: "List the apps in Coolify, with their status and address.".to_string(), input_schema: json!({"type": "object", "properties": {}}), read_only: None },
+        StoredTool { name: "list_projects".to_string(), description: "List the projects in Coolify, with their uuid and name. Use one to say where create_app puts an app.".to_string(), input_schema: json!({"type": "object", "properties": {}}), read_only: None },
+        StoredTool { name: "list_servers".to_string(), description: "List the servers in Coolify, with their uuid and name. Use one to say where create_app runs an app.".to_string(), input_schema: json!({"type": "object", "properties": {}}), read_only: None },
         StoredTool { name: "get_app".to_string(), description: "Read an app's status, address, repository, branch, build pack and latest deployment.".to_string(), input_schema: by_app("Read an app."), read_only: None },
         StoredTool { name: "list_deployments".to_string(), description: "List an app's recent deployments with their commit, who triggered them and the result.".to_string(), input_schema: by_app("List deployments."), read_only: None },
         StoredTool {
@@ -96,9 +102,11 @@ pub fn tools() -> Vec<StoredTool> {
         },
         StoredTool {
             name: CREATE_APP.to_string(),
-            description: "Create an app from a git repository, or from a docker image, in the project and server the person chose, and deploy it. It gets an address under the server's wildcard domain. Always needs the person's approval in chats, even when Always allow is on.".to_string(),
+            description: "Create an app from a git repository, or from a docker image, in a project and on a server, and deploy it. Name them, or give their uuids from list_projects and list_servers. Leave the server out when Coolify has one, and the project out when Coolify has one or one named default. It gets an address under the server's wildcard domain. Always needs the person's approval in chats, even when Always allow is on.".to_string(),
             input_schema: json!({"type": "object", "properties": {
                 "name": {"type": "string"},
+                "project": {"type": "string", "description": "The project's name or uuid."},
+                "server": {"type": "string", "description": "The server's name or uuid."},
                 "git_repository": {"type": "string", "description": "The repository's address. Leave out for a docker image."},
                 "git_branch": {"type": "string", "description": "Defaults to main."},
                 "base_directory": {"type": "string", "description": "Where the app lives in the repository. Defaults to /."},
@@ -154,7 +162,8 @@ pub fn normalise_settings(settings: &Value) -> Result<Value, String> {
 
     match (project, server) {
         (Some(project), Some(server)) => Ok(json!({"project_uuid": project, "server_uuid": server})),
-        _ => Err("Choose the project and the server apps are created in.".to_string()),
+        (None, None) => Ok(json!({})),
+        _ => Err("Choose both a project and a server, or neither for the whole instance.".to_string()),
     }
 }
 
@@ -223,6 +232,10 @@ async fn options(http: &reqwest::Client, credentials: &Credentials) -> Outcome<V
 
 pub async fn verify(http: &reqwest::Client, credentials: &Credentials) -> Result<Value, String> {
     let discovered = options(http, credentials).await.map_err(|failure| failure.message().to_string())?;
+    if credentials.settings["project_uuid"].as_str().is_none_or(str::is_empty) {
+        return Ok(json!({}));
+    }
+
     let find = |list: &str, uuid: &str| discovered[list].as_array().and_then(|entries| entries.iter().find(|entry| entry["uuid"] == uuid)).cloned();
     let Some(project) = find("projects", credentials.settings["project_uuid"].as_str().unwrap_or_default()) else {
         return Err(format!("{} has no project with that uuid. Choose a project from the list.", host_of(&credentials.address)));
@@ -353,6 +366,10 @@ impl Account {
         send(builder, &self.credentials.address).await
     }
 
+    fn scoped(&self) -> bool {
+        !self.target("project_uuid").is_empty()
+    }
+
     async fn project_environment_ids(&self) -> Outcome<Vec<i64>> {
         let environments = self.call(reqwest::Method::GET, &format!("projects/{}/environments", self.target("project_uuid")), None).await?;
 
@@ -360,10 +377,36 @@ impl Account {
     }
 
     async fn applications(&self) -> Outcome<Vec<Value>> {
-        let ids = self.project_environment_ids().await?;
         let all = self.call(reqwest::Method::GET, "applications", None).await?;
+        let apps = list_of(&all, "applications");
 
-        Ok(list_of(&all, "applications").into_iter().filter(|app| app["environment_id"].as_i64().is_some_and(|id| ids.contains(&id))).collect())
+        if !self.scoped() {
+            return Ok(apps);
+        }
+
+        let ids = self.project_environment_ids().await?;
+
+        Ok(apps.into_iter().filter(|app| app["environment_id"].as_i64().is_some_and(|id| ids.contains(&id))).collect())
+    }
+
+    async fn choose(&self, path: &str, noun: &str, wanted: Option<&str>, fallback_name: Option<&str>) -> Outcome<Value> {
+        let body = self.call(reqwest::Method::GET, path, None).await?;
+        let entries: Vec<Value> = list_of(&body, path).into_iter().filter(|entry| entry["uuid"].is_string()).collect();
+        let names = entries.iter().filter_map(|entry| entry["name"].as_str()).collect::<Vec<_>>().join(", ");
+        let matches_name = |entry: &Value, name: &str| entry["name"].as_str().is_some_and(|candidate| candidate.eq_ignore_ascii_case(name));
+
+        let found = match (wanted, entries.len()) {
+            (_, 0) => return Err(Failure::Other(format!("Coolify has no {noun}s yet. Create one in Coolify first."))),
+            (Some(wanted), _) => entries.iter().find(|entry| entry["uuid"] == wanted || matches_name(entry, wanted)),
+            (None, 1) => entries.first(),
+            (None, _) => fallback_name.and_then(|name| entries.iter().find(|entry| matches_name(entry, name))),
+        };
+
+        match (found, wanted) {
+            (Some(entry), _) => Ok(entry.clone()),
+            (None, Some(wanted)) => Err(Failure::Other(format!("Coolify has no {noun} called {wanted}. Choose one of: {names}."))),
+            (None, None) => Err(Failure::Other(format!("Say which {noun} to use in {noun}. The choices are: {names}."))),
+        }
     }
 
     async fn application(&self, uuid: &str) -> Outcome<Value> {
@@ -559,11 +602,21 @@ impl Account {
         let Some(name) = arguments["name"].as_str().map(str::trim).filter(|name| !name.is_empty()) else {
             return Err(Failure::Other("Give the app a name.".to_string()));
         };
-        let wildcard = self.credentials.settings["wildcard_domain"].as_str().unwrap_or_default();
-        let address = address_for(name, wildcard);
+        let (project_uuid, server_uuid, wildcard) = match self.scoped() {
+            true => (self.target("project_uuid"), self.target("server_uuid"), self.target("wildcard_domain")),
+            false => {
+                let project = self.choose("projects", "project", arguments["project"].as_str().map(str::trim).filter(|wanted| !wanted.is_empty()), Some(DEFAULT_PROJECT)).await?;
+                let server = self.choose("servers", "server", arguments["server"].as_str().map(str::trim).filter(|wanted| !wanted.is_empty()), None).await?;
+                let server_uuid = server["uuid"].as_str().unwrap_or_default().to_string();
+                let detail = self.call(reqwest::Method::GET, &format!("servers/{server_uuid}"), None).await.unwrap_or(Value::Null);
+
+                (project["uuid"].as_str().unwrap_or_default().to_string(), server_uuid, detail["settings"]["wildcard_domain"].as_str().unwrap_or_default().to_string())
+            }
+        };
+        let address = address_for(name, &wildcard);
         let mut body = json!({
-            "project_uuid": self.target("project_uuid"),
-            "server_uuid": self.target("server_uuid"),
+            "project_uuid": project_uuid,
+            "server_uuid": server_uuid,
             "environment_name": self.credentials.settings["environment_name"].as_str().unwrap_or(DEFAULT_ENVIRONMENT),
             "name": name,
             "instant_deploy": false,
@@ -727,6 +780,8 @@ pub async fn call(state: &AppState, _owner: Uuid, server: &ServerRow, credential
 
                 Ok(Value::Array(views))
             }
+            "list_projects" => Ok(naming(&list_of(&handle.call(reqwest::Method::GET, "projects", None).await?, "projects"))),
+            "list_servers" => Ok(naming(&list_of(&handle.call(reqwest::Method::GET, "servers", None).await?, "servers"))),
             CREATE_APP => handle.create_app(state, arguments, conversation).await,
             _ => {
                 let Some(uuid) = app else {
@@ -826,6 +881,10 @@ pub async fn set_target(State(state): State<AppState>, user: AuthUser, Path(id):
     let mut settings = row.settings.0.clone();
 
     if let (Some(fields), Some(chosen), Some(discovered)) = (settings.as_object_mut(), chosen.as_object(), discovered.as_object()) {
+        for key in SCOPE_KEYS {
+            fields.remove(key);
+        }
+
         fields.extend(chosen.clone());
         fields.extend(discovered.clone());
     }

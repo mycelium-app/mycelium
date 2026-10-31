@@ -67,7 +67,7 @@ class AppsSetupFlowTest {
     }
 
     @Test
-    fun coolifyTestShowsTheHostProjectsAndServersThenCreatesTheAccountWithItsTarget() {
+    fun coolifyTestShowsTheHostProjectsAndServersThenNamesTheAccountWithoutChoosingWhereAppsGo() {
         open("coolify")
 
         type("Server address", "https://coolify.example.com")
@@ -80,14 +80,12 @@ class AppsSetupFlowTest {
         rule.onNodeWithText("atlas-box").assertExists()
         rule.onNodeWithText("Continue").performClick()
 
-        rule.onNodeWithText("Agents create every app in this project. Apps in other projects stay out of their reach.").assertExists()
-        rule.onNodeWithText("Apps get an address under its wildcard domain, like harbour-status.apps.example.com.").assertExists()
-        rule.onNodeWithText("Continue").performClick()
+        rule.onNodeWithContentDescription("Step 4 of 4: Name", substring = true).assertExists()
         rule.onNodeWithText("Add integration").performClick()
 
         rule.waitUntil(5_000) { finished }
         val created = requests.last { it.first.endsWith("/chat-tool-servers") }.second
-        assertTrue(created.contains("\"kind\":\"coolify\"") && created.contains("\"bearer_token\":\"coolify-token\"") && created.contains("\"project_uuid\":\"p1\"") && created.contains("\"server_uuid\":\"s1\""), created)
+        assertTrue(created.contains("\"kind\":\"coolify\"") && created.contains("\"bearer_token\":\"coolify-token\"") && !created.contains("project_uuid"), created)
     }
 
     @Test

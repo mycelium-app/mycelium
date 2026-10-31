@@ -30,7 +30,7 @@ async fn version(headers: HeaderMap) -> Response {
 }
 
 async fn projects() -> Json<Value> {
-    Json(json!([{"uuid": "p1", "name": "Agents"}]))
+    Json(json!([{"uuid": "p1", "name": "Agents"}, {"uuid": "p2", "name": "Sites"}]))
 }
 
 async fn servers() -> Json<Value> {
@@ -41,13 +41,16 @@ async fn one_server() -> Json<Value> {
     Json(json!({"uuid": "s1", "settings": {"wildcard_domain": "https://apps.example.com"}}))
 }
 
-async fn environments() -> Json<Value> {
-    Json(json!([{"id": 7, "name": "production"}]))
+async fn environments(Path(project): Path<String>) -> Json<Value> {
+    let id = if project == "p1" { 7 } else { 8 };
+
+    Json(json!([{"id": id, "name": "production"}]))
 }
 
 async fn applications() -> Json<Value> {
     Json(json!([
         {"uuid": "a1", "name": "notes", "status": "running:healthy", "fqdn": "https://notes.apps.example.com", "environment_id": 7, "git_repository": "slop/notes", "git_branch": "main"},
+        {"uuid": "site", "name": "landing", "status": "running:healthy", "environment_id": 8},
         {"uuid": "other", "name": "elsewhere", "status": "running:healthy", "environment_id": 99}
     ]))
 }
@@ -113,7 +116,7 @@ async fn fake_coolify() -> (String, Arc<FakeCoolify>) {
     let router = Router::new()
         .route("/api/v1/version", get(version))
         .route("/api/v1/projects", get(projects))
-        .route("/api/v1/projects/p1/environments", get(environments))
+        .route("/api/v1/projects/{project}/environments", get(environments))
         .route("/api/v1/servers", get(servers))
         .route("/api/v1/servers/s1", get(one_server))
         .route("/api/v1/applications", get(applications))
@@ -133,6 +136,10 @@ async fn fake_coolify() -> (String, Arc<FakeCoolify>) {
 
 async fn add_coolify(server: &Server, base: &str) -> (u16, Value) {
     server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Coolify", "kind": "coolify", "url": base, "bearer_token": TOKEN, "settings": {"project_uuid": "p1", "server_uuid": "s1"}}))).await
+}
+
+async fn add_whole_instance(server: &Server, base: &str) -> (u16, Value) {
+    server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Coolify", "kind": "coolify", "url": base, "bearer_token": TOKEN}))).await
 }
 
 fn mcp(tool: &str, arguments: Value) -> Value {
@@ -325,4 +332,91 @@ async fn an_id_that_would_leave_the_app_path_is_refused_before_it_reaches_coolif
     assert!(status >= 400, "{refused}");
     assert!(refused.to_string().contains("not a Coolify id"), "{refused}");
     assert!(injected >= 400);
+}
+
+#[tokio::test]
+async fn a_whole_instance_account_lists_the_apps_in_every_project() {
+    let server = Server::start().await;
+    let (base, _) = fake_coolify().await;
+
+    let (status, added) = add_whole_instance(&server, &base).await;
+    let (_, apps) = server.user.json(server.user.get("/api/v1/apps")).await;
+
+    assert_eq!(status, 201, "{added}");
+    assert_eq!(apps["apps"].as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn a_whole_instance_account_creates_an_app_in_the_project_named_by_the_agent() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, fake) = fake_coolify().await;
+    add_whole_instance(&server, &base).await;
+
+    let reply = server.approved_agent_mcp(&node.token, mcp("create_app", json!({"name": "Notes", "project": "sites", "server": "Main", "git_repository": "https://git.example.com/slop/notes"}))).await;
+    let created = fake.created.lock().unwrap().clone();
+
+    assert!(text(&reply).contains("\"deployment_uuid\":\"d1\""), "{reply}");
+    assert_eq!((created[0]["project_uuid"].clone(), created[0]["server_uuid"].clone()), (json!("p2"), json!("s1")));
+}
+
+#[tokio::test]
+async fn a_whole_instance_account_needs_no_server_when_there_is_one_and_asks_for_the_project_when_there_are_several() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, fake) = fake_coolify().await;
+    add_whole_instance(&server, &base).await;
+
+    let unclear = server.approved_agent_mcp(&node.token, mcp("create_app", json!({"name": "Notes", "git_repository": "https://git.example.com/slop/notes"}))).await;
+    let chosen = server.approved_agent_mcp(&node.token, mcp("create_app", json!({"name": "Notes", "project": "p1", "git_repository": "https://git.example.com/slop/notes"}))).await;
+    let created = fake.created.lock().unwrap().clone();
+
+    assert_eq!(unclear["result"]["isError"], true);
+    assert_eq!(text(&unclear), "Say which project to use in project. The choices are: Agents, Sites.");
+    assert_eq!(chosen["result"]["isError"], json!(false), "{chosen}");
+    assert_eq!(created[0]["server_uuid"], "s1");
+}
+
+#[tokio::test]
+async fn a_whole_instance_account_lists_projects_and_servers_for_the_agent() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, _) = fake_coolify().await;
+    add_whole_instance(&server, &base).await;
+
+    let conversation = server.node_conversation(&node.token).await;
+    let projects = server.agent_mcp(&node.token, conversation, mcp("list_projects", json!({}))).await;
+
+    assert!(text(&projects).contains("\"name\":\"Sites\""), "{projects}");
+}
+
+#[tokio::test]
+async fn a_project_account_never_sees_or_creates_in_another_project() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, fake) = fake_coolify().await;
+    add_coolify(&server, &base).await;
+
+    let (_, apps) = server.user.json(server.user.get("/api/v1/apps")).await;
+    server.approved_agent_mcp(&node.token, mcp("create_app", json!({"name": "Notes", "project": "Sites", "git_repository": "https://git.example.com/slop/notes"}))).await;
+    let created = fake.created.lock().unwrap().clone();
+
+    assert_eq!(apps["apps"].as_array().unwrap().len(), 1);
+    assert_eq!(created[0]["project_uuid"], "p1");
+}
+
+#[tokio::test]
+async fn widening_a_project_account_to_the_whole_instance_clears_its_scope() {
+    let server = Server::start().await;
+    let (base, _) = fake_coolify().await;
+    let (_, added) = add_coolify(&server, &base).await;
+    let id = added["id"].as_str().unwrap();
+
+    let (status, widened) = server.user.json(server.user.put(&format!("/api/v1/chat-tool-servers/{id}/coolify-target")).json(&json!({}))).await;
+    let (_, apps) = server.user.json(server.user.get("/api/v1/apps")).await;
+
+    assert_eq!(status, 200, "{widened}");
+    assert_eq!(widened["settings"].get("project_uuid"), None);
+    assert_eq!(widened["settings"].get("project_name"), None);
+    assert_eq!(apps["apps"].as_array().unwrap().len(), 3);
 }
