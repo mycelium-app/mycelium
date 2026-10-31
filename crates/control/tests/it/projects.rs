@@ -463,6 +463,40 @@ async fn a_new_folder_with_a_new_repository_creates_the_repository_and_clones_it
     assert_eq!(seen.lock().unwrap()[0].0, "POST /user/repos");
 }
 
+#[tokio::test]
+async fn a_new_repository_the_forge_refuses_creates_no_folder_and_no_project() {
+    let server = Server::start().await;
+    let github = fake_creating_forge("github", Seen::default()).await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let mut link = server.online_node("laptop").await;
+
+    let (status, error) = server.user.json(server.user.post("/api/v1/projects").json(&json!({"node_id": link.id, "forge_id": forge_id, "repository": "acme-org/taken", "new_repository": true, "new_folder": "taken"}))).await;
+    let asked_the_node = tokio::time::timeout(std::time::Duration::from_millis(200), link.next()).await.is_ok();
+    let (_, projects) = server.user.json(server.user.get("/api/v1/projects")).await;
+
+    assert_eq!((status, error["error"].clone(), asked_the_node, projects), (400, json!("forge_repository_refused"), false, json!([])));
+}
+
+#[tokio::test]
+async fn a_node_that_never_answers_create_folder_is_reported_as_needing_an_update() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let user = server.user.clone();
+    let node_id = link.id;
+    let asking = tokio::spawn(async move { user.json(user.post("/api/v1/projects").json(&json!({"node_id": node_id, "new_folder": "quiet-otter"}))).await });
+
+    let asked = loop {
+        match link.next().await {
+            ControlToNode::Git { command, .. } => break command,
+            _ => continue,
+        }
+    };
+    let (status, error) = asking.await.unwrap();
+
+    assert_eq!(asked, GitCommand::CreateDirectory { name: "quiet-otter".into() });
+    assert_eq!((status, error["error"].clone(), error["message"].clone()), (409, json!("node_outdated"), json!("laptop needs Mycelium v0.20.0 or newer to create folders. Update the node, then try again.")));
+}
+
 async fn conversation_in(server: &Server, node_id: Uuid, cwd: &str) -> Uuid {
     let (status, body) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": node_id, "agent": "claude", "cwd": cwd}))).await;
     assert_eq!(status, 201, "{body}");

@@ -70,6 +70,12 @@ pub async fn clone_repository(state: &AppState, forge: &forges::ForgeRow, reposi
     Ok(answer["path"].as_str().unwrap_or_default().to_string())
 }
 
+async fn create_folder(state: &AppState, node_id: Uuid, name: &str) -> ApiResult<String> {
+    let answer = relay(state, node_id, PROJECTS_FOLDER.to_string(), GitCommand::CreateDirectory { name: name.to_string() }).await?;
+
+    Ok(answer["path"].as_str().unwrap_or_default().to_string())
+}
+
 fn remote_location(url: &str) -> Option<(String, String)> {
     let (authority, path) = match url.split_once("://") {
         Some((_, rest)) => rest.split_once('/').unwrap_or((rest, "")),
@@ -148,17 +154,10 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         return Err(node_offline());
     }
 
-    let created_folder = match request.new_folder.as_deref() {
-        Some(name) => {
-            let answer = relay(&state, request.node_id, PROJECTS_FOLDER.to_string(), GitCommand::CreateDirectory { name: name.to_string() }).await?;
+    let new_folder = request.new_folder.as_deref();
 
-            Some(answer["path"].as_str().unwrap_or_default().to_string())
-        }
-        None => None,
-    };
-
-    let (name, path, forge_id, repository) = match (request.forge_id, request.repository.as_deref().map(str::trim), created_folder.as_deref().or(request.path.as_deref().map(str::trim))) {
-        (Some(forge_id), Some(repository), Some(path)) if !path.is_empty() && !request.new_repository && created_folder.is_none() => {
+    let (name, path, forge_id, repository) = match (request.forge_id, request.repository.as_deref().map(str::trim), request.path.as_deref().map(str::trim)) {
+        (Some(forge_id), Some(repository), Some(path)) if !path.is_empty() && !request.new_repository && new_folder.is_none() => {
             if !valid_repository(repository) {
                 return Err(ApiError::bad_request("repository_invalid", "Enter the repository as owner/name, for example acme-org/acme-backups."));
             }
@@ -175,7 +174,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 
             (name, registered, Some(forge_id), Some(repository.to_string()))
         }
-        (Some(forge_id), Some(repository), folder) if folder.is_none() || created_folder.is_some() => {
+        (Some(forge_id), Some(repository), None) => {
             if !valid_repository(repository) {
                 return Err(ApiError::bad_request("repository_invalid", "Enter the repository as owner/name, for example acme-org/acme-backups."));
             }
@@ -188,13 +187,21 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
                 api.create_repository(&state.http, &forge.account, repository).await.map_err(|error| error.into_api(api.kind, &api.base_url))?;
             }
 
-            let path = clone_repository(&state, &forge, repository, request.node_id, folder).await?;
+            let folder = match new_folder {
+                Some(name) => Some(create_folder(&state, request.node_id, name).await?),
+                None => None,
+            };
+            let path = clone_repository(&state, &forge, repository, request.node_id, folder.as_deref()).await?;
             let name = repository.rsplit('/').next().unwrap_or(repository).to_string();
 
             (name, path, Some(forge_id), Some(repository.to_string()))
         }
-        (None, None, Some(path)) if !path.is_empty() => {
-            let answer = relay(&state, request.node_id, path.to_string(), GitCommand::Register).await?;
+        (None, None, path) if path.is_some_and(|path| !path.is_empty()) || new_folder.is_some() => {
+            let path = match new_folder {
+                Some(name) => create_folder(&state, request.node_id, name).await?,
+                None => path.unwrap_or_default().to_string(),
+            };
+            let answer = relay(&state, request.node_id, path, GitCommand::Register).await?;
             let registered = answer["path"].as_str().unwrap_or_default().to_string();
             let name = registered.rsplit('/').next().unwrap_or(&registered).to_string();
 

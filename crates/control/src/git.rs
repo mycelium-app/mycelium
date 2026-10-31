@@ -115,9 +115,16 @@ pub async fn relay(state: &AppState, node_id: Uuid, cwd: String, command: GitCom
         return Err(node_offline());
     }
 
+    let creates_folder = matches!(command, GitCommand::CreateDirectory { .. });
     let asked = state.ask_node::<GitAnswer>(node_id, timeout, |request_id| ControlToNode::Git { request_id, cwd, command }).await;
 
     let Some(answer) = asked else {
+        if creates_folder {
+            let name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(node_id).fetch_one(&state.pool).await?;
+
+            return Err(ApiError::conflict("node_outdated", format!("{name} needs Mycelium v0.20.0 or newer to create folders. Update the node, then try again.")));
+        }
+
         return Err(ApiError::new(StatusCode::GATEWAY_TIMEOUT, "git_timeout", "The node did not answer in time. Try again in a moment."));
     };
 
