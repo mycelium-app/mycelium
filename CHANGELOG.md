@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.20.0
+
+- Coolify agents can use the whole Coolify API, including databases, services, volumes and domains, and can create a database and get its connection URL. Reading never asks; anything that changes something asks first.
+- The folder browser can create a folder. A new conversation with no project starts a new project with a generated name, and can create its repository on your forge at the same time.
+- Repository lists have a Refresh button that fetches from the forge straight away.
+- Repositories can be set up from the Projects screen on a phone.
+
 ## v0.19.0
 
 - Terminals live on the node: they keep running through dropped connections, control plane restarts and app restarts, and come back with their scrollback. Tabs and splits are saved per conversation, so every device opens the same layout.
