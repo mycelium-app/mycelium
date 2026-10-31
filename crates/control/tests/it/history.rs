@@ -85,7 +85,7 @@ async fn importing_a_transcript_counts_its_turns_in_activity_without_usage() {
 
     import(&server, link.id, "claude").await;
 
-    let (_, body) = server.user.json(server.user.get("/api/v1/activity?range=30d")).await;
+    let (_, body) = server.user.json(server.user.get("/api/v1/activity?range=all")).await;
     assert_eq!(body["totals"]["turns"], 1);
     assert_eq!(body["totals"]["reported_turns"], 0);
     assert_eq!(body["unreported_agents"], json!(["claude"]));
