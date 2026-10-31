@@ -259,7 +259,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
 
                 Table(
                     listOf(
-                        Col("Repository", 200.dp, weight = 1f),
+                        Col("Repository", 80.dp, weight = 1f),
                         Col("Forge", 72.dp, max = 160.dp, priority = 1),
                         Col("Set up on", 120.dp, max = 280.dp, overflow = Overflow.Wrap, priority = 1),
                         Col("", 190.dp, align = ColumnAlign.End, rigid = true),

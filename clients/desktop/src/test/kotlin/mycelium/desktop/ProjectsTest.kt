@@ -161,7 +161,7 @@ class ProjectsTest {
     @Test
     fun aRepositoryNotSetUpCanBeClonedFromANarrowScreen() {
         val store = store()
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); Box(Modifier.width(430.dp)) { ProjectsScreen(store, state, onNewConversation = {}) } } }
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); Box(Modifier.width(360.dp)) { ProjectsScreen(store, state, onNewConversation = {}) } } }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("immich").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Set up immich-app/immich on a node").performClick()
