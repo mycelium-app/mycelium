@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.19.0
+
+- Terminals live on the node: they keep running through dropped connections, control plane restarts and app restarts, and come back with their scrollback. Tabs and splits are saved per conversation, so every device opens the same layout.
+- The terminal on a phone is a full-screen sheet you type into with the keyboard, with a key row for Esc, Tab, Ctrl, the arrows and Paste, and one terminal at a time.
+- Coolify can be given the whole instance. Agents choose the project, server and environment for each app, and an integration limited to one project can be widened from its account page.
+- Environments no longer need Chromium on the node. Browser tools say when no Chromium-based browser is open.
+
 ## v0.18.0
 
 - Agents keep a to-do list for the conversation, pinned above the composer and expandable to its checklist. Claude Code and Codex fill it from their plans, other agents and chat models set it with a tool, and whoever continues the conversation on another model or account is given it.
