@@ -8,6 +8,20 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -97,8 +111,10 @@ import mycelium.state.xtermRgb
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, modifier: Modifier = Modifier, onExited: () -> Unit = {}) {
+fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, modifier: Modifier = Modifier, onExited: () -> Unit = {}, onClose: () -> Unit = {}) {
     val colors = MyTheme.colors
+    val touch = LocalTouch.current
+    var switching by remember { mutableStateOf(false) }
     val id = conversation.id
     var workspace by remember(id) { mutableStateOf(store.terminalWorkspaces[id] ?: TerminalWorkspace()) }
     var scrollbacks by remember(id) { mutableStateOf<Map<String, OpenTerminal>>(emptyMap()) }
@@ -144,34 +160,57 @@ fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, mod
     }
 
     Column(modifier.background(colors.bgPanel).semantics { contentDescription = "Terminal" }) {
-        Row(Modifier.fillMaxWidth().height(Tokens.Size.Bar).padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-            MainTabStrip(
-                tabs = tabs.tabs.map { tab ->
-                    val seen = tab.layout.paneIds().mapNotNull { pane -> workspace.panes[pane]?.let(activity::get) }
-                    val agent = if (AgentTerminalActivity.Typing in seen) AgentTerminalActivity.Typing else seen.firstOrNull()
+        if (touch) {
+            Row(Modifier.fillMaxWidth().height(Tokens.Size.BarTouch).background(colors.bgChrome).padding(start = Tokens.Space.S1, end = Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                MyButton({ switching = true }, text = current?.title.orEmpty(), icon = MyIcon.Terminal, trailingIcon = MyIcon.ChevronDown, description = "${current?.title.orEmpty()} of ${tabs.tabs.size}, switch terminal")
+                Spacer(Modifier.weight(1f))
+                MyButton({ change { it.open() } }, icon = MyIcon.Plus, description = "New terminal", muted = true)
+                MyButton(onClose, icon = MyIcon.Close, description = "Close the terminal", muted = true)
+            }
 
-                    MainTab(
-                        tab.id,
-                        tab.title,
-                        "Close ${tab.title}",
-                        badge = when (agent) {
-                            AgentTerminalActivity.Typing -> MyIcon.Keyboard
-                            AgentTerminalActivity.Reading -> MyIcon.Eye
-                            null -> null
-                        },
-                        badgeLabel = if (agent == AgentTerminalActivity.Typing) "Agent is typing in this terminal" else "Agent is reading this terminal",
-                    )
-                },
-                selected = tabs.selected.orEmpty(),
-                onSelect = { workspace = workspace.copy(tabs = tabs.select(it)) },
-                onClose = { tabId -> change { it.closeTab(tabId) } },
-                groupLabel = "Terminals",
-                modifier = Modifier.weight(1f),
-            )
-            MyButton({ change { it.split(SplitDirection.Right) } }, icon = MyIcon.SplitRight, description = "Split right", muted = true)
-            MyButton({ change { it.split(SplitDirection.Down) } }, icon = MyIcon.SplitDown, description = "Split down", muted = true)
-            MyButton({ change { it.open() } }, icon = MyIcon.Plus, description = "New terminal", muted = true)
-            MyButton({ change { it.closeFocused() } }, icon = MyIcon.Close, description = "Close terminal", muted = true)
+            if (switching) {
+                MenuPopup(onDismiss = { switching = false }) {
+                    for (tab in tabs.tabs) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.weight(1f)) {
+                                MenuItem(tab.title, onClick = { workspace = workspace.copy(tabs = tabs.select(tab.id)); switching = false }, checked = tab.id == current?.id)
+                            }
+
+                            MyButton({ switching = false; change { it.closeTab(tab.id) } }, icon = MyIcon.Close, description = "End ${tab.title}", muted = true)
+                        }
+                    }
+                }
+            }
+        } else {
+            Row(Modifier.fillMaxWidth().height(Tokens.Size.Bar).padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                MainTabStrip(
+                    tabs = tabs.tabs.map { tab ->
+                        val seen = tab.layout.paneIds().mapNotNull { pane -> workspace.panes[pane]?.let(activity::get) }
+                        val agent = if (AgentTerminalActivity.Typing in seen) AgentTerminalActivity.Typing else seen.firstOrNull()
+
+                        MainTab(
+                            tab.id,
+                            tab.title,
+                            "Close ${tab.title}",
+                            badge = when (agent) {
+                                AgentTerminalActivity.Typing -> MyIcon.Keyboard
+                                AgentTerminalActivity.Reading -> MyIcon.Eye
+                                null -> null
+                            },
+                            badgeLabel = if (agent == AgentTerminalActivity.Typing) "Agent is typing in this terminal" else "Agent is reading this terminal",
+                        )
+                    },
+                    selected = tabs.selected.orEmpty(),
+                    onSelect = { workspace = workspace.copy(tabs = tabs.select(it)) },
+                    onClose = { tabId -> change { it.closeTab(tabId) } },
+                    groupLabel = "Terminals",
+                    modifier = Modifier.weight(1f),
+                )
+                MyButton({ change { it.split(SplitDirection.Right) } }, icon = MyIcon.SplitRight, description = "Split right", muted = true)
+                MyButton({ change { it.split(SplitDirection.Down) } }, icon = MyIcon.SplitDown, description = "Split down", muted = true)
+                MyButton({ change { it.open() } }, icon = MyIcon.Plus, description = "New terminal", muted = true)
+                MyButton({ change { it.closeFocused() } }, icon = MyIcon.Close, description = "Close terminal", muted = true)
+            }
         }
 
         Hairline()
@@ -328,9 +367,23 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
     }
 
     var selecting by remember(emulator) { mutableStateOf(false) }
+    var ctrl by remember(emulator) { mutableStateOf(false) }
+    var typing by remember(emulator) { mutableStateOf(false) }
+    val inputFocus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val clipboard = LocalClipboardManager.current
+    val press = { input: String ->
+        ctrl = false
+        store.typeIntoTerminal(id!!, input)
+    }
+    val typeText = { text: String ->
+        val control = if (ctrl && text.length == 1) terminalControlInput(text[0]) else null
+
+        press(control ?: text)
+    }
 
     Column(modifier) {
-        if (LocalAnnotate.current != null && id != null) {
+        if (id != null && (if (touch) selecting else LocalAnnotate.current != null)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.End) {
                 MyButton({ selecting = !selecting }, text = if (selecting) "Back to terminal" else "Select output", size = ButtonSize.Sm, muted = true)
             }
@@ -338,8 +391,14 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
 
         if (selecting) {
             Box(Modifier.weight(1f).fillMaxWidth().background(colors.bgContent).verticalScrollWithBar().padding(Tokens.Space.S2).semantics { contentDescription = "Terminal output" }) {
-                Annotatable {
-                    Label(emulator.screenText().trimEnd(), style = Tokens.Type.Code)
+                if (touch) {
+                    SelectionContainer {
+                        Label(emulator.screenText().trimEnd(), style = Tokens.Type.Code)
+                    }
+                } else {
+                    Annotatable {
+                        Label(emulator.screenText().trimEnd(), style = Tokens.Type.Code)
+                    }
                 }
             }
 
@@ -365,7 +424,21 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
                     typed != null
                 }
                 .focusable(interactionSource = source)
-                .pointerInput(Unit) { detectTapGestures { onFocus(); focusRequester.requestFocus() } }
+                .pointerInput(touch) {
+                    detectTapGestures(
+                        onLongPress = { if (touch) selecting = true },
+                        onTap = {
+                            onFocus()
+
+                            if (touch) {
+                                runCatching { inputFocus.requestFocus() }
+                                keyboard?.show()
+                            } else {
+                                focusRequester.requestFocus()
+                            }
+                        },
+                    )
+                }
                 .semantics { contentDescription = "Terminal for ${projectName(conversation.cwd)}. Press Shift and Tab to leave it." },
         ) {
             Canvas(Modifier.fillMaxSize()) {
@@ -373,7 +446,35 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
             }
 
             Canvas(Modifier.fillMaxSize()) {
-                revision.let { drawCursor(emulator, cellWidth, cellHeight, colors.text, focused.value, blinkOn) }
+                revision.let { drawCursor(emulator, cellWidth, cellHeight, colors.text, focused.value || typing, blinkOn) }
+            }
+
+            if (touch && id != null && !exited) {
+                var field by remember { mutableStateOf(TextFieldValue(InputAnchor, TextRange(InputAnchor.length))) }
+
+                BasicTextField(
+                    field,
+                    { next ->
+                        val inserted = next.text.removePrefix(InputAnchor)
+
+                        if (!next.text.startsWith(InputAnchor)) {
+                            press(terminalKeyInput(TerminalKey.Backspace))
+                        } else if (inserted.isNotEmpty()) {
+                            typeText(inserted)
+                        }
+
+                        field = TextFieldValue(InputAnchor, TextRange(InputAnchor.length))
+                    },
+                    Modifier
+                        .size(1.dp)
+                        .alpha(0f)
+                        .focusRequester(inputFocus)
+                        .onFocusChanged { typing = it.isFocused }
+                        .semantics { contentDescription = "Type into terminal" },
+                    cursorBrush = SolidColor(Color.Transparent),
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { press(terminalKeyInput(TerminalKey.Enter)) }),
+                )
             }
         }
 
@@ -389,36 +490,37 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
         }
 
         if (touch && id != null && !exited) {
-            TerminalKeys(onType = { store.typeIntoTerminal(id, it) }, applicationCursorKeys = emulator.applicationCursorKeys)
+            TerminalKeys(
+                ctrl = ctrl,
+                onCtrl = { ctrl = !ctrl },
+                onPress = press,
+                onPaste = { clipboard.getText()?.text?.let { store.typeIntoTerminal(id, it) } },
+                applicationCursorKeys = emulator.applicationCursorKeys,
+            )
         }
     }
 }
 
 @Composable
-private fun TerminalKeys(onType: (String) -> Unit, applicationCursorKeys: Boolean) {
-    var draft by remember { mutableStateOf("") }
+private fun TerminalKeys(ctrl: Boolean, onCtrl: () -> Unit, onPress: (String) -> Unit, onPaste: () -> Unit, applicationCursorKeys: Boolean) {
+    Row(
+        Modifier.fillMaxWidth().background(MyTheme.colors.bgChrome).padding(horizontal = Tokens.Space.S1, vertical = Tokens.Space.S1).semantics { contentDescription = "Terminal keys" },
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MyButton({ onPress(terminalKeyInput(TerminalKey.Escape)) }, text = "Esc", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+        MyButton({ onPress(terminalKeyInput(TerminalKey.Tab)) }, text = "Tab", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+        MyButton(onCtrl, text = "Ctrl", size = ButtonSize.Sm, variant = ButtonVariant.Outline, selected = ctrl, stateDescription = if (ctrl) "On" else "Off")
 
-    Column(Modifier.fillMaxWidth().background(MyTheme.colors.bgChrome).padding(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-        TextInput(
-            draft,
-            { draft = it },
-            label = "Send to terminal",
-            placeholder = "Type, then send with Enter",
-            mono = true,
-            showLabel = false,
-            onSubmit = {
-                onType(draft + terminalKeyInput(TerminalKey.Enter))
-                draft = ""
-            },
-        )
-
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-            MyButton({ onType(terminalKeyInput(TerminalKey.Escape)) }, text = "Esc", variant = ButtonVariant.Outline)
-            MyButton({ onType(terminalKeyInput(TerminalKey.Tab)) }, text = "Tab", variant = ButtonVariant.Outline)
-            MyButton({ onType(terminalControlInput('c').orEmpty()) }, text = "Ctrl+C", variant = ButtonVariant.Outline)
-            MyButton({ onType(terminalKeyInput(TerminalKey.Up, applicationCursorKeys)) }, text = "Up", variant = ButtonVariant.Outline)
-            MyButton({ onType(terminalKeyInput(TerminalKey.Down, applicationCursorKeys)) }, text = "Down", variant = ButtonVariant.Outline)
+        Row(Modifier.semantics { contentDescription = "Arrow keys" }) {
+            MyButton({ onPress(terminalKeyInput(TerminalKey.Left, applicationCursorKeys)) }, icon = MyIcon.ArrowLeft, description = "Left", muted = true)
+            MyButton({ onPress(terminalKeyInput(TerminalKey.Up, applicationCursorKeys)) }, icon = MyIcon.ArrowUp, description = "Up", muted = true)
+            MyButton({ onPress(terminalKeyInput(TerminalKey.Down, applicationCursorKeys)) }, icon = MyIcon.ArrowDown, description = "Down", muted = true)
+            MyButton({ onPress(terminalKeyInput(TerminalKey.Right, applicationCursorKeys)) }, icon = MyIcon.ArrowRight, description = "Right", muted = true)
         }
+
+        Spacer(Modifier.weight(1f))
+        MyButton(onPaste, icon = MyIcon.Clipboard, description = "Paste", muted = true)
     }
 }
 
@@ -427,6 +529,7 @@ private val LetterKeys = listOf(
     Key.N, Key.O, Key.P, Key.Q, Key.R, Key.S, Key.T, Key.U, Key.V, Key.W, Key.X, Key.Y, Key.Z,
 )
 
+private const val InputAnchor = "\u200B"
 private const val CellProbeLength = 20
 private const val DefaultColumns = 80
 private const val DefaultRows = 24

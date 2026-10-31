@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.height
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -531,7 +532,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     }
                     .onSizeChanged { chatWidth = with(density) { it.width.toDp() } },
             ) {
-                Column(Modifier.weight(1f).fillMaxWidth()) {
+                Column(if (compact && terminalShown) Modifier.height(0.dp).clipToBounds().clearAndSetSemantics {} else Modifier.weight(1f).fillMaxWidth()) {
                 ConversationHeader(
                     slots = header,
                     conversation = conversation,
@@ -748,11 +749,13 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 }
 
                 if (terminalAvailable && terminalMounted) {
-                    Column(if (terminalShown) Modifier.height(terminalHeight) else Modifier.height(0.dp).clearAndSetSemantics {}) {
-                        ResizeHandle("Resize the terminal", Orientation.Vertical) { moved -> terminalHeight = (terminalHeight - moved).coerceIn(Tokens.Size.TerminalDockMin, Tokens.Size.TerminalDockMax) }
+                    Column(if (terminalShown) (if (compact) Modifier.weight(1f) else Modifier.height(terminalHeight)) else Modifier.height(0.dp).clearAndSetSemantics {}) {
+                        if (!compact) {
+                            ResizeHandle("Resize the terminal", Orientation.Vertical) { moved -> terminalHeight = (terminalHeight - moved).coerceIn(Tokens.Size.TerminalDockMin, Tokens.Size.TerminalDockMax) }
+                        }
 
                         key(id) {
-                            TerminalPanel(store, state, conversation, Modifier.weight(1f).fillMaxWidth(), onExited = { terminalShown = false; terminalMounted = false })
+                            TerminalPanel(store, state, conversation, Modifier.weight(1f).fillMaxWidth(), onExited = { terminalShown = false; terminalMounted = false }, onClose = { terminalShown = false })
                         }
                     }
                 }
