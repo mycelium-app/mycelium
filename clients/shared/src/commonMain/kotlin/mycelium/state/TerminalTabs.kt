@@ -1,5 +1,9 @@
 package mycelium.state
 
+import mycelium.api.SavedTerminalLayout
+import mycelium.api.SavedTerminalNode
+import mycelium.api.SavedTerminalTab
+
 enum class SplitDirection { Right, Down }
 
 sealed interface TerminalLayout {
@@ -12,7 +16,7 @@ data class TerminalTab(val id: String, val number: Int, val layout: TerminalLayo
     val title: String get() = "Terminal $number"
 }
 
-data class TerminalTabs(val tabs: List<TerminalTab> = emptyList(), val selected: String? = null, private val created: Int = 0) {
+data class TerminalTabs(val tabs: List<TerminalTab> = emptyList(), val selected: String? = null, val created: Int = 0) {
     val current: TerminalTab? get() = tabs.firstOrNull { it.id == selected }
 
     fun open(): TerminalTabs {
@@ -124,4 +128,33 @@ data class TerminalWorkspace(val tabs: TerminalTabs = TerminalTabs(), val panes:
 
         workspace.copy(tabs = opened, panes = workspace.panes + (opened.current!!.focused to terminalId))
     }
+}
+
+private fun TerminalLayout.saved(): SavedTerminalNode = when (this) {
+    is TerminalLayout.Pane -> SavedTerminalNode(pane = id)
+    is TerminalLayout.Split -> SavedTerminalNode(direction = direction.name, first = first.saved(), second = second.saved(), ratio = ratio)
+}
+
+private fun SavedTerminalNode.restored(): TerminalLayout? {
+    val first = first?.restored()
+    val second = second?.restored()
+
+    return when {
+        pane != null -> TerminalLayout.Pane(pane)
+        first != null && second != null -> TerminalLayout.Split(SplitDirection.entries.firstOrNull { it.name == direction } ?: SplitDirection.Right, first, second, ratio.coerceIn(MinSplitRatio, 1 - MinSplitRatio))
+        else -> null
+    }
+}
+
+fun TerminalWorkspace.saved(): SavedTerminalLayout = SavedTerminalLayout(
+    tabs = tabs.tabs.map { SavedTerminalTab(it.id, it.number, it.layout.saved(), it.focused) },
+    selected = tabs.selected,
+    created = tabs.created,
+    panes = panes,
+)
+
+fun SavedTerminalLayout.restored(): TerminalWorkspace {
+    val restoredTabs = this.tabs.mapNotNull { tab -> tab.layout.restored()?.let { TerminalTab(tab.id, tab.number, it, tab.focused) } }
+
+    return TerminalWorkspace(TerminalTabs(restoredTabs, selected?.takeIf { selected -> restoredTabs.any { it.id == selected } }, maxOf(created, restoredTabs.maxOfOrNull { it.number } ?: 0)), panes)
 }

@@ -194,6 +194,15 @@ data class StartTerminalResponse(@SerialName("terminal_id") val terminalId: Stri
 data class OpenTerminal(@SerialName("terminal_id") val terminalId: String, val scrollback: String, val offset: Long = 0)
 
 @Serializable
+data class SavedTerminalNode(val pane: String? = null, val direction: String? = null, val first: SavedTerminalNode? = null, val second: SavedTerminalNode? = null, val ratio: Float = 0.5f)
+
+@Serializable
+data class SavedTerminalTab(val id: String, val number: Int, val layout: SavedTerminalNode, val focused: String)
+
+@Serializable
+data class SavedTerminalLayout(val tabs: List<SavedTerminalTab> = emptyList(), val selected: String? = null, val created: Int = 0, val panes: Map<String, String> = emptyMap())
+
+@Serializable
 data class TerminalInputRequest(val data: String)
 
 @Serializable

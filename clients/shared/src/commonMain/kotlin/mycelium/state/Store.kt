@@ -75,6 +75,7 @@ import mycelium.api.Hours
 import kotlin.io.encoding.Base64
 
 private const val FirstRetryMillis = 250L
+private const val TerminalLayoutSaveDelay = 500L
 private const val LongestRetryMillis = 15_000L
 private const val StableConnectionMillis = 10_000L
 private const val RecentConnectAttemptMillis = 5_000L
@@ -1197,6 +1198,29 @@ class Store(
     }
 
     val terminalWorkspaces = mutableMapOf<String, TerminalWorkspace>()
+    private val terminalLayoutSaves = mutableMapOf<String, Job>()
+
+    suspend fun loadTerminalWorkspace(conversationId: String): TerminalWorkspace {
+        terminalWorkspaces[conversationId]?.let { return it }
+
+        val saved = orNull { api.terminalLayout(conversationId) }
+        val workspace = saved?.restored() ?: TerminalWorkspace()
+        terminalWorkspaces[conversationId] = workspace
+
+        return workspace
+    }
+
+    fun keepTerminalWorkspace(conversationId: String, workspace: TerminalWorkspace) {
+        if (terminalWorkspaces.put(conversationId, workspace) == workspace) {
+            return
+        }
+
+        terminalLayoutSaves[conversationId]?.cancel()
+        terminalLayoutSaves[conversationId] = scope.launch {
+            delay(TerminalLayoutSaveDelay)
+            orNull { api.saveTerminalLayout(conversationId, workspace.saved()) }
+        }
+    }
 
     fun typeIntoTerminal(terminalId: String, text: String) {
         typed.trySend(terminalId to text)

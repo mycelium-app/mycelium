@@ -133,6 +133,8 @@ fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, mod
     }
 
     LaunchedEffect(id) {
+        workspace = store.loadTerminalWorkspace(id)
+
         val open = runCatching { store.api.openTerminals(id) }.getOrDefault(emptyList())
         val running = open.map { it.terminalId }.toSet()
         val gone = workspace.panes.filterValues { it !in running }.keys
@@ -149,7 +151,7 @@ fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, mod
 
     SideEffect {
         if (loaded) {
-            store.terminalWorkspaces[id] = workspace
+            store.keepTerminalWorkspace(id, workspace)
         }
     }
 

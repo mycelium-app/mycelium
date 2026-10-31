@@ -20,7 +20,12 @@ import kotlinx.coroutines.withTimeout
 import mycelium.api.MyceliumApi
 import mycelium.api.WalkthroughNoteRequest
 import mycelium.api.parseStreamMessage
+import mycelium.state.SplitDirection
 import mycelium.state.Store
+import mycelium.state.TerminalLayout
+import mycelium.state.TerminalTabs
+import mycelium.state.TerminalWorkspace
+import mycelium.state.paneIds
 import mycelium.state.hasOlderEvents
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -79,6 +84,43 @@ class StoreTest {
         val joined = posted.value.joinToString("|")
 
         assertEquals("/api/v1/terminals/t1/input {\"data\":\"bHMN\"}|/api/v1/terminals/t2/input {\"data\":\"eA==\"}", joined)
+    }
+
+    @Test
+    fun aConversationOpenedOnAnotherDeviceLoadsTheTabsAndSplitsSavedOnTheServer() = runTest {
+        val layout = """{"tabs":[{"id":"tab1","number":1,"layout":{"direction":"Down","first":{"pane":"pane1"},"second":{"pane":"pane2"},"ratio":0.3},"focused":"pane2"},{"id":"tab2","number":2,"layout":{"pane":"pane3"},"focused":"pane3"}],"selected":"tab2","created":3,"panes":{"pane1":"t1","pane2":"t2","pane3":"t3"}}"""
+        val engine = MockEngine { respond(layout, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
+
+        val workspace = store.loadTerminalWorkspace("c1")
+
+        assertEquals(listOf("tab1", "tab2"), workspace.tabs.tabs.map { it.id })
+        assertEquals("tab2", workspace.tabs.selected)
+        assertEquals(listOf("pane1", "pane2"), workspace.tabs.tabs.first().layout.paneIds())
+        assertEquals(0.3f, (workspace.tabs.tabs.first().layout as TerminalLayout.Split).ratio)
+        assertEquals("t2", workspace.panes["pane2"])
+        assertEquals("tab4", workspace.tabs.open().tabs.last().id)
+    }
+
+    @Test
+    fun changingTheTerminalLayoutSavesItToTheServerOnceTheChangesStop() = runTest {
+        val saved = MutableStateFlow(emptyList<String>())
+        val engine = MockEngine { request ->
+            saved.update { it + "${request.method.value} ${request.url.encodedPath} ${String(request.body.toByteArray())}" }
+
+            respond("", HttpStatusCode.NoContent)
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
+
+        store.keepTerminalWorkspace("c1", TerminalWorkspace(TerminalTabs().open()))
+        store.keepTerminalWorkspace("c1", TerminalWorkspace(TerminalTabs().open().split(SplitDirection.Right)))
+
+        withTimeout(5_000) { while (saved.value.isEmpty()) delay(10) }
+        withContext(Dispatchers.Default) { delay(700) }
+
+        assertEquals(1, saved.value.size)
+        assertTrue(saved.value.single().startsWith("PUT /api/v1/conversations/c1/terminal-layout "))
+        assertTrue(saved.value.single().contains("\"direction\":\"Right\""))
     }
 
     @Test

@@ -232,6 +232,13 @@ class MyceliumApi(
     suspend fun openTerminals(conversationId: String): List<OpenTerminal> =
         call("/conversations/$conversationId/terminals") { client.get(it) { authorise() } }.body()
 
+    suspend fun terminalLayout(conversationId: String): SavedTerminalLayout =
+        call("/conversations/$conversationId/terminal-layout") { client.get(it) { authorise() } }.body()
+
+    suspend fun saveTerminalLayout(conversationId: String, layout: SavedTerminalLayout) {
+        call("/conversations/$conversationId/terminal-layout") { client.put(it) { authorise(); json(layout) } }
+    }
+
     suspend fun terminalInput(terminalId: String, data: String) {
         call("/terminals/$terminalId/input") { client.post(it) { authorise(); json(TerminalInputRequest(data)) } }
     }
