@@ -1,9 +1,13 @@
 package mycelium.desktop
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.input.key.Key
@@ -152,6 +156,20 @@ class ProjectsTest {
         rule.onNodeWithContentDescription("New conversation in acme-org/acme-backups").performClick()
 
         assertEquals("p1", opened)
+    }
+
+    @Test
+    fun aRepositoryNotSetUpCanBeClonedFromANarrowScreen() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); Box(Modifier.width(430.dp)) { ProjectsScreen(store, state, onNewConversation = {}) } } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("immich").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Set up immich-app/immich on a node").performClick()
+        rule.onNodeWithText("Clone onto a node").performClick()
+        rule.onNodeWithText("atlas").performClick()
+
+        rule.waitUntil(5_000) { posts.isNotEmpty() }
+        assertEquals("""{"node_id":"$AtlasId","forge_id":"f1","repository":"immich-app/immich"}""", posts.single().second)
     }
 
     @Test

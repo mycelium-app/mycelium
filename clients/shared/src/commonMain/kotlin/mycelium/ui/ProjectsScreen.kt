@@ -294,16 +294,36 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                                                 Box(Modifier.width(Tokens.Size.NumberField)) {
                                                     IndeterminateProgress("Cloning ${repository.fullName}")
                                                 }
+                                            }
+                                        }
+                                    }
+
+                                    else -> TableCell.Slot("${projectGroupLabel(state, setUp)} New conversation", ProjectActionsExtra) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                                            if (key in cloning) {
+                                                Box(Modifier.width(Tokens.Size.NumberField)) {
+                                                    IndeterminateProgress("Cloning ${repository.fullName}")
+                                                }
                                             } else if (elsewhere.isNotEmpty()) {
                                                 Box {
-                                                    MyButton(
-                                                        { setUpMenu = key },
-                                                        icon = MyIcon.Plus,
-                                                        description = if (setUp.isEmpty()) "Set up ${repository.fullName} on a node" else "Set up ${repository.fullName} on another node",
-                                                        tooltip = if (setUp.isEmpty()) "Set up on a node" else "Set up on another node",
-                                                        size = ButtonSize.Sm,
-                                                        muted = true,
-                                                    )
+                                                    if (setUp.isEmpty()) {
+                                                        MyButton(
+                                                            { setUpMenu = key },
+                                                            text = "Set up",
+                                                            size = ButtonSize.Sm,
+                                                            variant = ButtonVariant.Outline,
+                                                            description = "Set up ${repository.fullName} on a node",
+                                                        )
+                                                    } else {
+                                                        MyButton(
+                                                            { setUpMenu = key },
+                                                            icon = MyIcon.Plus,
+                                                            description = "Set up ${repository.fullName} on another node",
+                                                            tooltip = "Set up on another node",
+                                                            size = ButtonSize.Sm,
+                                                            muted = true,
+                                                        )
+                                                    }
 
                                                     if (setUpMenu == key) {
                                                         MenuPopup(onDismiss = { setUpMenu = null; cloneChoice = false }) {
@@ -337,11 +357,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                                                     }
                                                 }
                                             }
-                                        }
-                                    }
 
-                                    else -> TableCell.Slot("${projectGroupLabel(state, setUp)} New conversation", ProjectActionsExtra) {
-                                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
                                             if (setUp.isNotEmpty()) {
                                                 ProjectGroupMenu(store, state, setUp, repository.fullName)
                                             }
