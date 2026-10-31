@@ -67,6 +67,16 @@ async fn create_public(State(fake): State<Arc<FakeCoolify>>, Json(body): Json<Va
     (StatusCode::CREATED, Json(json!({"uuid": "a1"}))).into_response()
 }
 
+async fn create_postgresql(State(fake): State<Arc<FakeCoolify>>, Json(body): Json<Value>) -> Response {
+    fake.created.lock().unwrap().push(body);
+
+    (StatusCode::CREATED, Json(json!({"uuid": "db1", "internal_db_url": "postgres://postgres:pw@db1:5432/postgres"}))).into_response()
+}
+
+async fn storages() -> Json<Value> {
+    Json(json!({"persistent_storages": [{"name": "data", "mount_path": "/data"}]}))
+}
+
 async fn deploy() -> Json<Value> {
     Json(json!({"deployments": [{"message": "queued", "resource_uuid": "a1", "deployment_uuid": "d1"}]}))
 }
@@ -123,6 +133,8 @@ async fn fake_coolify() -> (String, Arc<FakeCoolify>) {
         .route("/api/v1/servers/s1", get(one_server))
         .route("/api/v1/applications", get(applications))
         .route("/api/v1/applications/public", post(create_public))
+        .route("/api/v1/databases/postgresql", post(create_postgresql))
+        .route("/api/v1/applications/{uuid}/storages", get(storages))
         .route("/api/v1/applications/{uuid}", get(one_application))
         .route("/api/v1/applications/{uuid}/logs", get(runtime_logs))
         .route("/api/v1/applications/{uuid}/envs", get(list_envs).post(save_env).patch(save_env))
@@ -465,4 +477,90 @@ async fn an_app_says_which_project_and_server_it_lives_in_as_coolify_reports_it(
 
     assert_eq!((found("notes")["project"].clone(), found("notes")["server"].clone()), (json!("Agents"), json!("Main")));
     assert_eq!((found("landing")["project"].clone(), found("landing")["server"].clone()), (json!("Sites"), Value::Null));
+}
+
+#[tokio::test]
+async fn an_api_get_passes_through_without_asking() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, _) = fake_coolify().await;
+    add_whole_instance(&server, &base).await;
+    let conversation = server.node_conversation(&node.token).await;
+
+    let reply = server.agent_mcp(&node.token, conversation, mcp("api", json!({"method": "GET", "path": "applications/a1/storages"}))).await;
+
+    assert_eq!(reply["result"]["isError"], json!(false), "{reply}");
+    assert!(text(&reply).contains("\"status\":200") && text(&reply).contains("/data"), "{reply}");
+}
+
+#[tokio::test]
+async fn an_api_post_asks_first_showing_method_path_and_body_then_runs_once_approved() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, fake) = fake_coolify().await;
+    add_whole_instance(&server, &base).await;
+    let conversation = server.node_conversation(&node.token).await;
+    let body = mcp("api", json!({"method": "POST", "path": "databases/postgresql", "body": {"name": "ledger", "project_uuid": "p1", "server_uuid": "s1", "environment_name": "production"}}));
+
+    let (reply, asked) = tokio::join!(server.agent_mcp(&node.token, conversation, body), async {
+        let request = server.open_request(conversation).await;
+        let before = fake.created.lock().unwrap().len();
+
+        server.answer(conversation, &request, "approve").await;
+
+        (request["toolCall"]["rawInput"].clone(), before)
+    });
+    let created = fake.created.lock().unwrap().clone();
+
+    assert_eq!(asked.0["method"], "POST");
+    assert_eq!(asked.0["path"], "databases/postgresql");
+    assert_eq!(asked.0["body"]["name"], "ledger");
+    assert_eq!(asked.1, 0);
+    assert_eq!(reply["result"]["isError"], json!(false), "{reply}");
+    assert_eq!(created[0]["name"], "ledger");
+}
+
+#[tokio::test]
+async fn an_api_path_that_leaves_api_v1_is_refused_before_it_reaches_coolify() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, _) = fake_coolify().await;
+    add_whole_instance(&server, &base).await;
+    let conversation = server.node_conversation(&node.token).await;
+
+    for path in ["../../etc/passwd", "applications/../../x", "https://evil.example.com/api/v1/servers", "applications/%2e%2e/x"] {
+        let reply = server.agent_mcp(&node.token, conversation, mcp("api", json!({"method": "GET", "path": path}))).await;
+
+        assert_eq!(reply["result"]["isError"], json!(true), "{path}: {reply}");
+        assert!(text(&reply).starts_with("The path must be under /api/v1"), "{path}: {reply}");
+    }
+}
+
+#[tokio::test]
+async fn a_project_account_cannot_use_the_api_tool() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, _) = fake_coolify().await;
+    add_coolify(&server, &base).await;
+    let conversation = server.node_conversation(&node.token).await;
+
+    let reply = server.agent_mcp(&node.token, conversation, mcp("api", json!({"method": "GET", "path": "projects"}))).await;
+
+    assert_eq!(reply["result"]["isError"], json!(true));
+    assert_eq!(text(&reply), "This integration is limited to one project. Widen it to the whole instance in its account page to use the full API.");
+}
+
+#[tokio::test]
+async fn creating_a_database_asks_first_and_returns_its_uuid_and_internal_url() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, fake) = fake_coolify().await;
+    add_whole_instance(&server, &base).await;
+
+    let reply = server.approved_agent_mcp(&node.token, mcp("create_database", json!({"name": "ledger", "type": "postgresql", "project": "sites", "server": "Main"}))).await;
+    let created = fake.created.lock().unwrap().clone();
+
+    assert_eq!(reply["result"]["isError"], json!(false), "{reply}");
+    assert!(text(&reply).contains("\"database_uuid\":\"db1\"") && text(&reply).contains("postgres://postgres:pw@db1:5432/postgres"), "{reply}");
+    assert_eq!((created[0]["project_uuid"].clone(), created[0]["environment_name"].clone(), created[0]["instant_deploy"].clone()), (json!("p2"), json!("staging"), json!(true)));
 }

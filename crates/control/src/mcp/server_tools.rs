@@ -35,7 +35,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
     let mut decision = "auto";
     let mut answer = None;
     let filter = response_editor::take_filter(&mut arguments);
-    let effective = server.effective(tool);
+    let effective = server.effective(tool, &arguments);
     let asks = effective.ask && (server.integration().is_some() || effective.ask_source != crate::integration_policy::Source::Preset);
 
     if asks || effective.edit {

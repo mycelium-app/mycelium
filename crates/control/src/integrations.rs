@@ -213,8 +213,13 @@ impl ServerRow {
         self.groups.is_empty() || group.is_some_and(|group| self.groups.contains(&group))
     }
 
-    pub fn effective(&self, tool: &str) -> Effective {
-        integration_policy::effective(&self.policy.0, tool, self.tool_kind(tool))
+    pub fn effective(&self, tool: &str, input: &Value) -> Effective {
+        let kind = match (self.integration(), tool) {
+            (Some(Integration::Coolify), "api") if coolify::api_reads(input) => ToolKind::Read,
+            _ => self.tool_kind(tool),
+        };
+
+        integration_policy::effective(&self.policy.0, tool, kind)
     }
 
     pub fn status(&self) -> IntegrationStatus {

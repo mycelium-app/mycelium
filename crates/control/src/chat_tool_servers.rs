@@ -150,7 +150,7 @@ impl ServerRow {
                 .tool_list()
                 .iter()
                 .map(|tool| {
-                    let effective = self.effective(&tool.name);
+                    let effective = self.effective(&tool.name, &Value::Null);
 
                     ChatToolInfo { name: tool.name.clone(), description: tool.description.clone(), kind: self.tool_kind(&tool.name), asks: effective.ask, edits: effective.edit, ask_source: effective.ask_source.name().to_string(), edit_source: effective.edit_source.name().to_string() }
                 })

@@ -247,12 +247,12 @@ impl Toolbox {
         self.tools.iter().find(|tool| tool.name == name)
     }
 
-    fn needs_approval(&self, tool: &Tool) -> bool {
+    fn needs_approval(&self, tool: &Tool, input: &Value) -> bool {
         let Some(server) = tool.server_row() else {
             return !self.always_allowed.contains(&tool.name);
         };
 
-        server.effective(&tool.original).ask && !self.always_allowed.contains(&tool.name)
+        server.effective(&tool.original, input).ask && !self.always_allowed.contains(&tool.name)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -356,11 +356,11 @@ async fn outcome_of(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolb
 
     let mut arguments = call.input.clone();
     let filter = tool.server_row().and_then(|_| response_editor::take_filter(&mut arguments));
-    let edits_by_setting = tool.server_row().is_some_and(|server| server.effective(&tool.original).edit);
+    let edits_by_setting = tool.server_row().is_some_and(|server| server.effective(&tool.original, &arguments).edit);
     let mut decision = "auto";
     let mut answer = None;
 
-    if toolbox.needs_approval(&tool) {
+    if toolbox.needs_approval(&tool, &arguments) {
         let approval = Approval { title: &call.name, input: &arguments, server: &tool.server, account: tool.server_row().and_then(|server| server.account.as_deref()), filter: filter.as_deref(), edits_by_setting };
         let answered = request_approval(state, owner, id, &call.id, &approval).await?;
 

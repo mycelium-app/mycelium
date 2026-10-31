@@ -20,6 +20,10 @@ const START: &str = "start";
 const DELETE_APP: &str = "delete_app";
 const SET_ENV: &str = "set_env";
 const DELETE_ENV: &str = "delete_env";
+const CREATE_DATABASE: &str = "create_database";
+const API: &str = "api";
+const DATABASE_TYPES: [&str; 8] = ["postgresql", "mysql", "mariadb", "mongodb", "redis", "keydb", "dragonfly", "clickhouse"];
+const API_METHODS: [&str; 5] = ["GET", "POST", "PATCH", "PUT", "DELETE"];
 const DEFAULT_ENVIRONMENT: &str = "production";
 const DEFAULT_PROJECT: &str = "default";
 const SCOPE_KEYS: [&str; 6] = ["project_uuid", "server_uuid", "project_name", "server_name", "wildcard_domain", "environment_name"];
@@ -119,6 +123,29 @@ pub fn tools() -> Vec<StoredTool> {
             }, "required": ["name"]}),
             read_only: None,
         },
+        StoredTool {
+            name: CREATE_DATABASE.to_string(),
+            description: "Create a database in a project and on a server, and start it. Name them, or give their uuids from list_projects and list_servers. Leave the server out when Coolify has one, and the project out when Coolify has one or one named default. Returns its uuid and the internal connection URL for apps on the same server. Always needs the person's approval in chats, even when Always allow is on.".to_string(),
+            input_schema: json!({"type": "object", "properties": {
+                "name": {"type": "string"},
+                "type": {"type": "string", "enum": DATABASE_TYPES, "description": "The database engine."},
+                "project": {"type": "string", "description": "The project's name or uuid."},
+                "server": {"type": "string", "description": "The server's name or uuid."},
+                "environment": {"type": "string", "description": "The project's environment. Defaults to production, or the project's first one."},
+                "image": {"type": "string", "description": "An image such as postgres:16-alpine. Defaults to the engine's current image."}
+            }, "required": ["name", "type"]}),
+            read_only: None,
+        },
+        StoredTool {
+            name: API.to_string(),
+            description: "Call any Coolify REST API v1 endpoint, for everything the other tools do not cover: applications, databases (postgresql, mysql, mariadb, mongodb, redis and the rest), services, servers, projects, environments, storages and volumes, domains, deployments and environment variables. Paths are relative to /api/v1, such as databases/postgresql or applications/{uuid}/storages; see https://coolify.io/docs/api-reference for them. Returns the status and the JSON answer. GET runs at once; POST, PATCH, PUT and DELETE always need the person's approval in chats, even when Always allow is on. Only available when the account covers the whole Coolify instance.".to_string(),
+            input_schema: json!({"type": "object", "properties": {
+                "method": {"type": "string", "enum": API_METHODS},
+                "path": {"type": "string", "description": "The endpoint under /api/v1, such as applications/{uuid}/storages. A query string is allowed."},
+                "body": {"type": "object", "description": "The JSON body for POST, PATCH and PUT."}
+            }, "required": ["method", "path"]}),
+            read_only: None,
+        },
         StoredTool { name: DEPLOY.to_string(), description: "Deploy an app again from its repository. Always needs the person's approval in chats, even when Always allow is on.".to_string(), input_schema: by_app("Deploy an app."), read_only: None },
         StoredTool { name: STOP.to_string(), description: "Stop a running app. Always needs the person's approval in chats, even when Always allow is on.".to_string(), input_schema: by_app("Stop an app."), read_only: None },
         StoredTool { name: START.to_string(), description: "Start a stopped app. Always needs the person's approval in chats, even when Always allow is on.".to_string(), input_schema: by_app("Start an app."), read_only: None },
@@ -145,7 +172,11 @@ pub fn tools() -> Vec<StoredTool> {
 }
 
 pub fn always_asks(tool: &str) -> bool {
-    matches!(tool, CREATE_APP | DEPLOY | STOP | START | DELETE_APP | SET_ENV | DELETE_ENV)
+    matches!(tool, CREATE_APP | CREATE_DATABASE | API | DEPLOY | STOP | START | DELETE_APP | SET_ENV | DELETE_ENV)
+}
+
+pub fn api_reads(input: &Value) -> bool {
+    input["method"].as_str().is_some_and(|method| method.eq_ignore_ascii_case("GET"))
 }
 
 pub fn approval_input(tool: &str, input: &Value) -> Value {
@@ -624,12 +655,9 @@ impl Account {
         Ok(deployment)
     }
 
-    async fn create_app(&self, state: &AppState, arguments: &Value, conversation: Option<Uuid>) -> Outcome<Value> {
-        let Some(name) = arguments["name"].as_str().map(str::trim).filter(|name| !name.is_empty()) else {
-            return Err(Failure::Other("Give the app a name.".to_string()));
-        };
-        let (project_uuid, server_uuid, wildcard, environment_name) = match self.scoped() {
-            true => (self.target("project_uuid"), self.target("server_uuid"), self.target("wildcard_domain"), self.credentials.settings["environment_name"].as_str().unwrap_or(DEFAULT_ENVIRONMENT).to_string()),
+    async fn placement(&self, arguments: &Value) -> Outcome<(String, String, String, String)> {
+        match self.scoped() {
+            true => Ok((self.target("project_uuid"), self.target("server_uuid"), self.target("wildcard_domain"), self.credentials.settings["environment_name"].as_str().unwrap_or(DEFAULT_ENVIRONMENT).to_string())),
             false => {
                 let project = self.choose("projects", "project", arguments["project"].as_str().map(str::trim).filter(|wanted| !wanted.is_empty()), Some(DEFAULT_PROJECT)).await?;
                 let server = self.choose("servers", "server", arguments["server"].as_str().map(str::trim).filter(|wanted| !wanted.is_empty()), None).await?;
@@ -647,9 +675,16 @@ impl Account {
                     None => names.iter().find(|name| same(name, DEFAULT_ENVIRONMENT)).or(names.first()).ok_or_else(|| Failure::Other(format!("The project {} has no environments. Create one in Coolify first.", project["name"].as_str().unwrap_or_default())))?,
                 };
 
-                (project_uuid, server_uuid, detail["settings"]["wildcard_domain"].as_str().unwrap_or_default().to_string(), environment.to_string())
+                Ok((project_uuid, server_uuid, detail["settings"]["wildcard_domain"].as_str().unwrap_or_default().to_string(), environment.to_string()))
             }
+        }
+    }
+
+    async fn create_app(&self, state: &AppState, arguments: &Value, conversation: Option<Uuid>) -> Outcome<Value> {
+        let Some(name) = arguments["name"].as_str().map(str::trim).filter(|name| !name.is_empty()) else {
+            return Err(Failure::Other("Give the app a name.".to_string()));
         };
+        let (project_uuid, server_uuid, wildcard, environment_name) = self.placement(arguments).await?;
         let address = address_for(name, &wildcard);
         let mut body = json!({
             "project_uuid": project_uuid,
@@ -701,6 +736,41 @@ impl Account {
         let deployment = self.deploy(state, &app_uuid, "agent", conversation).await?;
 
         Ok(json!({"app_uuid": app_uuid, "app_name": name, "deployment_uuid": deployment, "address": address}))
+    }
+
+    async fn create_database(&self, arguments: &Value) -> Outcome<Value> {
+        let Some(name) = arguments["name"].as_str().map(str::trim).filter(|name| !name.is_empty()) else {
+            return Err(Failure::Other("Give the database a name.".to_string()));
+        };
+        let kind = arguments["type"].as_str().map(str::trim).unwrap_or_default().to_ascii_lowercase();
+
+        if !DATABASE_TYPES.contains(&kind.as_str()) {
+            return Err(Failure::Other(format!("Choose a database type: {}.", DATABASE_TYPES.join(", "))));
+        }
+
+        let (project_uuid, server_uuid, _, environment_name) = self.placement(arguments).await?;
+        let mut body = json!({
+            "project_uuid": project_uuid,
+            "server_uuid": server_uuid,
+            "environment_name": environment_name,
+            "name": name,
+            "instant_deploy": true,
+        });
+
+        if let Some(image) = arguments["image"].as_str().map(str::trim).filter(|image| !image.is_empty()) {
+            body["image"] = json!(image);
+        }
+
+        let created = self.call(reqwest::Method::POST, &format!("databases/{kind}"), Some(body)).await?;
+        let Some(database_uuid) = created["uuid"].as_str().map(str::to_string) else {
+            return Err(Failure::Other("Coolify did not say which database it created.".to_string()));
+        };
+        let url = match created["internal_db_url"].as_str() {
+            Some(url) => Value::from(url),
+            None => self.call(reqwest::Method::GET, &format!("databases/{database_uuid}"), None).await.map(|detail| detail["internal_db_url"].clone()).unwrap_or(Value::Null),
+        };
+
+        Ok(json!({"database_uuid": database_uuid, "database_name": name, "type": kind, "internal_url": url}))
     }
 
     async fn lines(&self, uuid: &str, kind: &str, deployment: Option<&str>, count: usize) -> Outcome<Vec<String>> {
@@ -821,6 +891,40 @@ pub async fn call(state: &AppState, _owner: Uuid, server: &ServerRow, credential
             "list_projects" => Ok(naming(&list_of(&handle.call(reqwest::Method::GET, "projects", None).await?, "projects"))),
             "list_servers" => Ok(naming(&list_of(&handle.call(reqwest::Method::GET, "servers", None).await?, "servers"))),
             CREATE_APP => handle.create_app(state, arguments, conversation).await,
+            CREATE_DATABASE => handle.create_database(arguments).await,
+            API => {
+                if handle.scoped() {
+                    return Err(Failure::Other("This integration is limited to one project. Widen it to the whole instance in its account page to use the full API.".to_string()));
+                }
+
+                let method = arguments["method"].as_str().map(str::to_ascii_uppercase).filter(|method| API_METHODS.contains(&method.as_str())).and_then(|method| reqwest::Method::from_bytes(method.as_bytes()).ok());
+                let Some(method) = method else {
+                    return Err(Failure::Other(format!("Choose a method: {}.", API_METHODS.join(", "))));
+                };
+                let path = arguments["path"].as_str().map(|path| path.trim().trim_start_matches('/')).unwrap_or_default();
+                let (route, query) = path.split_once('?').unwrap_or((path, ""));
+                let plain = route.split('/').all(|part| part != ".." && part != ".") && !route.is_empty() && !route.contains(['\\', ':', '%', '@', '#']) && !query.contains('#');
+
+                if !plain {
+                    return Err(Failure::Other("The path must be under /api/v1, like databases/postgresql. Do not give a full address or use \"..\".".to_string()));
+                }
+
+                let builder = request(&handle.http, &handle.credentials, method, path);
+                let builder = match arguments.get("body").filter(|body| !body.is_null()) {
+                    Some(body) => builder.json(body),
+                    None => builder,
+                };
+                let host = host_of(&handle.credentials.address);
+                let response = builder.send().await.map_err(|_| Failure::Unreachable(format!("Could not reach {host}. Check the address and that Coolify is running.")))?;
+                let status = response.status();
+                let text = response.text().await.unwrap_or_default();
+                let body = serde_json::from_str::<Value>(&text).unwrap_or(Value::String(text));
+
+                match status.is_success() {
+                    true => Ok(json!({"status": status.as_u16(), "body": body})),
+                    false => Err(Failure::Other(format!("Coolify answered {}: {body}", status.as_u16()))),
+                }
+            }
             _ => {
                 let Some(uuid) = app else {
                     return Err(Failure::Other("Give the app's uuid in app.".to_string()));
