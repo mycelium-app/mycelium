@@ -105,8 +105,11 @@ async fn connect_once(daemon: &Daemon, outgoing: &mut mpsc::UnboundedReceiver<No
 
     while outgoing.try_recv().is_ok() {}
 
+    let terminals = daemon.terminals_report();
+
     send(&mut socket, &daemon.hello().await).await?;
     send(&mut socket, &daemon.logins_report().await).await?;
+    send(&mut socket, &terminals).await?;
 
     daemon.on_connected();
     *established = true;

@@ -14,6 +14,8 @@ use crate::pod::PodRuntime;
 use crate::session::{Launch, SessionHandle, SessionSpec, next_failure_seq, spawn_session};
 use crate::transcripts::TranscriptFollower;
 use anyhow::{Context, Result};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use mycelium_proto::api::KubernetesNode;
 use mycelium_proto::conversation::{AgentId, AgentInfo, LoginInfo, SessionPosition};
 use mycelium_proto::link::{ControlToNode, NodeToControl};
@@ -269,6 +271,10 @@ impl Daemon {
         NodeToControl::Logins { logins: self.logins_for(&agents) }
     }
 
+    pub fn terminals_report(&self) -> NodeToControl {
+        NodeToControl::TerminalList { terminals: self.terminals.list() }
+    }
+
     pub async fn kubernetes_report(&self) -> Option<KubernetesNode> {
         let pods = self.pods.as_ref()?;
         let conversations: Vec<Uuid> = self.session_handles().into_iter().map(|(conversation_id, _)| conversation_id).collect();
@@ -351,10 +357,17 @@ impl Daemon {
             ControlToNode::LoginInput { login_id, text } => self.logins.input(login_id, &text),
             ControlToNode::StopLogin { login_id } => self.logins.stop(login_id),
             ControlToNode::RemoveLogin { agent, account } => self.remove_login(agent, &account),
-            ControlToNode::StartTerminal { terminal_id, cwd, cols, rows, .. } => self.terminals.start(terminal_id, &cwd, cols, rows),
+            ControlToNode::StartTerminal { terminal_id, conversation_id, cwd, cols, rows } => self.terminals.start(terminal_id, conversation_id, &cwd, cols, rows),
             ControlToNode::TerminalInput { terminal_id, data } => self.terminals.input(terminal_id, &data),
             ControlToNode::ResizeTerminal { terminal_id, cols, rows } => self.terminals.resize(terminal_id, cols, rows),
             ControlToNode::StopTerminal { terminal_id } => self.terminals.stop(terminal_id),
+            ControlToNode::ReadTerminal { request_id, terminal_id, from } => {
+                let buffer = match self.terminals.read(terminal_id, from) {
+                    Some((data, offset, total)) => NodeToControl::TerminalBuffer { request_id, found: true, data: STANDARD.encode(data), offset, total },
+                    None => NodeToControl::TerminalBuffer { request_id, found: false, data: String::new(), offset: 0, total: 0 },
+                };
+                let _ = self.out.send(buffer);
+            }
             ControlToNode::StartEnvironment { conversation_id, width, height, apps } => self.environments.start(conversation_id, width, height, apps),
             ControlToNode::EnvironmentLaunch { request_id, conversation_id, app, file } => self.environments.launch(request_id, conversation_id, app, file),
             ControlToNode::EnvironmentFocus { request_id, conversation_id, window } => self.environments.focus(request_id, conversation_id, window),

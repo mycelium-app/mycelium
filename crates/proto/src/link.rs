@@ -8,6 +8,15 @@ use crate::conversation::{AgentId, AgentInfo, LoginInfo, SessionPosition};
 pub const REPLACED_CLOSE_CODE: u16 = 4000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeTerminal {
+    pub terminal_id: Uuid,
+    pub conversation_id: Uuid,
+    pub total: u64,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NodeToControl {
     Hello {
@@ -81,6 +90,16 @@ pub enum NodeToControl {
     },
     TerminalExited {
         terminal_id: Uuid,
+    },
+    TerminalList {
+        terminals: Vec<NodeTerminal>,
+    },
+    TerminalBuffer {
+        request_id: Uuid,
+        found: bool,
+        data: String,
+        offset: u64,
+        total: u64,
     },
     EnvironmentCapability {
         capability: EnvironmentCapability,
@@ -533,6 +552,11 @@ pub enum ControlToNode {
     },
     StopTerminal {
         terminal_id: Uuid,
+    },
+    ReadTerminal {
+        request_id: Uuid,
+        terminal_id: Uuid,
+        from: u64,
     },
     StartEnvironment {
         conversation_id: Uuid,
