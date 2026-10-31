@@ -1,4 +1,4 @@
-use crate::common::{NodeLink, Server, eventually};
+use crate::common::{NodeLink, Server};
 use base64::Engine;
 use mycelium_proto::link::{ControlToNode, NodeToControl};
 use serde_json::{Value, json};
@@ -38,8 +38,19 @@ impl Fixture {
         (reply["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string(), reply["result"]["isError"].as_bool().unwrap_or(false))
     }
 
-    async fn output(&mut self, terminal_id: Uuid, bytes: &[u8]) {
-        self.link.send(NodeToControl::TerminalOutput { terminal_id, data: base64::engine::general_purpose::STANDARD.encode(bytes) }).await;
+    async fn read_terminal(&mut self, terminal_id: Uuid, kept: &[u8]) -> String {
+        let Fixture { server, link, token, conversation_id } = self;
+        let call = server.agent_mcp(token, *conversation_id, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "terminal_read", "arguments": {"terminal_id": terminal_id}}}));
+        let node = async {
+            let ControlToNode::ReadTerminal { request_id, .. } = link.next().await else {
+                panic!("expected the control plane to ask the node for the terminal's output");
+            };
+
+            link.send(NodeToControl::TerminalBuffer { request_id, found: true, data: base64::engine::general_purpose::STANDARD.encode(kept), offset: 0, total: kept.len() as u64 }).await;
+        };
+        let (reply, ()) = tokio::join!(call, node);
+
+        reply["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string()
     }
 }
 
@@ -62,15 +73,7 @@ async fn an_agent_lists_the_terminals_the_person_has_open() {
 async fn an_agent_reads_what_a_terminal_printed_as_plain_text() {
     let mut fixture = fixture().await;
     let terminal_id = fixture.open_terminal().await;
-    fixture.output(terminal_id, b"\x1b[32mbuild ok\x1b[0m\r\n").await;
-    fixture.output(terminal_id, b"$ ").await;
-
-    let read = eventually("the output to be readable", || async {
-        let (text, _) = fixture.tool("terminal_read", json!({"terminal_id": terminal_id})).await;
-
-        text.contains("$ ").then_some(text)
-    })
-    .await;
+    let read = fixture.read_terminal(terminal_id, b"\x1b[32mbuild ok\x1b[0m\r\n$ ").await;
 
     assert_eq!(read, "build ok\n$ ");
 }

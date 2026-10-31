@@ -7,7 +7,7 @@ use crate::error::ApiResult;
 use crate::imports;
 use crate::prompts::pump;
 use crate::ssh_access;
-use crate::state::{AppState, BrowserActedAnswer, BrowserControlsAnswer, EnvironmentInputAnswer, EnvironmentLaunchAnswer, EnvironmentScreenshotAnswer, FolderAnswer, GitAnswer, ProcessAnswer, ResetAnswer, SteerAnswer};
+use crate::state::{AppState, BrowserActedAnswer, BrowserControlsAnswer, EnvironmentInputAnswer, EnvironmentLaunchAnswer, EnvironmentScreenshotAnswer, FolderAnswer, GitAnswer, ProcessAnswer, ResetAnswer, SteerAnswer, TerminalBufferAnswer};
 use crate::store::{CONVERSATION_COLUMNS, TURN_HAS_ENDED, ConversationRow, append_event, enum_text, has_live_workflow_agent, highest_node_seq, highest_node_seqs, lock_on_node, merge_queue, publish_node, set_status, without_nul};
 use crate::transcripts::{WriteError, write_chunk};
 use axum::extract::{ConnectInfo, State};
@@ -274,6 +274,32 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
                 state.publish(Some(owner.user_id), StreamMessage::TerminalOutput { terminal_id, data, offset });
             }
+
+            Ok(())
+        }
+        NodeToControl::TerminalList { terminals } => {
+            let mut live = HashSet::new();
+
+            for terminal in terminals {
+                let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1 and node_id = $2").bind(terminal.conversation_id).bind(node_id).fetch_optional(&state.pool).await?;
+
+                match owner {
+                    Some(user_id) => {
+                        state.hub.track_terminal(terminal.terminal_id, node_id, user_id, terminal.conversation_id, terminal.total);
+                        live.insert(terminal.terminal_id);
+                    }
+                    None => {
+                        state.hub.send(node_id, ControlToNode::StopTerminal { terminal_id: terminal.terminal_id });
+                    }
+                }
+            }
+
+            state.finish_terminals_of_node(node_id, &live);
+
+            Ok(())
+        }
+        NodeToControl::TerminalBuffer { request_id, found, data, total, .. } => {
+            state.hub.answer(node_id, request_id, TerminalBufferAnswer { found, data, total });
 
             Ok(())
         }

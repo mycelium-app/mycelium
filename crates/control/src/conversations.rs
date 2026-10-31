@@ -471,6 +471,10 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
         chats::index_title(&state, id, &row.title).await?;
     }
 
+    if request.archived == Some(true) {
+        state.stop_terminals_of_conversation(id);
+    }
+
     if request.archived == Some(true) && before.is_idle() {
         state.hub.send(row.node_id, ControlToNode::CloseSession { conversation_id: id });
         state.remove_session(row.node_id, id).await?;
@@ -673,6 +677,7 @@ pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     }
 
     for (removed_id, node_id) in removed {
+        state.stop_terminals_of_conversation(removed_id);
         state.hub.send(node_id, ControlToNode::CloseSession { conversation_id: removed_id });
         state.remove_session(node_id, removed_id).await?;
         crate::environments::stop_with_conversation(&state, removed_id, true).await;

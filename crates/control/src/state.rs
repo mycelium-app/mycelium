@@ -42,12 +42,9 @@ pub struct LoginOwner {
     pub user_id: Uuid,
 }
 
-const TERMINAL_SCROLLBACK_BYTES: usize = 64 * 1024;
-
 struct TerminalSession {
     owner: LoginOwner,
     conversation_id: Uuid,
-    scrollback: Vec<u8>,
     total: u64,
 }
 
@@ -113,6 +110,12 @@ pub struct FolderAnswer {
     pub files: Vec<FolderFile>,
     pub truncated: bool,
     pub error: Option<String>,
+}
+
+pub struct TerminalBufferAnswer {
+    pub found: bool,
+    pub data: String,
+    pub total: u64,
 }
 
 pub struct ResetAnswer {
@@ -212,6 +215,7 @@ node_answers! {
     ProcessAnswer => stop_requests,
     FolderAnswer => folder_requests,
     ResetAnswer => reset_requests,
+    TerminalBufferAnswer => terminal_buffer_requests,
     EnvironmentInputAnswer => environment_input_requests,
     EnvironmentScreenshotAnswer => environment_screenshot_requests,
     BrowserControlsAnswer => browser_controls_requests,
@@ -239,6 +243,7 @@ pub struct Hub {
     lastfm_sign_ins: Mutex<HashMap<String, PendingLastFm>>,
     freeagent_sign_ins: Mutex<HashMap<String, PendingFreeAgent>>,
     reset_requests: PendingRequests<ResetAnswer>,
+    terminal_buffer_requests: PendingRequests<TerminalBufferAnswer>,
     environment_input_requests: PendingRequests<EnvironmentInputAnswer>,
     environment_screenshot_requests: PendingRequests<EnvironmentScreenshotAnswer>,
     browser_controls_requests: PendingRequests<BrowserControlsAnswer>,
@@ -624,9 +629,9 @@ impl Hub {
         finished
     }
 
-    pub fn track_terminal(&self, terminal_id: Uuid, node_id: Uuid, user_id: Uuid, conversation_id: Uuid) {
+    pub fn track_terminal(&self, terminal_id: Uuid, node_id: Uuid, user_id: Uuid, conversation_id: Uuid, total: u64) {
         if let Ok(mut terminals) = self.terminals.lock() {
-            terminals.insert(terminal_id, TerminalSession { owner: LoginOwner { node_id, user_id }, conversation_id, scrollback: Vec::new(), total: 0 });
+            terminals.insert(terminal_id, TerminalSession { owner: LoginOwner { node_id, user_id }, conversation_id, total });
         }
     }
 
@@ -649,17 +654,9 @@ impl Hub {
         let session = terminals.get_mut(&terminal_id)?;
         let start = session.total;
 
-        session.scrollback.extend_from_slice(bytes);
         session.total += bytes.len() as u64;
 
-        let excess = session.scrollback.len().saturating_sub(TERMINAL_SCROLLBACK_BYTES);
-        session.scrollback.drain(..excess);
-
         Some(start)
-    }
-
-    pub fn terminal_scrollback(&self, terminal_id: Uuid) -> Option<(Vec<u8>, u64)> {
-        self.terminals.lock().ok().and_then(|terminals| terminals.get(&terminal_id).map(|session| (session.scrollback.clone(), session.total)))
     }
 
     pub fn finish_terminal(&self, terminal_id: Uuid) {
@@ -668,13 +665,13 @@ impl Hub {
         }
     }
 
-    pub fn finish_terminals_of(&self, node_id: Uuid) -> Vec<(Uuid, LoginOwner)> {
+    pub fn finish_terminals_of(&self, node_id: Uuid, live: &HashSet<Uuid>) -> Vec<(Uuid, LoginOwner)> {
         let Ok(mut terminals) = self.terminals.lock() else {
             return Vec::new();
         };
-        let finished: Vec<(Uuid, LoginOwner)> = terminals.iter().filter(|(_, session)| session.owner.node_id == node_id).map(|(terminal_id, session)| (*terminal_id, session.owner)).collect();
+        let finished: Vec<(Uuid, LoginOwner)> = terminals.iter().filter(|(terminal_id, session)| session.owner.node_id == node_id && !live.contains(terminal_id)).map(|(terminal_id, session)| (*terminal_id, session.owner)).collect();
 
-        terminals.retain(|_, session| session.owner.node_id != node_id);
+        terminals.retain(|terminal_id, session| session.owner.node_id != node_id || live.contains(terminal_id));
 
         finished
     }
@@ -787,11 +784,25 @@ impl AppState {
             self.publish(Some(owner.user_id), StreamMessage::LoginFinished { login_id, ok: false });
         }
 
-        for (terminal_id, owner) in self.hub.finish_terminals_of(node_id) {
+        crate::environments::finish_environments_of_node(self, node_id);
+    }
+
+    pub fn finish_terminals_of_node(&self, node_id: Uuid, live: &HashSet<Uuid>) {
+        for (terminal_id, owner) in self.hub.finish_terminals_of(node_id, live) {
             self.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id });
         }
+    }
 
-        crate::environments::finish_environments_of_node(self, node_id);
+    pub fn stop_terminals_of_conversation(&self, conversation_id: Uuid) {
+        for terminal_id in self.hub.terminals_of_conversation(conversation_id) {
+            let Some(owner) = self.hub.terminal_owner(terminal_id) else {
+                continue;
+            };
+
+            self.hub.send(owner.node_id, ControlToNode::StopTerminal { terminal_id });
+            self.hub.finish_terminal(terminal_id);
+            self.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id });
+        }
     }
 }
 

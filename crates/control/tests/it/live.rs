@@ -1,7 +1,7 @@
 use crate::common;
 use crate::common::{NodeLink, Server, StreamClient};
 use mycelium_proto::conversation::{AgentId, Conversation, ConversationStatus, DeviceKind, DeviceState, Event, EventKind, LoginInfo, LoginState, QueuedPrompt};
-use mycelium_proto::link::{ControlToNode, NodeToControl};
+use mycelium_proto::link::{ControlToNode, NodeTerminal, NodeToControl};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -260,6 +260,7 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/nodes/{id}/ssh-tokens",
     "POST /api/v1/forges/{id}/mcp",
     "POST /api/v1/conversations/{id}/environment/stream-ticket",
+    "PUT /api/v1/conversations/{id}/terminal-layout",
 ];
 
 fn routes_that_change_state() -> BTreeSet<String> {
@@ -626,24 +627,158 @@ async fn start_terminal(server: &Server, link: &mut NodeLink, conversation_id: U
     terminal_id
 }
 
+async fn open_terminals(server: &Server, link: &mut NodeLink, conversation_id: Uuid, printed: &str, total: u64) -> Value {
+    let request = server.user.json(server.user.get(&format!("/api/v1/conversations/{conversation_id}/terminals")));
+    let node = async {
+        let ControlToNode::ReadTerminal { request_id, from, .. } = link.next().await else {
+            panic!("expected the control plane to ask the node for the terminal's output");
+        };
+        assert_eq!(from, 0);
+
+        link.send(NodeToControl::TerminalBuffer { request_id, found: true, data: printed.into(), offset: 0, total }).await;
+    };
+    let ((status, open), ()) = tokio::join!(request, node);
+    assert_eq!(status, 200, "{open}");
+
+    open
+}
+
 #[tokio::test]
-async fn a_returning_client_lists_the_open_terminals_with_what_they_printed() {
+async fn a_returning_client_lists_the_open_terminals_with_the_output_the_node_kept() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let conversation = server.create_conversation(link.id, None).await;
     link.expect_start_session().await;
     let terminal_id = start_terminal(&server, &mut link, conversation.id).await;
-    link.send(NodeToControl::TerminalOutput { terminal_id, data: "bHM=".into() }).await;
 
-    let listed = common::eventually("the output to be kept", || async {
-        let (_, open) = server.user.json(server.user.get(&format!("/api/v1/conversations/{}/terminals", conversation.id))).await;
+    let listed = open_terminals(&server, &mut link, conversation.id, "bHM=", 2).await;
 
-        (open[0]["scrollback"] == "bHM=").then_some(open)
+    assert_eq!(listed[0]["terminal_id"], json!(terminal_id));
+    assert_eq!(listed[0]["scrollback"], "bHM=");
+    assert_eq!(listed[0]["offset"], 2);
+}
+
+#[tokio::test]
+async fn a_terminal_survives_its_node_link_dropping_and_comes_back_with_its_scrollback() {
+    let server = Server::start().await;
+    let (mut link, token) = server.online_node_with_token("laptop", env!("CARGO_PKG_VERSION")).await;
+    let node_id = link.id;
+    let conversation = server.create_conversation(node_id, None).await;
+    link.expect_start_session().await;
+    let mut stream = server.user.stream().await;
+    let terminal_id = start_terminal(&server, &mut link, conversation.id).await;
+
+    drop(link);
+    let user = server.user.clone();
+    common::eventually("the node to go offline", || async {
+        let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;
+
+        nodes.as_array().unwrap().iter().any(|node| node["id"] == json!(node_id) && node["online"] == false).then_some(())
     })
     .await;
 
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/terminals/{terminal_id}/input")).json(&json!({"data": "eA=="}))).await;
+    assert_eq!(status, 409, "an offline node is not a missing terminal");
+
+    let mut returned = server.connect_node(node_id, &token).await;
+    returned.hello(vec![]).await;
+    returned.send(NodeToControl::TerminalList { terminals: vec![NodeTerminal { terminal_id, conversation_id: conversation.id, total: 2, cols: 80, rows: 24 }] }).await;
+
+    let listed = open_terminals(&server, &mut returned, conversation.id, "bHM=", 2).await;
+
     assert_eq!(listed[0]["terminal_id"], json!(terminal_id));
-    assert_eq!(listed[0]["offset"], 2);
+    assert_eq!(listed[0]["scrollback"], "bHM=");
+
+    returned.send(NodeToControl::TerminalOutput { terminal_id, data: "bHM=".into() }).await;
+    let output = stream.until(|message| matches!(message, StreamMessage::TerminalOutput { .. } | StreamMessage::TerminalExited { .. }).then_some(message)).await;
+    assert_eq!(output, StreamMessage::TerminalOutput { terminal_id, data: "bHM=".into(), offset: 2 });
+}
+
+#[tokio::test]
+async fn a_restarted_control_plane_tracks_the_terminals_the_node_reports() {
+    let first = Server::start().await;
+    let (mut link, token) = first.online_node_with_token("laptop", env!("CARGO_PKG_VERSION")).await;
+    let node_id = link.id;
+    let conversation = first.create_conversation(node_id, None).await;
+    link.expect_start_session().await;
+    let terminal_id = start_terminal(&first, &mut link, conversation.id).await;
+
+    let restarted = Server::start_on(first.database_url.clone(), |_| {}).await;
+    let mut returned = restarted.connect_node(node_id, &token).await;
+    returned.hello(vec![]).await;
+    returned.send(NodeToControl::TerminalList { terminals: vec![NodeTerminal { terminal_id, conversation_id: conversation.id, total: 2, cols: 80, rows: 24 }] }).await;
+
+    common::eventually("the terminal to be driveable again", || async {
+        let (status, _) = restarted.user.json(restarted.user.post(&format!("/api/v1/terminals/{terminal_id}/input")).json(&json!({"data": "eA=="}))).await;
+
+        (status == 204).then_some(())
+    })
+    .await;
+    assert_eq!(returned.next().await, ControlToNode::TerminalInput { terminal_id, data: "eA==".into() });
+
+    let listed = open_terminals(&restarted, &mut returned, conversation.id, "bHM=", 2).await;
+    assert_eq!(listed[0]["terminal_id"], json!(terminal_id));
+}
+
+#[tokio::test]
+async fn a_terminal_the_node_no_longer_reports_ends_in_the_stream() {
+    let server = Server::start().await;
+    let (mut link, token) = server.online_node_with_token("laptop", env!("CARGO_PKG_VERSION")).await;
+    let node_id = link.id;
+    let conversation = server.create_conversation(node_id, None).await;
+    link.expect_start_session().await;
+    let mut stream = server.user.stream().await;
+    let terminal_id = start_terminal(&server, &mut link, conversation.id).await;
+
+    let mut returned = server.connect_node(node_id, &token).await;
+    returned.hello(vec![]).await;
+    returned.send(NodeToControl::TerminalList { terminals: vec![] }).await;
+
+    stream.until(|message| matches!(message, StreamMessage::TerminalExited { terminal_id: id } if id == terminal_id).then_some(())).await;
+}
+
+#[tokio::test]
+async fn deleting_a_conversation_stops_its_terminals() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    let mut stream = server.user.stream().await;
+    let terminal_id = start_terminal(&server, &mut link, conversation.id).await;
+
+    server.user.json(server.user.patch(&format!("/api/v1/conversations/{}", conversation.id)).json(&json!({"archived": true}))).await;
+    stream.until(|message| matches!(message, StreamMessage::TerminalExited { terminal_id: id } if id == terminal_id).then_some(())).await;
+
+    loop {
+        if link.next().await == (ControlToNode::StopTerminal { terminal_id }) {
+            break;
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_terminal_layout_round_trips_for_the_conversation_and_is_empty_before_it_is_saved() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    let path = format!("/api/v1/conversations/{}/terminal-layout", conversation.id);
+
+    let (status, before) = server.user.json(server.user.get(&path)).await;
+    assert_eq!((status, before), (200, json!({})));
+
+    let layout = json!({"tabs": [{"id": "a", "terminals": ["t1", "t2"], "ratio": 0.4}], "selected": "a"});
+    let (status, _) = server.user.json(server.user.put(&path).json(&layout)).await;
+    assert_eq!(status, 204);
+
+    let (_, saved) = server.user.json(server.user.get(&path)).await;
+    assert_eq!(saved, layout);
+
+    let (status, _) = server.user.json(server.user.put(&path).json(&json!([1, 2]))).await;
+    assert_eq!(status, 400);
+
+    let other = server.second_user("other@example.com").await;
+    let (status, _) = other.json(other.get(&path)).await;
+    assert_eq!(status, 404);
 }
 
 #[tokio::test]
@@ -745,7 +880,7 @@ async fn a_node_cannot_stream_output_for_a_terminal_it_does_not_own() {
 }
 
 #[tokio::test]
-async fn a_terminal_ends_in_the_stream_when_its_node_disconnects() {
+async fn a_terminal_ends_in_the_stream_when_its_node_is_revoked() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let conversation = server.create_conversation(link.id, None).await;
@@ -753,7 +888,7 @@ async fn a_terminal_ends_in_the_stream_when_its_node_disconnects() {
     let mut stream = server.user.stream().await;
     let terminal_id = start_terminal(&server, &mut link, conversation.id).await;
 
-    drop(link);
+    server.user.json(server.user.delete(&format!("/api/v1/nodes/{}", link.id))).await;
 
     stream.until(|message| matches!(message, StreamMessage::TerminalExited { terminal_id: id } if id == terminal_id).then_some(())).await;
 }

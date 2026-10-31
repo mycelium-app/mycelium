@@ -10,6 +10,7 @@ use mycelium_proto::conversation::AgentId;
 use mycelium_proto::link::{ControlToNode, GitCommand};
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::HashSet;
 use mycelium_proto::stream::StreamMessage;
 use uuid::Uuid;
 
@@ -79,6 +80,7 @@ pub async fn revoke(State(state): State<AppState>, _user: AuthUser, Path(id): Pa
     state.hub.send(id, ControlToNode::Revoked);
     state.hub.disconnect(id);
     state.finish_logins_of_node(id);
+    state.finish_terminals_of_node(id, &HashSet::new());
     state.publish(None, StreamMessage::NodeRemoved { node_id: id });
 
     Ok(StatusCode::NO_CONTENT)

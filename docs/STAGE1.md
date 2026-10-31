@@ -208,7 +208,7 @@ Nodes:
 Terminals:
 - `POST /api/v1/conversations/{id}/terminal` `{cols, rows}` → `{terminal_id}`; 404 for a conversation that is not
   the caller's, 409 `node_offline`, 400 `size_required` for a zero size. Output streams as `terminal_output`.
-  `POST /api/v1/terminals/{terminal_id}/input` `{data}` (base64 bytes), `POST /api/v1/terminals/{terminal_id}/resize`
+  `PUT /api/v1/conversations/{id}/terminal-layout` (any JSON object up to 64 KiB, `GET` of the same path answers it or `{}`; the client that saved it already shows it, other devices read it when they open the conversation). Terminals live on the node with a 256 KiB scrollback each and survive link drops and control plane restarts: the node lists them on connect and `GET /conversations/{id}/terminals` reads each one's scrollback from the node. `POST /api/v1/terminals/{terminal_id}/input` `{data}` (base64 bytes), `POST /api/v1/terminals/{terminal_id}/resize`
   `{cols, rows}` and `DELETE /api/v1/terminals/{terminal_id}` (detaches; the tmux session keeps running).
 
 Environments (a separate desktop with its own browser, per conversation, held in memory on the control plane):
@@ -275,7 +275,7 @@ History:
 Live:
 - `GET /api/v1/stream` (WebSocket, cookie or client token). The server sends one JSON object per
   message: `conversation` (the row), `event` (`{conversation_id, seq, kind, payload}`), `queue`,
-  `conversation_removed` (`{conversation_id}`), `node`, `node_removed` (`{node_id}`, sent when a node is revoked), `node_resources` (`{node_id, sample}`), `login_output` (`{login_id, data}`), `terminal_output` (`{terminal_id, data}`, base64 bytes), `terminal_exited` (`{terminal_id}`, also sent when the terminal is stopped or its node disconnects or is revoked), `login_finished` (`{login_id, ok}`; `ok` is false when the sign-in is stopped, or its node disconnects or is revoked), `device` (`{user_code, kind: "node"|"client", label, hostname, state: "pending"|"approved"|"denied"|"expired"|"consumed", result_id: null|uuid}`, sent to everyone signed in whenever a device code is created, approved, denied, expires or is exchanged; `result_id` is the node or client token id once consumed). A node is published with `node` (`online` false) as soon as its credential is issued at token exchange, before the daemon first connects. Clients drop the node on `node_removed`, and reconnect and refetch. A request that carries an `Origin` header must match `MYCELIUM_PUBLIC_URL`'s origin, otherwise 403 `origin_not_allowed`; clients that send none (desktop, tests) are accepted.
+  `conversation_removed` (`{conversation_id}`), `node`, `node_removed` (`{node_id}`, sent when a node is revoked), `node_resources` (`{node_id, sample}`), `login_output` (`{login_id, data}`), `terminal_output` (`{terminal_id, data}`, base64 bytes), `terminal_exited` (`{terminal_id}`, also sent when the terminal is stopped, its conversation is archived or deleted, its node is revoked, or its node reconnects without it), `login_finished` (`{login_id, ok}`; `ok` is false when the sign-in is stopped, or its node disconnects or is revoked), `device` (`{user_code, kind: "node"|"client", label, hostname, state: "pending"|"approved"|"denied"|"expired"|"consumed", result_id: null|uuid}`, sent to everyone signed in whenever a device code is created, approved, denied, expires or is exchanged; `result_id` is the node or client token id once consumed). A node is published with `node` (`online` false) as soon as its credential is issued at token exchange, before the daemon first connects. Clients drop the node on `node_removed`, and reconnect and refetch. A request that carries an `Origin` header must match `MYCELIUM_PUBLIC_URL`'s origin, otherwise 403 `origin_not_allowed`; clients that send none (desktop, tests) are accepted.
 
 Memory:
 - `GET /api/v1/memories?query=` (newest first, or full-text matches when `query` is given), `PATCH /memories/{id}` `{text}`, `DELETE /memories/{id}`. Any signed-in user manages them.
@@ -504,7 +504,7 @@ only the person who owns the conversation or started the sign-in; the rest reach
 | Agent acts in the environment, or the person takes over or hands back | `environment_action` (`{conversation_id, action}`), plus `environment` | owner |
 | Node reports what environments it can run | `node` (`environment`) | everyone |
 | Terminal output | `terminal_output` | opener |
-| Terminal ends: node reports it, `DELETE /terminals/{id}`, node disconnects or is revoked | `terminal_exited` | opener |
+| Terminal ends: node reports it, `DELETE /terminals/{id}`, its conversation is archived or deleted, node reconnects without it or is revoked | `terminal_exited` | opener |
 | Conversation created (also by starting an issue workspace), renamed, archived or restored | `conversation` (and `queue` on create) | owner |
 | Archived conversation deleted | `conversation_removed` for it and each side chat | owner |
 | Schedule proposed or confirmed | `schedule` | owner |
