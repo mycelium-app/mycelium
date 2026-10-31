@@ -1564,6 +1564,8 @@ pub struct CreateProjectRequest {
     pub path: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub new_repository: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_folder: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

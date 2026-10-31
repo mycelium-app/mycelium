@@ -410,6 +410,59 @@ async fn a_new_repository_the_forge_refuses_is_reported_and_nothing_is_cloned_or
     assert_eq!(projects, json!([]));
 }
 
+#[tokio::test]
+async fn a_new_folder_is_created_on_the_node_in_the_projects_folder_then_registered_as_the_project() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let user = server.user.clone();
+    let node_id = link.id;
+    let asking = tokio::spawn(async move { user.json(user.post("/api/v1/projects").json(&json!({"node_id": node_id, "new_folder": "quiet-otter"}))).await });
+
+    let created = answer_next(&mut link, Ok(json!({"path": "/home/sam/projects/quiet-otter", "name": "quiet-otter"}))).await;
+    let registered = answer_next(&mut link, Ok(json!({"path": "/home/sam/projects/quiet-otter", "repository": false, "remotes": []}))).await;
+    let (status, project) = asking.await.unwrap();
+
+    assert_eq!(created, ("projects".to_string(), GitCommand::CreateDirectory { name: "quiet-otter".into() }));
+    assert_eq!(registered, ("/home/sam/projects/quiet-otter".to_string(), GitCommand::Register));
+    assert_eq!((status, project["name"].clone(), project["path"].clone()), (201, json!("quiet-otter"), json!("/home/sam/projects/quiet-otter")));
+}
+
+#[tokio::test]
+async fn a_new_folder_the_node_refuses_creates_no_project() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let user = server.user.clone();
+    let node_id = link.id;
+    let asking = tokio::spawn(async move { user.json(user.post("/api/v1/projects").json(&json!({"node_id": node_id, "new_folder": "taken"}))).await });
+
+    answer_next(&mut link, Err("taken already exists in /home/sam/projects. Choose another name.")).await;
+    let (status, error) = asking.await.unwrap();
+    let (_, projects) = server.user.json(server.user.get("/api/v1/projects")).await;
+
+    assert_eq!((status, error["error"].clone(), projects), (409, json!("git_failed"), json!([])));
+}
+
+#[tokio::test]
+async fn a_new_folder_with_a_new_repository_creates_the_repository_and_clones_it_into_that_folder() {
+    let server = Server::start().await;
+    let seen = Seen::default();
+    let github = fake_creating_forge("github", seen.clone()).await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let mut link = server.online_node("laptop").await;
+    let user = server.user.clone();
+    let node_id = link.id;
+    let asking = tokio::spawn(async move { user.json(user.post("/api/v1/projects").json(&json!({"node_id": node_id, "forge_id": forge_id, "repository": "samexample/quiet-otter", "new_repository": true, "new_folder": "quiet-otter"}))).await });
+
+    answer_next(&mut link, Ok(json!({"path": "/home/sam/projects/quiet-otter", "name": "quiet-otter"}))).await;
+    let (cwd, clone) = answer_next(&mut link, Ok(json!({"path": "/home/sam/projects/quiet-otter"}))).await;
+    let (status, project) = asking.await.unwrap();
+
+    assert_eq!(cwd, "/home/sam/projects/quiet-otter");
+    assert!(matches!(clone, GitCommand::Clone { url, .. } if url == format!("{github}/samexample/quiet-otter.git")));
+    assert_eq!((status, project["path"].clone(), project["repository"].clone()), (201, json!("/home/sam/projects/quiet-otter"), json!("samexample/quiet-otter")));
+    assert_eq!(seen.lock().unwrap()[0].0, "POST /user/repos");
+}
+
 async fn conversation_in(server: &Server, node_id: Uuid, cwd: &str) -> Uuid {
     let (status, body) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": node_id, "agent": "claude", "cwd": cwd}))).await;
     assert_eq!(status, 201, "{body}");

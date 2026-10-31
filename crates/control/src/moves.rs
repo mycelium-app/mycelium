@@ -256,7 +256,7 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
     let target_project = match route.target_project.clone() {
         Some(project) => project,
         None => {
-            let path = projects::clone_repository(state, &forge, &repository, target_node_id).await.map_err(|error| reason(error.message()))?;
+            let path = projects::clone_repository(state, &forge, &repository, target_node_id, None).await.map_err(|error| reason(error.message()))?;
             let name = repository.rsplit('/').next().unwrap_or(&repository).to_string();
 
             sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!(

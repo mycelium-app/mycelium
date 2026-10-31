@@ -61,10 +61,11 @@ pub async fn sibling_on(state: &AppState, owner: Uuid, project: &ProjectRow, nod
     row.ok_or_else(|| ApiError::bad_request("project_not_on_node", "This project is not set up on that node. Choose a node it is set up on."))
 }
 
-pub async fn clone_repository(state: &AppState, forge: &forges::ForgeRow, repository: &str, node_id: Uuid) -> ApiResult<String> {
+pub async fn clone_repository(state: &AppState, forge: &forges::ForgeRow, repository: &str, node_id: Uuid, folder: Option<&str>) -> ApiResult<String> {
     let credentials = forge.git_credentials()?;
     let url = format!("{}/{repository}.git", forge.base_url);
-    let answer = relay(state, node_id, format!("{PROJECTS_FOLDER}/{repository}"), GitCommand::Clone { url, credentials: Some(credentials) }).await?;
+    let target = folder.map_or_else(|| format!("{PROJECTS_FOLDER}/{repository}"), str::to_string);
+    let answer = relay(state, node_id, target, GitCommand::Clone { url, credentials: Some(credentials) }).await?;
 
     Ok(answer["path"].as_str().unwrap_or_default().to_string())
 }
@@ -147,8 +148,17 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         return Err(node_offline());
     }
 
-    let (name, path, forge_id, repository) = match (request.forge_id, request.repository.as_deref().map(str::trim), request.path.as_deref().map(str::trim)) {
-        (Some(forge_id), Some(repository), Some(path)) if !path.is_empty() && !request.new_repository => {
+    let created_folder = match request.new_folder.as_deref() {
+        Some(name) => {
+            let answer = relay(&state, request.node_id, PROJECTS_FOLDER.to_string(), GitCommand::CreateDirectory { name: name.to_string() }).await?;
+
+            Some(answer["path"].as_str().unwrap_or_default().to_string())
+        }
+        None => None,
+    };
+
+    let (name, path, forge_id, repository) = match (request.forge_id, request.repository.as_deref().map(str::trim), created_folder.as_deref().or(request.path.as_deref().map(str::trim))) {
+        (Some(forge_id), Some(repository), Some(path)) if !path.is_empty() && !request.new_repository && created_folder.is_none() => {
             if !valid_repository(repository) {
                 return Err(ApiError::bad_request("repository_invalid", "Enter the repository as owner/name, for example acme-org/acme-backups."));
             }
@@ -165,7 +175,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 
             (name, registered, Some(forge_id), Some(repository.to_string()))
         }
-        (Some(forge_id), Some(repository), None) => {
+        (Some(forge_id), Some(repository), folder) if folder.is_none() || created_folder.is_some() => {
             if !valid_repository(repository) {
                 return Err(ApiError::bad_request("repository_invalid", "Enter the repository as owner/name, for example acme-org/acme-backups."));
             }
@@ -178,7 +188,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
                 api.create_repository(&state.http, &forge.account, repository).await.map_err(|error| error.into_api(api.kind, &api.base_url))?;
             }
 
-            let path = clone_repository(&state, &forge, repository, request.node_id).await?;
+            let path = clone_repository(&state, &forge, repository, request.node_id, folder).await?;
             let name = repository.rsplit('/').next().unwrap_or(repository).to_string();
 
             (name, path, Some(forge_id), Some(repository.to_string()))
@@ -236,7 +246,7 @@ pub async fn checkout(State(state): State<AppState>, user: AuthUser, Path(id): P
         return Ok((StatusCode::OK, Json(existing.to_proto())));
     }
 
-    create(State(state), user, Json(CreateProjectRequest { node_id: request.node_id, forge_id: Some(forge_id), repository: Some(repository), path: None, new_repository: false })).await
+    create(State(state), user, Json(CreateProjectRequest { node_id: request.node_id, forge_id: Some(forge_id), repository: Some(repository), path: None, new_repository: false, new_folder: None })).await
 }
 
 pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchProjectRequest>) -> ApiResult<Json<Project>> {
