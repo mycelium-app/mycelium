@@ -2,6 +2,8 @@ package mycelium.desktop
 
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.input.key.Key
@@ -34,6 +36,7 @@ import mycelium.ui.ProjectsScreen
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 private const val LaptopId = "aaaaaaaa-0000-0000-0000-000000000001"
 private const val AtlasId = "aaaaaaaa-0000-0000-0000-000000000002"
@@ -68,6 +71,7 @@ class ProjectsTest {
     private val posts = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
     private val patches = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
     private var repositoriesDelay = 20L
+    private val repositoryQueries = java.util.Collections.synchronizedList(mutableListOf<String>())
     private var groups = "[]"
     private var forges = ForgesJson
     private var repositories = RepositoriesJson
@@ -89,6 +93,7 @@ class ProjectsTest {
             }
 
             if (path.endsWith("/repositories")) {
+                repositoryQueries += request.url.encodedQuery
                 delay(repositoriesDelay)
             }
 
@@ -307,6 +312,83 @@ class ProjectsTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Choose the repository to clone.").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Choose the repository to clone.").assertExists()
         assertEquals(0, posts.size)
+    }
+
+    @Test
+    fun refreshingRepositoriesOnTheProjectsPageAsksTheForgesAgain() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("immich").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(false, repositoryQueries.any { it.contains("refresh=true") })
+        rule.onNodeWithContentDescription("Refresh repositories").performClick()
+
+        rule.waitUntil(5_000) { repositoryQueries.any { it.contains("refresh=true") } }
+    }
+
+    @Test
+    fun refreshingRepositoriesInTheNewProjectDialogAsksTheForgesAgain() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = {}) } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("acme-org/acme-backups").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Refresh repositories").performClick()
+
+        rule.waitUntil(5_000) { repositoryQueries.any { it.contains("refresh=true") } }
+    }
+
+    @Test
+    fun withNoProjectAndNoFolderTheHeadlineNamesAGeneratedProjectAndSendingCreatesItsFolder() {
+        val store = store()
+        var created: Conversation? = null
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = { created = it }) } }
+
+        rule.onNodeWithContentDescription("Project: ", substring = true).assertExists()
+        val headline = rule.onNodeWithContentDescription("Project: ", substring = true).fetchSemanticsNode().config[SemanticsProperties.ContentDescription].single()
+        assertTrue(Regex("Project: [a-z]+-[a-z]+, new").matches(headline), headline)
+        val name = headline.removePrefix("Project: ").removeSuffix(", new")
+        rule.onNodeWithContentDescription("Send").performClick()
+
+        rule.waitUntil(5_000) { created != null }
+        assertEquals("""{"node_id":"$AtlasId","new_folder":"$name"}""", posts.first().second)
+        assertEquals("""{"node_id":"$AtlasId","agent":"claude","project_id":"p1"}""", posts.last().second)
+    }
+
+    @Test
+    fun theNewProjectOptionNamesTheFolderAndCanAlsoCreateARepositoryOnTheForge() {
+        val store = store()
+        var created: Conversation? = null
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = { created = it }) } }
+
+        rule.onNodeWithContentDescription("Project: ", substring = true).performClick()
+        rule.onNodeWithText("New project").assertExists()
+        rule.onNodeWithContentDescription("Name").performTextReplacement("calm-heron")
+        rule.onNodeWithText("~/projects/calm-heron").assertExists()
+        rule.onNodeWithContentDescription("Also create a repository on github.com").performClick()
+        rule.onNodeWithContentDescription("Owner: samexample").assertExists()
+        rule.onNodeWithContentDescription("Owner: samexample").performClick()
+        rule.onNodeWithText("acme-org").performClick()
+        rule.onNodeWithContentDescription("Owner: acme-org").assertExists()
+        assertEquals(0, rule.onAllNodesWithText("samexample").fetchSemanticsNodes().size)
+        rule.onNodeWithText("acme-org / calm-heron").assertExists()
+        rule.onNodeWithContentDescription("Name").performTextReplacement("calm-heron")
+        rule.onNodeWithContentDescription("Name").performKeyInput { pressKey(Key.Enter) }
+
+        rule.waitUntil(5_000) { created != null }
+        assertEquals("""{"node_id":"$AtlasId","forge_id":"f1","repository":"acme-org/calm-heron","new_repository":true,"new_folder":"calm-heron"}""", posts.first().second)
+    }
+
+    @Test
+    fun startingWithoutAProjectKeepsTheFolderRequirement() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = {}) } }
+
+        rule.onNodeWithContentDescription("Project: ", substring = true).performClick()
+        rule.onNodeWithText("No project, choose a folder").performClick()
+        rule.onNodeWithContentDescription("Send").performClick()
+
+        rule.onNodeWithText("Enter the folder the agent should work in, for example /home/you/project.").assertExists()
+        assertEquals(emptyList(), posts)
     }
 
     @Test

@@ -32,6 +32,8 @@ import androidx.compose.ui.unit.dp
 import mycelium.api.AnyNodeId
 import mycelium.api.AnyNodePick
 import mycelium.api.Conversation
+import mycelium.api.CreateProjectRequest
+import mycelium.api.Forge
 import mycelium.api.NodeSummary
 import mycelium.api.Project
 import mycelium.api.CreateConversationRequest
@@ -55,6 +57,7 @@ import mycelium.state.inGroup
 import mycelium.state.switchableAccounts
 import mycelium.state.worktreeHint
 import mycelium.state.isLaptop
+import mycelium.state.randomFolderName
 
 private const val AgentAccountSeparator = "|"
 
@@ -83,6 +86,9 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var cwdError by remember { mutableStateOf<String?>(null) }
     var chosenProject by remember { mutableStateOf(projectId) }
     var withoutProject by remember { mutableStateOf(false) }
+    var newProjectChosen by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf(NewProjectDraft(randomFolderName())) }
+    var forges by remember { mutableStateOf<List<Forge>>(emptyList()) }
     var projectMenuOpen by remember { mutableStateOf(false) }
     var placeMenuOpen by remember { mutableStateOf(false) }
     var settingUpProject by remember { mutableStateOf(false) }
@@ -97,10 +103,16 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
         store.load { store.refreshProjects() }
     }
 
+    LaunchedEffect(Unit) {
+        forges = runCatching { store.api.forges() }.getOrDefault(emptyList())
+    }
+
     val groupFilter = LocalGroupFilter.current
     val projects = state.projects.values.filter { inGroup(it.groupId, groupFilter) }.sortedBy { it.name }
     val recent = state.conversations.values.filter { it.projectId != null }.sortedByDescending { it.updatedAt }.mapNotNull { conversation -> projects.firstOrNull { it.id == conversation.projectId } }.distinct().take(RecentProjects)
-    val project = if (withoutProject) null else state.projects[chosenProject] ?: recent.firstOrNull()
+    val project = if (withoutProject || newProjectChosen) null else state.projects[chosenProject] ?: recent.firstOrNull()
+    val creatingProject = !withoutProject && project == null && (newProjectChosen || cwd.isBlank())
+    val newProjectName = draft.name.trim()
     LaunchedEffect(placeMenuOpen, anyNode, state.nodes, project?.id) {
         if ((placeMenuOpen || anyNode) && nodes.isNotEmpty()) {
             anyNodePick = null
@@ -172,6 +184,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
         sendAfterSetup = false
         setup = null
         withoutProject = id == null
+        newProjectChosen = false
         chosenProject = id
         worktree = false
         cwdError = null
@@ -188,7 +201,12 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
             return
         }
 
-        if (project == null && cwd.isBlank()) {
+        if (creatingProject && newProjectName.isEmpty()) {
+            cwdError = "Enter a name for the new project."
+            return
+        }
+
+        if (project == null && !creatingProject && cwd.isBlank()) {
             cwdError = "Enter the folder the agent should work in, for example /home/you/project."
             return
         }
@@ -204,14 +222,22 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
         val text = prompt.text.trim()
 
         store.act {
+            val forge = forges.firstOrNull()
+            val owner = draft.owner ?: forge?.account
+            val newProject = if (!creatingProject) null else if (draft.repository && forge != null) {
+                store.createProject(CreateProjectRequest(node.id, forge.id, "$owner/$newProjectName", newRepository = true, newFolder = newProjectName))
+            } else {
+                store.createProject(CreateProjectRequest(node.id, newFolder = newProjectName))
+            }
+            val target = newProject ?: project
             val created = store.api.createConversation(
                 CreateConversationRequest(
-                    if (anyNode) AnyNodeId else node.id,
+                    if (anyNode && newProject == null) AnyNodeId else node.id,
                     chosenAgent,
                     account = chosenAccount?.account,
                     routing = routing,
-                    cwd = if (project == null) cwd.trim() else null,
-                    projectId = project?.id,
+                    cwd = if (target == null) cwd.trim() else null,
+                    projectId = target?.id,
                     branch = if (project != null && worktree) branch.trim() else null,
                     prompt = text.ifEmpty { null }.takeIf { files.isEmpty() },
                     model = chosenModel.ifEmpty { null },
@@ -254,10 +280,10 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
 
                         Box {
                             Row(
-                                Modifier.pressable({ projectMenuOpen = true }, description = "Project: ${project?.name ?: "No project"}", shape = ControlShape),
+                                Modifier.pressable({ projectMenuOpen = true }, description = if (creatingProject) "Project: $newProjectName, new" else "Project: ${project?.name ?: "No project"}", shape = ControlShape),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Label(project?.name ?: "No project", style = Tokens.Type.Display)
+                                Label(if (creatingProject) newProjectName else project?.name ?: "No project", style = Tokens.Type.Display)
                                 Icon(MyIcon.ChevronDown, colors.textMuted)
                             }
 
@@ -271,6 +297,25 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                     recent = recent,
                                     noProjectLabel = "No project, choose a folder",
                                     onNewProject = { projectMenuOpen = false; settingUpProject = true },
+                                    newProject = NewProjectOption(
+                                        draft,
+                                        creatingProject,
+                                        node?.name,
+                                        forges.firstOrNull(),
+                                        onChoose = {
+                                            setupJob?.cancel()
+                                            sendAfterSetup = false
+                                            setup = null
+                                            withoutProject = false
+                                            newProjectChosen = true
+                                            chosenProject = null
+                                            worktree = false
+                                            cwdError = null
+                                            branchError = null
+                                        },
+                                        onChange = { draft = it },
+                                        onSubmit = { projectMenuOpen = false; create() },
+                                    ),
                                     onSelect = ::chooseProject,
                                 )
                             }
@@ -279,7 +324,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                         Label("?", style = Tokens.Type.Display)
                     }
 
-                    if (project != null) {
+                    if (project != null || creatingProject) {
                         MyButton({ chooseProject(null) }, text = "or start without a project", size = ButtonSize.Sm, muted = true)
                     }
                 }
@@ -319,12 +364,14 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                         } else node?.let { placed ->
                             {
                                 val where = when {
+                                    creatingProject -> "New folder"
                                     project == null && cwd.isBlank() -> "Choose a folder"
                                     project == null -> cwd.trim().trimEnd('/').substringAfterLast('/').ifEmpty { cwd.trim() }
                                     worktree -> branch.trim().ifEmpty { "New worktree" }
                                     else -> "Checkout"
                                 }
                                 val summary = when {
+                                    creatingProject -> "new folder ~/projects/$newProjectName"
                                     project == null && cwd.isBlank() -> "choose a folder"
                                     project == null -> "folder $where"
                                     worktree -> "new worktree"
@@ -409,7 +456,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                                         hint = worktreeHint(project, branch, state.conversations.values),
                                                     )
                                                 }
-                                            } else {
+                                            } else if (!newProjectChosen) {
                                                 Row(
                                                     Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
                                                     horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
@@ -500,6 +547,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     if (settingUpProject) {
         NewProjectDialog(store, state, onDismiss = { settingUpProject = false }, onCreated = { created ->
             chosenProject = created.id
+            newProjectChosen = false
             withoutProject = false
             settingUpProject = false
         })

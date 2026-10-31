@@ -3,11 +3,13 @@ package mycelium.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -18,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import mycelium.api.Forge
 import mycelium.api.NodeSummary
 import mycelium.api.Project
 import mycelium.state.AppState
@@ -145,8 +148,59 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
     }
 }
 
+data class NewProjectDraft(val name: String, val repository: Boolean = false, val owner: String? = null)
+
+class NewProjectOption(
+    val draft: NewProjectDraft,
+    val chosen: Boolean,
+    val nodeName: String?,
+    val forge: Forge?,
+    val onChoose: () -> Unit,
+    val onChange: (NewProjectDraft) -> Unit,
+    val onSubmit: () -> Unit,
+)
+
 @Composable
-fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, selected: String?, label: String, onDismiss: () -> Unit, setUpFolder: String? = null, onSetUp: () -> Unit = {}, recent: List<Project> = emptyList(), noProjectLabel: String = "No project", onNewProject: (() -> Unit)? = null, onSelect: (String?) -> Unit) {
+private fun NewProjectForm(option: NewProjectOption) {
+    val draft = option.draft
+    var ownerMenu by remember { mutableStateOf(false) }
+
+    Column(Modifier.padding(start = Tokens.Space.S8, end = Tokens.Space.S2, top = Tokens.Space.S1, bottom = Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+        TextInput(draft.name, { option.onChange(draft.copy(name = it)) }, label = "Name", mono = true, onSubmit = option.onSubmit)
+
+        Label("~/projects/${draft.name.trim()}", style = Tokens.Type.Code, color = MyTheme.colors.textMuted)
+
+        option.forge?.let { forge ->
+            val host = forge.baseUrl.substringAfter("://")
+            val owner = draft.owner ?: forge.account
+
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(draft.repository, description = "Also create a repository on $host", onToggle = { option.onChange(draft.copy(repository = !draft.repository)) }, checkedState = "Ticked", uncheckedState = "Not ticked")
+
+                Label("Also create a repository on $host")
+            }
+
+            if (draft.repository) {
+                Box {
+                    MyButton({ ownerMenu = true }, text = "$owner / ${draft.name.trim()}", description = "Owner: $owner", variant = ButtonVariant.Outline, size = ButtonSize.Sm, muted = true, trailingIcon = MyIcon.ChevronDown)
+
+                    if (ownerMenu) {
+                        MenuPopup(onDismiss = { ownerMenu = false }) {
+                            MenuLabel("Owner")
+
+                            for (choice in listOf(forge.account) + forge.organisations) {
+                                MenuItem(choice, onClick = { option.onChange(draft.copy(owner = choice)); ownerMenu = false }, checked = choice == owner)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, selected: String?, label: String, onDismiss: () -> Unit, setUpFolder: String? = null, onSetUp: () -> Unit = {}, recent: List<Project> = emptyList(), noProjectLabel: String = "No project", onNewProject: (() -> Unit)? = null, newProject: NewProjectOption? = null, onSelect: (String?) -> Unit) {
     var query by remember { mutableStateOf("") }
     val matching = projects.filter { project ->
         listOf(project.name, project.path, nodes[project.nodeId]?.name.orEmpty()).any { it.contains(query.trim(), ignoreCase = true) }
@@ -159,6 +213,17 @@ fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, select
 
     MenuPopup(onDismiss = onDismiss) {
         MenuLabel(label)
+
+        if (newProject != null) {
+            MenuItem("New project", onClick = newProject.onChoose, checked = newProject.chosen, hint = newProject.nodeName, leading = MyIcon.FolderPlus)
+
+            if (newProject.chosen) {
+                NewProjectForm(newProject)
+            }
+
+            Hairline(Modifier.padding(vertical = Tokens.Space.S1))
+        }
+
         TextInput(query, { query = it }, label = "Search projects", placeholder = if (severalNodes) "Name, path or node" else "Name or path", showLabel = false)
         val scroll = rememberLazyListState()
 
@@ -185,7 +250,7 @@ fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, select
             }
         }
 
-        MenuItem(noProjectLabel, onClick = { onSelect(null) }, checked = selected == null, leading = MyIcon.Folder)
+        MenuItem(noProjectLabel, onClick = { onSelect(null) }, checked = selected == null && newProject?.chosen != true, leading = MyIcon.Folder)
 
         if (setUpFolder != null) {
             MenuItem("Set up ${projectName(setUpFolder)} as a project", onClick = onSetUp, leading = MyIcon.Plus)

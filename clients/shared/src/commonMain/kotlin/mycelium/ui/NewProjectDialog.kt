@@ -170,7 +170,15 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
             }
 
             if (cloning) {
-                TextInput(repository?.fullName ?: query, { repository = null; query = it }, label = "Search repositories", placeholder = "Search repositories", showLabel = false, leadingIcon = MyIcon.Search)
+                TextInput(
+                    repository?.fullName ?: query,
+                    { repository = null; query = it },
+                    label = "Search repositories",
+                    placeholder = "Search repositories",
+                    showLabel = false,
+                    leadingIcon = MyIcon.Search,
+                    trailing = { RefreshRepositoriesButton { store.act { found = store.api.repositories(query = query, refresh = true).repositories.take(RepositoryChoices) } } },
+                )
 
                 if (repository == null) {
                     for (option in found) {

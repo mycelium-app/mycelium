@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -14,15 +15,24 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import mycelium.api.Directories
 import mycelium.api.NodeSummary
 import mycelium.state.Store
+import mycelium.state.randomFolderName
+import kotlinx.coroutines.launch
 
 @Composable
 fun FolderBrowserDialog(store: Store, nodeId: String, nodeName: String, start: String, onChoose: (String) -> Unit, onDismiss: () -> Unit) {
@@ -32,6 +42,9 @@ fun FolderBrowserDialog(store: Store, nodeId: String, nodeName: String, start: S
     var failure by remember { mutableStateOf<String?>(null) }
     var fellBack by remember { mutableStateOf(false) }
     var attempts by remember { mutableStateOf(0) }
+    var naming by remember { mutableStateOf<String?>(null) }
+    val namingFocus = remember { FocusRequester() }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(nodeId, requested, attempts) {
         failure = null
@@ -61,6 +74,8 @@ fun FolderBrowserDialog(store: Store, nodeId: String, nodeName: String, start: S
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
                 Label(shown.path, Modifier.weight(1f), Tokens.Type.CodeSm, colors.textMuted)
 
+                MyButton({ naming = randomFolderName() }, text = "New folder", icon = MyIcon.FolderPlus, variant = ButtonVariant.Outline, size = ButtonSize.Sm, selected = naming != null)
+
                 shown.parent?.let { parent ->
                     MyButton({ requested = parent }, text = "Up", icon = MyIcon.ArrowUp, description = "Up to $parent", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
                 }
@@ -70,6 +85,45 @@ fun FolderBrowserDialog(store: Store, nodeId: String, nodeName: String, start: S
 
             Column(Modifier.heightIn(max = 320.dp)) {
                 LazyColumn(Modifier.scrollbar(scroll), state = scroll) {
+                    naming?.let { name ->
+                        item {
+                            Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(MyIcon.FolderPlus, colors.textMuted)
+
+                                TextInput(
+                                    name,
+                                    { naming = it },
+                                    label = "New folder name",
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .onPreviewKeyEvent { event ->
+                                            if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
+                                                naming = null
+                                                true
+                                            } else {
+                                                false
+                                            }
+                                        },
+                                    showLabel = false,
+                                    mono = true,
+                                    focusRequester = namingFocus,
+                                    onSubmit = {
+                                        scope.launch {
+                                            failure = attempt {
+                                                val made = store.createDirectory(nodeId, shown.path, name)
+
+                                                naming = null
+                                                requested = made.path
+                                            }
+                                        }
+                                    },
+                                )
+                            }
+
+                            LaunchedEffect(Unit) { namingFocus.requestFocus() }
+                        }
+                    }
+
                     items(shown.directories, key = { it.path }) { entry ->
                         MenuItem(
                             entry.name,

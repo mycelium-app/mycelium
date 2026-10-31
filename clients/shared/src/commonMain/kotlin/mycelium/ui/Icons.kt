@@ -122,6 +122,7 @@ enum class MyIcon(vararg val paths: String) {
     Agent(rect(3f, 11f, 18f, 10f, 2f), circle(12f, 5f, 2f), "M12 7v4M8 16h.01M16 16h.01"),
     Activity("M3 12h4l3-8 4 16 3-8h4"),
     Folder("M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"),
+    FolderPlus("M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z", "M12 10v6M9 13h6"),
     Forge("M3 7h18l-2 10H5Z", "M9 7V4h6v3"),
     Issue(circle(12f, 12f, 9f), circle(12f, 12f, 1.5f)),
     Gauge("M12 14l4-4", "M3.3 19a10 10 0 1 1 17.4 0"),

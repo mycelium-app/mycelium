@@ -188,6 +188,9 @@ class MyceliumApi(
         call("/nodes/$id/update") { client.post(it) { authorise() } }
     }
 
+    suspend fun createDirectory(nodeId: String, path: String, name: String): DirectoryEntry =
+        call("/nodes/$nodeId/directories") { client.post(it) { authorise(); json(CreateDirectoryRequest(path, name)) } }.body()
+
     suspend fun directories(nodeId: String, path: String): Directories =
         call("/nodes/$nodeId/directories") { client.get(it) { authorise(); parameter("path", path) } }.body()
 
@@ -466,10 +469,11 @@ class MyceliumApi(
         call("/apps/$uuid") { client.delete(it) { authorise() } }
     }
 
-    suspend fun repositories(forge: String? = null, organisation: String? = null, query: String = ""): Repositories =
+    suspend fun repositories(forge: String? = null, organisation: String? = null, query: String = "", refresh: Boolean = false): Repositories =
         call("/repositories") {
             client.get(it) {
                 authorise()
+                if (refresh) parameter("refresh", true)
                 if (forge != null) parameter("forge", forge)
                 if (organisation != null) parameter("organisation", organisation)
                 if (query.isNotBlank()) parameter("q", query.trim())

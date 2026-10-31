@@ -150,7 +150,22 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
-            ListSearch(query, { query = it }, "repositories")
+            ListSearch(
+                query,
+                { query = it },
+                "repositories",
+                trailing = {
+                    RefreshRepositoriesButton {
+                        store.act {
+                            store.refreshRepositories(refresh = true)
+
+                            if (filtering) {
+                                filtered = store.api.repositories(forgeId, organisation, query)
+                            }
+                        }
+                    }
+                },
+            )
 
             Box {
                 val chosen = connected.firstOrNull { it.id == forgeId }

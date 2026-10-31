@@ -512,6 +512,7 @@ fun TextInput(
     leadingIcon: MyIcon? = null,
     hint: String? = null,
     focusRequester: FocusRequester? = null,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     val colors = MyTheme.colors
     val source = remember { MutableInteractionSource() }
@@ -563,6 +564,8 @@ fun TextInput(
                     if (masked) {
                         MyButton({ revealed = !revealed }, text = if (revealed) "Hide" else "Show", description = "${if (revealed) "Hide" else "Show"} $label", size = ButtonSize.Sm, muted = true)
                     }
+
+                    trailing?.invoke()
                 }
             },
         )

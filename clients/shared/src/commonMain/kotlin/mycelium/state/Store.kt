@@ -28,6 +28,7 @@ import kotlin.time.TimeSource
 import mycelium.DefaultEventPageSize
 import mycelium.Platform
 import mycelium.api.Directories
+import mycelium.api.DirectoryEntry
 import mycelium.api.Experiments
 import mycelium.api.ApiException
 import mycelium.api.ControlPlaneUnreachable
@@ -436,9 +437,9 @@ class Store(
         mutableState.update { it.copy(projects = projects.associateBy { p -> p.id }) }
     }
 
-    suspend fun refreshRepositories() {
+    suspend fun refreshRepositories(refresh: Boolean = false) {
         val forges = api.forges()
-        val listing = api.repositories()
+        val listing = api.repositories(refresh = refresh)
 
         mutableState.update { it.copy(forges = forges, repositoryListing = listing) }
     }
@@ -563,6 +564,8 @@ class Store(
 
         return project
     }
+
+    suspend fun createDirectory(nodeId: String, path: String, name: String): DirectoryEntry = api.createDirectory(nodeId, path, name)
 
     suspend fun directories(nodeId: String, path: String): Directories = api.directories(nodeId, path)
 

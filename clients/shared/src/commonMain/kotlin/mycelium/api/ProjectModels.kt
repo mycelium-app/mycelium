@@ -63,7 +63,11 @@ data class CreateProjectRequest(
     val repository: String? = null,
     val path: String? = null,
     @SerialName("new_repository") val newRepository: Boolean = false,
+    @SerialName("new_folder") val newFolder: String? = null,
 )
+
+@Serializable
+data class CreateDirectoryRequest(val path: String, val name: String)
 
 @Serializable
 data class Worktree(

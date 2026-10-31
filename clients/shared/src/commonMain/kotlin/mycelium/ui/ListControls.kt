@@ -27,8 +27,14 @@ fun ListSearch(
     placeholder: String = "Search $things",
     mono: Boolean = false,
     onSubmit: (() -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
-    TextInput(value, onValueChange, label = "Search $things", placeholder = placeholder, showLabel = false, mono = mono, modifier = modifier.width(Tokens.Size.FormColumn), leadingIcon = MyIcon.Search, onSubmit = onSubmit)
+    TextInput(value, onValueChange, label = "Search $things", placeholder = placeholder, showLabel = false, mono = mono, modifier = modifier.width(Tokens.Size.FormColumn), leadingIcon = MyIcon.Search, onSubmit = onSubmit, trailing = trailing)
+}
+
+@Composable
+fun RefreshRepositoriesButton(onClick: () -> Unit) {
+    MyButton(onClick, icon = MyIcon.Refresh, description = "Refresh repositories", size = ButtonSize.Sm, muted = true)
 }
 
 @Composable

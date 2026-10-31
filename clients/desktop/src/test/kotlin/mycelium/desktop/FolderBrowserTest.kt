@@ -3,7 +3,10 @@ package mycelium.desktop
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.input.key.Key
@@ -29,6 +32,7 @@ import mycelium.ui.NewConversationScreen
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 private const val NodeId = "aaaaaaaa-0000-0000-0000-000000000001"
 
@@ -54,6 +58,8 @@ class FolderBrowserTest {
 
     private val posts = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
     private var directories: Pair<HttpStatusCode, String>? = null
+    private var refusal: String? = null
+    private val listed = java.util.Collections.synchronizedList(mutableListOf<String>())
 
     private fun store(): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -64,7 +70,13 @@ class FolderBrowserTest {
                 posts += path to String(request.body.toByteArray())
             }
 
+            if (path.endsWith("/directories") && request.method == HttpMethod.Get) {
+                listed += request.url.parameters["path"].orEmpty()
+            }
+
             when {
+                path.endsWith("/directories") && request.method == HttpMethod.Post && refusal != null -> respond("""{"error":"git_failed","message":"$refusal"}""", HttpStatusCode.Conflict, json)
+                path.endsWith("/directories") && request.method == HttpMethod.Post -> respond("""{"name":"quiet-otter","path":"/work/quiet-otter"}""", HttpStatusCode.Created, json)
                 path.endsWith("/directories") -> {
                     val requested = request.url.parameters["path"].orEmpty()
                     val answer = directories ?: (HttpStatusCode.OK to if (requested == "/work/backups") BackupsListing else RootListing)
@@ -102,6 +114,54 @@ class FolderBrowserTest {
 
         rule.waitUntil(5_000) { posts.isNotEmpty() }
         assertEquals("""{"node_id":"$NodeId","forge_id":"f1","repository":"acme-org/backups","path":"/work/backups"}""", posts.single().second)
+    }
+
+    private fun browseFromTheExistingFolderDialog(store: Store) {
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ExistingFolderDialog(store, state, backups, onDismiss = {}) } }
+
+        rule.onNodeWithContentDescription("Browse folders on laptop").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("notes").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun new_folder_offers_a_random_two_word_name_and_enter_creates_the_folder_on_the_node_and_opens_it() {
+        val store = store()
+        browseFromTheExistingFolderDialog(store)
+
+        rule.onNodeWithText("New folder").performClick()
+        val offered = rule.onNodeWithContentDescription("New folder name").fetchSemanticsNode().config[SemanticsProperties.EditableText].text
+        assertTrue(Regex("[a-z]+-[a-z]+").matches(offered), offered)
+        rule.onNodeWithContentDescription("New folder name").performTextReplacement("quiet-otter")
+        rule.onNodeWithContentDescription("New folder name").performKeyInput { pressKey(Key.Enter) }
+
+        rule.waitUntil(5_000) { "/work/quiet-otter" in listed }
+        assertEquals("""{"path":"/work","name":"quiet-otter"}""", posts.single().second)
+        assertEquals(0, rule.onAllNodesWithContentDescription("New folder name").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun escape_cancels_the_new_folder_name_without_creating_anything() {
+        val store = store()
+        browseFromTheExistingFolderDialog(store)
+
+        rule.onNodeWithText("New folder").performClick()
+        rule.onNodeWithContentDescription("New folder name").performKeyInput { pressKey(Key.Escape) }
+
+        assertEquals(0, rule.onAllNodesWithContentDescription("New folder name").fetchSemanticsNodes().size)
+        assertEquals(emptyList(), posts)
+    }
+
+    @Test
+    fun a_name_the_node_refuses_is_shown_and_the_name_stays_for_editing() {
+        val store = store()
+        browseFromTheExistingFolderDialog(store)
+        refusal = "quiet-otter already exists in /work. Choose another name."
+
+        rule.onNodeWithText("New folder").performClick()
+        rule.onNodeWithContentDescription("New folder name").performKeyInput { pressKey(Key.Enter) }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("quiet-otter already exists in /work. Choose another name.").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("New folder name").assertExists()
     }
 
     @Test
