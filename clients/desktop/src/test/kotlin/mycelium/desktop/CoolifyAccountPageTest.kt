@@ -1,5 +1,6 @@
 package mycelium.desktop
 
+import java.util.concurrent.CopyOnWriteArrayList
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -28,7 +29,7 @@ class CoolifyAccountPageTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val requests = mutableListOf<Pair<String, String>>()
+    private val requests = CopyOnWriteArrayList<Pair<String, String>>()
     private var opened = 0
     private var removed = false
 
