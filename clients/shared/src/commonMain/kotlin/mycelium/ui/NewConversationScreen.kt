@@ -92,7 +92,8 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var draft by remember { mutableStateOf(NewProjectDraft(randomFolderName(), forgeId = platform?.loadPreference(NewProjectForgePreference))) }
     var forges by remember { mutableStateOf<List<Forge>>(emptyList()) }
     var projectMenuOpen by remember { mutableStateOf(false) }
-    var placeMenuOpen by remember { mutableStateOf(false) }
+    var runOnMenuOpen by remember { mutableStateOf(false) }
+    var workInMenuOpen by remember { mutableStateOf(false) }
     var settingUpProject by remember { mutableStateOf(false) }
     var browsing by remember { mutableStateOf(false) }
     var worktree by remember { mutableStateOf(false) }
@@ -119,8 +120,8 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val project = if (withoutProject || newProjectChosen) null else state.projects[chosenProject] ?: recent.firstOrNull()
     val creatingProject = !withoutProject && project == null && (newProjectChosen || cwd.isBlank())
     val newProjectName = draft.name.trim()
-    LaunchedEffect(placeMenuOpen, anyNode, state.nodes, project?.id) {
-        if ((placeMenuOpen || anyNode) && nodes.isNotEmpty()) {
+    LaunchedEffect(runOnMenuOpen, workInMenuOpen, anyNode, state.nodes, project?.id) {
+        if ((runOnMenuOpen || workInMenuOpen || anyNode) && nodes.isNotEmpty()) {
             anyNodePick = null
             anyNodePick = runCatching { store.api.anyNodePick(project?.id) }.getOrNull()
         }
@@ -384,92 +385,105 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                     else -> "existing checkout"
                                 }
 
-                                Box {
-                                    MyButton(
-                                        { placeMenuOpen = true },
-                                        text = "${if (anyNode) "Any node" else placed.name} · $where",
-                                        icon = if (anyNode) MyIcon.Server else nodeIcon(placed),
-                                        description = "Place: ${if (anyNode) "Any node" else placed.name}, $summary",
-                                        muted = true,
-                                        trailingIcon = MyIcon.ChevronDown,
-                                    )
+                                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                                    Box {
+                                        MyButton(
+                                            { runOnMenuOpen = true },
+                                            text = "Run on ${if (anyNode) "any node" else placed.name}",
+                                            icon = if (anyNode) MyIcon.Server else nodeIcon(placed),
+                                            description = "Run on: ${if (anyNode) "Any node" else placed.name}",
+                                            muted = true,
+                                            trailingIcon = MyIcon.ChevronDown,
+                                        )
 
-                                    if (placeMenuOpen) {
-                                        MenuPopup(onDismiss = { placeMenuOpen = false }, width = PlaceMenuWidth) {
-                                            MenuLabel("Run on")
-
-                                            MenuItem(
-                                                "Any node",
-                                                onClick = { setupJob?.cancel(); sendAfterSetup = false; setup = null; anyNode = true; placeMenuOpen = false },
-                                                checked = anyNode,
-                                                hint = anyNodePick?.let { "${it.name} now, most free" },
-                                                leading = MyIcon.Server,
-                                            )
-
-                                            for (option in nodes) {
+                                        if (runOnMenuOpen) {
+                                            MenuPopup(onDismiss = { runOnMenuOpen = false }, width = PlaceMenuWidth) {
                                                 MenuItem(
-                                                    option.name,
-                                                    onClick = {
-                                                        val held = project?.let { checkoutOn(state, it, option.id) }
-
-                                                        setupJob?.cancel()
-                                                        sendAfterSetup = false
-                                                        setup = null
-                                                        placeMenuOpen = false
-
-                                                        when {
-                                                            project == null -> Unit
-                                                            held != null -> {
-                                                                chosenProject = held.id
-                                                                withoutProject = false
-                                                            }
-                                                            cloneable(project) -> startSetup(project, option)
-                                                            else -> {
-                                                                withoutProject = true
-                                                                worktree = false
-                                                            }
-                                                        }
-
-                                                        anyNode = false
-                                                        nodeId = option.id
-                                                    },
-                                                    checked = !anyNode && option.id == placed.id,
-                                                    hint = project?.let { held -> checkoutOn(state, held, option.id)?.path ?: if (cloneable(held)) "Not set up yet, clones ${held.name}" else "No checkout, choose a folder" },
-                                                    leading = nodeIcon(option),
+                                                    "Any node",
+                                                    onClick = { setupJob?.cancel(); sendAfterSetup = false; setup = null; anyNode = true; runOnMenuOpen = false },
+                                                    checked = anyNode,
+                                                    hint = anyNodePick?.let { "${it.name} now, most free" },
+                                                    leading = MyIcon.Server,
                                                 )
-                                            }
 
-                                            Hairline(Modifier.padding(vertical = Tokens.Space.S1))
+                                                for (option in nodes) {
+                                                    MenuItem(
+                                                        option.name,
+                                                        onClick = {
+                                                            val held = project?.let { checkoutOn(state, it, option.id) }
 
-                                            MenuItem("Load balancing", onClick = { placeMenuOpen = false; store.openScreen("settings/agents") }, leading = MyIcon.Settings)
+                                                            setupJob?.cancel()
+                                                            sendAfterSetup = false
+                                                            setup = null
+                                                            runOnMenuOpen = false
 
-                                            Hairline(Modifier.padding(vertical = Tokens.Space.S1))
+                                                            when {
+                                                                project == null -> Unit
+                                                                held != null -> {
+                                                                    chosenProject = held.id
+                                                                    withoutProject = false
+                                                                }
+                                                                cloneable(project) -> startSetup(project, option)
+                                                                else -> {
+                                                                    withoutProject = true
+                                                                    worktree = false
+                                                                }
+                                                            }
 
-                                            if (project != null) {
-                                                MenuLabel("Work in")
-                                                MenuItem("Existing checkout", onClick = { worktree = false }, checked = !worktree, leading = MyIcon.Folder)
-                                                MenuItem("New worktree", onClick = { worktree = true }, checked = worktree, leading = MyIcon.Branch)
-
-                                                if (worktree) {
-                                                    TextInput(
-                                                        branch,
-                                                        { branch = it },
-                                                        label = "New branch",
-                                                        modifier = Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
-                                                        placeholder = "feature/restore-copy",
-                                                        mono = true,
-                                                        onSubmit = { placeMenuOpen = false; create() },
-                                                        hint = worktreeHint(project, branch, state.conversations.values),
+                                                            anyNode = false
+                                                            nodeId = option.id
+                                                        },
+                                                        checked = !anyNode && option.id == placed.id,
+                                                        hint = project?.let { held -> checkoutOn(state, held, option.id)?.path ?: if (cloneable(held)) "Not set up yet, clones ${held.name}" else "No checkout, choose a folder" },
+                                                        leading = nodeIcon(option),
                                                     )
                                                 }
-                                            } else if (!newProjectChosen) {
-                                                Row(
-                                                    Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
-                                                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-                                                    verticalAlignment = Alignment.Bottom,
-                                                ) {
-                                                    TextInput(cwd, { cwd = it }, label = "Folder", modifier = Modifier.weight(1f), placeholder = "/home/you/project", mono = true, onSubmit = { placeMenuOpen = false; create() })
-                                                    MyButton({ placeMenuOpen = false; browsing = true }, text = "Browse", icon = MyIcon.Folder, description = "Browse folders on ${placed.name}", variant = ButtonVariant.Outline)
+
+                                                Hairline(Modifier.padding(vertical = Tokens.Space.S1))
+
+                                                MenuItem("Load balancing", onClick = { runOnMenuOpen = false; store.openScreen("settings/agents") }, leading = MyIcon.Settings)
+                                            }
+                                        }
+                                    }
+
+                                    Box {
+                                        MyButton(
+                                            { workInMenuOpen = true },
+                                            text = where,
+                                            icon = if (worktree) MyIcon.Branch else MyIcon.Folder,
+                                            description = "Work in: $summary",
+                                            muted = true,
+                                            trailingIcon = MyIcon.ChevronDown,
+                                        )
+
+                                        if (workInMenuOpen) {
+                                            MenuPopup(onDismiss = { workInMenuOpen = false }, width = PlaceMenuWidth) {
+                                                if (project != null) {
+                                                    MenuLabel("Work in")
+                                                    MenuItem("Existing checkout", onClick = { worktree = false }, checked = !worktree, leading = MyIcon.Folder)
+                                                    MenuItem("New worktree", onClick = { worktree = true }, checked = worktree, leading = MyIcon.Branch)
+
+                                                    if (worktree) {
+                                                        TextInput(
+                                                            branch,
+                                                            { branch = it },
+                                                            label = "New branch",
+                                                            modifier = Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
+                                                            placeholder = "feature/restore-copy",
+                                                            mono = true,
+                                                            onSubmit = { workInMenuOpen = false; create() },
+                                                            hint = worktreeHint(project, branch, state.conversations.values),
+                                                        )
+                                                    }
+                                                } else if (!newProjectChosen) {
+                                                    Row(
+                                                        Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
+                                                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                                                        verticalAlignment = Alignment.Bottom,
+                                                    ) {
+                                                        TextInput(cwd, { cwd = it }, label = "Folder", modifier = Modifier.weight(1f), placeholder = "/home/you/project", mono = true, onSubmit = { workInMenuOpen = false; create() })
+                                                        MyButton({ workInMenuOpen = false; browsing = true }, text = "Browse", icon = MyIcon.Folder, description = "Browse folders on ${placed.name}", variant = ButtonVariant.Outline)
+                                                    }
                                                 }
                                             }
                                         }

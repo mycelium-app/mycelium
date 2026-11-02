@@ -170,7 +170,7 @@ class FolderBrowserTest {
         var created: Conversation? = null
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = { created = it }) } }
 
-        rule.onNodeWithContentDescription("Place: ", substring = true).performClick()
+        rule.onNodeWithContentDescription("Work in: ", substring = true).performClick()
         rule.onNodeWithContentDescription("Browse folders on laptop").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithText("notes").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Choose this folder").performClick()
@@ -186,7 +186,7 @@ class FolderBrowserTest {
         var created: Conversation? = null
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = { created = it }) } }
 
-        rule.onNodeWithContentDescription("Place: ", substring = true).performClick()
+        rule.onNodeWithContentDescription("Work in: ", substring = true).performClick()
         rule.onNodeWithContentDescription("Folder").performTextInput("/work/midden")
         rule.onNodeWithContentDescription("Folder").performKeyInput { pressKey(Key.Enter) }
 
@@ -200,7 +200,7 @@ class FolderBrowserTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = {}) } }
 
-        rule.onNodeWithContentDescription("Place: ", substring = true).performClick()
+        rule.onNodeWithContentDescription("Work in: ", substring = true).performClick()
         rule.onNodeWithContentDescription("Browse folders on laptop").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Update laptop to browse its folders, or enter the path.").fetchSemanticsNodes().isNotEmpty() }

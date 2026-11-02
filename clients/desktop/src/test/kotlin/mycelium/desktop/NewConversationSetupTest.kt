@@ -113,11 +113,11 @@ class NewConversationSetupTest {
     fun aNodeWithoutTheProjectOffersToCloneItAndStartsThereOnceSetUp() {
         show(store(HttpStatusCode.Created, HarbourOnWillow))
 
-        rule.onNodeWithContentDescription("Place: atlas, existing checkout").performClick()
+        rule.onNodeWithContentDescription("Run on: atlas").performClick()
         rule.onNodeWithText("Not set up yet, clones harbour").assertExists()
         rule.onNodeWithText("willow").performClick()
 
-        rule.waitUntil(5_000) { runCatching { rule.onNodeWithContentDescription("Place: willow, existing checkout").assertExists() }.isSuccess }
+        rule.waitUntil(5_000) { runCatching { rule.onNodeWithContentDescription("Run on: willow").assertExists() }.isSuccess }
         rule.onRoot().performKeyInput { pressKey(Key.Escape) }
         rule.onNodeWithContentDescription("Message").performTextInput("Restore the copy")
         rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }
@@ -131,7 +131,7 @@ class NewConversationSetupTest {
     fun aFailedSetupSaysWhatWentWrongAndOffersRetryWithWaysToRecover() {
         show(store(HttpStatusCode.BadRequest, """{"error":"clone_failed","message":"Could not clone example-org/harbour. Check the forge token."}"""))
 
-        rule.onNodeWithContentDescription("Place: atlas, existing checkout").performClick()
+        rule.onNodeWithContentDescription("Run on: atlas").performClick()
         rule.onNodeWithText("willow").performClick()
 
         rule.waitUntil(5_000) { runCatching { rule.onNodeWithText("Setup failed on willow").assertExists() }.isSuccess }
@@ -146,7 +146,7 @@ class NewConversationSetupTest {
     fun choosingAnyNodeStartsWithoutAnExplicitNode() {
         show(store(HttpStatusCode.Created, HarbourOnWillow))
 
-        rule.onNodeWithContentDescription("Place: atlas, existing checkout").performClick()
+        rule.onNodeWithContentDescription("Run on: atlas").performClick()
         rule.waitUntil(5_000) { previewProjects.isNotEmpty() }
         assertEquals("p1", previewProjects.last())
         rule.onNodeWithText("Any node").performClick()
@@ -159,12 +159,26 @@ class NewConversationSetupTest {
     }
 
     @Test
+    fun theNodeAndTheWorktreeAreChosenIndependentlyOnTheSplitPlaceStrip() {
+        show(store(HttpStatusCode.Created, HarbourOnWillow))
+
+        rule.onNodeWithContentDescription("Run on: atlas").performClick()
+        rule.onNodeWithText("willow").performClick()
+        rule.waitUntil(5_000) { runCatching { rule.onNodeWithContentDescription("Run on: willow").assertExists() }.isSuccess }
+        rule.onNodeWithContentDescription("Work in: existing checkout").performClick()
+        rule.onNodeWithText("New worktree").performClick()
+
+        rule.onNodeWithContentDescription("Run on: willow").assertExists()
+        rule.onNodeWithContentDescription("Work in: new worktree").assertExists()
+    }
+
+    @Test
     fun sendingDuringSetupWaitsThenStartsOnTheNewCheckout() {
         val gate = CompletableDeferred<Unit>()
         checkoutGate = gate
         show(store(HttpStatusCode.Created, HarbourOnWillow))
 
-        rule.onNodeWithContentDescription("Place: atlas, existing checkout").performClick()
+        rule.onNodeWithContentDescription("Run on: atlas").performClick()
         rule.onNodeWithText("willow").performClick()
         rule.waitUntil(5_000) { checkouts.isNotEmpty() }
         rule.onNodeWithText("Cloning harbour on willow").assertExists()
@@ -186,7 +200,7 @@ class NewConversationSetupTest {
         checkoutGate = gate
         show(store(HttpStatusCode.Created, HarbourOnWillow))
 
-        rule.onNodeWithContentDescription("Place: atlas, existing checkout").performClick()
+        rule.onNodeWithContentDescription("Run on: atlas").performClick()
         rule.onNodeWithText("willow").performClick()
         rule.waitUntil(5_000) { checkouts.isNotEmpty() }
         rule.onNodeWithContentDescription("Message").performTextInput("Keep this draft")
@@ -194,7 +208,7 @@ class NewConversationSetupTest {
         rule.onNodeWithText("Stop waiting").performClick()
         gate.complete(Unit)
 
-        rule.onNodeWithContentDescription("Place: atlas, existing checkout").assertExists()
+        rule.onNodeWithContentDescription("Run on: atlas").assertExists()
         rule.onNodeWithText("Keep this draft").assertExists()
         rule.runOnIdle { assertTrue(bodies.isEmpty()) }
     }
@@ -203,7 +217,7 @@ class NewConversationSetupTest {
     fun aFailedSetupDoesNotStartOnTheOriginalNodeAndCanBeRetried() {
         show(store(HttpStatusCode.BadRequest, """{"error":"clone_failed","message":"Check the forge sign-in."}"""))
 
-        rule.onNodeWithContentDescription("Place: atlas, existing checkout").performClick()
+        rule.onNodeWithContentDescription("Run on: atlas").performClick()
         rule.onNodeWithText("willow").performClick()
         rule.waitUntil(5_000) { runCatching { rule.onNodeWithText("Setup failed on willow").assertExists() }.isSuccess }
         rule.onNodeWithContentDescription("Message").performTextInput("Keep this draft")

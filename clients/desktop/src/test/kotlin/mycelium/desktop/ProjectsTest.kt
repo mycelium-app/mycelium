@@ -452,7 +452,7 @@ class ProjectsTest {
         var created: Conversation? = null
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = { created = it }) } }
 
-        rule.onNodeWithContentDescription("Place: ", substring = true).performClick()
+        rule.onNodeWithContentDescription("Work in: ", substring = true).performClick()
         rule.onNodeWithContentDescription("Folder").performTextInput("/work/midden")
         rule.onNodeWithContentDescription("Folder").performKeyInput { pressKey(Key.Enter) }
 
@@ -466,7 +466,7 @@ class ProjectsTest {
         var created: Conversation? = null
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = { created = it }) } }
 
-        rule.onNodeWithContentDescription("Place: ", substring = true).performClick()
+        rule.onNodeWithContentDescription("Work in: ", substring = true).performClick()
         rule.onNodeWithContentDescription("Folder").performTextInput("/work/midden")
         rule.onNodeWithContentDescription("Message").performTextInput("Fix the build")
         rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }
