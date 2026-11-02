@@ -86,6 +86,8 @@ import mycelium.DictationProblem
 import mycelium.state.Choice
 import mycelium.state.PlanEntry
 import mycelium.state.ForgeReference
+import mycelium.state.wordEndAfter
+import mycelium.state.wordStartBefore
 import mycelium.state.Annotation
 import mycelium.state.SessionOptions
 import mycelium.state.annotationLabel
@@ -700,17 +702,17 @@ fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, s
 
                 if (event.type == KeyEventType.KeyDown && event.key == Key.Backspace && (event.isCtrlPressed || event.isAltPressed) && text.selection.collapsed) {
                     val end = text.selection.end
-                    var start = end
-
-                    while (start > 0 && text.text[start - 1].isWhitespace()) start--
-
-                    if (start > 0 && isPasteMarker(text.text[start - 1])) {
-                        start--
-                    } else {
-                        while (start > 0 && !text.text[start - 1].isWhitespace() && !isPasteMarker(text.text[start - 1])) start--
-                    }
+                    val start = wordStartBefore(text.text, end)
 
                     onTextChange(TextFieldValue(text.text.removeRange(start, end), TextRange(start)))
+                    return@onPreviewKeyEvent true
+                }
+
+                if (event.type == KeyEventType.KeyDown && (event.key == Key.DirectionLeft || event.key == Key.DirectionRight) && (event.isCtrlPressed || event.isAltPressed)) {
+                    val moved = if (event.key == Key.DirectionLeft) wordStartBefore(text.text, text.selection.end) else wordEndAfter(text.text, text.selection.end)
+                    val anchor = if (event.isShiftPressed) text.selection.start else moved
+
+                    onTextChange(text.copy(selection = TextRange(anchor, moved)))
                     return@onPreviewKeyEvent true
                 }
 

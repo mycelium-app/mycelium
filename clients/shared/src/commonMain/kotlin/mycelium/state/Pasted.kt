@@ -79,6 +79,34 @@ fun pasteInsertion(before: String, after: String): IntRange? {
     return prefix until end
 }
 
+fun wordStartBefore(text: String, offset: Int): Int {
+    var start = offset
+
+    while (start > 0 && text[start - 1].isWhitespace()) start--
+
+    if (start > 0 && isPasteMarker(text[start - 1])) {
+        return start - 1
+    }
+
+    while (start > 0 && !text[start - 1].isWhitespace() && !isPasteMarker(text[start - 1])) start--
+
+    return start
+}
+
+fun wordEndAfter(text: String, offset: Int): Int {
+    var end = offset
+
+    while (end < text.length && text[end].isWhitespace()) end++
+
+    if (end < text.length && isPasteMarker(text[end])) {
+        return end + 1
+    }
+
+    while (end < text.length && !text[end].isWhitespace() && !isPasteMarker(text[end])) end++
+
+    return end
+}
+
 fun expandedPastes(text: String, pastes: Map<Char, String>, citations: Map<Char, String> = emptyMap(), references: Map<Char, ForgeReference> = emptyMap()): String =
     text.map { char -> if (isPasteMarker(char)) pastes[char] ?: citations[char] ?: references[char]?.let(::referenceText) ?: char.toString() else char.toString() }.joinToString("")
 
