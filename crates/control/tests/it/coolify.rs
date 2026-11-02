@@ -15,6 +15,7 @@ const SECRET_VALUE: &str = "hunter2-do-not-leak";
 struct FakeCoolify {
     created: Mutex<Vec<Value>>,
     envs: Mutex<Vec<Value>>,
+    deleted: Mutex<Vec<String>>,
 }
 
 fn authorised(headers: &HeaderMap) -> bool {
@@ -71,6 +72,12 @@ async fn create_postgresql(State(fake): State<Arc<FakeCoolify>>, Json(body): Jso
     fake.created.lock().unwrap().push(body);
 
     (StatusCode::CREATED, Json(json!({"uuid": "db1", "internal_db_url": "postgres://postgres:pw@db1:5432/postgres"}))).into_response()
+}
+
+async fn remove_database(State(fake): State<Arc<FakeCoolify>>, Path(uuid): Path<String>) -> Json<Value> {
+    fake.deleted.lock().unwrap().push(uuid);
+
+    Json(json!({"message": "Database deletion request queued."}))
 }
 
 async fn storages() -> Json<Value> {
@@ -134,6 +141,7 @@ async fn fake_coolify() -> (String, Arc<FakeCoolify>) {
         .route("/api/v1/applications", get(applications))
         .route("/api/v1/applications/public", post(create_public))
         .route("/api/v1/databases/postgresql", post(create_postgresql))
+        .route("/api/v1/databases/{uuid}", delete(remove_database))
         .route("/api/v1/applications/{uuid}/storages", get(storages))
         .route("/api/v1/applications/{uuid}", get(one_application))
         .route("/api/v1/applications/{uuid}/logs", get(runtime_logs))
@@ -238,6 +246,44 @@ async fn creating_an_app_asks_first_and_records_the_conversation_that_built_it()
     assert!(text(&reply).contains("\"deployment_uuid\":\"d1\""), "{reply}");
     assert_eq!(created[0]["domains"], "https://notes.apps.example.com");
     assert_eq!(apps["apps"][0]["conversation_id"], json!(conversation.to_string()));
+}
+
+#[tokio::test]
+async fn approving_an_api_write_for_the_session_covers_only_that_method_and_resource_and_never_a_delete() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, fake) = fake_coolify().await;
+    add_coolify(&server, &base).await;
+    let conversation = server.node_conversation(&node.token).await;
+    let create_database = || mcp("api", json!({"method": "POST", "path": "databases/postgresql", "body": {"name": "db"}}));
+    let delete_database = || mcp("api", json!({"method": "DELETE", "path": "databases/db1"}));
+
+    let (_, ()) = tokio::join!(server.agent_mcp(&node.token, conversation, create_database()), async {
+        let request = server.open_request(conversation).await;
+
+        server.answer(conversation, &request, "always").await;
+    });
+    let unasked = tokio::time::timeout(std::time::Duration::from_secs(5), server.agent_mcp(&node.token, conversation, create_database())).await;
+
+    let (_, ()) = tokio::join!(server.agent_mcp(&node.token, conversation, mcp("api", json!({"method": "POST", "path": "applications/public", "body": {}}))), async {
+        let request = server.open_request(conversation).await;
+
+        server.answer(conversation, &request, "deny").await;
+    });
+    let (_, ()) = tokio::join!(server.agent_mcp(&node.token, conversation, delete_database()), async {
+        let request = server.open_request(conversation).await;
+
+        server.answer(conversation, &request, "always").await;
+    });
+    let (_, ()) = tokio::join!(server.agent_mcp(&node.token, conversation, delete_database()), async {
+        let request = server.open_request(conversation).await;
+
+        server.answer(conversation, &request, "deny").await;
+    });
+
+    assert!(unasked.is_ok());
+    assert_eq!(fake.created.lock().unwrap().len(), 2);
+    assert_eq!(fake.deleted.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]

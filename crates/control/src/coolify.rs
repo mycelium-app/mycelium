@@ -179,6 +179,14 @@ pub fn api_reads(input: &Value) -> bool {
     input["method"].as_str().is_some_and(|method| method.eq_ignore_ascii_case("GET"))
 }
 
+pub fn api_resource(input: &Value) -> Option<String> {
+    let method = input["method"].as_str()?.to_ascii_uppercase();
+    let path = input["path"].as_str()?.trim().trim_start_matches('/');
+    let resource = path.split(['?', '/']).next().unwrap_or_default();
+
+    Some(format!("{method} {resource}"))
+}
+
 pub fn approval_input(tool: &str, input: &Value) -> Value {
     let mut shown = input.clone();
 

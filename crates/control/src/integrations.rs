@@ -1,5 +1,5 @@
 use crate::chat_tool_servers::{ServerRow, StoredTool};
-use crate::integration_policy::{self, Effective};
+use crate::integration_policy::{self, Effective, Source};
 use mycelium_proto::api::{ApprovalPreset, IntegrationStatus, ToolKind};
 use crate::{actual, caldav, coolify, discord, email, freeagent, lastfm, paperless, stoat, tandoor, zulip};
 use crate::state::AppState;
@@ -190,6 +190,22 @@ impl Integration {
     }
 }
 
+pub enum Grant {
+    Whole,
+    Scoped(String),
+    Never,
+}
+
+impl Grant {
+    pub fn key(&self, tool: &str) -> Option<String> {
+        match self {
+            Grant::Whole => Some(tool.to_string()),
+            Grant::Scoped(scope) => Some(format!("{tool} {scope}")),
+            Grant::Never => None,
+        }
+    }
+}
+
 impl ServerRow {
     pub fn integration(&self) -> Option<Integration> {
         Integration::parse(&self.kind)
@@ -218,8 +234,25 @@ impl ServerRow {
             (Some(Integration::Coolify), "api") if coolify::api_reads(input) => ToolKind::Read,
             _ => self.tool_kind(tool),
         };
+        let mut effective = integration_policy::effective(&self.policy.0, tool, kind);
+        let scoped_grant = self.grant(tool, input).key(tool).filter(|key| key != tool).and_then(|key| self.policy.0.ask.tools.get(&key).copied());
 
-        integration_policy::effective(&self.policy.0, tool, kind)
+        if scoped_grant == Some(false) && effective.ask_source != Source::Tool {
+            effective.ask = false;
+            effective.ask_source = Source::Tool;
+        }
+
+        effective
+    }
+
+    pub fn grant(&self, tool: &str, input: &Value) -> Grant {
+        match (self.integration(), tool) {
+            (Some(Integration::Coolify), "api") => match coolify::api_resource(input) {
+                Some(resource) if !resource.starts_with("DELETE ") => Grant::Scoped(resource),
+                _ => Grant::Never,
+            },
+            _ => Grant::Whole,
+        }
     }
 
     pub fn status(&self) -> IntegrationStatus {
