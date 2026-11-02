@@ -69,7 +69,7 @@ internal fun DeleteAppDialog(name: String, address: String?, repository: String?
 }
 
 @Composable
-fun AppsScreen(store: Store, state: AppState, platform: Platform, onOpenApp: (String) -> Unit, onOpenConversation: (String) -> Unit, onNewConversation: () -> Unit) {
+fun AppsScreen(store: Store, state: AppState, platform: Platform, onOpenApp: (String) -> Unit, onViewApp: (String) -> Unit, onOpenConversation: (String) -> Unit, onNewConversation: () -> Unit) {
     val muted = MyTheme.colors.textMuted
     var query by remember { mutableStateOf("") }
     var deleting by remember { mutableStateOf<AppSummary?>(null) }
@@ -129,7 +129,7 @@ fun AppsScreen(store: Store, state: AppState, platform: Platform, onOpenApp: (St
                                 1 -> TableCell.Slot(measureAs = "Deploying", extra = 24.dp) { AppStatus(app.status) }
                                 2 -> TableCell.Slot(measureAs = app.address?.let(::addressLabel) ?: "None") {
                                     app.address?.let { address ->
-                                        MyButton({ platform.openUrl(addressUrl(address)) }, text = addressLabel(address), description = "Open ${addressLabel(address)}", size = ButtonSize.Sm, muted = true)
+                                        MyButton({ onViewApp(app.uuid) }, text = addressLabel(address), description = "Open ${addressLabel(address)}", size = ButtonSize.Sm, muted = true)
                                     }
                                 }
                                 3 -> TableCell.Text(app.lastDeployAt?.let(::ago) ?: "Never", color = muted)
@@ -145,7 +145,7 @@ fun AppsScreen(store: Store, state: AppState, platform: Platform, onOpenApp: (St
                                     }
                                 }
                                 else -> TableCell.Slot(measureAs = "") {
-                                    AppRowMenu(store, app, platform, onDelete = { deleting = app })
+                                    AppRowMenu(store, app, onViewApp, onDelete = { deleting = app })
                                 }
                             }
                         },
@@ -172,10 +172,10 @@ fun AppsScreen(store: Store, state: AppState, platform: Platform, onOpenApp: (St
 }
 
 @Composable
-private fun AppRowMenu(store: Store, app: AppSummary, platform: Platform, onDelete: () -> Unit) {
+private fun AppRowMenu(store: Store, app: AppSummary, onView: (String) -> Unit, onDelete: () -> Unit) {
     RowMenu(app.name) { close ->
         app.address?.let { address ->
-            MenuItem("Open", onClick = { close(); platform.openUrl(addressUrl(address)) }, leading = MyIcon.Globe)
+            MenuItem("Open", onClick = { close(); onView(app.uuid) }, leading = MyIcon.Globe)
         }
 
         MenuItem("Redeploy", onClick = { close(); store.act { store.api.redeployApp(app.uuid); store.refreshApps() } }, leading = MyIcon.Refresh)

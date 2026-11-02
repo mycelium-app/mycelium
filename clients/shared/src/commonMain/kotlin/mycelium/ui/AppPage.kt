@@ -55,8 +55,10 @@ fun AppPage(
     startDeployment: String?,
     onBack: () -> Unit,
     onOpenConversation: (String) -> Unit,
+    startViewing: Boolean = false,
 ) {
     val colors = MyTheme.colors
+    var viewing by remember(uuid, startViewing) { mutableStateOf(startViewing) }
     var app by remember(uuid) { mutableStateOf<AppDetail?>(null) }
     var loadFailure by remember(uuid) { mutableStateOf<String?>(null) }
     var deployments by remember(uuid) { mutableStateOf<List<AppDeployment>>(emptyList()) }
@@ -92,6 +94,25 @@ fun AppPage(
     }
 
     val current = app
+    val viewedAddress = current?.address?.takeIf { viewing }
+
+    if (current != null && viewedAddress != null) {
+        val url = addressUrl(viewedAddress)
+
+        Column(Modifier.fillMaxSize()) {
+            Bar {
+                BackButton(current.name, { viewing = false })
+                Icon(MyIcon.Globe, colors.textMuted, Tokens.Size.IconSm)
+                Label(current.name, Modifier.semantics { heading() }, Tokens.Type.UiStrong, maxLines = 1)
+                Label(addressLabel(viewedAddress), Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+                MyButton({ platform.openUrl(url) }, icon = MyIcon.Globe, description = "Open in browser", muted = true)
+            }
+
+            platform.WebContent(url, null, Modifier.weight(1f).fillMaxWidth())
+        }
+
+        return
+    }
 
     Column(Modifier.fillMaxSize()) {
         Bar {
@@ -106,7 +127,7 @@ fun AppPage(
 
                 if (!LocalTouch.current) {
                     Box(Modifier.weight(1f))
-                    AppActions(current, platform, ::act, store)
+                    AppActions(current, { viewing = true }, ::act, store)
                 }
             }
         }
@@ -117,7 +138,7 @@ fun AppPage(
 
         if (LocalTouch.current) {
             Box(Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2)) {
-                AppActions(current, platform, ::act, store)
+                AppActions(current, { viewing = true }, ::act, store)
             }
         }
 
@@ -132,7 +153,7 @@ fun AppPage(
         } else {
             Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
                 when (tab) {
-                    AppOverviewTab -> AppOverview(current, state, platform, deployments, onOpenConversation, onAllDeployments = { tab = AppDeploymentsTab }, onDelete = { deleting = true }, onOpenLogs = { logsFor = it; tab = AppLogsTab })
+                    AppOverviewTab -> AppOverview(current, state, { viewing = true }, deployments, onOpenConversation, onAllDeployments = { tab = AppDeploymentsTab }, onDelete = { deleting = true }, onOpenLogs = { logsFor = it; tab = AppLogsTab })
                     AppDeploymentsTab -> {
                         Label("Deployments", Modifier.semantics { heading() }, Tokens.Type.MetaStrong, colors.textMuted)
 
@@ -162,10 +183,10 @@ fun AppPage(
 }
 
 @Composable
-private fun AppActions(app: AppDetail, platform: Platform, act: (suspend () -> Unit) -> Unit, store: Store) {
+private fun AppActions(app: AppDetail, onView: () -> Unit, act: (suspend () -> Unit) -> Unit, store: Store) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2), itemVerticalAlignment = Alignment.CenterVertically) {
         app.address?.let { address ->
-            MyButton({ platform.openUrl(addressUrl(address)) }, text = "Open", description = "Open ${addressLabel(address)}", variant = ButtonVariant.Outline)
+            MyButton(onView, text = "Open", description = "Open ${addressLabel(address)}", variant = ButtonVariant.Outline)
         }
 
         MyButton({ act { store.api.redeployApp(app.uuid) } }, text = "Redeploy", variant = ButtonVariant.Outline)
@@ -177,7 +198,7 @@ private fun AppActions(app: AppDetail, platform: Platform, act: (suspend () -> U
 private fun AppOverview(
     app: AppDetail,
     state: AppState,
-    platform: Platform,
+    onView: () -> Unit,
     deployments: List<AppDeployment>,
     onOpenConversation: (String) -> Unit,
     onAllDeployments: () -> Unit,
@@ -194,7 +215,7 @@ private fun AppOverview(
         app.address?.let { address ->
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
                 Label("Address", Modifier.width(120.dp), Tokens.Type.Meta, colors.textMuted)
-                MyButton({ platform.openUrl(addressUrl(address)) }, text = addressUrl(address), description = "Open ${addressLabel(address)}", size = ButtonSize.Sm, muted = true)
+                MyButton(onView, text = addressUrl(address), description = "Open ${addressLabel(address)}", size = ButtonSize.Sm, muted = true)
             }
         }
 

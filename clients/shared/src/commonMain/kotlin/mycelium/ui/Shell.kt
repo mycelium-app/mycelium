@@ -178,7 +178,7 @@ sealed interface Route {
 
     data object Apps : Route
 
-    data class App(val uuid: String, val tab: String = AppOverviewTab, val deployment: String? = null) : Route
+    data class App(val uuid: String, val tab: String = AppOverviewTab, val deployment: String? = null, val viewing: Boolean = false) : Route
 
     data object Artifacts : Route
 
@@ -606,8 +606,8 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
                     Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) })
                     Route.Issues -> IssuesScreen(store, state, onOpened = { onRoute(Route.Chat(it.id)) })
                     Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
-                    Route.Apps -> AppsScreen(store, state, platform, onOpenApp = { onRoute(Route.App(it)) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onNewConversation = { onRoute(Route.New) })
-                    is Route.App -> AppPage(store, state, platform, route.uuid, route.tab, route.deployment, onBack = { onRoute(Route.Apps) }, onOpenConversation = { onRoute(Route.Chat(it)) })
+                    Route.Apps -> AppsScreen(store, state, platform, onOpenApp = { onRoute(Route.App(it)) }, onViewApp = { onRoute(Route.App(it, viewing = true)) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onNewConversation = { onRoute(Route.New) })
+                    is Route.App -> AppPage(store, state, platform, route.uuid, route.tab, route.deployment, onBack = { onRoute(Route.Apps) }, onOpenConversation = { onRoute(Route.Chat(it)) }, startViewing = route.viewing)
                     Route.Artifacts -> ArtifactsScreen(store, state, me, platform, onOpen = { onRoute(Route.Artefact(it)) })
                     is Route.Artefact -> ArtefactFullView(store, state, platform, route.id, onBack = { onRoute(Route.Artifacts) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenProjects = { onRoute(Route.Projects) })
                     Route.Assistants, Route.NewAssistant -> AssistantsScreen(store, state, onOpen = { onRoute(Route.Assistant(it.id)) }, onSettings = { onRoute(Route.AssistantSettings(it.id)) }, onNew = { onRoute(Route.NewAssistant) }, creating = route == Route.NewAssistant, onCloseNew = { onRoute(Route.Assistants) })

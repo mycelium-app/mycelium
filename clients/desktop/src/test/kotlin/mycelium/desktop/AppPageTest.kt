@@ -16,12 +16,26 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Modifier
+import mycelium.PageReading
+import mycelium.Platform
 import mycelium.ui.AppPage
 import mycelium.ui.MyceliumTheme
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+
+private class InAppPlatform(private val inner: AppsPlatform) : Platform by inner {
+    val shown = mutableListOf<String>()
+
+    @Composable
+    override fun WebContent(url: String, token: String?, modifier: Modifier, reading: PageReading?) {
+        LaunchedEffect(url) { shown += url }
+    }
+}
 
 class AppPageTest {
     @get:Rule
@@ -151,5 +165,23 @@ class AppPageTest {
         rule.onNodeWithText("Save").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/apps/a1/envs/PORT" } }
+    }
+
+    @Test
+    fun openingTheAddressShowsTheAppInsideMyceliumAndOpenInBrowserLeavesForTheSystemBrowser() {
+        val inApp = InAppPlatform(platform)
+        val store = appsStore(scopes.create()) { json(AppDetailJson) }
+
+        rule.setContent { MyceliumTheme(true) { AppPage(store, store.state.value, inApp, "a1", "Overview", null, onBack = {}, onOpenConversation = {}) } }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Open").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Open").performClick()
+
+        rule.waitUntil(5_000) { inApp.shown.isNotEmpty() }
+        assertEquals(listOf("https://harbour-status.apps.example.com"), inApp.shown)
+        assertTrue(platform.opened.isEmpty())
+
+        rule.onNodeWithContentDescription("Open in browser").performClick()
+
+        assertEquals(listOf("https://harbour-status.apps.example.com"), platform.opened)
     }
 }
