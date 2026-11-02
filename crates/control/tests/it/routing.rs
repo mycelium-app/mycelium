@@ -123,7 +123,7 @@ async fn an_account_that_signs_out_is_left_at_the_next_turn() {
 }
 
 #[tokio::test]
-async fn any_model_walks_down_the_list_at_a_limit_and_back_up_when_usage_returns() {
+async fn any_model_moves_down_the_list_at_a_limit_and_stays_there_when_usage_returns() {
     let server = Server::start().await;
     save_any_model(&server, json!([{"agent": "claude", "account": "sam@example.com"}, {"agent": "claude"}])).await;
     let accounts = vec![with_usage("sam@example.com", 60), with_usage("work@example.org", 50)];
@@ -144,11 +144,29 @@ async fn any_model_walks_down_the_list_at_a_limit_and_back_up_when_usage_returns
 
     server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "More"}))).await;
 
-    assert!(matches!(next_command(&mut link).await, ControlToNode::CloseSession { .. }));
-    assert_eq!(started_on(&mut link).await.as_deref(), Some("sam@example.com"));
+    assert!(matches!(next_command(&mut link).await, ControlToNode::Prompt { .. }));
     let events = server.events(id).await;
     let moves: Vec<Value> = events.iter().filter(|event| event["kind"] == "continued").map(|event| event["payload"]["reason"].clone()).collect();
-    assert_eq!(moves, vec![json!("usage_limit"), json!("usage_returned")]);
+    assert_eq!(moves, vec![json!("usage_limit")]);
+}
+
+#[tokio::test]
+async fn any_model_at_a_limit_moves_to_the_first_favourite_with_usage_even_one_above() {
+    let server = Server::start().await;
+    save_any_model(&server, json!([{"agent": "claude", "account": "sam@example.com"}, {"agent": "claude", "account": "work@example.org"}, {"agent": "claude", "account": "spare@example.net"}])).await;
+    let accounts = vec![with_usage("sam@example.com", 0), with_usage("work@example.org", 50), with_usage("spare@example.net", 90)];
+    let mut link = node_with_accounts(&server, "v0.11.0", accounts).await;
+    let created = create_routed(&server, link.id, "any_model").await;
+    let id: Uuid = serde_json::from_value(created["id"].clone()).unwrap();
+    assert_eq!(started_on(&mut link).await.as_deref(), Some("work@example.org"));
+    link.start_session(id, "acp-1").await;
+    expect_prompt(&mut link).await;
+    report(&server, &mut link, vec![with_usage("sam@example.com", 80), with_usage("work@example.org", 50), with_usage("spare@example.net", 90)], "sam@example.com", 80).await;
+
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: limit_message() }).await;
+
+    assert!(matches!(next_command(&mut link).await, ControlToNode::CloseSession { .. }));
+    assert_eq!(started_on(&mut link).await.as_deref(), Some("sam@example.com"));
 }
 
 #[tokio::test]

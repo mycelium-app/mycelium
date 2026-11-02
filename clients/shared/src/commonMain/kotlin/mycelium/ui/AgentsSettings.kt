@@ -153,7 +153,7 @@ fun AgentsSettings(store: Store) {
                     MyButton({ editingList = true }, text = "Edit list", variant = ButtonVariant.Outline)
                 }
 
-                Label("Any model starts on the first favourite with usage left, moves down as each reaches a limit, and moves back up at the next turn once usage returns. Star a model in any model menu to add it here.", style = Tokens.Type.Meta, color = colors.textMuted)
+                Label("Any model stays on its model until that reaches a limit, then moves to the first favourite with usage left. Star a model in any model menu to add it here.", style = Tokens.Type.Meta, color = colors.textMuted)
 
                 if (current.anyModel.isEmpty()) {
                     Label("No favourites yet.", color = colors.textMuted)

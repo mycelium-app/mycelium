@@ -214,6 +214,10 @@ async fn plan(state: &AppState, owner: Uuid, row: &ConversationRow, entries: &[M
         _ => (None, None),
     };
 
+    if cause.is_none() && !repick {
+        return Ok(None);
+    }
+
     for entry in entries {
         if cause.is_none() && !repick && matches_current(entry, row) {
             return Ok(None);
