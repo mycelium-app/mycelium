@@ -7,6 +7,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -29,6 +30,13 @@ import kotlin.test.assertTrue
 
 private class BesidePlatform(private val inner: AppsPlatform) : Platform by inner {
     val shown = java.util.Collections.synchronizedList(mutableListOf<String>())
+    val preferences = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    override fun loadPreference(key: String): String? = preferences[key]
+
+    override fun savePreference(key: String, value: String) {
+        preferences[key] = value
+    }
 
     @Composable
     override fun WebContent(url: String, token: String?, modifier: Modifier, reading: PageReading?) {
@@ -37,6 +45,8 @@ private class BesidePlatform(private val inner: AppsPlatform) : Platform by inne
 }
 
 private const val BuiltInChat = """{"uuid":"a1","name":"harbour-status","status":"running","address":"https://harbour-status.apps.example.com","conversation_id":"c1"}"""
+
+private const val BuiltOutside = """{"uuid":"a2","name":"orphan-app","status":"running","address":"https://orphan-app.apps.example.com"}"""
 
 private const val ConversationJson = """{"id":"c1","owner":"u1","node_id":"n1","agent":"claude","cwd":"/work","title":"c1","status":"done",
 "acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}"""
@@ -56,7 +66,8 @@ class AppBesideChatTest {
             val path = request.url.encodedPath
             val body = when {
                 path.endsWith("/apps/a1") -> BuiltInChat
-                path.endsWith("/apps") -> """{"apps":[$BuiltInChat]}"""
+                path.endsWith("/apps/a2") -> BuiltOutside
+                path.endsWith("/apps") -> """{"apps":[$BuiltInChat,$BuiltOutside]}"""
                 path.endsWith("/conversations") -> "[$ConversationJson]"
                 path.endsWith("/conversations/c1") -> ConversationJson
                 path.endsWith("/nodes") || path.endsWith("/groups") || path.endsWith("/events") -> "[]"
@@ -116,5 +127,29 @@ class AppBesideChatTest {
 
         assertTrue(!composerShown())
         rule.onNodeWithContentDescription("Show chat").assertExists()
+    }
+
+    @Test
+    fun anAppWithNoConversationOffersAPickerAndShowsTheChosenConversationBesideIt() {
+        show(Route.App("a2", viewing = true))
+
+        rule.waitUntil(5_000) { platform.shown.isNotEmpty() }
+        assertTrue(!composerShown())
+
+        rule.onNodeWithContentDescription("Show chat").performClick()
+        rule.onNodeWithContentDescription("Search conversations").assertExists()
+        rule.onNodeWithText("c1").performClick()
+
+        rule.waitUntil(5_000) { composerShown() }
+        rule.onNodeWithContentDescription("Hide chat").assertExists()
+        assertEquals("c1", platform.preferences["beside-chat:a2"])
+    }
+
+    @Test
+    fun theChoiceIsRememberedForThatAppOnThisDevice() {
+        platform.preferences["beside-chat:a2"] = "c1"
+        show(Route.App("a2", viewing = true))
+
+        rule.waitUntil(5_000) { composerShown() }
     }
 }
