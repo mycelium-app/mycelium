@@ -15,7 +15,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -86,7 +85,7 @@ fun GoalBar(goal: Goal, controls: GoalControls) {
     val now = rememberNow(ClockTickMillis, ticking = goal.timeLimitSeconds != null && !held)
     val progress = goalProgress(goal, now)
 
-    Column(Modifier.fillMaxWidth().semantics { contentDescription = "Goal" }) {
+    Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(start = Tokens.Space.S3, end = Tokens.Space.S2),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),

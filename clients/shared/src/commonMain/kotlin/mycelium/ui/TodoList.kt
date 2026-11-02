@@ -15,10 +15,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.Role
 import mycelium.state.PlanEntry
 import mycelium.state.PlanStatus
 import mycelium.state.todoCurrentIndex
+
+@Composable
+fun GoalAndTodoRegion(goal: GoalControls?, todos: List<PlanEntry>, conversationId: String, modifier: Modifier = Modifier) {
+    val held = goal?.goal
+    val label = when {
+        held != null && todos.isNotEmpty() -> "Goal and to-do list"
+        held != null -> "Goal"
+        else -> "To-do list"
+    }
+
+    Column(modifier.fillMaxWidth().semantics { contentDescription = label }) {
+        goal?.goal?.let { GoalBar(it, goal) }
+
+        if (todos.isNotEmpty()) {
+            TodoList(todos, conversationId)
+        }
+    }
+}
 
 @Composable
 fun TodoList(entries: List<PlanEntry>, conversationId: String, modifier: Modifier = Modifier) {
@@ -28,7 +47,7 @@ fun TodoList(entries: List<PlanEntry>, conversationId: String, modifier: Modifie
     val current = entries[currentIndex]
     val count = "${currentIndex + 1} of ${entries.size}"
 
-    Column(modifier.fillMaxWidth().semantics { contentDescription = "To-do list" }) {
+    Column(modifier.fillMaxWidth()) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -46,7 +65,7 @@ fun TodoList(entries: List<PlanEntry>, conversationId: String, modifier: Modifie
 
         if (expanded) {
             Column(Modifier.fillMaxWidth().padding(start = Tokens.Space.S3, end = Tokens.Space.S2, bottom = Tokens.Space.S2)) {
-                for (entry in entries) {
+                for ((index, entry) in entries.withIndex()) {
                     val word = when (entry.status) {
                         PlanStatus.Done -> "Done"
                         PlanStatus.Running -> "In progress"
@@ -59,7 +78,13 @@ fun TodoList(entries: List<PlanEntry>, conversationId: String, modifier: Modifie
                     }
 
                     Row(
-                        Modifier.fillMaxWidth().heightIn(min = Tokens.Space.S6).semantics(mergeDescendants = true) { contentDescription = "$word: ${entry.content}" },
+                        Modifier.fillMaxWidth().heightIn(min = Tokens.Space.S6).semantics(mergeDescendants = true) {
+                            contentDescription = "$word: ${entry.content}"
+
+                            if (index == currentIndex) {
+                                stateDescription = "Current step"
+                            }
+                        },
                         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {

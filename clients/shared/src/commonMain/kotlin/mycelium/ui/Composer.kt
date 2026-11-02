@@ -553,10 +553,8 @@ fun Composer(
                     .border(Tokens.Size.Hairline, colors.border, shape)
                     .padding(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S1),
             ) {
-                goal?.goal?.let { GoalBar(it, goal) }
-
-                if (todos.isNotEmpty()) {
-                    TodoList(todos, conversation.id)
+                if (goal?.goal != null || todos.isNotEmpty()) {
+                    GoalAndTodoRegion(goal, todos, conversation.id)
                 }
 
                 if (queue.isNotEmpty() || sending.isNotEmpty()) {
@@ -606,16 +604,8 @@ fun Composer(
     Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         val measured = Modifier.widthIn(max = readingMeasure()).fillMaxWidth()
 
-        goal?.goal?.let { held ->
-            Box(measured) {
-                GoalBar(held, goal)
-            }
-        }
-
-        if (todos.isNotEmpty()) {
-            Box(measured) {
-                TodoList(todos, conversation.id)
-            }
+        if (goal?.goal != null || todos.isNotEmpty()) {
+            GoalAndTodoRegion(goal, todos, conversation.id, measured)
         }
 
         if (queue.isNotEmpty() || sending.isNotEmpty()) {
