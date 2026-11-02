@@ -170,7 +170,22 @@ class AccountUsageTest {
     fun aCompactWindowThatLastsUntilItResetsHasNoForecast() {
         val window = UsageWindow("seven_day", 20.0, resetsAt = "2026-10-28T09:00:00Z", ratePerHour = 0.2)
 
-        assertEquals(CompactWindowUsage(20, null, "20% used, 4d left", false), compactWindowUsage(window, ::utc, Now))
+        assertEquals(CompactWindowUsage(20, null, "20% used, resets Wed", false), compactWindowUsage(window, ::utc, Now))
+    }
+
+    @Test
+    fun aWindowResettingTwoDaysAwayNamesTheLocalWeekdayInsteadOfDaysLeft() {
+        val mondayEvening = Instant.parse("2026-10-26T18:00:00Z")
+        val window = UsageWindow("seven_day", 56.0, resetsAt = "2026-10-28T19:00:00Z")
+
+        assertEquals("56% used, resets Wed", compactWindowUsage(window, ::utc, mondayEvening).summary)
+    }
+
+    @Test
+    fun aWindowResettingAWeekAwayNamesTheWeekdayAndDate() {
+        val window = UsageWindow("seven_day", 56.0, resetsAt = "2026-11-02T19:00:00Z")
+
+        assertEquals("56% used, resets Mon 2 Nov", compactWindowUsage(window, ::utc, Instant.parse("2026-10-26T18:00:00Z")).summary)
     }
 
     @Test
