@@ -56,6 +56,7 @@ fun AppPage(
     onBack: () -> Unit,
     onOpenConversation: (String) -> Unit,
     startViewing: Boolean = false,
+    onOpenNodes: () -> Unit = {},
 ) {
     val colors = MyTheme.colors
     var viewing by remember(uuid, startViewing) { mutableStateOf(startViewing) }
@@ -99,16 +100,19 @@ fun AppPage(
     if (current != null && viewedAddress != null) {
         val url = addressUrl(viewedAddress)
 
-        Column(Modifier.fillMaxSize()) {
-            Bar {
-                BackButton(current.name, { viewing = false })
-                Icon(MyIcon.Globe, colors.textMuted, Tokens.Size.IconSm)
-                Label(current.name, Modifier.semantics { heading() }, Tokens.Type.UiStrong, maxLines = 1)
-                Label(addressLabel(viewedAddress), Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
-                MyButton({ platform.openUrl(url) }, icon = MyIcon.Globe, description = "Open in browser", muted = true)
-            }
+        BesideChat(store, state, uuid, "the app", current.name, current.conversationId, onArchived = onBack, onOpenNodes = onOpenNodes, onOpenConversation = onOpenConversation) { modifier, toggle ->
+            Column(modifier) {
+                Bar {
+                    BackButton(current.name, { viewing = false })
+                    Icon(MyIcon.Globe, colors.textMuted, Tokens.Size.IconSm)
+                    Label(current.name, Modifier.semantics { heading() }, Tokens.Type.UiStrong, maxLines = 1)
+                    Label(addressLabel(viewedAddress), Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+                    MyButton({ platform.openUrl(url) }, icon = MyIcon.Globe, description = "Open in browser", muted = true)
+                    toggle()
+                }
 
-            platform.WebContent(url, null, Modifier.weight(1f).fillMaxWidth())
+                platform.WebContent(url, null, Modifier.weight(1f).fillMaxWidth())
+            }
         }
 
         return

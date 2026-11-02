@@ -51,6 +51,7 @@ internal fun AppDeployCard(call: DeployCall, name: ChatToolName?, fetch: suspend
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
     val openApp = LocalAppOpener.current
+    val viewApp = LocalAppViewer.current
     var progress by remember(call.deploymentUuid) { mutableStateOf<DeploymentProgress?>(null) }
     var failure by remember(call.deploymentUuid) { mutableStateOf<String?>(null) }
 
@@ -121,7 +122,9 @@ internal fun AppDeployCard(call: DeployCall, name: ChatToolName?, fetch: suspend
                     MyButton({ openApp(appUuid, call.deploymentUuid) }, text = "Build log", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
                 }
 
-                if (address != null && platform != null) {
+                if (address != null && viewApp != null && appUuid != null) {
+                    MyButton({ viewApp(appUuid) }, text = "Open app", description = "Open ${addressLabel(address)}", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+                } else if (address != null && platform != null) {
                     MyButton({ platform.openUrl(addressUrl(address)) }, text = "Open app", description = "Open ${addressLabel(address)}", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
                 }
             }

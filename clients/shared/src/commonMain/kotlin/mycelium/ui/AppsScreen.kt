@@ -38,6 +38,8 @@ val LocalAppsOpener = compositionLocalOf<(() -> Unit)?> { null }
 
 val LocalAppOpener = compositionLocalOf<((String, String?) -> Unit)?> { null }
 
+val LocalAppViewer = compositionLocalOf<((String) -> Unit)?> { null }
+
 @Composable
 internal fun AppStatus(status: String) {
     val colors = MyTheme.colors

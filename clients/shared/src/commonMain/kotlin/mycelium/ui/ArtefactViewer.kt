@@ -230,43 +230,7 @@ fun ArtefactFullView(
         return
     }
 
-    val attached = artifact.conversationId?.takeIf { state.conversations[it] != null }
-    val compact = LocalTouch.current
-    var chatShown by remember(artifactId) { mutableStateOf(attached != null && !compact) }
-    var chatWidth by remember { mutableStateOf(Tokens.Size.SidePanel) }
-
-    fun resizeChat(width: Dp) {
-        chatWidth = width.coerceIn(Tokens.Size.SidePanelMin, Tokens.Size.SidePanelMax)
-    }
-
-    val toggle: @Composable RowScope.() -> Unit = {
-        if (attached != null) {
-            MyButton({ chatShown = !chatShown }, icon = MyIcon.Chat, description = if (chatShown) "Hide chat" else "Show chat", muted = true, selected = chatShown)
-        }
-    }
-
-    Row(Modifier.fillMaxSize()) {
-        if (!(compact && chatShown)) {
-            ArtefactViewer(artifact, store, platform, Modifier.weight(1f).fillMaxHeight(), onBack = onBack, onOpenProjects = onOpenProjects, onOpenConversation = onOpenConversation, trailing = toggle)
-        }
-
-        if (attached != null && chatShown) {
-            if (compact) {
-                Column(Modifier.weight(1f).fillMaxHeight()) {
-                    Bar {
-                        BackButton("the artefact", { chatShown = false })
-                        Label(artifact.title, style = Tokens.Type.Title, maxLines = 1)
-                    }
-
-                    ConversationScreen(store, state, attached, onArchived = onBack, onOpenNodes = onOpenNodes, onOpenConversation = onOpenConversation, panels = false)
-                }
-            } else {
-                ResizeHandle("Resize the chat") { moved -> resizeChat(chatWidth - moved) }
-
-                Column(Modifier.width(chatWidth).fillMaxHeight()) {
-                    ConversationScreen(store, state, attached, onArchived = onBack, onOpenNodes = onOpenNodes, onOpenConversation = onOpenConversation, panels = false)
-                }
-            }
-        }
+    BesideChat(store, state, artifactId, "the artefact", artifact.title, artifact.conversationId, onArchived = onBack, onOpenNodes = onOpenNodes, onOpenConversation = onOpenConversation) { modifier, toggle ->
+        ArtefactViewer(artifact, store, platform, modifier, onBack = onBack, onOpenProjects = onOpenProjects, onOpenConversation = onOpenConversation, trailing = toggle)
     }
 }

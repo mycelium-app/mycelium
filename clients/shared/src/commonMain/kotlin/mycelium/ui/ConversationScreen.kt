@@ -2,6 +2,7 @@ package mycelium.ui
 
 import mycelium.api.ModelChoice
 import mycelium.api.Routing
+import mycelium.state.appsLinkVisible
 import mycelium.state.ContinueModelPrefix
 import mycelium.state.RoutingPrefix
 import mycelium.state.anyAccountId
@@ -126,6 +127,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     var moveTo by remember { mutableStateOf<String?>(null) }
     var phoneEnvironment by remember(id) { mutableStateOf(false) }
     var viewedArtefact by remember(id) { mutableStateOf<String?>(null) }
+    var viewedApp by remember(id) { mutableStateOf<String?>(null) }
     var tab by remember(id) { mutableStateOf(ConversationTab) }
     var dismissedPins by remember(id) { mutableStateOf(store.pinDismissals[id]) }
     val compact = LocalTouch.current
@@ -145,7 +147,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     var panel by remember(id) {
         val saved = if (compact) null else platform?.loadPreference("$SidePanelPreference:$id")
 
-        mutableStateOf(SidePanel.entries.firstOrNull { it.name == saved && it != SidePanel.Outline && (it != SidePanel.PullRequest || conversation?.pullRequestNumber != null) && (conversation?.isChat != true || it == SidePanel.Environment) })
+        mutableStateOf(SidePanel.entries.firstOrNull { it.name == saved && it != SidePanel.Outline && it != SidePanel.Apps && (it != SidePanel.PullRequest || conversation?.pullRequestNumber != null) && (conversation?.isChat != true || it == SidePanel.Environment) })
     }
     var panelWidth by remember(workspace) {
         val saved = workspace?.let { platform?.loadPreference("$SidePanelWidthPreference:$it") } ?: platform?.loadPreference(SidePanelWidthPreference)
@@ -456,6 +458,24 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
+    val outerAppViewer = LocalAppViewer.current
+    val appViewer = outerAppViewer?.let { outer ->
+        { uuid: String ->
+            if (!compact && !chat && panels) {
+                viewedApp = uuid
+                openPanel(SidePanel.Apps)
+            } else {
+                outer(uuid)
+            }
+        }
+    }
+
+    LaunchedEffect(id, state.chatToolServers) {
+        if (appsLinkVisible(state.chatToolServers)) {
+            runCatching { store.refreshApps() }
+        }
+    }
+
     val conversationWorkflows = ConversationWorkflows(
         workflows = state.workflows.values.filter { it.conversationId == id }.sortedBy { it.createdAt },
         onOpen = onOpenWorkflow,
@@ -484,7 +504,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         node?.let { FolderBrowserDialog(store, it.id, it.name, parentFolder(path), onChoose = { browsingPath = null }, onDismiss = { browsingPath = null }) }
     }
 
-    CompositionLocalProvider(LocalPathOpener provides pathOpener, LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAgentOpener provides agentOpener, LocalConversationWorkflows provides conversationWorkflows, LocalOutlineOpener provides showOutline, LocalOutlinePage provides (outlinePage ?: liveOutline), LocalIdeTarget provides ideTarget) {
+    CompositionLocalProvider(LocalPathOpener provides pathOpener, LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAppViewer provides appViewer, LocalAgentOpener provides agentOpener, LocalConversationWorkflows provides conversationWorkflows, LocalOutlineOpener provides showOutline, LocalOutlinePage provides (outlinePage ?: liveOutline), LocalIdeTarget provides ideTarget) {
         val walkthrough = state.walkthroughs[id]?.takeIf { !it.dismissed && !chat }
 
         val density = LocalDensity.current
@@ -494,6 +514,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 SidePanel.Subagents -> SubagentsPanel(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation, store::closeSession)
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
                 SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, onOpenArtefact, Modifier.fillMaxSize()) }
+                SidePanel.Apps -> platform?.let { AppsPanel(store, state, it, id, viewedApp, { viewedApp = it }, Modifier.fillMaxSize()) }
                 SidePanel.Outline -> outlinePage?.let { page -> platform?.let { BrowserPanel(it, page.url, page.title, onClose = { openPanel(null) }) } }
                 SidePanel.PullRequest -> key(conversation.id) { ConversationPullRequestPanel(store, state, conversation, Modifier.fillMaxSize()) }
                 SidePanel.Environment -> key(conversation.id) { EnvironmentPanel(store, state, conversation, environmentFillsArea, { environmentExpanded = it }, { openPanel(null) }, onOpenNode, onOpenConversation, onOpenNodes) }
@@ -782,7 +803,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     }
                 }
 
-                Rail(if (narrow && chatForced) null else panel, outlinePage != null, conversation.pullRequestNumber != null, conversation.scratch || chat) { chosen ->
+                Rail(if (narrow && chatForced) null else panel, outlinePage != null, conversationApps(state, id).isNotEmpty(), conversation.pullRequestNumber != null, conversation.scratch || chat) { chosen ->
                     if (narrow) {
                         if (panel == chosen && !chatForced) {
                             chatForced = true
@@ -804,7 +825,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, { openPanel(null); onOpenArtefact(it) }, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 SidePanel.PullRequest -> key(conversation.id) { ConversationPullRequestPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
-                SidePanel.Outline, SidePanel.Environment, null -> Unit
+                SidePanel.Apps, SidePanel.Outline, SidePanel.Environment, null -> Unit
             }
         }
     }
@@ -1080,10 +1101,10 @@ fun iconOf(status: ConversationStatus): MyIcon = when (status) {
 private const val ConversationTab = "Conversation"
 private const val WalkthroughTab = "Walkthrough"
 
-private enum class SidePanel { Subagents, Git, PullRequest, Artefacts, Outline, Environment }
+private enum class SidePanel { Subagents, Git, PullRequest, Artefacts, Apps, Outline, Environment }
 
 @Composable
-private fun Rail(open: SidePanel?, outlineOpen: Boolean, hasPullRequest: Boolean, environmentOnly: Boolean, onToggle: (SidePanel) -> Unit) {
+private fun Rail(open: SidePanel?, outlineOpen: Boolean, hasApps: Boolean, hasPullRequest: Boolean, environmentOnly: Boolean, onToggle: (SidePanel) -> Unit) {
     val colors = MyTheme.colors
 
     Row(Modifier.fillMaxHeight()) {
@@ -1102,6 +1123,9 @@ private fun Rail(open: SidePanel?, outlineOpen: Boolean, hasPullRequest: Boolean
                 }
 
                 MyButton({ onToggle(SidePanel.Artefacts) }, icon = MyIcon.Layers, description = if (open == SidePanel.Artefacts) "Close artefacts" else "Open artefacts", muted = true, selected = open == SidePanel.Artefacts)
+                if (hasApps) {
+                    MyButton({ onToggle(SidePanel.Apps) }, icon = MyIcon.AppWindow, description = if (open == SidePanel.Apps) "Close apps" else "Open apps", muted = true, selected = open == SidePanel.Apps)
+                }
             }
 
             MyButton({ onToggle(SidePanel.Environment) }, icon = MyIcon.Desktop, description = if (open == SidePanel.Environment) "Close the environment panel" else "Open environment", muted = true, selected = open == SidePanel.Environment)
