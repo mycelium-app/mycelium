@@ -62,6 +62,7 @@ import mycelium.state.randomFolderName
 private const val AgentAccountSeparator = "|"
 
 private const val RecentProjects = 3
+private const val NewProjectForgePreference = "new-project-forge"
 
 private val PlaceMenuWidth = 340.dp
 
@@ -69,6 +70,7 @@ fun startableNodes(state: AppState) = state.nodes.values.filter { it.online && !
 
 @Composable
 fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversation) -> Unit, projectId: String? = null, onOpenNodes: () -> Unit = {}) {
+    val platform = LocalPlatform.current
     val colors = MyTheme.colors
     val nodes = startableNodes(state)
     var nodeId by remember { mutableStateOf<String?>(null) }
@@ -87,7 +89,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var chosenProject by remember { mutableStateOf(projectId) }
     var withoutProject by remember { mutableStateOf(false) }
     var newProjectChosen by remember { mutableStateOf(false) }
-    var draft by remember { mutableStateOf(NewProjectDraft(randomFolderName())) }
+    var draft by remember { mutableStateOf(NewProjectDraft(randomFolderName(), forgeId = platform?.loadPreference(NewProjectForgePreference))) }
     var forges by remember { mutableStateOf<List<Forge>>(emptyList()) }
     var projectMenuOpen by remember { mutableStateOf(false) }
     var placeMenuOpen by remember { mutableStateOf(false) }
@@ -101,6 +103,10 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
 
     LaunchedEffect(Unit) {
         store.load { store.refreshProjects() }
+    }
+
+    LaunchedEffect(draft.forgeId) {
+        draft.forgeId?.let { platform?.savePreference(NewProjectForgePreference, it) }
     }
 
     LaunchedEffect(Unit) {
@@ -222,8 +228,8 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
         val text = prompt.text.trim()
 
         store.act {
-            val forge = forges.firstOrNull()
-            val owner = draft.owner ?: forge?.account
+            val forge = draft.forge(forges)
+            val owner = forge?.let { draft.ownerOn(it) }
             val newProject = if (!creatingProject) null else if (draft.repository && forge != null) {
                 store.createProject(CreateProjectRequest(node.id, forge.id, "$owner/$newProjectName", newRepository = true, newFolder = newProjectName))
             } else {
@@ -301,7 +307,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                         draft,
                                         creatingProject,
                                         node?.name,
-                                        forges.firstOrNull(),
+                                        forges,
                                         onChoose = {
                                             setupJob?.cancel()
                                             sendAfterSetup = false

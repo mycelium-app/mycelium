@@ -27,7 +27,11 @@ import mycelium.api.Forge
 private const val AllCategories = "All"
 private val TileMinWidth = 280.dp
 
-internal fun forgeProduct(forge: Forge): String = if (forge.kind == "gitlab") "GitLab" else "GitHub"
+internal fun forgeProduct(forge: Forge): String = when (forge.kind) {
+    "gitlab" -> "GitLab"
+    "forgejo" -> "Forgejo"
+    else -> "GitHub"
+}
 
 data class CatalogueTile(val name: String, val category: IntegrationCategory, val agentsCan: String, val asksFirst: String, val brand: String?, val detail: String?, val footer: String, val added: Boolean, val icon: MyIcon, val onChoose: () -> Unit)
 

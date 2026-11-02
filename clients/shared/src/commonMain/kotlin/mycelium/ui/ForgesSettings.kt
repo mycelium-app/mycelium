@@ -42,6 +42,12 @@ private fun forgeName(forge: Forge): String = when (forge.kind) {
     else -> "GitHub"
 }
 
+internal fun forgeIcon(forge: Forge): MyIcon = when (forge.kind) {
+    "gitlab" -> MyIcon.Gitlab
+    "forgejo" -> MyIcon.Branch
+    else -> MyIcon.Github
+}
+
 internal fun mcpAddress(forge: Forge): String = if (forge.kind == "gitlab") "${forge.baseUrl.trimEnd('/')}/api/v4/mcp" else "https://api.githubcopilot.com/mcp/"
 
 private fun mcpOffered(kind: String, baseUrl: String): Boolean = kind != "forgejo" && (kind == "gitlab" || baseUrl.isBlank() || baseUrl.trim().trimEnd('/') == "https://github.com")

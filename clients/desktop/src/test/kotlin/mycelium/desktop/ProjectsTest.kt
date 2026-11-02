@@ -397,6 +397,29 @@ class ProjectsTest {
     }
 
     @Test
+    fun choosingGitLabAmongTwoForgesCreatesTheRepositoryThereUnderOneOfItsGroups() {
+        forges = """[{"id":"f1","kind":"github","base_url":"https://github.com","account":"samexample","token_hint":"wxyz","organisations":["acme-org"],"created_at":"2026-10-22T10:00:00Z"},
+{"id":"f2","kind":"gitlab","base_url":"https://gitlab.example.com","account":"sam","token_hint":"abcd","organisations":["slop"],"created_at":"2026-10-22T10:00:00Z"}]"""
+        val store = store()
+        var created: Conversation? = null
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = { created = it }) } }
+
+        rule.onNodeWithContentDescription("Project: ", substring = true).performClick()
+        rule.onNodeWithContentDescription("Name").performTextReplacement("brisk-wren")
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Forge: GitHub").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Also create a repository on").performClick()
+        rule.onNodeWithContentDescription("Forge: GitHub").performClick()
+        rule.onNodeWithText("GitLab").performClick()
+        rule.onNodeWithContentDescription("Owner: sam").performClick()
+        rule.onNodeWithText("slop").performClick()
+        rule.onNodeWithContentDescription("Name").performTextReplacement("brisk-wren")
+        rule.onNodeWithContentDescription("Name").performKeyInput { pressKey(Key.Enter) }
+
+        rule.waitUntil(5_000) { created != null }
+        assertEquals("""{"node_id":"$AtlasId","forge_id":"f2","repository":"slop/brisk-wren","new_repository":true,"new_folder":"brisk-wren"}""", posts.first().second)
+    }
+
+    @Test
     fun startingWithoutAProjectKeepsTheFolderRequirement() {
         val store = store()
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = {}) } }

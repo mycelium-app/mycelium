@@ -148,13 +148,17 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
     }
 }
 
-data class NewProjectDraft(val name: String, val repository: Boolean = false, val owner: String? = null)
+data class NewProjectDraft(val name: String, val repository: Boolean = false, val owner: String? = null, val forgeId: String? = null)
+
+fun NewProjectDraft.forge(forges: List<Forge>): Forge? = forges.firstOrNull { it.id == forgeId } ?: forges.firstOrNull()
+
+fun NewProjectDraft.ownerOn(forge: Forge): String = owner?.takeIf { it in listOf(forge.account) + forge.organisations } ?: forge.account
 
 class NewProjectOption(
     val draft: NewProjectDraft,
     val chosen: Boolean,
     val nodeName: String?,
-    val forge: Forge?,
+    val forges: List<Forge>,
     val onChoose: () -> Unit,
     val onChange: (NewProjectDraft) -> Unit,
     val onSubmit: () -> Unit,
@@ -164,20 +168,39 @@ class NewProjectOption(
 private fun NewProjectForm(option: NewProjectOption) {
     val draft = option.draft
     var ownerMenu by remember { mutableStateOf(false) }
+    var forgeMenu by remember { mutableStateOf(false) }
 
     Column(Modifier.padding(start = Tokens.Space.S8, end = Tokens.Space.S2, top = Tokens.Space.S1, bottom = Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
         TextInput(draft.name, { option.onChange(draft.copy(name = it)) }, label = "Name", mono = true, onSubmit = option.onSubmit)
 
         Label("~/projects/${draft.name.trim()}", style = Tokens.Type.Code, color = MyTheme.colors.textMuted)
 
-        option.forge?.let { forge ->
+        draft.forge(option.forges)?.let { forge ->
             val host = forge.baseUrl.substringAfter("://")
-            val owner = draft.owner ?: forge.account
+            val owner = draft.ownerOn(forge)
+            val severalForges = option.forges.size > 1
+            val question = if (severalForges) "Also create a repository on" else "Also create a repository on $host"
 
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(draft.repository, description = "Also create a repository on $host", onToggle = { option.onChange(draft.copy(repository = !draft.repository)) }, checkedState = "Ticked", uncheckedState = "Not ticked")
+                Checkbox(draft.repository, description = question, onToggle = { option.onChange(draft.copy(repository = !draft.repository)) }, checkedState = "Ticked", uncheckedState = "Not ticked")
 
-                Label("Also create a repository on $host")
+                Label(question)
+
+                if (severalForges) {
+                    Box {
+                        MyButton({ forgeMenu = true }, text = forgeProduct(forge), icon = forgeIcon(forge), description = "Forge: ${forgeProduct(forge)}", variant = ButtonVariant.Outline, size = ButtonSize.Sm, muted = true, trailingIcon = MyIcon.ChevronDown)
+
+                        if (forgeMenu) {
+                            MenuPopup(onDismiss = { forgeMenu = false }) {
+                                MenuLabel("Forge")
+
+                                for (choice in option.forges) {
+                                    MenuItem(forgeProduct(choice), onClick = { option.onChange(draft.copy(forgeId = choice.id)); forgeMenu = false }, checked = choice.id == forge.id, hint = choice.baseUrl.substringAfter("://"), leading = forgeIcon(choice))
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             if (draft.repository) {

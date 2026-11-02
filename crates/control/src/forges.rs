@@ -279,7 +279,7 @@ impl ForgeApi {
         let (path, field) = match self.kind {
             ForgeKind::Github => ("/user/orgs", "login"),
             ForgeKind::Forgejo => ("/user/orgs", "username"),
-            ForgeKind::Gitlab => ("/groups?min_access_level=10&top_level_only=true", "full_path"),
+            ForgeKind::Gitlab => ("/groups?min_access_level=30&top_level_only=true", "full_path"),
         };
         let mut names = vec![account.to_string()];
 
