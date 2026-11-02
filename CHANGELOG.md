@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.21.0
+
+- Apps open inside Mycelium, beside the conversation that built them, and an open app can show its conversation next to it. Open in browser stays available.
+- A new project's repository can be created on any connected forge, under its account or a GitLab group or organisation.
+- Any model stays on the model a conversation is using until that model reaches a limit, then moves to the first favourite with usage left. It no longer switches back when usage returns, which would lose context.
+- The usage card says the weekday a window resets when it is a day or more away.
+- Ctrl and Alt with the arrow keys move and select by word across a pasted block, citation or image in the composer.
+
 ## v0.20.0
 
 - Coolify agents can use the whole Coolify API, including databases, services, volumes and domains, and can create a database and get its connection URL. Reading never asks; anything that changes something asks first.
