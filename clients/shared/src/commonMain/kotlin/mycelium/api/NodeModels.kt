@@ -111,6 +111,12 @@ data class HarnessModels(
 data class DrainRequest(val draining: Boolean)
 
 @Serializable
+data class CreateJoinTokenRequest(val name: String)
+
+@Serializable
+data class JoinToken(val token: String, @SerialName("expires_at") val expiresAt: String)
+
+@Serializable
 data class UpdateNodeRequest(val name: String? = null, val icon: String? = null, val colour: String? = null)
 
 @Serializable

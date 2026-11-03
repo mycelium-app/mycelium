@@ -67,6 +67,7 @@ class NodeKubernetesTest {
     val scopes = TestScopes()
 
     private val saved = CopyOnWriteArrayList<String>()
+    private val tokenRequests = CopyOnWriteArrayList<String>()
 
     private fun store(experiments: String, nodes: String): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -81,6 +82,11 @@ class NodeKubernetesTest {
             }
 
             val body = when {
+                path.endsWith("/nodes/join-tokens") -> {
+                    tokenRequests += (request.body as TextContent).text
+
+                    """{"token":"myc_join_example","expires_at":"2026-11-03T11:00:00Z"}"""
+                }
                 path.endsWith("/experiments") -> experiments
                 path.endsWith("/nodes") -> nodes
                 path.endsWith("/conversations") -> Conversations
@@ -155,25 +161,56 @@ class NodeKubernetesTest {
         assertEquals(false, present("Create the outpost in the cluster"))
     }
 
-    @Test
-    fun anOutpostWithANameAndNamespaceShowsThreeCopyableStepsForThem() {
+    private fun fillInAnOutpost() {
         openAddAnOutpost()
         rule.onNodeWithContentDescription("Name").performTextInput("lab-cluster")
         rule.onNodeWithContentDescription("Namespace").performTextReplacement("team-a")
         rule.onNodeWithContentDescription("Storage class").performTextInput("fast")
         rule.waitForIdle()
+    }
 
-        for (title in listOf("Create the outpost in the cluster", "Join, then store the outpost's credential", "Add agent sign-ins")) {
+    @Test
+    fun anOutpostWithANameAndNamespaceOffersAJoinTokenBeforeAnyCommand() {
+        fillInAnOutpost()
+
+        assertTrue(present("Create a join token"))
+        rule.onNodeWithContentDescription("Create join token").assertExists()
+        assertEquals(false, present("Create the outpost in the cluster"))
+        assertTrue(tokenRequests.isEmpty())
+    }
+
+    @Test
+    fun creatingAJoinTokenForTheNameShowsItAndTheCopyableStepsThatUseIt() {
+        fillInAnOutpost()
+        rule.onNodeWithContentDescription("Create join token").performClick()
+        rule.waitUntil(5_000) { present("Create the outpost in the cluster") }
+
+        assertEquals(listOf("""{"name":"lab-cluster"}"""), tokenRequests.toList())
+        assertTrue(present("myc_join_example"))
+
+        for (title in listOf("Create the outpost in the cluster", "Add agent sign-ins")) {
             assertTrue(present(title), title)
         }
 
-        for (copy in listOf("Copy step 1", "Copy the join command", "Copy the node.toml lines", "Copy the credential command", "Copy step 3")) {
+        for (copy in listOf("Copy the join token", "Copy step 2", "Copy step 3")) {
             rule.onNodeWithContentDescription(copy).assertExists()
         }
 
-        assertTrue(present("mycelium node outpost lab-cluster --namespace team-a --storage-class fast | kubectl apply -f -"))
-        assertTrue(present("mycelium node join https://mycelium.test --name lab-cluster"))
-        assertTrue(present("kubectl -n team-a create secret generic lab-cluster-node-credential --from-file=node.toml=node.toml"))
+        assertTrue(present("MYCELIUM_JOIN_TOKEN=myc_join_example mycelium node outpost lab-cluster --namespace team-a --storage-class fast --control-plane https://mycelium.test | kubectl apply -f -"))
+        assertEquals(false, present("Copy the join command"))
+    }
+
+    @Test
+    fun changingTheNameDiscardsTheJoinTokenBecauseItIsBoundToTheName() {
+        fillInAnOutpost()
+        rule.onNodeWithContentDescription("Create join token").performClick()
+        rule.waitUntil(5_000) { present("myc_join_example") }
+
+        rule.onNodeWithContentDescription("Name").performTextInput("2")
+        rule.waitForIdle()
+
+        assertEquals(false, present("myc_join_example"))
+        rule.onNodeWithContentDescription("Create join token").assertExists()
     }
 
     @Test

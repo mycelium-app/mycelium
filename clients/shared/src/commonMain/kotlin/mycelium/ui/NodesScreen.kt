@@ -73,20 +73,11 @@ private fun outpostNamespaceError(namespace: String) =
 private fun outpostStorageClassError(storageClass: String) =
     if (storageClass.isNotEmpty() && !DnsSubdomain.matches(storageClass)) "Enter a storage class as it is named in the cluster, or leave it empty." else null
 
-private fun kubernetesJoinSteps(controlPlane: String, name: String, namespace: String, storageClass: String) = listOf(
+private fun kubernetesJoinSteps(controlPlane: String, name: String, namespace: String, storageClass: String, token: String) = listOf(
     JoinStep(
         "Create the outpost in the cluster",
-        "The namespace, a service account, a role limited to that namespace, and the node Deployment.",
-        listOf("Copy step 1" to "mycelium node outpost $name --namespace $namespace" + (if (storageClass.isEmpty()) "" else " --storage-class $storageClass") + " | kubectl apply -f -"),
-    ),
-    JoinStep(
-        "Join, then store the outpost's credential",
-        "Run the join on any machine and approve the code. It writes node.toml; add the cluster paths and the [kubernetes] section, then store it.",
-        listOf(
-            "Copy the join command" to "mycelium node join $controlPlane --name $name",
-            "Copy the node.toml lines" to "state_dir = \"/var/lib/mycelium\"\nprojects_root = \"/var/lib/mycelium/projects\"\n\n[kubernetes]\nenabled = true",
-            "Copy the credential command" to "kubectl -n $namespace create secret generic $name-node-credential --from-file=node.toml=node.toml",
-        ),
+        "The namespace, a service account, a role limited to that namespace, a Secret holding the token, and the node Deployment. The node joins with the token when it starts.",
+        listOf("Copy step 2" to "MYCELIUM_JOIN_TOKEN=$token mycelium node outpost $name --namespace $namespace" + (if (storageClass.isEmpty()) "" else " --storage-class $storageClass") + " --control-plane $controlPlane | kubectl apply -f -"),
     ),
     JoinStep(
         "Add agent sign-ins",
@@ -134,7 +125,7 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform, onOpenNode: (
                 MyButton({ joinOpen = true }, text = if (touch) null else "Join a node", icon = MyIcon.Plus, variant = ButtonVariant.Outline, description = "Join a node")
 
                 if (joinOpen) {
-                    JoinPopup(api.baseUrl, platform, state.experiments.kubernetesNodes, onDismiss = { joinOpen = false })
+                    JoinPopup(store, api.baseUrl, platform, state.experiments.kubernetesNodes, onDismiss = { joinOpen = false })
                 }
             }
         }
@@ -198,11 +189,12 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform, onOpenNode: (
 }
 
 @Composable
-private fun JoinPopup(controlPlane: String, platform: Platform, kubernetes: Boolean, onDismiss: () -> Unit) {
+private fun JoinPopup(store: Store, controlPlane: String, platform: Platform, kubernetes: Boolean, onDismiss: () -> Unit) {
     var method by remember { mutableStateOf(JoinMethods.first()) }
     var outpostName by remember { mutableStateOf("") }
     var outpostNamespace by remember { mutableStateOf("mycelium") }
     var outpostStorageClass by remember { mutableStateOf("") }
+    var joinToken by remember(outpostName) { mutableStateOf<String?>(null) }
     val methods = if (kubernetes) JoinMethods + KubernetesMethod else JoinMethods
 
     MenuPopup(onDismiss = onDismiss, width = Tokens.Size.Popover) {
@@ -222,11 +214,28 @@ private fun JoinPopup(controlPlane: String, platform: Platform, kubernetes: Bool
                 Label("Leave the storage class empty for a workspace that is lost when a pod is removed.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
 
                 val ready = outpostName.isNotEmpty() && outpostNamespace.isNotEmpty() && listOf(outpostNameError(outpostName), outpostNamespaceError(outpostNamespace), outpostStorageClassError(outpostStorageClass)).all { it == null }
-                val steps = if (ready) kubernetesJoinSteps(controlPlane, outpostName, outpostNamespace, outpostStorageClass) else emptyList()
+                if (ready) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                        StepHeading(1, "Create a join token", filled = joinToken != null)
+                        Label("The token works once, for a node called $outpostName, and expires in an hour. It is shown here only until you close this dialog.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+
+                        val created = joinToken
+
+                        if (created == null) {
+                            MyButton({ store.act { joinToken = store.api.createJoinToken(outpostName).token } }, text = "Create join token", variant = ButtonVariant.Outline, description = "Create join token")
+                        } else {
+                            CopyableCode(created, "Join token", platform::copyToClipboard, description = "Copy the join token")
+                            MyButton({ store.act { joinToken = store.api.createJoinToken(outpostName).token } }, text = "Create a new join token", size = ButtonSize.Sm, muted = true, description = "Create a new join token")
+                        }
+                    }
+                }
+
+                val created = joinToken
+                val steps = if (ready && created != null) kubernetesJoinSteps(controlPlane, outpostName, outpostNamespace, outpostStorageClass, created) else emptyList()
 
                 for ((index, step) in steps.withIndex()) {
                     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                        StepHeading(index + 1, step.title, filled = false)
+                        StepHeading(index + 2, step.title, filled = false)
                         step.note?.let { Label(it, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted) }
 
                         for ((description, command) in step.commands) {

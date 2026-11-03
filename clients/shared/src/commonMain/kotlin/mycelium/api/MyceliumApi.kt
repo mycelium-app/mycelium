@@ -180,6 +180,8 @@ class MyceliumApi(
 
     suspend fun mintSshToken(nodeId: String): SshToken = call("/nodes/$nodeId/ssh-tokens") { client.post(it) { authorise() } }.body()
 
+    suspend fun createJoinToken(name: String): JoinToken = call("/nodes/join-tokens") { client.post(it) { authorise(); json(CreateJoinTokenRequest(name)) } }.body()
+
     suspend fun drainNode(id: String, draining: Boolean) {
         call("/nodes/$id/drain") { client.post(it) { authorise(); json(DrainRequest(draining)) } }
     }
