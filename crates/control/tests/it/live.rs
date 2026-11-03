@@ -1069,6 +1069,27 @@ async fn a_session_failure_is_streamed_as_an_error_and_a_failed_conversation() {
 }
 
 #[tokio::test]
+async fn a_node_cannot_fail_or_index_workflows_of_a_conversation_on_another_node() {
+    let server = Server::start().await;
+    let mut owner = server.online_node("laptop").await;
+    let mut intruder = server.online_node("desktop").await;
+    let id = started_conversation(&server, &mut owner, Some("run it")).await;
+    owner.expect_prompt().await;
+    let mut stream = server.user.stream().await;
+
+    intruder.send(NodeToControl::SessionFailed { conversation_id: id, seq: 1, message: "crashed".into() }).await;
+    intruder.send(NodeToControl::Workflow { conversation_id: id, run_id: "run-1".into(), line: json!({"type": "started", "key": "k1", "agentId": "aaa"}) }).await;
+    intruder.send(NodeToControl::Resources { sample: crate::any_node::sample(10.0, 80) }).await;
+    stream.until(|message| matches!(message, StreamMessage::NodeResources { .. }).then_some(())).await;
+
+    let (_, conversation) = server.user.json(server.user.get(&format!("/api/v1/conversations/{id}"))).await;
+    let workflows = sqlx::query_scalar::<_, i64>("select count(*) from workflows where conversation_id = $1").bind(id).fetch_one(&server.pool).await.unwrap();
+
+    assert_eq!(conversation["status"], "working");
+    assert_eq!(workflows, 0);
+}
+
+#[tokio::test]
 async fn a_conversation_left_running_by_a_node_that_lost_its_session_is_streamed_as_failed() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

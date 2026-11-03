@@ -731,3 +731,21 @@ async fn a_reconnect_acknowledges_each_conversation_at_its_own_position() {
     expected.sort();
     assert_eq!(acks, expected);
 }
+
+#[tokio::test]
+async fn a_node_flooding_the_link_with_messages_is_disconnected() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+
+    let mut refused = false;
+
+    for _ in 0..25_000 {
+        if !link.try_send(NodeToControl::PromptReceived { conversation_id: Uuid::nil(), prompt_id: Uuid::nil() }).await {
+            refused = true;
+
+            break;
+        }
+    }
+
+    assert!(refused || link.closed().await);
+}

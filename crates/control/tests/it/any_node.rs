@@ -3,7 +3,7 @@ use mycelium_proto::link::{ControlToNode, NodeToControl, ResourceSample};
 use serde_json::json;
 use uuid::Uuid;
 
-fn sample(cpu_percent: f32, memory_available_bytes: u64) -> ResourceSample {
+pub fn sample(cpu_percent: f32, memory_available_bytes: u64) -> ResourceSample {
     ResourceSample {
         at_ms: chrono::Utc::now().timestamp_millis(),
         available: true,

@@ -40,6 +40,9 @@ const AGENT_ACTIVITY: [&str; 5] = ["agent_message_chunk", "agent_thought_chunk",
 const ACTIVITY_REFRESH_SECONDS: i32 = 5;
 const TRAILING_OUTPUT_SECONDS: i32 = 3;
 
+const FRAME_WINDOW: Duration = Duration::from_secs(10);
+const FRAMES_PER_WINDOW: u32 = 20_000;
+
 const PING_INTERVAL: Duration = Duration::from_secs(25);
 const SILENCE_LIMIT: Duration = Duration::from_secs(90);
 
@@ -62,6 +65,8 @@ async fn run_link(state: AppState, node_id: Uuid, connection_id: Uuid, mut outgo
     let mut last_frame = Instant::now();
     let mut batch = UpdateBatch::default();
     let mut icons_checked = false;
+    let mut window_started = Instant::now();
+    let mut frames_in_window = 0u32;
 
     loop {
         let flush_at = batch.deadline;
@@ -94,6 +99,19 @@ async fn run_link(state: AppState, node_id: Uuid, connection_id: Uuid, mut outgo
             incoming = source.next() => match incoming {
                 Some(Ok(Message::Text(text))) => {
                     last_frame = Instant::now();
+
+                    if window_started.elapsed() > FRAME_WINDOW {
+                        window_started = last_frame;
+                        frames_in_window = 0;
+                    }
+
+                    frames_in_window += 1;
+
+                    if frames_in_window > FRAMES_PER_WINDOW {
+                        tracing::warn!("node {node_id} sent more than {FRAMES_PER_WINDOW} messages in {} seconds, so its link is closed", FRAME_WINDOW.as_secs());
+
+                        break;
+                    }
 
                     match serde_json::from_str::<NodeToControl>(&text) {
                         Ok(NodeToControl::AcpUpdate { conversation_id, seq, update }) => {
@@ -198,6 +216,10 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
             state.remove_session(node_id, conversation_id).await
         }
         NodeToControl::SessionFailed { conversation_id, seq, mut message } => {
+            if !runs_on_node(state, node_id, conversation_id).await? {
+                return Ok(());
+            }
+
             state.remove_session(node_id, conversation_id).await?;
             state.hub.forget_prompts_of(conversation_id);
             state.hub.take_send_now(conversation_id);
@@ -219,6 +241,10 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
             stop_for_failure(state, node_id, conversation_id, owner, Some(seq), &message, limit).await
         }
         NodeToControl::Workflow { conversation_id, run_id, line } => {
+            if !runs_on_node(state, node_id, conversation_id).await? {
+                return Ok(());
+            }
+
             let limit = crate::usage_limits::inspect_workflow_line(state, node_id, conversation_id, &line).await?;
             let mut payload = json!({"run_id": run_id, "line": line, "at": chrono::Utc::now()});
 
@@ -450,6 +476,12 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
             Ok(())
         }
     }
+}
+
+async fn runs_on_node(state: &AppState, node_id: Uuid, conversation_id: Uuid) -> ApiResult<bool> {
+    let found = sqlx::query_scalar::<_, bool>("select exists (select 1 from conversations where id = $1 and node_id = $2)").bind(conversation_id).bind(node_id).fetch_one(&state.pool).await?;
+
+    Ok(found)
 }
 
 async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid, owner: Option<Uuid>, seq: Option<i64>, message: &str, limit: Option<crate::usage_limits::Detected>) -> ApiResult<()> {

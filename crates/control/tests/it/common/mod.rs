@@ -211,6 +211,10 @@ impl NodeLink {
         self.socket.send(Message::Text(serde_json::to_string(&message).unwrap().into())).await.unwrap();
     }
 
+    pub async fn try_send(&mut self, message: NodeToControl) -> bool {
+        self.socket.send(Message::Text(serde_json::to_string(&message).unwrap().into())).await.is_ok()
+    }
+
     pub async fn next(&mut self) -> ControlToNode {
         loop {
             let message = self.raw().await;
