@@ -357,7 +357,7 @@ async fn the_folders_on_a_node_are_listed_through_the_node() {
 #[tokio::test]
 async fn a_folder_is_created_on_a_node_under_the_given_parent_and_a_refusal_is_reported() {
     let server = Server::start().await;
-    let mut link = server.online_node("laptop").await;
+    let mut link = server.online_node_as("laptop", common::CURRENT_NODE_VERSION).await;
     let user = server.user.clone();
     let id = link.id;
     let creating = tokio::spawn(async move { user.json(user.post(&format!("/api/v1/nodes/{id}/directories")).json(&json!({"path": "/work", "name": "quiet-otter"}))).await });

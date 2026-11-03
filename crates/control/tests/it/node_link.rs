@@ -23,7 +23,7 @@ async fn hello_records_the_agents_and_the_node_is_online_only_while_linked() {
     let node = &nodes.as_array().unwrap()[0];
 
     assert_eq!(node["online"], true);
-    assert_eq!(node["version"], common::CURRENT_NODE_VERSION);
+    assert_eq!(node["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(node["agents"][0]["agent"], "claude");
     assert_eq!(node["agents"][0]["available"], true);
 

@@ -413,7 +413,7 @@ async fn a_new_repository_the_forge_refuses_is_reported_and_nothing_is_cloned_or
 #[tokio::test]
 async fn a_new_folder_is_created_on_the_node_in_the_projects_folder_then_registered_as_the_project() {
     let server = Server::start().await;
-    let mut link = server.online_node("laptop").await;
+    let mut link = server.online_node_as("laptop", common::CURRENT_NODE_VERSION).await;
     let user = server.user.clone();
     let node_id = link.id;
     let asking = tokio::spawn(async move { user.json(user.post("/api/v1/projects").json(&json!({"node_id": node_id, "new_folder": "quiet-otter"}))).await });
@@ -430,7 +430,7 @@ async fn a_new_folder_is_created_on_the_node_in_the_projects_folder_then_registe
 #[tokio::test]
 async fn a_new_folder_the_node_refuses_creates_no_project() {
     let server = Server::start().await;
-    let mut link = server.online_node("laptop").await;
+    let mut link = server.online_node_as("laptop", common::CURRENT_NODE_VERSION).await;
     let user = server.user.clone();
     let node_id = link.id;
     let asking = tokio::spawn(async move { user.json(user.post("/api/v1/projects").json(&json!({"node_id": node_id, "new_folder": "taken"}))).await });
@@ -448,7 +448,7 @@ async fn a_new_folder_with_a_new_repository_creates_the_repository_and_clones_it
     let seen = Seen::default();
     let github = fake_creating_forge("github", seen.clone()).await;
     let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
-    let mut link = server.online_node("laptop").await;
+    let mut link = server.online_node_as("laptop", common::CURRENT_NODE_VERSION).await;
     let user = server.user.clone();
     let node_id = link.id;
     let asking = tokio::spawn(async move { user.json(user.post("/api/v1/projects").json(&json!({"node_id": node_id, "forge_id": forge_id, "repository": "samexample/quiet-otter", "new_repository": true, "new_folder": "quiet-otter"}))).await });
@@ -490,7 +490,7 @@ async fn an_older_node_is_told_at_once_that_it_cannot_create_folders() {
 #[tokio::test]
 async fn a_current_node_that_never_answers_create_folder_is_still_reported_as_needing_an_update() {
     let server = Server::start().await;
-    let mut link = server.online_node("laptop").await;
+    let mut link = server.online_node_as("laptop", common::CURRENT_NODE_VERSION).await;
     let user = server.user.clone();
     let node_id = link.id;
     let asking = tokio::spawn(async move { user.json(user.post("/api/v1/projects").json(&json!({"node_id": node_id, "new_folder": "quiet-otter"}))).await });
