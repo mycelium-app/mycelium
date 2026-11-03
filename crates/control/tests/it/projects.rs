@@ -478,7 +478,17 @@ async fn a_new_repository_the_forge_refuses_creates_no_folder_and_no_project() {
 }
 
 #[tokio::test]
-async fn a_node_that_never_answers_create_folder_is_reported_as_needing_an_update() {
+async fn an_older_node_is_told_at_once_that_it_cannot_create_folders() {
+    let server = Server::start().await;
+    let link = server.online_node_as("laptop", "v0.16.1").await;
+
+    let (status, error) = server.user.json(server.user.post("/api/v1/projects").json(&json!({"node_id": link.id, "new_folder": "quiet-otter"}))).await;
+
+    assert_eq!((status, error["error"].clone(), error["message"].clone()), (409, json!("node_outdated"), json!("laptop needs Mycelium v0.20.0 or newer to create folders. Update the node, then try again.")));
+}
+
+#[tokio::test]
+async fn a_current_node_that_never_answers_create_folder_is_still_reported_as_needing_an_update() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let user = server.user.clone();

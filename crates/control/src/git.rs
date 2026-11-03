@@ -1,7 +1,7 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::forges::{self, ForgeApi};
-use crate::nodes::node_offline;
+use crate::nodes::{node_has, node_offline};
 use crate::projects;
 use crate::state::{AppState, GitAnswer};
 use crate::store::find_owned;
@@ -102,6 +102,12 @@ pub struct PushRequest {
     force: bool,
 }
 
+const CREATE_DIRECTORY_SINCE: (u64, u64, u64) = (0, 20, 0);
+
+fn node_outdated_for_folders(name: &str) -> ApiError {
+    ApiError::conflict("node_outdated", format!("{name} needs Mycelium v0.20.0 or newer to create folders. Update the node, then try again."))
+}
+
 pub async fn relay(state: &AppState, node_id: Uuid, cwd: String, command: GitCommand) -> ApiResult<Value> {
     let timeout = match command {
         GitCommand::RunTests { timeout_secs, .. } => Duration::from_secs(u64::from(timeout_secs) + 30),
@@ -116,13 +122,22 @@ pub async fn relay(state: &AppState, node_id: Uuid, cwd: String, command: GitCom
     }
 
     let creates_folder = matches!(command, GitCommand::CreateDirectory { .. });
-    let asked = state.ask_node::<GitAnswer>(node_id, timeout, |request_id| ControlToNode::Git { request_id, cwd, command }).await;
+
+    if creates_folder {
+        let (name, version) = sqlx::query_as::<_, (String, String)>("select name, version from nodes where id = $1").bind(node_id).fetch_one(&state.pool).await?;
+
+        if !node_has(&version, CREATE_DIRECTORY_SINCE) {
+            return Err(node_outdated_for_folders(&name));
+        }
+    }
+
+    let asked =state.ask_node::<GitAnswer>(node_id, timeout, |request_id| ControlToNode::Git { request_id, cwd, command }).await;
 
     let Some(answer) = asked else {
         if creates_folder {
             let name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(node_id).fetch_one(&state.pool).await?;
 
-            return Err(ApiError::conflict("node_outdated", format!("{name} needs Mycelium v0.20.0 or newer to create folders. Update the node, then try again.")));
+            return Err(node_outdated_for_folders(&name));
         }
 
         return Err(ApiError::new(StatusCode::GATEWAY_TIMEOUT, "git_timeout", "The node did not answer in time. Try again in a moment."));

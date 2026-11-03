@@ -317,6 +317,8 @@ impl NodeLink {
     }
 }
 
+pub const CURRENT_NODE_VERSION: &str = "0.21.0";
+
 pub struct Server {
     pub user: Client,
     pub base: String,
@@ -440,7 +442,7 @@ impl Server {
     }
 
     pub async fn online_node(&self, name: &str) -> NodeLink {
-        self.online_node_as(name, env!("CARGO_PKG_VERSION")).await
+        self.online_node_as(name, CURRENT_NODE_VERSION).await
     }
 
     pub async fn online_node_as(&self, name: &str, version: &str) -> NodeLink {
