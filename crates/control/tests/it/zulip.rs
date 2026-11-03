@@ -325,6 +325,17 @@ async fn a_message_id_returns_that_message_with_its_neighbours_in_the_same_topic
 }
 
 #[tokio::test]
+async fn an_older_limit_argument_still_sets_how_many_messages_come_back() {
+    let (server, token, _zulip, _node) = zulip_agent().await;
+
+    let limited = read(&server, &token, "get_messages", json!({"limit": 2})).await;
+    let counted = read(&server, &token, "get_messages", json!({"before": 2})).await;
+
+    assert_eq!(ids(&limited), ids(&counted));
+    assert_eq!(limited["coverage"]["returned"], 2);
+}
+
+#[tokio::test]
 async fn a_permalink_returns_its_message_and_the_replies_around_it_in_the_topic_and_not_the_channels_other_topics() {
     let (server, token, zulip, _node) = zulip_agent().await;
     let link = "https://zulip.example.com/#narrow/channel/12-dev/topic/release/near/57";

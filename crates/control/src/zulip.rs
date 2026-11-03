@@ -169,7 +169,7 @@ async fn messages(http: &reqwest::Client, credentials: &Credentials, narrow: Vec
     }
 
     let dated = since.is_some() || until.is_some();
-    let asked_before = arguments["before"].as_u64().map(|count| count.min(MAX_COUNT));
+    let asked_before = arguments["before"].as_u64().or_else(|| arguments["limit"].as_u64()).map(|count| count.min(MAX_COUNT));
     let asked_after = arguments["after"].as_u64().map(|count| count.min(MAX_COUNT));
     let side = if around.is_some() { MESSAGE_CONTEXT } else { 0 };
     let (before, after) = match (asked_before, asked_after) {
