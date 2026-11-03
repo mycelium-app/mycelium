@@ -133,20 +133,26 @@ fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, mod
     }
 
     LaunchedEffect(id) {
-        workspace = store.loadTerminalWorkspace(id)
+        while (!loaded) {
+            val fetched = runCatching { store.loadTerminalWorkspace(id) to store.api.openTerminals(id) }.getOrNull()
 
-        val open = runCatching { store.api.openTerminals(id) }.getOrDefault(emptyList())
-        val running = open.map { it.terminalId }.toSet()
-        val gone = workspace.panes.filterValues { it !in running }.keys
-        var restored = workspace.copy(tabs = gone.fold(workspace.tabs) { result, pane -> result.closePane(pane) }, panes = workspace.panes - gone)
+            if (fetched == null) {
+                delay(TerminalLoadRetryMillis)
+            } else {
+                val (saved, open) = fetched
+                val running = open.map { it.terminalId }.toSet()
+                val gone = saved.panes.filterValues { it !in running }.keys
+                var restored = saved.copy(tabs = gone.fold(saved.tabs) { result, pane -> result.closePane(pane) }, panes = saved.panes - gone)
 
-        if (restored.tabs.tabs.isEmpty()) {
-            restored = if (open.isEmpty()) restored.copy(tabs = TerminalTabs().open()) else TerminalWorkspace().adopting(open.map { it.terminalId })
+                if (restored.tabs.tabs.isEmpty()) {
+                    restored = if (open.isEmpty()) restored.copy(tabs = TerminalTabs().open()) else TerminalWorkspace().adopting(open.map { it.terminalId })
+                }
+
+                scrollbacks = open.associateBy { it.terminalId }
+                workspace = restored
+                loaded = true
+            }
         }
-
-        scrollbacks = open.associateBy { it.terminalId }
-        workspace = restored
-        loaded = true
     }
 
     SideEffect {
@@ -538,6 +544,7 @@ private val LetterKeys = listOf(
     Key.N, Key.O, Key.P, Key.Q, Key.R, Key.S, Key.T, Key.U, Key.V, Key.W, Key.X, Key.Y, Key.Z,
 )
 
+private const val TerminalLoadRetryMillis = 1_000L
 private const val InputAnchor = "\u200B"
 private const val CellProbeLength = 20
 private const val DefaultColumns = 80

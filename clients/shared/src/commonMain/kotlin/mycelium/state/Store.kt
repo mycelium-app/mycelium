@@ -1206,8 +1206,7 @@ class Store(
     suspend fun loadTerminalWorkspace(conversationId: String): TerminalWorkspace {
         terminalWorkspaces[conversationId]?.let { return it }
 
-        val saved = orNull { api.terminalLayout(conversationId) }
-        val workspace = saved?.restored() ?: TerminalWorkspace()
+        val workspace = api.terminalLayout(conversationId).restored()
         terminalWorkspaces[conversationId] = workspace
 
         return workspace

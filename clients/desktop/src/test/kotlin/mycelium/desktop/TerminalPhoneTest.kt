@@ -18,6 +18,7 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import java.util.Base64
@@ -55,11 +56,16 @@ class TerminalPhoneTest {
 
     private val sent = CopyOnWriteArrayList<String>()
     private var openTerminals = "[]"
+    private var savedLayout = "{}"
+    private var failingOpens = 0
+    private val requests = CopyOnWriteArrayList<String>()
     private val json = headersOf(HttpHeaders.ContentType, "application/json")
 
     private fun store(): Store {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
+
+            requests += "${request.method.value} $path"
 
             if (path.endsWith("/input")) {
                 sent += String(Base64.getDecoder().decode(Json.parseToJsonElement(String(request.body.toByteArray())).jsonObject.getValue("data").jsonPrimitive.content))
@@ -69,6 +75,8 @@ class TerminalPhoneTest {
                 path.endsWith("/conversations") -> respond("[$PhoneConversationJson]", HttpStatusCode.OK, json)
                 path.endsWith("/conversations/c1") -> respond(PhoneConversationJson, HttpStatusCode.OK, json)
                 path.endsWith("/terminal") -> respond("""{"terminal_id":"t1"}""", HttpStatusCode.OK, json)
+                path.endsWith("/terminal-layout") && request.method == HttpMethod.Get -> respond(savedLayout, HttpStatusCode.OK, json)
+                path.endsWith("/terminals") && failingOpens-- > 0 -> respond("", HttpStatusCode.ServiceUnavailable)
                 path.endsWith("/terminals") -> respond(openTerminals, HttpStatusCode.OK, json)
                 path.endsWith("/events") || path.endsWith("/queue") || path.endsWith("/nodes") -> respond("[]", HttpStatusCode.OK, json)
                 else -> respond("{}", HttpStatusCode.OK, json)
@@ -124,6 +132,18 @@ class TerminalPhoneTest {
         compose.onNodeWithText("Terminal 1, pane 1").performClick()
 
         compose.onNodeWithContentDescription("Terminal 1, pane 1 of 2, switch terminal").assertExists()
+    }
+
+    @Test
+    fun reopeningWhileTheOpenTerminalsRequestFailsKeepsTheSavedTerminalInsteadOfStartingANewOne() {
+        savedLayout = """{"tabs":[{"id":"tab1","number":1,"layout":{"pane":"pane1"},"focused":"pane1"}],"selected":"tab1","created":1,"panes":{"pane1":"t1"}}"""
+        openTerminals = """[{"terminal_id":"t1","scrollback":""}]"""
+        failingOpens = 1
+
+        showPanel()
+
+        assertEquals(emptyList(), requests.filter { it.startsWith("POST") && it.endsWith("/terminal") })
+        assertEquals(emptyList(), requests.filter { it.startsWith("PUT") })
     }
 
     @Test
