@@ -35,6 +35,7 @@ pub struct KubernetesResources {
 #[serde(default)]
 pub struct KubernetesConfig {
     pub enabled: bool,
+    pub outpost: String,
     pub namespace: String,
     pub image: String,
     pub image_pull_policy: Option<String>,
@@ -48,6 +49,7 @@ impl Default for KubernetesConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            outpost: "mycelium".to_string(),
             namespace: "mycelium".to_string(),
             image: DEFAULT_AGENT_IMAGE.to_string(),
             image_pull_policy: None,
@@ -67,6 +69,10 @@ impl KubernetesConfig {
     pub fn with_environment(mut self, lookup: impl Fn(&str) -> Option<String>) -> Self {
         if let Some(enabled) = lookup("MYCELIUM_KUBERNETES_ENABLED") {
             self.enabled = matches!(enabled.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes");
+        }
+
+        if let Some(outpost) = lookup("MYCELIUM_KUBERNETES_OUTPOST") {
+            self.outpost = outpost;
         }
 
         if let Some(namespace) = lookup("MYCELIUM_KUBERNETES_NAMESPACE") {

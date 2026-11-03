@@ -320,6 +320,7 @@ async fn an_agent_the_node_reported_as_missing_cannot_be_started() {
 
 fn cluster(conversation_id: Uuid, state: mycelium_proto::api::PodState) -> mycelium_proto::api::KubernetesNode {
     mycelium_proto::api::KubernetesNode {
+        outpost: "mycelium".into(),
         namespace: "mycelium".into(),
         image: "ghcr.io/mycelium-app/mycelium-agent:latest".into(),
         credentials_secret: "mycelium-agent-credentials".into(),
@@ -348,6 +349,34 @@ async fn a_node_reporting_kubernetes_facts_shows_them_in_the_node_api() {
     assert_eq!(kubernetes["credentials_secret"], "mycelium-agent-credentials");
     assert_eq!(kubernetes["workspace_persistent"], false);
     assert_eq!(kubernetes["pods"], json!([{"conversation_id": conversation_id, "name": "mycelium-session-7f3c2a91", "state": "running"}]));
+}
+
+#[tokio::test]
+async fn two_outposts_added_to_one_control_plane_are_two_nodes_each_with_its_own_namespace() {
+    let server = Server::start().await;
+    let mut outposts = Vec::new();
+
+    for (name, namespace) in [("lab-cluster", "team-a"), ("edge-cluster", "team-b")] {
+        let (id, token) = server.join("node", name).await;
+        let mut link = server.connect_node(id, &token).await;
+        let facts = mycelium_proto::api::KubernetesNode { outpost: name.into(), namespace: namespace.into(), ..cluster(Uuid::from_u128(7), mycelium_proto::api::PodState::Running) };
+        link.send(NodeToControl::Hello { version: "0.1.0".into(), hostname: name.into(), os: "linux".into(), arch: "x86_64".into(), agents: vec![], sessions: vec![], kubernetes: Some(facts) }).await;
+        outposts.push(link);
+    }
+
+    let user = server.user.clone();
+    let nodes = common::eventually("both outposts", || async {
+        let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;
+        let nodes = nodes.as_array().unwrap().clone();
+
+        nodes.iter().all(|node| node["kubernetes"].is_object()).then_some(nodes).filter(|nodes| nodes.len() == 2)
+    })
+    .await;
+
+    let mut found: Vec<(String, String, String)> = nodes.iter().map(|node| (node["name"].as_str().unwrap().to_string(), node["kubernetes"]["outpost"].as_str().unwrap().to_string(), node["kubernetes"]["namespace"].as_str().unwrap().to_string())).collect();
+    found.sort();
+
+    assert_eq!(found, vec![("edge-cluster".to_string(), "edge-cluster".to_string(), "team-b".to_string()), ("lab-cluster".to_string(), "lab-cluster".to_string(), "team-a".to_string())]);
 }
 
 #[tokio::test]

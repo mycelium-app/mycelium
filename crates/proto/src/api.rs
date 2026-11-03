@@ -117,6 +117,8 @@ pub struct SessionPod {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct KubernetesNode {
+    #[serde(default)]
+    pub outpost: String,
     pub namespace: String,
     pub image: String,
     pub credentials_secret: String,

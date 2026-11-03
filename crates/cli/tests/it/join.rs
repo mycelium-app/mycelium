@@ -89,6 +89,38 @@ async fn join_prints_the_code_waits_for_approval_and_writes_a_private_credential
 }
 
 #[tokio::test]
+async fn join_with_a_name_asks_to_be_listed_under_it() {
+    let granted = (StatusCode::OK, json!({"kind": "node", "id": "7f0c1d52-3c2e-4b43-a0a5-1c8a1e2b9d11", "token": "tok-123"}));
+    let (url, script) = start_control_plane(vec![granted]).await;
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("node.toml");
+    let path = config_path.clone();
+
+    let assert = tokio::task::spawn_blocking(move || mycelium(&path).args(["node", "join", &url, "--name", "lab-cluster"]).assert()).await.unwrap();
+
+    assert.success();
+    assert_eq!(script.device_requests.lock().unwrap()[0]["label"], "lab-cluster");
+}
+
+#[test]
+fn the_outpost_command_prints_manifests_for_the_namespace_and_name_it_is_given() {
+    let dir = tempfile::tempdir().unwrap();
+
+    mycelium(&dir.path().join("node.toml"))
+        .args(["node", "outpost", "lab-cluster", "--namespace", "team-a", "--storage-class", "fast"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("kind: Role\n").and(predicate::str::contains("namespace: team-a")).and(predicate::str::contains("mycelium.app/outpost: lab-cluster")).and(predicate::str::contains("value: fast")));
+}
+
+#[test]
+fn the_outpost_command_refuses_a_name_kubernetes_would_reject() {
+    let dir = tempfile::tempdir().unwrap();
+
+    mycelium(&dir.path().join("node.toml")).args(["node", "outpost", "Lab Cluster"]).assert().failure().stderr(predicate::str::contains("Enter a name"));
+}
+
+#[tokio::test]
 async fn join_stops_with_advice_when_the_code_expires() {
     let expired = (StatusCode::BAD_REQUEST, json!({"error": "expired_token", "message": "expired"}));
     let (url, _script) = start_control_plane(vec![pending(), expired]).await;

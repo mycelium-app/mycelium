@@ -18,6 +18,7 @@ use uuid::Uuid;
 pub const MANAGED_BY_LABEL: &str = "app.kubernetes.io/managed-by";
 pub const MANAGED_BY: &str = "mycelium-node";
 pub const NODE_LABEL: &str = "mycelium.example/node";
+pub const OUTPOST_LABEL: &str = "mycelium.app/outpost";
 pub const CONVERSATION_LABEL: &str = "mycelium.example/conversation";
 pub const AGENT_CONTAINER: &str = "agent";
 pub const WORKSPACE_PATH: &str = "/workspace";
@@ -52,13 +53,14 @@ pub struct PodRuntime {
     node_id: Uuid,
 }
 
-pub fn pod_name(conversation_id: Uuid) -> String {
-    format!("mycelium-session-{conversation_id}")
+pub fn pod_name(outpost: &str, conversation_id: Uuid) -> String {
+    format!("{outpost}-session-{conversation_id}")
 }
 
-fn labels(node_id: Uuid, conversation_id: Uuid) -> BTreeMap<String, String> {
+fn labels(outpost: &str, node_id: Uuid, conversation_id: Uuid) -> BTreeMap<String, String> {
     BTreeMap::from([
         (MANAGED_BY_LABEL.to_string(), MANAGED_BY.to_string()),
+        (OUTPOST_LABEL.to_string(), outpost.to_string()),
         (NODE_LABEL.to_string(), node_id.to_string()),
         (CONVERSATION_LABEL.to_string(), conversation_id.to_string()),
     ])
@@ -81,7 +83,7 @@ fn start_script() -> String {
 }
 
 pub fn pod_spec(config: &KubernetesConfig, node_id: Uuid, conversation_id: Uuid, launch: &PodLaunch) -> Pod {
-    let name = pod_name(conversation_id);
+    let name = pod_name(&config.outpost, conversation_id);
     let mut env: Vec<EnvVar> = launch.agent_env.iter().map(|(name, value)| EnvVar { name: name.clone(), value: Some(value.clone()), ..Default::default() }).collect();
     env.push(EnvVar { name: "MYCELIUM_CWD".to_string(), value: Some(launch.cwd.clone()), ..Default::default() });
     env.push(EnvVar { name: "HOME".to_string(), value: Some(AGENT_HOME.to_string()), ..Default::default() });
@@ -113,7 +115,7 @@ pub fn pod_spec(config: &KubernetesConfig, node_id: Uuid, conversation_id: Uuid,
     };
 
     Pod {
-        metadata: ObjectMeta { name: Some(name), namespace: Some(config.namespace.clone()), labels: Some(labels(node_id, conversation_id)), ..Default::default() },
+        metadata: ObjectMeta { name: Some(name), namespace: Some(config.namespace.clone()), labels: Some(labels(&config.outpost, node_id, conversation_id)), ..Default::default() },
         spec: Some(PodSpec {
             restart_policy: Some("Never".to_string()),
             automount_service_account_token: Some(false),
@@ -128,7 +130,7 @@ pub fn pod_spec(config: &KubernetesConfig, node_id: Uuid, conversation_id: Uuid,
 
 pub fn claim_spec(config: &KubernetesConfig, node_id: Uuid, conversation_id: Uuid) -> PersistentVolumeClaim {
     PersistentVolumeClaim {
-        metadata: ObjectMeta { name: Some(pod_name(conversation_id)), namespace: Some(config.namespace.clone()), labels: Some(labels(node_id, conversation_id)), ..Default::default() },
+        metadata: ObjectMeta { name: Some(pod_name(&config.outpost, conversation_id)), namespace: Some(config.namespace.clone()), labels: Some(labels(&config.outpost, node_id, conversation_id)), ..Default::default() },
         spec: Some(PersistentVolumeClaimSpec {
             access_modes: Some(vec!["ReadWriteOnce".to_string()]),
             storage_class_name: config.storage_class.clone(),
@@ -139,8 +141,8 @@ pub fn claim_spec(config: &KubernetesConfig, node_id: Uuid, conversation_id: Uui
     }
 }
 
-fn selector(node_id: Uuid, conversation_id: Uuid) -> String {
-    format!("{MANAGED_BY_LABEL}={MANAGED_BY},{NODE_LABEL}={node_id},{CONVERSATION_LABEL}={conversation_id}")
+fn selector(outpost: &str, node_id: Uuid, conversation_id: Uuid) -> String {
+    format!("{MANAGED_BY_LABEL}={MANAGED_BY},{OUTPOST_LABEL}={outpost},{NODE_LABEL}={node_id},{CONVERSATION_LABEL}={conversation_id}")
 }
 
 fn exit_code_of(pod: &Pod) -> Option<i64> {
@@ -219,13 +221,14 @@ impl PodRuntime {
             pods.push(SessionPod { conversation_id: *conversation_id, name: pod.name_any(), state: state_of(&pod) });
         }
 
-        KubernetesNode { namespace: self.config.namespace.clone(), image: self.config.image.clone(), credentials_secret: self.config.credentials_secret.clone(), workspace_persistent: self.config.storage_class.is_some(), pods }
+        KubernetesNode { outpost: self.config.outpost.clone(), namespace: self.config.namespace.clone(), image: self.config.image.clone(), credentials_secret: self.config.credentials_secret.clone(), workspace_persistent: self.config.storage_class.is_some(), pods }
     }
 
     pub async fn find(&self, conversation_id: Uuid) -> Result<Option<Pod>> {
-        let found = self.pods.list(&ListParams::default().labels(&selector(self.node_id, conversation_id))).await.context("list the session's pods")?;
+        let found = self.pods.list(&ListParams::default().labels(&selector(&self.config.outpost, self.node_id, conversation_id))).await.context("list the session's pods")?;
+        let owned = found.items.into_iter().find(|pod| pod.labels().get(OUTPOST_LABEL).is_some_and(|outpost| *outpost == self.config.outpost));
 
-        Ok(found.items.into_iter().next())
+        Ok(owned)
     }
 
     pub async fn delete(&self, conversation_id: Uuid) -> Result<()> {
@@ -284,7 +287,7 @@ impl PodRuntime {
     }
 
     pub async fn bridge(self, conversation_id: Uuid, dir: &Path, launch: Option<PodLaunch>, after: usize, entries: mpsc::UnboundedSender<Value>, mut frames: mpsc::UnboundedReceiver<Value>) -> Result<()> {
-        let name = pod_name(conversation_id);
+        let name = pod_name(&self.config.outpost, conversation_id);
         let journal_path = dir.join("journal.jsonl");
 
         if let Some(launch) = &launch {
@@ -395,7 +398,7 @@ mod kube_tests {
     use std::sync::{Arc, Mutex};
 
     fn config() -> KubernetesConfig {
-        KubernetesConfig { enabled: true, namespace: "agents".into(), image: "registry.example.com/agent:1".into(), image_pull_policy: Some("Always".into()), credentials_secret: "agent-signins".into(), ..KubernetesConfig::default() }
+        KubernetesConfig { enabled: true, outpost: "lab".into(), namespace: "agents".into(), image: "registry.example.com/agent:1".into(), image_pull_policy: Some("Always".into()), credentials_secret: "agent-signins".into(), ..KubernetesConfig::default() }
     }
 
     fn launch() -> PodLaunch {
@@ -438,7 +441,7 @@ mod kube_tests {
         let pod = pod_spec(&config(), node(), conversation(), &launch());
         let agent = container(&pod);
 
-        assert_eq!(pod.metadata.name.as_deref(), Some("mycelium-session-00000000-0000-0000-0000-000000000007"));
+        assert_eq!(pod.metadata.name.as_deref(), Some("lab-session-00000000-0000-0000-0000-000000000007"));
         assert_eq!(pod.metadata.namespace.as_deref(), Some("agents"));
         assert_eq!(agent.image.as_deref(), Some("registry.example.com/agent:1"));
         assert_eq!(agent.image_pull_policy.as_deref(), Some("Always"));
@@ -448,13 +451,14 @@ mod kube_tests {
     }
 
     #[test]
-    fn the_pod_is_labelled_with_the_node_and_conversation() {
+    fn the_pod_is_labelled_with_the_outpost_node_and_conversation() {
         let pod = pod_spec(&config(), node(), conversation(), &launch());
         let labels = pod.metadata.labels.unwrap();
 
         assert_eq!(labels.get(CONVERSATION_LABEL).map(String::as_str), Some("00000000-0000-0000-0000-000000000007"));
         assert_eq!(labels.get(NODE_LABEL).map(String::as_str), Some("00000000-0000-0000-0000-000000000001"));
         assert_eq!(labels.get(MANAGED_BY_LABEL).map(String::as_str), Some(MANAGED_BY));
+        assert_eq!(labels.get(OUTPOST_LABEL).map(String::as_str), Some("lab"));
     }
 
     #[test]
@@ -490,7 +494,7 @@ mod kube_tests {
         let pod = pod_spec(&stored, node(), conversation(), &launch());
         let claim = claim_spec(&stored, node(), conversation());
 
-        assert_eq!(volume(&pod, "workspace").persistent_volume_claim.unwrap().claim_name, "mycelium-session-00000000-0000-0000-0000-000000000007");
+        assert_eq!(volume(&pod, "workspace").persistent_volume_claim.unwrap().claim_name, "lab-session-00000000-0000-0000-0000-000000000007");
         assert_eq!(claim.spec.unwrap().storage_class_name.as_deref(), Some("fast"));
     }
 
@@ -523,10 +527,41 @@ mod kube_tests {
 
         let found = runtime.find(conversation()).await.unwrap();
 
-        assert_eq!(found.unwrap().name_any(), pod_name(conversation()));
+        assert_eq!(found.unwrap().name_any(), pod_name("lab", conversation()));
         let sent = requests.lock().unwrap().clone();
         assert!(sent[0].starts_with("GET /api/v1/namespaces/agents/pods?"), "{sent:?}");
         assert!(sent[0].contains("labelSelector=") && sent[0].contains("00000000-0000-0000-0000-000000000007"), "{sent:?}");
+    }
+
+    #[tokio::test]
+    async fn every_pod_listing_carries_the_outposts_selector() {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let list = json!({"apiVersion": "v1", "kind": "PodList", "metadata": {}, "items": []});
+        let runtime = PodRuntime::with_client(fake_client(requests.clone(), list), config(), node());
+
+        runtime.find(conversation()).await.unwrap();
+        runtime.delete(conversation()).await.unwrap();
+        runtime.report(&[conversation()]).await;
+
+        let sent = requests.lock().unwrap().clone();
+        assert!(!sent.is_empty());
+        for request in sent {
+            assert!(request.contains("labelSelector=") && request.contains("mycelium.app%2Foutpost%3Dlab"), "{request}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pod_of_another_outpost_is_never_found_or_deleted_even_if_the_cluster_returns_it() {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let other = KubernetesConfig { outpost: "edge".into(), ..config() };
+        let foreign = pod_spec(&other, node(), conversation(), &launch());
+        let list = json!({"apiVersion": "v1", "kind": "PodList", "metadata": {}, "items": [foreign]});
+        let runtime = PodRuntime::with_client(fake_client(requests.clone(), list), config(), node());
+
+        assert!(runtime.find(conversation()).await.unwrap().is_none());
+        runtime.delete(conversation()).await.unwrap();
+
+        assert!(requests.lock().unwrap().iter().all(|request| request.starts_with("GET")));
     }
 
     #[tokio::test]
@@ -552,7 +587,7 @@ mod kube_tests {
         let report = runtime.report(&[conversation()]).await;
 
         assert_eq!((report.namespace.as_str(), report.image.as_str(), report.credentials_secret.as_str(), report.workspace_persistent), ("agents", "registry.example.com/agent:1", "agent-signins", false));
-        assert_eq!(report.pods, vec![SessionPod { conversation_id: conversation(), name: pod_name(conversation()), state: PodState::Exited }]);
+        assert_eq!(report.pods, vec![SessionPod { conversation_id: conversation(), name: pod_name("lab", conversation()), state: PodState::Exited }]);
     }
 
     #[test]

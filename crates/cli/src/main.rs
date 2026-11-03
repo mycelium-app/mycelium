@@ -58,6 +58,17 @@ enum NodeCommand {
         url: String,
         #[arg(long, env = "MYCELIUM_JOIN_TOKEN_FILE")]
         join_token_file: Option<PathBuf>,
+        /// The name this node shows in the node list, instead of the machine's hostname
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Print the Kubernetes manifests for an outpost: one node in one namespace of a cluster
+    Outpost {
+        name: String,
+        #[arg(long, default_value = "mycelium")]
+        namespace: String,
+        #[arg(long)]
+        storage_class: Option<String>,
     },
     Run {
         #[arg(long, env = "MYCELIUM_CONTROL_PLANE")]
@@ -74,13 +85,19 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Control { command: ControlCommand::Serve } => mycelium_control::serve().await,
         Command::Artifacts => mycelium_artifacts::serve().await,
-        Command::Node { command: NodeCommand::Join { url, join_token_file } } => {
-            mycelium_node::join(mycelium_node::JoinOptions { control_plane: url, join_token_file, config_path: None }).await
+        Command::Node { command: NodeCommand::Join { url, join_token_file, name } } => {
+            mycelium_node::join(mycelium_node::JoinOptions { control_plane: url, join_token_file, name, config_path: None }).await
+        }
+        Command::Node { command: NodeCommand::Outpost { name, namespace, storage_class } } => {
+            let manifests = mycelium_node::manifests::Outpost { name, namespace, storage_class: storage_class.filter(|class| !class.is_empty()) }.manifests()?;
+            print!("{manifests}");
+
+            Ok(())
         }
         Command::Node { command: NodeCommand::Run { control_plane } } => {
             if let Some(url) = control_plane.filter(|_| !mycelium_node::config::config_path().exists())
             {
-                mycelium_node::join(mycelium_node::JoinOptions { control_plane: url, join_token_file: None, config_path: None }).await?;
+                mycelium_node::join(mycelium_node::JoinOptions { control_plane: url, join_token_file: None, name: None, config_path: None }).await?;
             }
 
             mycelium_node::run().await

@@ -13,9 +13,9 @@ experiment (Settings, Experiments). The node itself works whether or not the exp
 
 1. The node daemon runs as a one-replica Deployment with a service account that can manage pods
    in its namespace.
-2. Starting a conversation creates a pod named `mycelium-session-<conversation id>`, labelled
-   with `mycelium.example/node` and `mycelium.example/conversation`. Its main container runs the
-   agent with standard input kept open.
+2. Starting a conversation creates a pod named `<outpost>-session-<conversation id>`, labelled
+   with `mycelium.app/outpost`, `mycelium.example/node` and `mycelium.example/conversation`. Its
+   main container runs the agent with standard input kept open.
 3. The node writes ACP frames to the pod through `pods/attach` and reads the agent's output
    through `pods/log`, and records both directions in its own journal under the node state
    directory.
@@ -28,14 +28,44 @@ experiment (Settings, Experiments). The node itself works whether or not the exp
 The pod runs as a non-root user, has no service account token, and has restart policy `Never`.
 The agent's working folder is `/workspace/<folder>`.
 
+## Outposts
+
+An outpost is one Kubernetes node in one namespace of a cluster. Several outposts can run against
+one control plane and one cluster, each its own node in the node list with its own namespace, sign-in
+Secret and pods. Choose Join a node, Kubernetes in the app to add one: it asks for a name, a
+namespace and an optional storage class, then shows the commands below with those values filled in.
+
+An outpost only lists, creates and deletes pods that carry its own `mycelium.app/outpost` label,
+and every pod listing sends that label as a selector. Kubernetes RBAC cannot restrict a role to
+pods by label, so the Role is limited to the outpost's namespace and the outposts of a shared
+namespace keep out of one another's pods by those selectors. Use a namespace for each outpost when
+you need the cluster itself to enforce the boundary.
+
+Names an outpost owns, for an outpost called `lab` in the namespace `team-a`:
+
+| Object | Name |
+| --- | --- |
+| Service account, Role, RoleBinding, Deployment | `lab-node` |
+| Node state volume claim | `lab-node-state` |
+| Node credential Secret | `lab-node-credential` |
+| Agent sign-ins Secret | `lab-agent-credentials` |
+| Session pods | `lab-session-<conversation id>` |
+
+A name is up to 40 lowercase letters, numbers and hyphens. Outposts started before outposts existed
+ran as `mycelium`; their pods have no outpost label, so a restarted node does not find them and
+starts the conversation in a new pod.
+
 ## Install
 
-1. Create the namespace, service account and role:
+1. Print the manifests for the outpost and apply them. This creates the namespace, a service
+   account, a Role and RoleBinding limited to that namespace, the state volume and the node
+   Deployment:
 
    ```
-   kubectl apply -f deploy/kubernetes/namespace.yaml
-   kubectl apply -f deploy/kubernetes/rbac.yaml
+   mycelium node outpost lab --namespace team-a --storage-class fast | kubectl apply -f -
    ```
+
+   Leave out `--storage-class` for an `emptyDir` workspace. The namespace defaults to `mycelium`.
 
 2. Build and push the agent image, or use `ghcr.io/mycelium-app/mycelium-agent:latest`:
 
@@ -44,34 +74,32 @@ The agent's working folder is `/workspace/<folder>`.
    docker push registry.example.com/mycelium-agent:1
    ```
 
-3. Join the node. Run `mycelium node join https://mycelium.example.com` once on any machine,
-   then put the node's address, id and token in `node.toml` with the cluster paths:
+3. Join the node under the outpost's name. Run
+   `mycelium node join https://mycelium.example.com --name lab` once on any machine and approve the
+   code, then put the cluster paths in the `node.toml` it writes:
 
    ```
-   control_plane = "https://mycelium.example.com"
-   node_id = "00000000-0000-0000-0000-000000000000"
-   token = "myc_node_example"
    state_dir = "/var/lib/mycelium"
    projects_root = "/var/lib/mycelium/projects"
+
+   [kubernetes]
+   enabled = true
    ```
 
    ```
-   kubectl -n mycelium create secret generic mycelium-node-credential --from-file=node.toml=node.toml
+   kubectl -n team-a create secret generic lab-node-credential --from-file=node.toml=node.toml
    ```
 
-4. Create the agent sign-ins Secret (see below), then start the node:
+4. Create the agent sign-ins Secret (see below). The node starts as soon as its credential Secret
+   exists.
 
-   ```
-   kubectl apply -f deploy/kubernetes/node.yaml
-   ```
-
-The node appears in the node list as soon as it connects. Start a conversation on it and
-`kubectl -n mycelium get pods` shows the session's pod.
+The outpost appears in the node list as soon as it connects. Start a conversation on it and
+`kubectl -n team-a get pods -l mycelium.app/outpost=lab` shows the session's pod.
 
 ## Sign-ins
 
 Agent sign-in files come from one Secret in the node's namespace, named by
-`credentials_secret` (default `mycelium-agent-credentials`). It is mounted read-only into every
+`credentials_secret` (the manifests set `<outpost>-agent-credentials`). It is mounted read-only into every
 session pod, and each file present is copied to where the agent reads it. Every key is optional.
 
 | Key | Copied to | Used by |
@@ -82,7 +110,7 @@ session pod, and each file present is copied to where the agent reads it. Every 
 | `codex-config.toml` | `~/.codex/config.toml` | Codex |
 
 ```
-kubectl -n mycelium create secret generic mycelium-agent-credentials \
+kubectl -n team-a create secret generic lab-agent-credentials \
   --from-file=claude-credentials.json=$HOME/.claude/.credentials.json \
   --from-file=codex-auth.json=$HOME/.codex/auth.json
 ```
@@ -98,6 +126,7 @@ environment variable.
 | Setting | Variable | Default |
 | --- | --- | --- |
 | `enabled` | `MYCELIUM_KUBERNETES_ENABLED` | `false` |
+| `outpost` | `MYCELIUM_KUBERNETES_OUTPOST` | `mycelium` |
 | `namespace` | `MYCELIUM_KUBERNETES_NAMESPACE` | `mycelium` |
 | `image` | `MYCELIUM_KUBERNETES_IMAGE` | `ghcr.io/mycelium-app/mycelium-agent:latest` |
 | `image_pull_policy` | `MYCELIUM_KUBERNETES_IMAGE_PULL_POLICY` | the cluster default |
@@ -128,7 +157,7 @@ automatically.
 - Experiment: the pod protocol, labels and Secret keys can change.
 - Pod output is read from the container log, so the agent must write only protocol frames to
   standard output. Lines that are not JSON-RPC are ignored.
-- Keep `state_dir` on a persistent volume, as `node.yaml` does. Without it a restarted node has no
+- Keep `state_dir` on a persistent volume, as the generated Deployment does. Without it a restarted node has no
   journal and cannot resume a session it did not finish.
 - Resuming a conversation in a new pod does not restore the agent's own transcript, because the
   pod's home is not persistent. Only the workspace persists, and only with a `storage_class`.
@@ -137,4 +166,4 @@ automatically.
 - Attachments sent with a prompt are saved on the node, not in the pod.
 - Terminals, SSH, environments and browser tools run in the node's own container, not the pod.
 - Pods and claims are not garbage collected when the node is removed. Delete them with
-  `kubectl -n mycelium delete pods -l app.kubernetes.io/managed-by=mycelium-node`.
+  `kubectl -n team-a delete pods -l mycelium.app/outpost=lab`.

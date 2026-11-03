@@ -10,6 +10,7 @@ const SLOW_DOWN_STEP: Duration = Duration::from_secs(5);
 pub struct JoinOptions {
     pub control_plane: String,
     pub join_token_file: Option<PathBuf>,
+    pub name: Option<String>,
     pub config_path: Option<PathBuf>,
 }
 
@@ -35,7 +36,7 @@ pub async fn join(options: JoinOptions) -> Result<()> {
 
     let request = DeviceRequest {
         kind: DeviceKind::Node,
-        label: hostname.clone(),
+        label: options.name.unwrap_or_else(|| hostname.clone()),
         hostname,
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
