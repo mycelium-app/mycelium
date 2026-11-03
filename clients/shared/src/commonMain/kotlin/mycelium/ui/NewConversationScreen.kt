@@ -1,5 +1,6 @@
 package mycelium.ui
 
+import mycelium.state.accountShortName
 import mycelium.state.favouriteOptions
 import mycelium.state.modelOptions
 import androidx.compose.foundation.background
@@ -560,7 +561,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                             if (agents.isNotEmpty()) {
                                 ModelPicker(
                                     ModelPickerControls(
-                                        label = if (anyModel) "Any model" else listOfNotNull(chosenOption?.name ?: agentName(chosenAgent.orEmpty()), pinned?.account?.substringBefore('@')).joinToString(" · "),
+                                        label = if (anyModel) "Any model" else listOfNotNull(chosenOption?.name ?: agentName(chosenAgent.orEmpty()), pinned?.account?.let(::accountShortName)).joinToString(" · "),
                                         options = options,
                                         favourites = favourites.list,
                                         providers = emptyList(),

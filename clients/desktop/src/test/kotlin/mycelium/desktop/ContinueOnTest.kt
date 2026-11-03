@@ -87,8 +87,8 @@ class ContinueOnTest {
     fun continuingOnTheOtherHarnessSendsTheRequest() {
         shell(EnabledExperiments)
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Claude Code · sam").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Model: Claude Code · sam").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Claude Code · example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Model: Claude Code · example.com").performClick()
         rule.onNodeWithContentDescription("Codex: Codex").performClick()
 
         rule.waitUntil(5_000) { requests.toList().any { it.first == "POST /api/v1/conversations/c1/continue" } }
@@ -99,8 +99,8 @@ class ContinueOnTest {
     fun aConversationWithoutASessionChangesAccountFromTheSameMenu() {
         shell(EnabledExperiments, started = Started.replace("\"acp_session_id\":\"s\",", ""))
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Claude Code · sam").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Model: Claude Code · sam").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Claude Code · example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Model: Claude Code · example.com").performClick()
         rule.onNodeWithText("Account").performClick()
         rule.onNodeWithText("Claude Code · work@example.org").performClick()
 
@@ -112,8 +112,8 @@ class ContinueOnTest {
     fun aContinuedEventIsShownInTheThreadAsADivider() {
         shell(EnabledExperiments, Continued)
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continued on Codex as codex").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Continued on Codex as codex").assertIsDisplayed()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continued on Codex as example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Continued on Codex as example.com").assertIsDisplayed()
     }
 
     @Test
@@ -128,8 +128,8 @@ class ContinueOnTest {
     fun aFallbackDividerSaysWhyTheTurnMoved() {
         shell(EnabledExperiments, Continued.replace("\"kind\":\"handoff\"", "\"kind\":\"handoff\",\"reason\":\"usage_limit\",\"window\":\"five_hour\""))
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continued with Codex as codex").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Continued with Codex as codex").assertIsDisplayed()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continued with Codex as example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Continued with Codex as example.com").assertIsDisplayed()
         rule.onNodeWithText("5-hour limit reached").assertIsDisplayed()
     }
 
@@ -144,7 +144,7 @@ class ContinueOnTest {
     fun aMoveBackUpTheListSaysTheHarnessHasUsageAgain() {
         shell(EnabledExperiments, Continued.replace("\"kind\":\"handoff\"", "\"kind\":\"handoff\",\"reason\":\"usage_returned\"").replace("\"agent\":\"codex\",\"account\":\"codex@example.com\"", "\"agent\":\"claude\",\"account\":\"sam@example.com\"").replace("\"from\":{\"agent\":\"claude\",\"account\":\"sam@example.com\"}", "\"from\":{\"agent\":\"codex\",\"account\":\"codex@example.com\",\"model\":\"gpt-5.5\"}"))
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continued with Claude Code as sam").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continued with Claude Code as example.com").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Claude Code has usage again").assertIsDisplayed()
     }
 
@@ -152,8 +152,8 @@ class ContinueOnTest {
     fun anyAccountIsOfferedFirstAndSentAsARoutingChoice() {
         shell(EnabledExperiments)
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Claude Code · sam").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Model: Claude Code · sam").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Claude Code · example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Model: Claude Code · example.com").performClick()
         rule.onNodeWithText("Account").performClick()
         rule.onNodeWithText("Any account").performClick()
 

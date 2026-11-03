@@ -20,7 +20,7 @@ fun approximateDollars(usd: Double): String {
     return "~$${cents / 100}.${(cents % 100).toString().padStart(2, '0')}"
 }
 
-fun usageAccountName(account: UsageHistoryAccount): String = account.account.ifEmpty { agentName(account.agent) }.substringAfter('@')
+fun usageAccountName(account: UsageHistoryAccount): String = accountShortName(account.account.ifEmpty { agentName(account.agent) })
 
 fun readingsNote(account: UsageHistoryAccount): String? {
     val since = account.readingsSince?.let { dayLabel(it.take(10)) } ?: return null

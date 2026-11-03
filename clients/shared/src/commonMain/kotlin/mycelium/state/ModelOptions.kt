@@ -81,7 +81,7 @@ fun conversationModelLabel(conversation: Conversation, currentModel: String?, op
     val name = options.firstOrNull { it.isChosen(held) }?.name ?: held.model ?: if (conversation.agent == "chat") "Choose a model" else agentName(conversation.agent)
     val pinned = conversation.account.takeIf { conversation.routing == null && conversation.agent != "chat" }
 
-    return listOfNotNull(name, pinned?.substringBefore('@')).joinToString(" · ")
+    return listOfNotNull(name, pinned?.let(::accountShortName)).joinToString(" · ")
 }
 
 fun ModelChoice.displayName(options: List<ModelOption>, providers: List<ModelProvider>): String {

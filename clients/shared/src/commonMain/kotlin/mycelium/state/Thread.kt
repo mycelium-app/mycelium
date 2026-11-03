@@ -773,7 +773,7 @@ fun diffLines(oldText: String, newText: String): List<DiffLine> {
 private fun sideLabel(agent: String, account: String?, model: String?, provider: String?): String =
     when {
         agent == "chat" -> listOfNotNull(provider, model).joinToString(" · ")
-        else -> listOfNotNull(if (account != null) "${agentName(agent)} as ${account.substringBefore("@")}" else agentName(agent), model).joinToString(", ")
+        else -> listOfNotNull(if (account != null) "${agentName(agent)} as ${accountShortName(account)}" else agentName(agent), model).joinToString(", ")
     }
 
 private fun limitName(window: String?): String = when (window) {

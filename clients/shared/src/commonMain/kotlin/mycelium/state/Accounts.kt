@@ -22,6 +22,8 @@ import kotlin.time.Instant
 
 const val UnnamedAccount = "Account name not reported"
 
+fun accountShortName(account: String): String = account.substringAfter('@')
+
 data class AccountOnNode(val nodeName: String, val state: LoginState)
 
 data class AgentAccount(val agent: String, val label: String, val method: String, val nodes: List<AccountOnNode>, val windows: List<UsageWindow> = emptyList(), val usageReadAt: String? = null, val resetCredits: ResetCredits? = null)

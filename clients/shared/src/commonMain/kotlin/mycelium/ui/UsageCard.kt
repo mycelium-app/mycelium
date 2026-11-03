@@ -22,6 +22,7 @@ import androidx.compose.runtime.setValue
 import kotlin.time.Clock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import mycelium.state.accountShortName
 import mycelium.state.evenPacePercent
 import mycelium.state.nextUsageTick
 import androidx.compose.ui.Alignment
@@ -144,7 +145,7 @@ private fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (su
     }
 
     Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-        UsageHeader(account.label.substringAfter('@'), thisChat, account.usageReadAt) {
+        UsageHeader(accountShortName(account.label), thisChat, account.usageReadAt) {
             Icon(agentIcon(account.agent), MyTheme.colors.text, Tokens.Size.IconMd)
         }
 
