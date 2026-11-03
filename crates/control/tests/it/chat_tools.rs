@@ -1218,11 +1218,12 @@ async fn a_response_held_for_editing_reaches_the_model_as_the_person_edited_it()
     let held = rig.review_waiting(&id).await;
     let status = rig.server.conversation(id.parse().unwrap()).await["status"].clone();
     let shown = rig.held_response(&id, &held).await;
-    let kept = json!([shown["value"][0].clone()]);
+    let mut kept = shown["value"].clone();
+    kept["messages"] = json!([shown["value"]["messages"][0].clone()]);
 
     assert_eq!(status, "input");
     assert_eq!((held["server"].clone(), held["tool"].clone(), held["account"].clone()), (json!("Zulip"), json!("get_messages"), json!(ACCOUNT)));
-    assert_eq!(shown["value"].as_array().unwrap().len(), 2);
+    assert_eq!(shown["value"]["messages"].as_array().unwrap().len(), 2);
     assert_eq!(zulip.paths().iter().filter(|path| *path == "/api/v1/messages").count(), 1);
     assert_eq!(rig.send_response(&id, &held, kept).await, 204);
 
