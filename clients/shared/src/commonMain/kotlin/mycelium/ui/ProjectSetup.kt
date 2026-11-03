@@ -47,6 +47,8 @@ fun checkoutOn(state: AppState, project: Project, nodeId: String): Project? = wh
 
 fun cloneable(project: Project): Boolean = project.forgeId != null && project.repository != null
 
+fun resolveProject(state: AppState, id: String?, checkedOut: Project?): Project? = state.projects[id] ?: checkedOut?.takeIf { it.id == id }
+
 fun repositoryKey(project: Project): String = if (project.repository == null) project.id else "${project.forgeId}/${project.repository}"
 
 fun projectEntries(projects: List<Project>, onlineNodes: List<NodeSummary>, newestConversations: List<Conversation>, keptNodeId: String?): List<Project> =

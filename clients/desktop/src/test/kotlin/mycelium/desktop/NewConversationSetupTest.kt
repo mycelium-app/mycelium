@@ -423,4 +423,17 @@ class PlacePickerNodeChoiceTest {
         rule.waitUntil(5_000) { checkouts.isNotEmpty() }
         assertTrue(checkouts.single().endsWith("/projects/p4/checkout"))
     }
+
+    @Test
+    fun theClonedProjectStaysChosenBeforeTheProjectListIncludesIt() {
+        show("[$OnlyOnLedger]")
+
+        rule.onNodeWithContentDescription("Project: No project").performClick()
+        rule.onNodeWithText("ledgerbook").performClick()
+        rule.onNodeWithContentDescription("Node: choose a node").performClick()
+        rule.onNodeWithText("Clone onto willow").performClick()
+
+        rule.waitUntil(5_000) { runCatching { rule.onNodeWithContentDescription("Project: harbour").assertExists() }.isSuccess }
+        rule.onNodeWithContentDescription("Node: willow").assertExists()
+    }
 }

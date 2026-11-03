@@ -31,6 +31,7 @@ import mycelium.state.projectName
 @Stable
 class Place {
     var projectId by mutableStateOf<String?>(null)
+    var checkedOut by mutableStateOf<Project?>(null)
     var nodeId by mutableStateOf<String?>(null)
     var agent by mutableStateOf<String?>(null)
     var cwd by mutableStateOf("")
@@ -40,7 +41,7 @@ class Place {
 data class PlaceTarget(val node: NodeSummary, val agent: String, val project: Project?)
 
 fun Place.target(state: AppState): PlaceTarget? {
-    val project = state.projects[projectId]
+    val project = resolveProject(state, projectId, checkedOut)
     val nodes = startableNodes(state)
     val node = if (project != null) nodes.firstOrNull { it.id == project.nodeId } else nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
     val agents = node?.agents?.filter { it.available }.orEmpty()
@@ -89,7 +90,7 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
     }
 
     val projects = state.projects.values.sortedBy { it.name }
-    val project = state.projects[place.projectId]
+    val project = resolveProject(state, place.projectId, place.checkedOut)
     val projectNode = project?.let { held -> nodes.firstOrNull { it.id == held.nodeId } }
     val choosingNode = project != null && nodes.isNotEmpty() && projectNode == null
     val entries = projectEntries(projects, nodes, state.conversations.values.sortedByDescending { it.updatedAt }, project?.nodeId ?: place.nodeId)
@@ -140,6 +141,7 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
                     val checkout = store.api.checkoutProject(project.id, chosenId)
 
                     store.refreshProjects()
+                    place.checkedOut = checkout
                     place.projectId = checkout.id
                 }
                 else -> {

@@ -119,7 +119,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val groupFilter = LocalGroupFilter.current
     val projects = state.projects.values.filter { inGroup(it.groupId, groupFilter) }.sortedBy { it.name }
     val newestConversations = state.conversations.values.sortedByDescending { it.updatedAt }
-    val chosenCheckout = if (withoutProject || newProjectChosen) null else state.projects[chosenProject] ?: checkedOut?.takeIf { it.id == chosenProject }
+    val chosenCheckout = if (withoutProject || newProjectChosen) null else resolveProject(state, chosenProject, checkedOut)
     val keptNodeId = if (anyNode) null else chosenCheckout?.nodeId ?: nodeId
     val entries = projectEntries(projects, nodes, newestConversations, keptNodeId)
     val recent = newestConversations.mapNotNull { conversation -> state.projects[conversation.projectId]?.let { held -> entries.firstOrNull { repositoryKey(it) == repositoryKey(held) } } }.distinct().take(RecentProjects)
