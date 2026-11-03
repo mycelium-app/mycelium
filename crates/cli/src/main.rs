@@ -58,6 +58,9 @@ enum ControlCommand {
 enum NodeCommand {
     Join {
         url: String,
+        /// A single-use join token from Add an outpost, instead of a device code
+        #[arg(long = "token", env = "MYCELIUM_JOIN_TOKEN", hide_env_values = true)]
+        join_token: Option<String>,
         #[arg(long, env = "MYCELIUM_JOIN_TOKEN_FILE")]
         join_token_file: Option<PathBuf>,
         /// The name this node shows in the node list, instead of the machine's hostname
@@ -71,10 +74,18 @@ enum NodeCommand {
         namespace: String,
         #[arg(long)]
         storage_class: Option<String>,
+        /// The control plane the outpost joins on first start; needs --token
+        #[arg(long, env = "MYCELIUM_CONTROL_PLANE", requires = "join_token")]
+        control_plane: Option<String>,
+        /// A join token from Add an outpost, stored in a Secret that the node joins with
+        #[arg(long = "token", env = "MYCELIUM_JOIN_TOKEN", hide_env_values = true, requires = "control_plane")]
+        join_token: Option<String>,
     },
     Run {
         #[arg(long, env = "MYCELIUM_CONTROL_PLANE")]
         control_plane: Option<String>,
+        #[arg(long = "token", env = "MYCELIUM_JOIN_TOKEN", hide_env_values = true)]
+        join_token: Option<String>,
     },
     Status,
 }
@@ -88,19 +99,20 @@ async fn main() -> Result<()> {
         Command::Control { command: ControlCommand::Serve } => mycelium_control::serve().await,
         Command::Control { command: ControlCommand::RotateSecrets } => mycelium_control::rotate_secrets().await,
         Command::Artifacts => mycelium_artifacts::serve().await,
-        Command::Node { command: NodeCommand::Join { url, join_token_file, name } } => {
-            mycelium_node::join(mycelium_node::JoinOptions { control_plane: url, join_token_file, name, config_path: None }).await
+        Command::Node { command: NodeCommand::Join { url, join_token, join_token_file, name } } => {
+            mycelium_node::join(mycelium_node::JoinOptions { control_plane: url, join_token, join_token_file, name, config_path: None }).await
         }
-        Command::Node { command: NodeCommand::Outpost { name, namespace, storage_class } } => {
-            let manifests = mycelium_node::manifests::Outpost { name, namespace, storage_class: storage_class.filter(|class| !class.is_empty()) }.manifests()?;
+        Command::Node { command: NodeCommand::Outpost { name, namespace, storage_class, control_plane, join_token } } => {
+            let join = control_plane.zip(join_token).map(|(control_plane, token)| mycelium_node::manifests::OutpostJoin { control_plane, token });
+            let manifests = mycelium_node::manifests::Outpost { name, namespace, storage_class: storage_class.filter(|class| !class.is_empty()), join }.manifests()?;
             print!("{manifests}");
 
             Ok(())
         }
-        Command::Node { command: NodeCommand::Run { control_plane } } => {
+        Command::Node { command: NodeCommand::Run { control_plane, join_token } } => {
             if let Some(url) = control_plane.filter(|_| !mycelium_node::config::config_path().exists())
             {
-                mycelium_node::join(mycelium_node::JoinOptions { control_plane: url, join_token_file: None, name: None, config_path: None }).await?;
+                mycelium_node::join(mycelium_node::JoinOptions { control_plane: url, join_token, join_token_file: None, name: None, config_path: None }).await?;
             }
 
             mycelium_node::run().await

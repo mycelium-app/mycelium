@@ -1,6 +1,6 @@
 use crate::config::{NodeConfig, config_path, default_projects_root, default_state_dir};
 use anyhow::{Context, Result, bail};
-use mycelium_proto::api::{DeviceRequest, DeviceResponse, DeviceTokenRequest, DeviceTokenResponse, ErrorBody};
+use mycelium_proto::api::{DeviceRequest, DeviceResponse, DeviceTokenRequest, DeviceTokenResponse, ErrorBody, RedeemJoinToken};
 use mycelium_proto::conversation::DeviceKind;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -9,6 +9,7 @@ const SLOW_DOWN_STEP: Duration = Duration::from_secs(5);
 
 pub struct JoinOptions {
     pub control_plane: String,
+    pub join_token: Option<String>,
     pub join_token_file: Option<PathBuf>,
     pub name: Option<String>,
     pub config_path: Option<PathBuf>,
@@ -26,37 +27,43 @@ pub fn hostname() -> String {
 }
 
 pub async fn join(options: JoinOptions) -> Result<()> {
-    if options.join_token_file.is_some() {
-        bail!("Join tokens arrive in a later release. Join with a device code by leaving out --join-token-file.");
-    }
-
     let control_plane = options.control_plane.trim_end_matches('/').to_string();
     let client = reqwest::Client::new();
     let hostname = hostname();
-
-    let request = DeviceRequest {
-        kind: DeviceKind::Node,
-        label: options.name.unwrap_or_else(|| hostname.clone()),
-        hostname,
-        os: std::env::consts::OS.to_string(),
-        arch: std::env::consts::ARCH.to_string(),
+    let join_token = match (&options.join_token, &options.join_token_file) {
+        (Some(token), _) => Some(token.clone()),
+        (None, Some(file)) => Some(std::fs::read_to_string(file).with_context(|| format!("Could not read the join token from {}.", file.display()))?),
+        (None, None) => None,
     };
-    let response = client
-        .post(format!("{control_plane}/api/v1/device"))
-        .json(&request)
-        .send()
-        .await
-        .with_context(|| format!("Could not reach {control_plane}. Check the address and try again."))?;
-    if !response.status().is_success() {
-        bail!("{control_plane} refused the join request ({}). Check that the address is a Mycelium control plane.", response.status());
-    }
 
-    let device: DeviceResponse = response.json().await.context("The control plane sent an answer this node does not understand.")?;
+    let granted = match join_token {
+        Some(token) => redeem_join_token(&client, &control_plane, &token, &hostname).await?,
+        None => {
+            let request = DeviceRequest {
+                kind: DeviceKind::Node,
+                label: options.name.unwrap_or_else(|| hostname.clone()),
+                hostname,
+                os: std::env::consts::OS.to_string(),
+                arch: std::env::consts::ARCH.to_string(),
+            };
+            let response = client
+                .post(format!("{control_plane}/api/v1/device"))
+                .json(&request)
+                .send()
+                .await
+                .with_context(|| format!("Could not reach {control_plane}. Check the address and try again."))?;
+            if !response.status().is_success() {
+                bail!("{control_plane} refused the join request ({}). Check that the address is a Mycelium control plane.", response.status());
+            }
 
-    println!("To join this node, open {} and approve the code {}.", device.verification_uri_complete, device.user_code);
-    println!("Or go to {} and enter the code by hand.", device.verification_uri);
+            let device: DeviceResponse = response.json().await.context("The control plane sent an answer this node does not understand.")?;
 
-    let granted = await_approval(&client, &control_plane, &device).await?;
+            println!("To join this node, open {} and approve the code {}.", device.verification_uri_complete, device.user_code);
+            println!("Or go to {} and enter the code by hand.", device.verification_uri);
+
+            await_approval(&client, &control_plane, &device).await?
+        }
+    };
 
     let config = NodeConfig {
         control_plane,
@@ -73,6 +80,21 @@ pub async fn join(options: JoinOptions) -> Result<()> {
     println!("Joined as node {}. Credential written to {}.", config.node_id, path.display());
 
     Ok(())
+}
+
+async fn redeem_join_token(client: &reqwest::Client, control_plane: &str, token: &str, hostname: &str) -> Result<DeviceTokenResponse> {
+    let request = RedeemJoinToken { token: token.trim().to_string(), hostname: hostname.to_string(), os: std::env::consts::OS.to_string(), arch: std::env::consts::ARCH.to_string() };
+    let response = client.post(format!("{control_plane}/api/v1/nodes/join")).json(&request).send().await.with_context(|| format!("Could not reach {control_plane}. Check the address and try again."))?;
+
+    if response.status().is_success() {
+        let granted = response.json().await.context("The control plane sent a credential this node does not understand.")?;
+
+        return Ok(granted);
+    }
+
+    let body: ErrorBody = response.json().await.context("The control plane refused the join token with an answer this node does not understand.")?;
+
+    bail!("{}", body.message)
 }
 
 async fn await_approval(client: &reqwest::Client, control_plane: &str, device: &DeviceResponse) -> Result<DeviceTokenResponse> {

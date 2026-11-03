@@ -245,7 +245,8 @@ impl Environment {
             .env("XDG_CONFIG_HOME", self.node_home.join("config"))
             .env("MYCELIUM_NODE_CONFIG", &self.node_config)
             .env("MYCELIUM_CLAUDE_ACP", fake_agent())
-            .env_remove("MYCELIUM_JOIN_TOKEN_FILE");
+            .env_remove("MYCELIUM_JOIN_TOKEN_FILE")
+            .env_remove("MYCELIUM_JOIN_TOKEN");
 
         command
     }

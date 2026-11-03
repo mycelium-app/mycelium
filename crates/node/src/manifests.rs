@@ -11,6 +11,12 @@ pub struct Outpost {
     pub name: String,
     pub namespace: String,
     pub storage_class: Option<String>,
+    pub join: Option<OutpostJoin>,
+}
+
+pub struct OutpostJoin {
+    pub control_plane: String,
+    pub token: String,
 }
 
 fn is_dns_label(value: &str, longest: usize) -> bool {
@@ -37,6 +43,19 @@ impl Outpost {
             }
         }
 
+        if let Some(join) = &self.join {
+            let address_ok = (join.control_plane.starts_with("https://") || join.control_plane.starts_with("http://")) && join.control_plane.chars().all(|c| c.is_ascii_graphic());
+            let token_ok = !join.token.is_empty() && join.token.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+
+            if !address_ok {
+                bail!("Enter the address of the control plane, starting with https://.");
+            }
+
+            if !token_ok {
+                bail!("Enter the join token as Add an outpost shows it.");
+            }
+        }
+
         Ok(())
     }
 
@@ -46,6 +65,27 @@ impl Outpost {
         let name = &self.name;
         let namespace = &self.namespace;
         let storage_class = self.storage_class.as_ref().map(|class| format!("            - name: MYCELIUM_KUBERNETES_STORAGE_CLASS\n              value: {class}\n")).unwrap_or_default();
+
+        let (join_secret, node_config, credential_mount, credential_volume) = match &self.join {
+            Some(join) => (
+                format!(
+                    "---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: {name}-join-token\n  namespace: {namespace}\n  labels:\n    {OUTPOST_LABEL}: {name}\nstringData:\n  token: \"{}\"\n",
+                    join.token
+                ),
+                format!(
+                    "            - name: MYCELIUM_NODE_CONFIG\n              value: /var/lib/mycelium/node.toml\n            - name: XDG_STATE_HOME\n              value: /var/lib\n            - name: MYCELIUM_CONTROL_PLANE\n              value: \"{}\"\n            - name: MYCELIUM_JOIN_TOKEN\n              valueFrom:\n                secretKeyRef:\n                  name: {name}-join-token\n                  key: token\n",
+                    join.control_plane
+                ),
+                String::new(),
+                String::new(),
+            ),
+            None => (
+                String::new(),
+                "            - name: MYCELIUM_NODE_CONFIG\n              value: /etc/mycelium/node.toml\n".to_string(),
+                "            - name: credential\n              mountPath: /etc/mycelium\n              readOnly: true\n".to_string(),
+                format!("        - name: credential\n          secret:\n            secretName: {name}-node-credential\n            defaultMode: 0400\n"),
+            ),
+        };
 
         Ok(format!(
             r#"apiVersion: v1
@@ -146,9 +186,7 @@ spec:
           image: {NODE_IMAGE}
           command: ["dumb-init", "mycelium", "node", "run"]
           env:
-            - name: MYCELIUM_NODE_CONFIG
-              value: /etc/mycelium/node.toml
-            - name: MYCELIUM_KUBERNETES_ENABLED
+{node_config}            - name: MYCELIUM_KUBERNETES_ENABLED
               value: "true"
             - name: MYCELIUM_KUBERNETES_OUTPOST
               value: {name}
@@ -161,20 +199,13 @@ spec:
             - name: MYCELIUM_KUBERNETES_CREDENTIALS_SECRET
               value: {name}-agent-credentials
 {storage_class}          volumeMounts:
-            - name: credential
-              mountPath: /etc/mycelium
-              readOnly: true
-            - name: state
+{credential_mount}            - name: state
               mountPath: /var/lib/mycelium
       volumes:
-        - name: credential
-          secret:
-            secretName: {name}-node-credential
-            defaultMode: 0400
-        - name: state
+{credential_volume}        - name: state
           persistentVolumeClaim:
             claimName: {name}-node-state
-"#
+{join_secret}"#
         ))
     }
 }
@@ -184,7 +215,7 @@ mod tests {
     use super::*;
 
     fn outpost(name: &str, namespace: &str, storage_class: Option<&str>) -> Outpost {
-        Outpost { name: name.into(), namespace: namespace.into(), storage_class: storage_class.map(String::from) }
+        Outpost { name: name.into(), namespace: namespace.into(), storage_class: storage_class.map(String::from), join: None }
     }
 
     fn documents(outpost: &Outpost) -> Vec<String> {
@@ -244,6 +275,45 @@ mod tests {
         assert!(manifests.contains("name: MYCELIUM_KUBERNETES_STORAGE_CLASS\n              value: fast"));
         assert!(manifests.contains("name: MYCELIUM_KUBERNETES_CREDENTIALS_SECRET\n              value: lab-agent-credentials"));
         assert!(manifests.contains("secretName: lab-node-credential"));
+    }
+
+    fn joining(name: &str) -> Outpost {
+        Outpost { join: Some(OutpostJoin { control_plane: "https://mycelium.example.com".into(), token: "myc_join_abc-123_x".into() }), ..outpost(name, "team-a", None) }
+    }
+
+    #[test]
+    fn an_outpost_with_a_join_token_stores_it_in_a_secret_the_node_reads_and_keeps_its_credential_in_the_state_volume() {
+        let manifests = joining("lab").manifests().unwrap();
+        let secret = manifests.split("\n---\n").find(|document| kind_of(document) == "Secret").unwrap();
+
+        assert!(secret.contains("  name: lab-join-token\n") && secret.contains("  namespace: team-a\n") && secret.contains("token: \"myc_join_abc-123_x\""), "{secret}");
+        assert!(manifests.contains("name: MYCELIUM_JOIN_TOKEN\n              valueFrom:\n                secretKeyRef:\n                  name: lab-join-token\n                  key: token"));
+        assert!(manifests.contains("name: MYCELIUM_CONTROL_PLANE\n              value: \"https://mycelium.example.com\""));
+        assert!(manifests.contains("name: MYCELIUM_NODE_CONFIG\n              value: /var/lib/mycelium/node.toml"));
+        assert!(!manifests.contains("lab-node-credential"));
+    }
+
+    #[test]
+    fn the_join_token_appears_only_in_its_own_secret() {
+        let manifests = joining("lab").manifests().unwrap();
+
+        assert_eq!(manifests.matches("myc_join_abc-123_x").count(), 1);
+    }
+
+    #[test]
+    fn an_outpost_without_a_join_token_keeps_the_stored_credential() {
+        let manifests = outpost("lab", "team-a", None).manifests().unwrap();
+
+        assert!(!manifests.contains("kind: Secret") && !manifests.contains("MYCELIUM_JOIN_TOKEN"));
+    }
+
+    #[test]
+    fn a_join_token_or_address_that_could_alter_the_manifest_is_refused() {
+        for (control_plane, token) in [("https://mycelium.example.com", "abc\nkind: x"), ("https://mycelium.example.com", ""), ("mycelium.example.com", "abc"), ("https://my celium.example.com", "abc")] {
+            let refused = Outpost { join: Some(OutpostJoin { control_plane: control_plane.into(), token: token.into() }), ..outpost("lab", "team-a", None) }.manifests();
+
+            assert!(refused.is_err(), "{control_plane:?} {token:?}");
+        }
     }
 
     #[test]

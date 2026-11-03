@@ -643,9 +643,9 @@ replays everything after them from the keepers.
 `~/.config/mycelium/node.toml` (or `/var/lib/mycelium-node/node.toml` under the system service):
 `control_plane`, `node_id`, `token`, `state_dir`, `projects_root`, `max_sessions` (default 8). At the limit the node closes its least recently used idle session (not working, not waiting for input) to make room and tells the control plane; the conversation resumes through `session/load` on its next message. It refuses the new session only when every session is busy.
 `mycelium node join` writes it with mode 0600. `MYCELIUM_NODE_CONFIG` overrides the path.
-`MYCELIUM_JOIN_TOKEN_FILE`, when set, joins without a device code: a single-use token minted in the
-UI. Stage 1 implements the device code; the token file is accepted by the CLI flag parser and
-reports "Join tokens arrive in a later release" until then.
+`MYCELIUM_JOIN_TOKEN` (or `--token`) and `MYCELIUM_JOIN_TOKEN_FILE`, when set, join without a device
+code: a single-use token valid for an hour, minted in the UI for one node name and exchanged at
+`POST /api/v1/nodes/join`. See `docs/KUBERNETES.md` for the outpost use.
 
 ### Agents
 

@@ -24,12 +24,12 @@ fn help_lists_the_stage_one_commands() {
 }
 
 #[test]
-fn node_join_takes_a_url_and_an_optional_join_token_file() {
+fn node_join_reports_a_join_token_file_it_cannot_read() {
     mycelium()
         .args(["node", "join", "https://mycelium.example", "--join-token-file", "/nonexistent"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Join tokens arrive in a later release"));
+        .stderr(predicate::str::contains("Could not read the join token from /nonexistent"));
 }
 
 #[test]

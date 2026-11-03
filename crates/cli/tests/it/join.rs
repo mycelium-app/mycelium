@@ -56,7 +56,7 @@ fn pending() -> (StatusCode, Value) {
 
 fn mycelium(config_path: &Path) -> Command {
     let mut command = Command::cargo_bin("mycelium").unwrap();
-    command.env("MYCELIUM_NODE_CONFIG", config_path).env_remove("MYCELIUM_JOIN_TOKEN_FILE");
+    command.env("MYCELIUM_NODE_CONFIG", config_path).env_remove("MYCELIUM_JOIN_TOKEN_FILE").env_remove("MYCELIUM_JOIN_TOKEN");
 
     command
 }
@@ -146,15 +146,73 @@ async fn join_stops_when_the_request_is_denied() {
     assert!(!config_path.exists());
 }
 
-#[test]
-fn join_tokens_report_that_they_arrive_in_a_later_release() {
-    let dir = tempfile::tempdir().unwrap();
+async fn start_token_control_plane(answer: (StatusCode, Value)) -> (String, Arc<Mutex<Vec<Value>>>) {
+    let received = Arc::new(Mutex::new(Vec::new()));
+    let state = (received.clone(), answer);
 
-    mycelium(&dir.path().join("node.toml"))
-        .args(["node", "join", "https://mycelium.example", "--join-token-file", "/nonexistent"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("Join tokens arrive in a later release"));
+    async fn redeem(State(state): State<(Arc<Mutex<Vec<Value>>>, (StatusCode, Value))>, Json(body): Json<Value>) -> (StatusCode, Json<Value>) {
+        state.0.lock().unwrap().push(body);
+
+        (state.1.0, Json(state.1.1.clone()))
+    }
+
+    let app = Router::new().route("/api/v1/nodes/join", post(redeem)).with_state(state);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    (url, received)
+}
+
+async fn run_join_with_token(url: String, config_path: std::path::PathBuf, token: &'static str) -> assert_cmd::assert::Assert {
+    tokio::task::spawn_blocking(move || mycelium(&config_path).env("MYCELIUM_JOIN_TOKEN", token).args(["node", "join", &url]).assert()).await.unwrap()
+}
+
+#[tokio::test]
+async fn join_with_a_token_from_the_environment_writes_a_private_credential_without_a_device_code() {
+    let granted = (StatusCode::OK, json!({"kind": "node", "id": "7f0c1d52-3c2e-4b43-a0a5-1c8a1e2b9d11", "token": "myc_node_tok-123"}));
+    let (url, received) = start_token_control_plane(granted).await;
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config").join("node.toml");
+
+    let assert = run_join_with_token(url.clone(), config_path.clone(), "myc_join_abc").await;
+
+    assert.success().stdout(predicate::str::contains("Joined as node 7f0c1d52-3c2e-4b43-a0a5-1c8a1e2b9d11"));
+    let config = NodeConfig::load(&config_path).unwrap();
+    assert_eq!((config.control_plane, config.token.as_str()), (url, "myc_node_tok-123"));
+    assert_eq!(std::fs::metadata(&config_path).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(received.lock().unwrap()[0]["token"], "myc_join_abc");
+}
+
+#[tokio::test]
+async fn join_with_a_token_file_reads_the_token_from_it() {
+    let granted = (StatusCode::OK, json!({"kind": "node", "id": "7f0c1d52-3c2e-4b43-a0a5-1c8a1e2b9d11", "token": "myc_node_tok-123"}));
+    let (url, received) = start_token_control_plane(granted).await;
+    let dir = tempfile::tempdir().unwrap();
+    let token_file = dir.path().join("join-token");
+    std::fs::write(&token_file, "myc_join_from_file\n").unwrap();
+    let config_path = dir.path().join("node.toml");
+    let path = config_path.clone();
+
+    let assert = tokio::task::spawn_blocking(move || mycelium(&path).args(["node", "join", &url, "--join-token-file", token_file.to_str().unwrap()]).assert()).await.unwrap();
+
+    assert.success();
+    assert_eq!(received.lock().unwrap()[0]["token"], "myc_join_from_file");
+}
+
+#[tokio::test]
+async fn join_with_a_used_token_says_so_and_writes_no_credential() {
+    let refused = (StatusCode::BAD_REQUEST, json!({"error": "join_token_used", "message": "This join token has already been used. Create a new one in Add an outpost."}));
+    let (url, _) = start_token_control_plane(refused).await;
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("node.toml");
+
+    let assert = run_join_with_token(url, config_path.clone(), "myc_join_abc").await;
+
+    assert.failure().stderr(predicate::str::contains("This join token has already been used. Create a new one in Add an outpost."));
+    assert!(!config_path.exists());
 }
 
 #[test]

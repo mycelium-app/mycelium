@@ -33,7 +33,8 @@ The agent's working folder is `/workspace/<folder>`.
 An outpost is one Kubernetes node in one namespace of a cluster. Several outposts can run against
 one control plane and one cluster, each its own node in the node list with its own namespace, sign-in
 Secret and pods. Choose Join a node, Kubernetes in the app to add one: it asks for a name, a
-namespace and an optional storage class, then shows the commands below with those values filled in.
+namespace and an optional storage class, creates a join token, then shows the commands below with
+those values filled in.
 
 An outpost only lists, creates and deletes pods that carry its own `mycelium.app/outpost` label,
 and every pod listing sends that label as a selector. Kubernetes RBAC cannot restrict a role to
@@ -52,46 +53,52 @@ Names an outpost owns, for an outpost called `lab` in the namespace `team-a`:
 | Session pods | `lab-session-<conversation id>` |
 
 A name is up to 40 lowercase letters, numbers and hyphens. Outposts started before outposts existed
-ran as `mycelium`; their pods have no outpost label, so a restarted node does not find them and
-starts the conversation in a new pod.
+ran as `mycelium`, and their pods have no outpost label. On start, a node labels the pods named
+`mycelium-session-<conversation id>` that carry its own node id, so a restarted node finds them
+instead of starting the conversation in a new pod. It does this only when no other outpost has a
+pod in its namespace; otherwise it leaves them alone and logs once. Pods are never relabelled for
+another node.
 
 ## Install
 
-1. Print the manifests for the outpost and apply them. This creates the namespace, a service
-   account, a Role and RoleBinding limited to that namespace, the state volume and the node
-   Deployment:
+1. Create a join token for the outpost's name. Add an outpost in the app does this for you; it is
+   bound to your account and the name, works once and expires after an hour. The control plane
+   stores only a hash of it.
+
+2. Print the manifests for the outpost with the token and the control plane's address, and apply
+   them. This creates the namespace, a service account, a Role and RoleBinding limited to that
+   namespace, the state volume, a Secret holding the token and the node Deployment:
 
    ```
-   mycelium node outpost lab --namespace team-a --storage-class fast | kubectl apply -f -
+   MYCELIUM_JOIN_TOKEN=myc_join_... mycelium node outpost lab --namespace team-a --storage-class fast --control-plane https://mycelium.example.com | kubectl apply -f -
    ```
 
    Leave out `--storage-class` for an `emptyDir` workspace. The namespace defaults to `mycelium`.
+   On first start the node joins with `MYCELIUM_JOIN_TOKEN` and keeps its credential in its state
+   volume (`/var/lib/mycelium/node.toml`), so a restart does not need the token again. A used or
+   expired token is refused with a plain message and the node does not start; create a new token
+   and apply again.
 
-2. Build and push the agent image, or use `ghcr.io/mycelium-app/mycelium-agent:latest`:
+3. Build and push the agent image, or use `ghcr.io/mycelium-app/mycelium-agent:latest`:
 
    ```
    docker build -f deploy/kubernetes/agent.Dockerfile -t registry.example.com/mycelium-agent:1 deploy/kubernetes
    docker push registry.example.com/mycelium-agent:1
    ```
 
-3. Join the node under the outpost's name. Run
-   `mycelium node join https://mycelium.example.com --name lab` once on any machine and approve the
-   code, then put the cluster paths in the `node.toml` it writes:
+4. Create the agent sign-ins Secret (see below). The node starts as soon as the Deployment runs.
 
-   ```
-   state_dir = "/var/lib/mycelium"
-   projects_root = "/var/lib/mycelium/projects"
+Without `--token` and `--control-plane`, `mycelium node outpost` prints manifests that read a
+`<outpost>-node-credential` Secret instead. Create it from a `node.toml` written by
+`mycelium node join https://mycelium.example.com --name lab`, with `state_dir`, `projects_root`
+and `[kubernetes] enabled = true` set for the cluster:
 
-   [kubernetes]
-   enabled = true
-   ```
+```
+kubectl -n team-a create secret generic lab-node-credential --from-file=node.toml=node.toml
+```
 
-   ```
-   kubectl -n team-a create secret generic lab-node-credential --from-file=node.toml=node.toml
-   ```
-
-4. Create the agent sign-ins Secret (see below). The node starts as soon as its credential Secret
-   exists.
+Join tokens also join machines that cannot show a device code: `mycelium node join <url> --token
+<token>`, or the token in `MYCELIUM_JOIN_TOKEN` or a file named by `MYCELIUM_JOIN_TOKEN_FILE`.
 
 The outpost appears in the node list as soon as it connects. Start a conversation on it and
 `kubectl -n team-a get pods -l mycelium.app/outpost=lab` shows the session's pod.
