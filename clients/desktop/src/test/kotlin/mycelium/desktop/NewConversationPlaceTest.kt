@@ -54,6 +54,7 @@ class NewConversationPlaceTest {
     val scopes = TestScopes()
 
     private val bodies = CopyOnWriteArrayList<String>()
+    private val configs = CopyOnWriteArrayList<String>()
 
     private fun store(nodes: String = OrionJson): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -64,6 +65,10 @@ class NewConversationPlaceTest {
                 path.endsWith("/conversations") && request.method == HttpMethod.Post -> {
                     bodies += String(request.body.toByteArray())
                     respond(CreatedJson, HttpStatusCode.Created, json)
+                }
+                path.endsWith("/config") -> {
+                    configs += String(request.body.toByteArray())
+                    respond("", HttpStatusCode.NoContent)
                 }
                 path.endsWith("/projects") -> respond(HarbourJson, HttpStatusCode.OK, json)
                 path.endsWith("/nodes") -> respond(nodes, HttpStatusCode.OK, json)
@@ -102,6 +107,33 @@ class NewConversationPlaceTest {
 
         rule.waitUntil(5_000) { created != null }
         assertEquals("""{"node_id":"$OrionId","agent":"claude","project_id":"p1","prompt":"Restore the copy"}""", bodies.single())
+    }
+
+    @Test
+    fun aModeChosenBeforeSendingIsAppliedToTheNewConversation() {
+        var created: Conversation? = null
+        show(store(), onCreated = { created = it })
+
+        rule.onNodeWithContentDescription("Mode: Default").performClick()
+        rule.onNodeWithText("Plan").performClick()
+        rule.onNodeWithContentDescription("Message").performTextInput("Plan the restore")
+        rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }
+
+        rule.waitUntil(5_000) { created != null && configs.isNotEmpty() }
+        assertEquals("""{"mode":"plan"}""", configs.single())
+    }
+
+    @Test
+    fun withoutChoosingAModeNoneIsSent() {
+        var created: Conversation? = null
+        show(store(), onCreated = { created = it })
+
+        rule.onNodeWithContentDescription("Message").performTextInput("Restore the copy")
+        rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }
+
+        rule.waitUntil(5_000) { created != null }
+        rule.waitForIdle()
+        assertEquals(0, configs.size)
     }
 
     @Test
