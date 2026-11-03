@@ -20,6 +20,7 @@ import mycelium.ui.MyceliumTheme
 import mycelium.ui.Shell
 import org.junit.Rule
 import kotlin.test.Test
+import kotlin.test.assertEquals
 
 private class RowsPlatform : Platform {
     override val originUrl: String? = null
@@ -50,10 +51,8 @@ class ConversationRowStatusTest {
     @get:Rule
     val scopes = TestScopes()
 
-    @Test
-    fun eachRowNamesItsStateAgentAndNodeInWords() {
+    private fun show(rows: List<String>) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
-        val rows = listOf(conversation("w1", "Build the thing", "working"), conversation("w2", "Pick a colour", "input"), conversation("w3", "Break the build", "failed"))
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             val body = when {
@@ -69,11 +68,31 @@ class ConversationRowStatusTest {
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
         rule.setContent { MyceliumTheme(true) { Shell(store, RowsPlatform(), Me("u", "sam@example.com", "Sam"), onSignOut = {}) } }
+    }
+
+    @Test
+    fun eachRowNamesItsStateAgentAndNodeInWords() {
+        val rows = listOf(conversation("w1", "Build the thing", "working"), conversation("w2", "Pick a colour", "input"), conversation("w3", "Break the build", "failed"))
+        show(rows)
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Pipeline Build the thing").fetchSemanticsNodes().isNotEmpty() }
 
         rule.onNodeWithContentDescription("Pipeline Build the thing, Working, Claude Code on Workbench").assertExists()
         rule.onNodeWithContentDescription("Pipeline Pick a colour, Needs input, Claude Code on Workbench").assertExists()
         rule.onNodeWithContentDescription("Pipeline Break the build, Failed, Claude Code on Workbench").assertExists()
+    }
+
+    @Test
+    fun aStandaloneMainBranchIsHiddenWhileFeatureBranchesAndPullRequestsRemain() {
+        val main = conversation("w1", "Main work", "working").dropLast(1) + ""","branch":"main"}"""
+        val feature = conversation("w2", "Feature work", "input").dropLast(1) + ""","branch":"topic","pull_request_label":"PR #7","pull_request_state":"open"}"""
+        val mainPull = conversation("w3", "Review work", "failed").dropLast(1) + ""","branch":"main","pull_request_label":"PR #8","pull_request_state":"open"}"""
+        show(listOf(main, feature, mainPull))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Pipeline Main work").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, rule.onAllNodesWithText("main").fetchSemanticsNodes().size)
+        rule.onNodeWithText("topic  PR #7 open").assertExists()
+        rule.onNodeWithText("main  PR #8 open").assertExists()
+        rule.captureScreen("sidebar-compact-branches")
     }
 }

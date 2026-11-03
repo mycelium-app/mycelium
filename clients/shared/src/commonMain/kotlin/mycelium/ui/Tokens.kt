@@ -146,7 +146,7 @@ object Tokens {
         val IconSm: Dp = 14.dp
         val IconMd: Dp = 16.dp
         val Avatar: Dp = 20.dp
-        val TwoLineRowIcon: Dp = 32.dp
+        val TwoLineRowIcon: Dp = 22.dp
         val EarlierSessions: Dp = 320.dp
         val EarlierThread: Dp = 240.dp
         val Dot: Dp = 6.dp

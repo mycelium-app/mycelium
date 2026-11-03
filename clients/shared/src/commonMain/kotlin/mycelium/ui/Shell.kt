@@ -1063,7 +1063,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
     val projectName = project?.takeIf { !row.isChat }?.name
     val shownTitle = projectName?.let { "$it ${row.title}" } ?: row.title
     val pullRequestText = conversationPullRequestText(row.pullRequestLabel, row.pullRequestState)
-    val place = listOfNotNull(row.branch, pullRequestText).joinToString("  ")
+    val place = listOfNotNull(row.branch, pullRequestText).joinToString("  ").takeUnless { it == "main" }.orEmpty()
 
     Box(
         Modifier
@@ -1116,7 +1116,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
             if (!row.isChat) {
                 val iconSize = if (place.isNotEmpty()) Tokens.Size.TwoLineRowIcon else Tokens.Size.IconSm
 
-                Box(Modifier.width(Tokens.Size.TwoLineRowIcon), contentAlignment = Alignment.Center) {
+                Box(Modifier.width(Tokens.Space.S8), contentAlignment = Alignment.Center) {
                     Box {
                         if (row.isSubagent) {
                             Icon(MyIcon.Agent, colors.textMuted, iconSize)
