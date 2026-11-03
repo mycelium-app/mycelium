@@ -875,7 +875,7 @@ fun FullScreenSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -
 }
 
 @Composable
-fun Dialog(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+fun Dialog(onDismiss: () -> Unit, width: Dp = Tokens.Size.Dialog, content: @Composable ColumnScope.() -> Unit) {
     val colors = MyTheme.colors
 
     if (LocalTouch.current) {
@@ -903,7 +903,7 @@ fun Dialog(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
         ) {
             Column(
                 Modifier
-                    .widthIn(max = Tokens.Size.Dialog)
+                    .widthIn(max = width)
                     .fillMaxWidth()
                     .focusRequester(focus)
                     .focusable()

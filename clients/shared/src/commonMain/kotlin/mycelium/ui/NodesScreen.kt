@@ -197,8 +197,8 @@ private fun JoinPopup(store: Store, controlPlane: String, platform: Platform, ku
     var joinToken by remember(outpostName) { mutableStateOf<String?>(null) }
     val methods = if (kubernetes) JoinMethods + KubernetesMethod else JoinMethods
 
-    MenuPopup(onDismiss = onDismiss, width = Tokens.Size.Popover) {
-        Column(Modifier.padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+    Dialog(onDismiss = onDismiss, width = Tokens.Size.Page) {
+        Column(Modifier.weight(1f, fill = false).verticalScrollWithBar(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
             Label(if (method == KubernetesMethod) "Add an outpost" else "Join a node", Modifier.semantics { heading() }, Tokens.Type.Title)
             Segmented(methods, method, { method = it }, groupLabel = "How the machine runs Mycelium")
 
@@ -251,8 +251,11 @@ private fun JoinPopup(store: Store, controlPlane: String, platform: Platform, ku
                     }
                 }
             }
+        }
 
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             StatusMark("Waiting for the next node", Tone.Working, MyIcon.Working)
+            MyButton(onDismiss, text = "Cancel", variant = ButtonVariant.Outline)
         }
     }
 }

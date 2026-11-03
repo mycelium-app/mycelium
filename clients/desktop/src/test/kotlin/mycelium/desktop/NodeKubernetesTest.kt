@@ -3,6 +3,10 @@ package mycelium.desktop
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -155,6 +159,9 @@ class NodeKubernetesTest {
         openAddAnOutpost()
 
         assertTrue(present("Add an outpost"))
+        rule.onNodeWithText("Cancel").performClick()
+        assertEquals(false, present("Add an outpost"))
+        openAddAnOutpost()
         rule.onNodeWithContentDescription("Name").assertExists()
         rule.onNodeWithContentDescription("Namespace").assertExists()
         rule.onNodeWithContentDescription("Storage class").assertExists()
@@ -170,6 +177,18 @@ class NodeKubernetesTest {
     }
 
     @Test
+    fun theOutpostDialogCanBeNavigatedAndClosedFromTheKeyboard() {
+        fillInAnOutpost()
+        rule.onNodeWithContentDescription("Name").performClick()
+        rule.onNodeWithContentDescription("Name").performKeyInput { pressKey(Key.Tab) }
+        rule.onNodeWithContentDescription("Namespace").assertIsFocused()
+        rule.captureScreen("outpost-keyboard")
+        rule.onNodeWithContentDescription("Namespace").performKeyInput { pressKey(Key.Escape) }
+
+        assertEquals(false, present("Add an outpost"))
+    }
+
+    @Test
     fun anOutpostWithANameAndNamespaceOffersAJoinTokenBeforeAnyCommand() {
         fillInAnOutpost()
 
@@ -177,6 +196,7 @@ class NodeKubernetesTest {
         rule.onNodeWithContentDescription("Create join token").assertExists()
         assertEquals(false, present("Create the outpost in the cluster"))
         assertTrue(tokenRequests.isEmpty())
+        rule.captureScreen("outpost-join-token")
     }
 
     @Test
@@ -198,6 +218,7 @@ class NodeKubernetesTest {
 
         assertTrue(present("MYCELIUM_JOIN_TOKEN=myc_join_example mycelium node outpost lab-cluster --namespace team-a --storage-class fast --control-plane https://mycelium.test | kubectl apply -f -"))
         assertEquals(false, present("Copy the join command"))
+        rule.captureScreen("outpost-commands")
     }
 
     @Test
@@ -236,6 +257,7 @@ class NodeKubernetesTest {
         }
 
         assertEquals(2, rule.onAllNodesWithText("Kubernetes").fetchSemanticsNodes().size)
+        rule.captureScreen("outposts")
     }
 
     @Test

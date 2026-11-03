@@ -3,6 +3,11 @@ package mycelium.desktop
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.InternalComposeUiApi
+import androidx.compose.ui.graphics.asSkiaBitmap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -139,6 +144,14 @@ internal fun renderAt(name: String, dark: Boolean, phone: Boolean, tabs: Int = 0
     scene.close()
 
     return out
+}
+
+internal fun ComposeContentTestRule.captureScreen(name: String) {
+    val bitmap = onAllNodes(isRoot()).onLast().captureToImage().asSkiaBitmap()
+    val bytes = org.jetbrains.skia.Image.makeFromBitmap(bitmap).encodeToData(EncodedImageFormat.PNG)!!.bytes
+    val out = File("build/screens/$name-dark.png")
+    out.parentFile.mkdirs()
+    out.writeBytes(bytes)
 }
 
 private fun render(name: String, dark: Boolean, content: @androidx.compose.runtime.Composable () -> Unit): File = renderAt(name, dark, false, content = content)

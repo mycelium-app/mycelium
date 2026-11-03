@@ -106,6 +106,7 @@ class AppBesideChatTest {
         assertEquals(listOf("https://harbour-status.apps.example.com"), platform.shown.toList())
         rule.onNodeWithContentDescription("Open in browser").assertExists()
         assertTrue(composerShown())
+        rule.captureScreen("app-side-panel")
     }
 
     @Test
@@ -126,7 +127,9 @@ class AppBesideChatTest {
         rule.waitUntil(5_000) { composerShown() }
         assertEquals(listOf("https://harbour-status.apps.example.com"), platform.shown.toList())
 
+        rule.captureScreen("app-beside-chat")
         rule.onNodeWithContentDescription("Hide chat").performClick()
+        rule.captureScreen("app-open")
 
         assertTrue(!composerShown())
         rule.onNodeWithContentDescription("Show chat").assertExists()
@@ -141,6 +144,7 @@ class AppBesideChatTest {
 
         rule.onNodeWithContentDescription("Show chat").performClick()
         rule.onNodeWithContentDescription("Search conversations").assertExists()
+        rule.captureScreen("app-choose-chat")
         rule.onNodeWithText("c1").performClick()
 
         rule.waitUntil(5_000) { composerShown() }
@@ -163,6 +167,7 @@ class AppBesideChatTest {
         rule.waitUntil(5_000) { composerShown() }
 
         rule.onNodeWithContentDescription("Change chat").performClick()
+        rule.captureScreen("app-change-chat")
         rule.onNodeWithText("c2").performClick()
 
         assertEquals("c2", platform.preferences["beside-chat:a2"])
