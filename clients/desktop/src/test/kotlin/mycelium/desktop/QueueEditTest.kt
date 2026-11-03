@@ -140,4 +140,29 @@ class QueueEditTest {
 
         assertEquals(listOf("""{"editing":true}""", """{"editing":false}"""), patches())
     }
+
+    @Test
+    fun upInAnEmptyComposerEditsTheLastQueuedMessage() {
+        open()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Actions for queued message 2").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithContentDescription("Message").performClick()
+        rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.DirectionUp) }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Editing queued message 2").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasContentDescription("Message").and(hasText("The header draws over the clock", substring = true))).assertIsDisplayed()
+    }
+
+    @Test
+    fun upInAComposerWithTextMovesTheCaretInsteadOfEditingTheQueue() {
+        open()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Actions for queued message 2").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithContentDescription("Message").performTextInput("draft")
+        rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.DirectionUp) }
+        rule.waitForIdle()
+
+        assertEquals(0, rule.onAllNodesWithText("Editing queued message 2").fetchSemanticsNodes().size)
+        assertEquals(emptyList(), patches())
+    }
 }

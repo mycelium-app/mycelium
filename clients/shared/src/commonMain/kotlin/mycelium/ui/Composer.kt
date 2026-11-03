@@ -448,6 +448,7 @@ fun Composer(
                         when {
                             key == Key.Escape && matches.isEmpty() && queueEdit != null -> { queueEdit.onCancel(); true }
                             key == Key.Escape && matches.isEmpty() && working -> { onStop(); true }
+                            key == Key.DirectionUp && matches.isEmpty() && queueEdit == null && text.text.isEmpty() && queue.isNotEmpty() -> { onEditQueued(queue.last()); true }
                             matches.isEmpty() -> false
                             key == Key.DirectionDown -> { highlighted = (highlighted + 1) % matches.size; true }
                             key == Key.DirectionUp -> { highlighted = (highlighted - 1 + matches.size) % matches.size; true }
