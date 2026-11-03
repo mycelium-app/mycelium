@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.22.0
+
+- Stored secrets are encrypted at rest. Set MYCELIUM_SECRET_KEY, or the control plane creates a key in its data folder on first boot; back that file up. `mycelium control rotate-secrets` rotates it.
+- Kubernetes outposts: several Kubernetes nodes can share one control plane, each in its own namespace with its own names and labelled pods. Add one from Nodes, Join, Add an outpost.
+- Terminals survive closing and reopening the app, including when the first load fails or the node is slow to send the scrollback.
+- Up in an empty composer edits the last queued message.
+- Zulip tools fetch a message by id or permalink, page through history, filter by channel, topic, sender and date, accept Zulip search operators such as from:me, and say whether more messages exist.
+- The place strip under New conversation is two controls: Run on for the node and a control for the checkout, worktree or folder.
+- Show chat beside an app or artefact with no conversation lets you choose one, and Change chat picks another.
+- A session approval for a Coolify api write covers only that method and resource, and deletes always ask.
+- Permission cards close when the agent abandons the request, and an older node is told at once that it cannot create folders.
+- Security hardening: the node link refuses another node's conversations and closes a flooding node, node folders stay inside the projects folder and are private, and terminals no longer inherit the node's secrets.
+
 ## v0.21.0
 
 - Apps open inside Mycelium, beside the conversation that built them, and an open app can show its conversation next to it. Open in browser stays available.
