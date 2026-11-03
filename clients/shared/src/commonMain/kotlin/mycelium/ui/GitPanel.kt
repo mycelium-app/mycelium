@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
@@ -637,14 +638,18 @@ fun CommitArea(
                     .heightIn(min = 56.dp)
                     .onPreviewKeyEvent { event ->
                         val commit = event.type == KeyEventType.KeyDown && event.key == Key.Enter && (event.isCtrlPressed || event.isMetaPressed)
+                        val prepared = status?.preparedMessage
+                        val fill = event.type == KeyEventType.KeyDown && event.key == Key.Tab && message.isEmpty() && !prepared.isNullOrEmpty() && !event.isShiftPressed && !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed
 
-                        if (commit && event.isShiftPressed) {
+                        if (fill) {
+                            onMessage(prepared.orEmpty())
+                        } else if (commit && event.isShiftPressed) {
                             onAmend()
                         } else if (commit) {
                             onCommit()
                         }
 
-                        commit
+                        fill || commit
                     }
                     .semantics { contentDescription = "Commit message" },
                 decorationBox = { inner ->

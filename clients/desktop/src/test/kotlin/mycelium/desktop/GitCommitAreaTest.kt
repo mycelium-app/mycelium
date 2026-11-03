@@ -5,6 +5,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.performTextInput
+import kotlin.test.assertTrue
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -38,6 +41,67 @@ class GitCommitAreaTest {
         shown("Pull")
         status = status.copy(upstream = null, ahead = 0, behind = 0)
         rule.onNodeWithContentDescription("Publish main").assertExists()
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun tabCopiesThePreparedMessageIntoAnEmptyFieldForEditing() {
+        val prepared = "fix: preserve queued jobs"
+        var message by mutableStateOf("")
+        rule.setContent {
+            MyceliumTheme(true) {
+                CommitArea(GitStatus("main", ahead = 0, behind = 0, files = emptyList(), preparedMessage = prepared), null, message, { message = it }, {}, {}, {})
+            }
+        }
+
+        val field = rule.onNodeWithContentDescription("Commit message")
+        field.performClick()
+        field.performKeyInput { pressKey(Key.Tab) }
+        field.assertTextEquals(prepared)
+        rule.captureScreen("commit-prepared-message")
+        field.performTextInput("edited ")
+
+        assertTrue(message.contains("edited "))
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun tabKeepsItsExistingBehaviourWithoutAnEmptyPreparedMessage() {
+        var message by mutableStateOf("fix: keep this message")
+        var prepared by mutableStateOf<String?>("fix: preserve queued jobs")
+        rule.setContent {
+            MyceliumTheme(true) {
+                CommitArea(GitStatus("main", ahead = 0, behind = 0, files = emptyList(), preparedMessage = prepared), null, message, { message = it }, {}, {}, {})
+            }
+        }
+
+        val field = rule.onNodeWithContentDescription("Commit message")
+        field.performClick()
+        field.performKeyInput { pressKey(Key.Tab) }
+        field.assertTextEquals("fix: keep this message\t")
+        rule.runOnIdle {
+            message = ""
+            prepared = null
+        }
+        field.performClick()
+        field.performKeyInput { pressKey(Key.Tab) }
+        assertEquals("\t", message)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun shiftTabLeavesThePreparedMessageAsAPlaceholder() {
+        var message by mutableStateOf("")
+        rule.setContent {
+            MyceliumTheme(true) {
+                CommitArea(GitStatus("main", ahead = 0, behind = 0, files = emptyList(), preparedMessage = "fix: preserve queued jobs"), null, message, { message = it }, {}, {}, {})
+            }
+        }
+
+        val field = rule.onNodeWithContentDescription("Commit message")
+        field.performClick()
+        field.performKeyInput { withKeyDown(Key.ShiftLeft) { pressKey(Key.Tab) } }
+        assertEquals("", message)
     }
 
     @OptIn(ExperimentalTestApi::class)
