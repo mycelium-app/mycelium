@@ -188,7 +188,8 @@ mod tests {
 
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut buffer = [0u8; 1024];
-            stream.read(&mut buffer).await.unwrap();
+            let read = stream.read(&mut buffer).await.unwrap();
+            assert!(read > 0);
             stream.write_all(b"HTTP/1.1 307 Temporary Redirect\r\nlocation: http://169.254.169.254/\r\ncontent-length: 0\r\n\r\n").await.unwrap();
         });
 

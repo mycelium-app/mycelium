@@ -290,8 +290,8 @@ async fn saving_pushes_the_global_file_to_an_online_node_and_the_node_reports_wh
 #[tokio::test]
 async fn taking_over_sends_the_current_file_with_permission_to_set_the_persons_own_aside() {
     let server = Server::start().await;
-    let mut link = server.online_node("laptop").await;
     save(&server, "global", "# Rules").await;
+    let mut link = server.online_node("laptop").await;
     expect_instructions(&mut link).await;
     let node_id = link.id;
     let user = server.user.clone();

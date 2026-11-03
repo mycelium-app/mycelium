@@ -9,6 +9,11 @@ async fn started_conversation(server: &Server, link: &mut NodeLink, prompt: Opti
     let conversation = server.create_conversation(link.id, prompt).await;
     link.expect_start_session().await;
     link.start_session(conversation.id, "acp-1").await;
+    common::eventually("the node to list the started session", || async {
+        let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
+
+        nodes.as_array().unwrap().iter().any(|node| node["sessions"].as_array().is_some_and(|sessions| sessions.contains(&json!(conversation.id)))).then_some(())
+    }).await;
 
     conversation.id
 }
