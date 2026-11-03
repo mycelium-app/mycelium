@@ -1114,18 +1114,22 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
             }
 
             if (!row.isChat) {
-                Box {
-                    if (row.isSubagent) {
-                        Icon(MyIcon.Agent, colors.textMuted, Tokens.Size.IconSm)
-                    } else {
-                        ProjectIcon(project, Tokens.Size.IconSm)
-                    }
+                val iconSize = if (place.isNotEmpty()) Tokens.Size.TwoLineRowIcon else Tokens.Size.IconSm
 
-                    if (badge != null) {
-                        val onIcon = project != null
-                        val placement = if (onIcon) Modifier.align(Alignment.BottomEnd).offset(x = Tokens.Space.S0_5, y = Tokens.Space.S0_5) else Modifier.align(Alignment.Center)
+                Box(Modifier.width(Tokens.Size.TwoLineRowIcon), contentAlignment = Alignment.Center) {
+                    Box {
+                        if (row.isSubagent) {
+                            Icon(MyIcon.Agent, colors.textMuted, iconSize)
+                        } else {
+                            ProjectIcon(project, iconSize)
+                        }
 
-                        Box(placement.size(Tokens.Space.S2).background(badge, CircleShape))
+                        if (badge != null) {
+                            val onIcon = project != null
+                            val placement = if (onIcon) Modifier.align(Alignment.BottomEnd).offset(x = Tokens.Space.S0_5, y = Tokens.Space.S0_5) else Modifier.align(Alignment.Center)
+
+                            Box(placement.size(Tokens.Space.S2).background(badge, CircleShape))
+                        }
                     }
                 }
             }

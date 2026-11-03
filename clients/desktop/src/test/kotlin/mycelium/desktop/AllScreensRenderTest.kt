@@ -59,9 +59,9 @@ private fun list(vararg items: String) = items.joinToString(",", "[", "]")
 
 private fun text(value: String) = value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
 
-private fun conversation(id: String, title: String, status: String, node: String, updated: String, agent: String = "claude", cwd: String = "/home/sam/projects/midden", project: String? = null) =
+private fun conversation(id: String, title: String, status: String, node: String, updated: String, agent: String = "claude", cwd: String = "/home/sam/projects/midden", project: String? = null, branch: String? = null) =
     """{"id":"$id","owner":"u","node_id":"$node","agent":"$agent","cwd":"$cwd","title":"$title","status":"$status","mode":"acceptEdits","model":"Opus 5.5","acp_session_id":"s",
-    ${if (project != null) "\"project_id\":\"$project\"," else ""}"created_at":"${ago(days = 2)}","updated_at":"$updated","archived_at":null}"""
+    ${if (project != null) "\"project_id\":\"$project\"," else ""}${if (branch != null) "\"branch\":\"$branch\"," else ""}"created_at":"${ago(days = 2)}","updated_at":"$updated","archived_at":null}"""
 
 private fun chatConversation(id: String, title: String, updated: String) =
     conversation(id, title, "done", "", updated, agent = "chat", cwd = "").replace("\"mode\"", "\"provider_id\":\"mp1\",\"mode\"")
@@ -77,7 +77,7 @@ private val Nodes = list(node(Willow, "willow", "laptop", address = "100.64.4.18
 private val Conversations = list(
     conversation(Main, "Bump @immich/ui in midden", "working", Willow, ago(minutes = 1), project = "p1"),
     conversation("22222222-2222-2222-2222-222222222222", "Release v0.3.7 for outline", "input", Atlas, ago(minutes = 9), project = "p2"),
-    conversation("33333333-3333-3333-3333-333333333333", "Renovate sweep", "failed", Atlas, ago(minutes = 30), project = "p1"),
+    conversation("33333333-3333-3333-3333-333333333333", "Renovate sweep", "failed", Atlas, ago(minutes = 30), project = "p1", branch = "renovate/deps"),
     conversation("44444444-4444-4444-4444-444444444444", "Restore flow copy", "review", Willow, ago(hours = 1), project = "p1"),
     conversation(Codex, "Uploads survive a 503 and a timeout", "working", Atlas, ago(hours = 2), agent = "codex", project = "p1"),
     conversation("66666666-6666-6666-6666-666666666666", "Flux image automation for vm", "done", Atlas, ago(days = 1), cwd = "/home/sam/projects/vm", project = "p2"),
