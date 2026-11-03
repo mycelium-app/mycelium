@@ -35,7 +35,8 @@ pub fn write(projects_root: &Path, root: &str, files: &[FolderFile], replace: bo
         }
     }
 
-    std::fs::create_dir_all(&folder).map_err(|cause| anyhow!("{} cannot be created: {cause}.", folder.display()))?;
+    crate::config::create_private_directory(&folder).map_err(|cause| anyhow!("{} cannot be created: {cause}.", folder.display()))?;
+    let canonical_folder = folder.canonicalize().map_err(|cause| anyhow!("{} cannot be read: {cause}.", folder.display()))?;
 
     for file in files {
         if !safe_relative(&file.path) {
@@ -46,7 +47,17 @@ pub fn write(projects_root: &Path, root: &str, files: &[FolderFile], replace: bo
         let target = folder.join(&file.path);
 
         if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).map_err(|cause| anyhow!("{} cannot be created: {cause}.", parent.display()))?;
+            crate::config::create_private_directory(parent).map_err(|cause| anyhow!("{} cannot be created: {cause}.", parent.display()))?;
+
+            let resolved = parent.canonicalize().map_err(|cause| anyhow!("{} cannot be read: {cause}.", parent.display()))?;
+
+            if !resolved.starts_with(&canonical_folder) {
+                bail!("{} is not a path inside the assistant folder.", file.path);
+            }
+        }
+
+        if target.symlink_metadata().is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+            bail!("{} is not a path inside the assistant folder.", file.path);
         }
 
         std::fs::write(&target, data).map_err(|cause| anyhow!("{} cannot be written: {cause}.", target.display()))?;
@@ -140,6 +151,37 @@ mod tests {
         assert!(outside.unwrap_err().to_string().contains("outside"));
         assert!(escaping.is_err());
         assert!(!root.path().join("a.md").exists());
+    }
+
+    #[test]
+    fn writing_does_not_follow_a_symlink_planted_in_the_folder_to_a_place_outside_it() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let folder = root.path().join("assistant");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::os::unix::fs::symlink(outside.path(), folder.join("notes")).unwrap();
+        std::os::unix::fs::symlink(outside.path().join("target.md"), folder.join("link.md")).unwrap();
+
+        let through_directory = write(root.path(), "assistant", &[file("notes/a.md", "x")], false);
+        let through_file = write(root.path(), "assistant", &[file("link.md", "x")], false);
+
+        assert!(through_directory.is_err());
+        assert!(through_file.is_err());
+        assert!(!outside.path().join("a.md").exists());
+        assert!(!outside.path().join("target.md").exists());
+    }
+
+    #[test]
+    fn the_folder_and_its_subfolders_are_private_to_the_node_user() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+
+        write(root.path(), "assistant", &[file("notes/a.md", "x")], true).unwrap();
+
+        for relative in ["assistant", "assistant/notes"] {
+            assert_eq!(std::fs::metadata(root.path().join(relative)).unwrap().permissions().mode() & 0o777, 0o700, "{relative}");
+        }
     }
 
     #[test]

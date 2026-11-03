@@ -3,7 +3,7 @@ use mycelium_proto::conversation::AgentId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -210,9 +210,14 @@ fn socket_base_of(control_plane: &str) -> Result<String> {
     anyhow::bail!("The control plane address {base} must start with https:// or http://.");
 }
 
+pub fn create_private_directory(path: &Path) -> std::io::Result<()> {
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(path)?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+}
+
 pub fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        create_private_directory(parent)?;
     }
 
     let mut file = std::fs::OpenOptions::new().create(true).write(true).truncate(true).mode(0o600).open(path)?;
@@ -379,6 +384,21 @@ mod tests {
         assert_eq!(path, dir.path().join("sessions").join(Uuid::from_u128(3).to_string()).join(format!("ssh-token-{}", Uuid::from_u128(2))));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "myc_ssh_example");
         assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    fn a_conversations_token_folder_and_the_sessions_folder_are_private() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = sample();
+        config.state_dir = dir.path().to_path_buf();
+        std::fs::create_dir_all(config.sessions_dir()).unwrap();
+        std::fs::set_permissions(config.sessions_dir(), std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        create_private_directory(&config.sessions_dir()).unwrap();
+        let path = config.save_api_token(Uuid::from_u128(3), "myc_api_example").unwrap();
+
+        assert_eq!(std::fs::metadata(config.sessions_dir()).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(std::fs::metadata(path.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
     }
 
     #[test]

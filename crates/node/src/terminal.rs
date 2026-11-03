@@ -11,6 +11,8 @@ use uuid::Uuid;
 
 const SCROLLBACK_BYTES: usize = 256 * 1024;
 const MAX_TERMINALS: usize = 32;
+const SECRET_NAME_PARTS: [&str; 5] = ["TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "API_KEY"];
+const NODE_VARIABLE_PREFIX: &str = "MYCELIUM_";
 
 #[derive(Default)]
 struct Scrollback {
@@ -150,6 +152,14 @@ impl TerminalManager {
         builder.cwd(cwd);
         builder.env("TERM", "xterm-256color");
 
+        for (name, _) in std::env::vars() {
+            let upper = name.to_uppercase();
+
+            if upper.starts_with(NODE_VARIABLE_PREFIX) || SECRET_NAME_PARTS.iter().any(|part| upper.contains(part)) {
+                builder.env_remove(&name);
+            }
+        }
+
         let mut child = pair.slave.spawn_command(builder).context("Could not start a terminal on this node.")?;
         drop(pair.slave);
 
@@ -231,6 +241,24 @@ mod tests {
 
         let seen = read_until(&mut messages, "sum-42").await;
         assert!(seen.contains(folder.path().file_name().unwrap().to_str().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn a_shell_does_not_inherit_the_nodes_secrets() {
+        let (manager, mut messages) = shell_manager();
+        let terminal_id = Uuid::from_u128(4);
+
+        unsafe {
+            std::env::set_var("MYCELIUM_TERMINAL_TEST_NODE", "node-value");
+            std::env::set_var("TERMINAL_TEST_API_TOKEN", "token-value");
+            std::env::set_var("TERMINAL_TEST_HARMLESS", "harmless-value");
+        }
+
+        manager.start(terminal_id, Uuid::from_u128(100), "/", 80, 24);
+        manager.input(terminal_id, &STANDARD.encode("echo seen-[$MYCELIUM_TERMINAL_TEST_NODE]-[$TERMINAL_TEST_API_TOKEN]-[$TERMINAL_TEST_HARMLESS]\n"));
+
+        let seen = read_until(&mut messages, "-[harmless-value]").await;
+        assert!(seen.contains("seen-[]-[]-[harmless-value]"), "{seen}");
     }
 
     #[tokio::test]

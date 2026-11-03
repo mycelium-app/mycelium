@@ -202,6 +202,8 @@ pub fn adopt(home: &Path, roots: &[PathBuf], target_root: &Path, session_id: &st
     Ok(true)
 }
 
+const MOST_RESTORED_OFFSET: i64 = 4 * 1024 * 1024 * 1024;
+
 pub fn restore(home: &Path, roots: &[PathBuf], path: &str, offset: i64, data: &str) -> Result<()> {
     let relative = Path::new(path);
     let plain = relative.components().all(|component| matches!(component, std::path::Component::Normal(_)));
@@ -209,7 +211,7 @@ pub fn restore(home: &Path, roots: &[PathBuf], path: &str, offset: i64, data: &s
     let root = roots.iter().find(|root| full.starts_with(root));
     let in_a_transcript_folder = root.is_some() && path.ends_with(".jsonl");
 
-    if !plain || !in_a_transcript_folder || offset < 0 {
+    if !plain || !in_a_transcript_folder || !(0..=MOST_RESTORED_OFFSET).contains(&offset) {
         bail!("{path} is not a place this node keeps transcripts.");
     }
 
@@ -609,6 +611,17 @@ mod tests {
 
         restore(dir.path(), &[dir.path().join(".claude/projects"), dir.path().join(".codex/sessions")], path, 0, &STANDARD.encode("new\n")).unwrap();
         assert_eq!(std::fs::read_to_string(dir.path().join(path)).unwrap(), "new\n");
+    }
+
+    #[test]
+    fn a_restore_at_an_enormous_offset_does_not_create_a_huge_sparse_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = ".claude/projects/-w-app/abc.jsonl";
+
+        let refused = restore(dir.path(), &[dir.path().join(".claude/projects")], path, i64::MAX / 2, &STANDARD.encode("x"));
+
+        assert!(refused.is_err());
+        assert!(!dir.path().join(path).exists());
     }
 
     #[test]

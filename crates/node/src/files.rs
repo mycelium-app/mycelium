@@ -1,12 +1,15 @@
-use crate::git::git;
+use crate::git::{git, within};
 use std::path::Path;
 
 const MOST_MATCHES: usize = 50;
 const MOST_WALKED: usize = 20_000;
 pub(crate) const SKIPPED_DIRECTORIES: &[&str] = &[".git", "node_modules", "target", "build", ".gradle", "dist", ".venv"];
 
-pub fn matching_files(cwd: &Path, query: &str) -> Vec<String> {
-    let mut paths = tracked_files(cwd).unwrap_or_else(|| walked_files(cwd));
+pub fn matching_files(root: &Path, cwd: &str, query: &str) -> Vec<String> {
+    let Ok(cwd) = within(root, cwd) else {
+        return Vec::new();
+    };
+    let mut paths = tracked_files(&cwd).unwrap_or_else(|| walked_files(&cwd));
     let needle = query.to_lowercase();
 
     paths.retain(|path| path.to_lowercase().contains(&needle));
@@ -63,25 +66,40 @@ mod tests {
 
     #[test]
     fn files_whose_name_starts_with_the_query_come_first_and_skipped_directories_are_left_out() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("src")).unwrap();
-        std::fs::create_dir_all(dir.path().join("node_modules/flake")).unwrap();
-        std::fs::write(dir.path().join("src/default.nix"), "").unwrap();
-        std::fs::write(dir.path().join("flake.nix"), "").unwrap();
-        std::fs::write(dir.path().join("node_modules/flake/flake.nix"), "").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("app");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::create_dir_all(dir.join("node_modules/flake")).unwrap();
+        std::fs::write(dir.join("src/default.nix"), "").unwrap();
+        std::fs::write(dir.join("flake.nix"), "").unwrap();
+        std::fs::write(dir.join("node_modules/flake/flake.nix"), "").unwrap();
 
-        assert_eq!(matching_files(dir.path(), "flake"), vec!["flake.nix".to_string()]);
-        assert_eq!(matching_files(dir.path(), "NIX"), vec!["flake.nix".to_string(), "src/default.nix".to_string()]);
+        assert_eq!(matching_files(root.path(), "app", "flake"), vec!["flake.nix".to_string()]);
+        assert_eq!(matching_files(root.path(), "app", "NIX"), vec!["flake.nix".to_string(), "src/default.nix".to_string()]);
     }
 
     #[test]
     fn a_git_repository_lists_what_git_would_and_skips_ignored_files() {
-        let dir = tempfile::tempdir().unwrap();
-        git(dir.path(), &["init", "-q"], &[]).unwrap();
-        std::fs::write(dir.path().join(".gitignore"), "secret.txt\n").unwrap();
-        std::fs::write(dir.path().join("secret.txt"), "").unwrap();
-        std::fs::write(dir.path().join("readme.md"), "").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("app");
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q"], &[]).unwrap();
+        std::fs::write(dir.join(".gitignore"), "secret.txt\n").unwrap();
+        std::fs::write(dir.join("secret.txt"), "").unwrap();
+        std::fs::write(dir.join("readme.md"), "").unwrap();
 
-        assert_eq!(matching_files(dir.path(), ""), vec!["readme.md".to_string(), ".gitignore".to_string()]);
+        assert_eq!(matching_files(root.path(), "app", ""), vec!["readme.md".to_string(), ".gitignore".to_string()]);
+    }
+
+    #[test]
+    fn a_folder_outside_the_projects_root_lists_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        std::fs::write(elsewhere.path().join("private.txt"), "").unwrap();
+        std::os::unix::fs::symlink(elsewhere.path(), root.path().join("link")).unwrap();
+
+        for requested in [elsewhere.path().to_str().unwrap(), "../elsewhere", "link"] {
+            assert!(matching_files(root.path(), requested, "").is_empty(), "{requested}");
+        }
     }
 }

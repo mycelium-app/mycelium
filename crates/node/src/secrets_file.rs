@@ -9,7 +9,7 @@ pub fn path_in(session_dir: &Path) -> PathBuf {
 }
 
 pub fn write(session_dir: &Path, secrets: &[(String, String)]) -> std::io::Result<PathBuf> {
-    std::fs::create_dir_all(session_dir)?;
+    crate::config::create_private_directory(session_dir)?;
 
     let path = path_in(session_dir);
     let staging = session_dir.join("secrets.env.new");

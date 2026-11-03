@@ -106,7 +106,7 @@ pub struct Daemon {
 }
 
 pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: DaemonOptions) -> Result<()> {
-    std::fs::create_dir_all(config.sessions_dir())?;
+    crate::config::create_private_directory(&config.sessions_dir())?;
 
     let (out, out_rx) = mpsc::unbounded_channel();
     let pods = match config.kubernetes.enabled {
@@ -395,9 +395,10 @@ impl Daemon {
             ControlToNode::ContinueSequence { conversation_id, after } => crate::session::continue_sequence(&self.session_dir(conversation_id), after),
             ControlToNode::ListFiles { request_id, cwd, query } => {
                 let out = self.out.clone();
+                let root = self.config.projects_root.clone();
 
                 tokio::task::spawn_blocking(move || {
-                    let paths = crate::files::matching_files(std::path::Path::new(&cwd), &query);
+                    let paths = crate::files::matching_files(&root, &cwd, &query);
                     let _ = out.send(NodeToControl::Files { request_id, paths });
                 });
             }
