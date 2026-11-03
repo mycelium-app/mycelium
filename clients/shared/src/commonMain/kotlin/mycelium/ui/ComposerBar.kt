@@ -66,7 +66,7 @@ fun barControls(kind: ConversationKind, harness: HarnessReport): List<BarControl
         BarControl.Dictate.takeIf { harness.voice && !starting },
         BarControl.TeachMe.takeIf { harness.teachMe && !starting },
         BarControl.Goal.takeIf { workspace },
-        BarControl.Mode.takeIf { harness.modes && starting },
+        BarControl.Mode.takeIf { harness.modes && kind == ConversationKind.NewConversation },
         BarControl.Model,
         BarControl.Mode.takeIf { harness.modes && configurable },
         BarControl.Settings.takeIf { harness.settings && configurable },
