@@ -150,9 +150,16 @@ impl Toolbox {
         .await?;
         loaded.extend(searched.into_iter().filter(|name| tools.iter().any(|tool| &tool.name == name)));
 
-        let always_allowed = granted_titles(state, conversation_id).await?;
+        let granted = granted_titles(state, conversation_id).await?;
+        let always_allowed = granted
+            .into_iter()
+            .filter_map(|(title, _, input)| match tools.iter().find(|tool| tool.name == title).and_then(|tool| tool.server_row().map(|server| (tool, server))) {
+                Some((tool, server)) => server.grant(&tool.original, &input.0).key(&tool.name),
+                None => Some(title),
+            })
+            .collect();
 
-        Ok(Toolbox { tools, loaded, always_allowed: always_allowed.into_iter().map(|(title, _)| title).collect(), connections: HashMap::new(), chat_node: chat_node(state, owner).await?, provider, changes })
+        Ok(Toolbox { tools, loaded, always_allowed, connections: HashMap::new(), chat_node: chat_node(state, owner).await?, provider, changes })
     }
 
     pub async fn reload_if_changed(&mut self, state: &AppState, owner: Uuid, conversation_id: Uuid) -> ApiResult<()> {
@@ -251,8 +258,9 @@ impl Toolbox {
         let Some(server) = tool.server_row() else {
             return !self.always_allowed.contains(&tool.name);
         };
+        let granted = server.grant(&tool.original, input).key(&tool.name).is_some_and(|key| self.always_allowed.contains(&key));
 
-        server.effective(&tool.original, input).ask && !self.always_allowed.contains(&tool.name)
+        server.effective(&tool.original, input).ask && !granted
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -365,7 +373,12 @@ async fn outcome_of(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolb
         let answered = request_approval(state, owner, id, &call.id, &approval).await?;
 
         if answered == ALWAYS {
-            toolbox.always_allowed.insert(tool.name.clone());
+            let key = match tool.server_row() {
+                Some(server) => server.grant(&tool.original, &arguments).key(&tool.name),
+                None => Some(tool.name.clone()),
+            };
+
+            toolbox.always_allowed.extend(key);
         }
 
         if !is_approved(&answered) {
@@ -454,12 +467,12 @@ pub async fn record_call(state: &AppState, owner: Uuid, server: &ServerRow, tool
     }
 }
 
-const GRANTED_SQL: &str = "select r.payload->'toolCall'->>'title', r.payload->>'request_id' from events r join events s on s.conversation_id = r.conversation_id and s.kind = 'permission_resolved' and s.payload->>'request_id' = r.payload->>'request_id'
+const GRANTED_SQL: &str = "select r.payload->'toolCall'->>'title', r.payload->>'request_id', coalesce(r.payload->'toolCall'->'rawInput', 'null'::jsonb) from events r join events s on s.conversation_id = r.conversation_id and s.kind = 'permission_resolved' and s.payload->>'request_id' = r.payload->>'request_id'
      where r.conversation_id = $1 and r.kind = 'permission_request' and s.payload->>'option_id' = any($2)
      and not exists (select 1 from events x where x.conversation_id = r.conversation_id and x.kind = 'permission_resolved' and x.payload->>'request_id' = r.payload->>'request_id' and x.payload->>'option_id' = $3)";
 
-async fn granted_titles(state: &AppState, conversation_id: Uuid) -> ApiResult<Vec<(String, String)>> {
-    let granted = sqlx::query_as::<_, (String, String)>(GRANTED_SQL).bind(conversation_id).bind(vec![ALWAYS.to_string(), "allow_always".to_string()]).bind(REVOKED).fetch_all(&state.pool).await?;
+async fn granted_titles(state: &AppState, conversation_id: Uuid) -> ApiResult<Vec<(String, String, sqlx::types::Json<Value>)>> {
+    let granted = sqlx::query_as::<_, (String, String, sqlx::types::Json<Value>)>(GRANTED_SQL).bind(conversation_id).bind(vec![ALWAYS.to_string(), "allow_always".to_string()]).bind(REVOKED).fetch_all(&state.pool).await?;
 
     Ok(granted)
 }
@@ -467,7 +480,7 @@ async fn granted_titles(state: &AppState, conversation_id: Uuid) -> ApiResult<Ve
 pub async fn granting_requests(state: &AppState, conversation_id: Uuid, tool: &str) -> ApiResult<Vec<String>> {
     let granted = granted_titles(state, conversation_id).await?;
 
-    Ok(granted.into_iter().filter(|(title, _)| title == tool).map(|(_, request_id)| request_id).collect())
+    Ok(granted.into_iter().filter(|(title, _, _)| title == tool).map(|(_, request_id, _)| request_id).collect())
 }
 
 pub struct Approval<'a> {

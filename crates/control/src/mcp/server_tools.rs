@@ -50,8 +50,8 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             let approval = chat_tools::Approval { title: name, input: &arguments, server: &server.name, account: server.account.as_deref(), filter: filter.as_deref(), edits_by_setting: effective.edit };
             let answered = chat_tools::request_approval(state, owner, conversation_id, &request_id, &approval).await?;
 
-            if answered == chat_tools::ALWAYS {
-                chat_tools::stop_asking(state, owner, server, tool).await?;
+            if answered == chat_tools::ALWAYS && let Some(key) = server.grant(tool, &arguments).key(tool) {
+                chat_tools::stop_asking(state, owner, server, &key).await?;
             }
 
             if !chat_tools::is_approved(&answered) {

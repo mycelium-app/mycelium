@@ -253,7 +253,7 @@ async fn approving_an_api_write_for_the_session_covers_only_that_method_and_reso
     let server = Server::start().await;
     let node = server.online_node("laptop").await;
     let (base, fake) = fake_coolify().await;
-    add_coolify(&server, &base).await;
+    add_whole_instance(&server, &base).await;
     let conversation = server.node_conversation(&node.token).await;
     let create_database = || mcp("api", json!({"method": "POST", "path": "databases/postgresql", "body": {"name": "db"}}));
     let delete_database = || mcp("api", json!({"method": "DELETE", "path": "databases/db1"}));
