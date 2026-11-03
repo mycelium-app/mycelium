@@ -59,27 +59,40 @@ private const val KubernetesMethod = "Kubernetes"
 
 private class JoinStep(val title: String, val note: String?, val commands: List<Pair<String, String>>)
 
-private fun kubernetesJoinSteps(controlPlane: String) = listOf(
+private val DnsLabel = Regex("[a-z0-9]([-a-z0-9]*[a-z0-9])?")
+private val DnsSubdomain = Regex("[a-z0-9]([-a-z0-9.]*[a-z0-9])?")
+private const val MaxOutpostName = 40
+private const val MaxNamespaceName = 63
+
+private fun outpostNameError(name: String) =
+    if (name.isNotEmpty() && !(name.length <= MaxOutpostName && DnsLabel.matches(name))) "Enter a name of up to $MaxOutpostName lowercase letters, numbers and hyphens, starting and ending with a letter or number." else null
+
+private fun outpostNamespaceError(namespace: String) =
+    if (namespace.isNotEmpty() && !(namespace.length <= MaxNamespaceName && DnsLabel.matches(namespace))) "Enter a namespace of up to $MaxNamespaceName lowercase letters, numbers and hyphens, starting and ending with a letter or number." else null
+
+private fun outpostStorageClassError(storageClass: String) =
+    if (storageClass.isNotEmpty() && !DnsSubdomain.matches(storageClass)) "Enter a storage class as it is named in the cluster, or leave it empty." else null
+
+private fun kubernetesJoinSteps(controlPlane: String, name: String, namespace: String, storageClass: String) = listOf(
     JoinStep(
-        "Create the namespace and permissions",
-        null,
-        listOf("Copy step 1" to "kubectl apply -f deploy/kubernetes/namespace.yaml\nkubectl apply -f deploy/kubernetes/rbac.yaml"),
+        "Create the outpost in the cluster",
+        "The namespace, a service account, a role limited to that namespace, and the node Deployment.",
+        listOf("Copy step 1" to "mycelium node outpost $name --namespace $namespace" + (if (storageClass.isEmpty()) "" else " --storage-class $storageClass") + " | kubectl apply -f -"),
     ),
     JoinStep(
-        "Join, then store the node's credential",
-        "Run the join on any machine. It writes node.toml; add the cluster paths and the [kubernetes] section, then store it.",
+        "Join, then store the outpost's credential",
+        "Run the join on any machine and approve the code. It writes node.toml; add the cluster paths and the [kubernetes] section, then store it.",
         listOf(
-            "Copy the join command" to "mycelium node join $controlPlane",
+            "Copy the join command" to "mycelium node join $controlPlane --name $name",
             "Copy the node.toml lines" to "state_dir = \"/var/lib/mycelium\"\nprojects_root = \"/var/lib/mycelium/projects\"\n\n[kubernetes]\nenabled = true",
-            "Copy the credential command" to "kubectl -n mycelium create secret generic mycelium-node-credential --from-file=node.toml=node.toml",
+            "Copy the credential command" to "kubectl -n $namespace create secret generic $name-node-credential --from-file=node.toml=node.toml",
         ),
     ),
     JoinStep(
         "Add agent sign-ins",
-        "Every key is optional: claude-credentials.json, claude.json, codex-auth.json, codex-config.toml. All sessions share this one Secret.",
-        listOf("Copy step 3" to "kubectl -n mycelium create secret generic mycelium-agent-credentials \\\n  --from-file=claude-credentials.json=\$HOME/.claude/.credentials.json \\\n  --from-file=codex-auth.json=\$HOME/.codex/auth.json"),
+        "Every key is optional: claude-credentials.json, claude.json, codex-auth.json, codex-config.toml. Only this outpost's sessions use this Secret.",
+        listOf("Copy step 3" to "kubectl -n $namespace create secret generic $name-agent-credentials \\\n  --from-file=claude-credentials.json=\$HOME/.claude/.credentials.json \\\n  --from-file=codex-auth.json=\$HOME/.codex/auth.json"),
     ),
-    JoinStep("Start the node", null, listOf("Copy step 4" to "kubectl apply -f deploy/kubernetes/node.yaml")),
 )
 
 fun joinCommands(method: String, controlPlane: String): List<Pair<String, String>> = when (method) {
@@ -187,17 +200,31 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform, onOpenNode: (
 @Composable
 private fun JoinPopup(controlPlane: String, platform: Platform, kubernetes: Boolean, onDismiss: () -> Unit) {
     var method by remember { mutableStateOf(JoinMethods.first()) }
+    var outpostName by remember { mutableStateOf("") }
+    var outpostNamespace by remember { mutableStateOf("mycelium") }
+    var outpostStorageClass by remember { mutableStateOf("") }
     val methods = if (kubernetes) JoinMethods + KubernetesMethod else JoinMethods
 
     MenuPopup(onDismiss = onDismiss, width = Tokens.Size.Popover) {
         Column(Modifier.padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-            Label("Join a node", Modifier.semantics { heading() }, Tokens.Type.Title)
+            Label(if (method == KubernetesMethod) "Add an outpost" else "Join a node", Modifier.semantics { heading() }, Tokens.Type.Title)
             Segmented(methods, method, { method = it }, groupLabel = "How the machine runs Mycelium")
 
             if (method == KubernetesMethod) {
-                Label("The node runs as one Deployment and starts each session in its own pod, from ghcr.io/mycelium-app/mycelium-agent:latest unless you set another image. Run these from a checkout of the repository or an unpacked release.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+                Label("An outpost is a Kubernetes node in one namespace of an existing cluster. It owns only the pods it creates, so several outposts can share a cluster, or a namespace. Run these with the mycelium command from a machine that can reach the cluster.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
 
-                for ((index, step) in kubernetesJoinSteps(controlPlane).withIndex()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+                    TextInput(outpostName, { outpostName = it }, label = "Name", modifier = Modifier.weight(1f), error = outpostNameError(outpostName), mono = true)
+                    TextInput(outpostNamespace, { outpostNamespace = it }, label = "Namespace", modifier = Modifier.weight(1f), error = outpostNamespaceError(outpostNamespace), mono = true)
+                    TextInput(outpostStorageClass, { outpostStorageClass = it }, label = "Storage class", modifier = Modifier.weight(1f), error = outpostStorageClassError(outpostStorageClass), mono = true)
+                }
+
+                Label("Leave the storage class empty for a workspace that is lost when a pod is removed.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+
+                val ready = outpostName.isNotEmpty() && outpostNamespace.isNotEmpty() && listOf(outpostNameError(outpostName), outpostNamespaceError(outpostNamespace), outpostStorageClassError(outpostStorageClass)).all { it == null }
+                val steps = if (ready) kubernetesJoinSteps(controlPlane, outpostName, outpostNamespace, outpostStorageClass) else emptyList()
+
+                for ((index, step) in steps.withIndex()) {
                     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                         StepHeading(index + 1, step.title, filled = false)
                         step.note?.let { Label(it, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted) }
@@ -309,6 +336,11 @@ private fun NodeGroup(
                 MyButton({ renaming = null }, text = "Cancel", size = ButtonSize.Sm, muted = true)
             } else {
                 Label(node.name, Modifier.semantics { heading() }.pressable(onOpen, description = "Open ${node.name}", shape = ControlShape).padding(horizontal = Tokens.Space.S1), Tokens.Type.UiStrong, maxLines = 1)
+            }
+
+            node.kubernetes?.let { cluster ->
+                Tag("Kubernetes")
+                Label(cluster.namespace, style = Tokens.Type.Code, color = colors.textMuted, maxLines = 1)
             }
 
             when {

@@ -87,6 +87,7 @@ data class SessionPod(
 
 @Serializable
 data class KubernetesNode(
+    val outpost: String = "",
     val namespace: String,
     val image: String,
     @SerialName("credentials_secret") val credentialsSecret: String,

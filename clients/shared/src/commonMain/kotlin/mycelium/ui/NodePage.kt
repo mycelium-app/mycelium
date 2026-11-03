@@ -238,10 +238,12 @@ private fun AgentsTab(node: NodeSummary, state: AppState, onOpenConversation: (S
 @Composable
 private fun ClusterSection(cluster: KubernetesNode) {
     val colors = MyTheme.colors
+    val outpost = cluster.outpost.ifEmpty { "mycelium" }
     val facts = listOf(
+        "Outpost" to outpost,
         "Namespace" to cluster.namespace,
         "Session image" to cluster.image,
-        "Agent sign-ins" to "Secret ${cluster.credentialsSecret}, shared by every session",
+        "Agent sign-ins" to "Secret ${cluster.credentialsSecret}, shared by every session of this outpost",
         "Workspace" to if (cluster.workspacePersistent) "Kept on a volume for each conversation" else "Lost when a pod is removed",
     )
 
@@ -251,11 +253,11 @@ private fun ClusterSection(cluster: KubernetesNode) {
         for ((name, value) in facts) {
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
                 Label(name, Modifier.width(FactNameWidth), color = colors.textMuted)
-                Label(value, style = if (name == "Namespace" || name == "Session image") Tokens.Type.Code else Tokens.Type.Ui)
+                Label(value, style = if (name == "Outpost" || name == "Namespace" || name == "Session image") Tokens.Type.Code else Tokens.Type.Ui)
             }
         }
 
-        Label("Set in the [kubernetes] section of node.toml, stored in the Secret mycelium-node-credential. Change it there and restart the node.", style = Tokens.Type.Meta, color = colors.textMuted)
+        Label("Set in the [kubernetes] section of node.toml, stored in the Secret $outpost-node-credential. This outpost lists and removes only the pods it created. Change it there and restart the node.", style = Tokens.Type.Meta, color = colors.textMuted)
     }
 }
 

@@ -6,7 +6,10 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.request.HttpRequestData
@@ -31,7 +34,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 private const val Cluster = """[{"id":"k1","name":"lab-cluster","hostname":"lab-cluster","os":"linux","arch":"x86_64","version":"v0.1.10","online":true,"draining":false,"sessions":["c1","c2","c3"],"agents":[],"logins":[],
-"kubernetes":{"namespace":"mycelium","image":"ghcr.io/mycelium-app/mycelium-agent:latest","credentials_secret":"mycelium-agent-credentials","workspace_persistent":false,"pods":[
+"kubernetes":{"outpost":"lab-cluster","namespace":"team-a","image":"ghcr.io/mycelium-app/mycelium-agent:latest","credentials_secret":"mycelium-agent-credentials","workspace_persistent":false,"pods":[
 {"conversation_id":"c1","name":"mycelium-session-7f3c2a91","state":"running"},
 {"conversation_id":"c2","name":"mycelium-session-b41e08d2","state":"running"},
 {"conversation_id":"c3","name":"mycelium-session-52d9c6e0","state":"exited"}]}}]"""
@@ -135,20 +138,67 @@ class NodeKubernetesTest {
         assertEquals(false, present("Kubernetes"))
     }
 
-    @Test
-    fun withTheExperimentOnTheKubernetesMethodShowsTheFourCopyableSteps() {
+    private fun openAddAnOutpost() {
         showJoinDialog("""{"kubernetes_nodes":true}""")
-
         rule.onNodeWithText("Kubernetes").performClick()
         rule.waitForIdle()
+    }
 
-        for (title in listOf("Create the namespace and permissions", "Join, then store the node's credential", "Add agent sign-ins", "Start the node")) {
+    @Test
+    fun addingAnOutpostAsksForANameANamespaceAndAStorageClassBeforeShowingCommands() {
+        openAddAnOutpost()
+
+        assertTrue(present("Add an outpost"))
+        rule.onNodeWithContentDescription("Name").assertExists()
+        rule.onNodeWithContentDescription("Namespace").assertExists()
+        rule.onNodeWithContentDescription("Storage class").assertExists()
+        assertEquals(false, present("Create the outpost in the cluster"))
+    }
+
+    @Test
+    fun anOutpostWithANameAndNamespaceShowsThreeCopyableStepsForThem() {
+        openAddAnOutpost()
+        rule.onNodeWithContentDescription("Name").performTextInput("lab-cluster")
+        rule.onNodeWithContentDescription("Namespace").performTextReplacement("team-a")
+        rule.onNodeWithContentDescription("Storage class").performTextInput("fast")
+        rule.waitForIdle()
+
+        for (title in listOf("Create the outpost in the cluster", "Join, then store the outpost's credential", "Add agent sign-ins")) {
             assertTrue(present(title), title)
         }
 
-        for (copy in listOf("Copy step 1", "Copy the join command", "Copy the node.toml lines", "Copy the credential command", "Copy step 3", "Copy step 4")) {
+        for (copy in listOf("Copy step 1", "Copy the join command", "Copy the node.toml lines", "Copy the credential command", "Copy step 3")) {
             rule.onNodeWithContentDescription(copy).assertExists()
         }
+
+        assertTrue(present("mycelium node outpost lab-cluster --namespace team-a --storage-class fast | kubectl apply -f -"))
+        assertTrue(present("mycelium node join https://mycelium.test --name lab-cluster"))
+        assertTrue(present("kubectl -n team-a create secret generic lab-cluster-node-credential --from-file=node.toml=node.toml"))
+    }
+
+    @Test
+    fun aNameThatIsNotAValidKubernetesNameShowsHowToFixItAndNoCommands() {
+        openAddAnOutpost()
+        rule.onNodeWithContentDescription("Name").performTextInput("Lab Cluster")
+        rule.waitForIdle()
+
+        assertTrue(rule.onAllNodesWithContentDescription("Name. Error: Enter a name of up to 40 lowercase letters, numbers and hyphens, starting and ending with a letter or number.").fetchSemanticsNodes().isNotEmpty())
+        assertEquals(false, present("Create the outpost in the cluster"))
+    }
+
+    @Test
+    fun theNodeListShowsEachOutpostAsItsOwnNodeWithItsNamespace() {
+        val first = Cluster.trim().removePrefix("[").removeSuffix("]")
+        val second = first.replace("\"id\":\"k1\"", "\"id\":\"k2\"").replace("lab-cluster", "edge-cluster").replace("team-a", "team-b")
+        val store = store("""{"kubernetes_nodes":true}""", "[$first,$second]")
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NodesScreen(store, state, KubernetesPlatform) } }
+        rule.waitForIdle()
+
+        for (text in listOf("lab-cluster", "edge-cluster", "team-a", "team-b")) {
+            assertTrue(present(text), text)
+        }
+
+        assertEquals(2, rule.onAllNodesWithText("Kubernetes").fetchSemanticsNodes().size)
     }
 
     @Test
@@ -157,7 +207,7 @@ class NodeKubernetesTest {
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NodePage(store, state, "k1", KubernetesPlatform, onBack = {}, onOpenConversation = {}) } }
         rule.waitForIdle()
 
-        for (text in listOf("Kubernetes", "Namespace", "mycelium", "Session image", "ghcr.io/mycelium-app/mycelium-agent:latest", "Agent sign-ins", "Secret mycelium-agent-credentials, shared by every session", "Workspace", "Lost when a pod is removed", "Conversations running here", "mycelium-session-7f3c2a91", "Needs input", "Agent exited, pod kept", "Closing a conversation deletes its pod.")) {
+        for (text in listOf("Kubernetes", "Outpost", "lab-cluster", "Namespace", "team-a", "Session image", "ghcr.io/mycelium-app/mycelium-agent:latest", "Agent sign-ins", "Secret mycelium-agent-credentials, shared by every session of this outpost", "Workspace", "Lost when a pod is removed", "Conversations running here", "mycelium-session-7f3c2a91", "Needs input", "Agent exited, pod kept", "Closing a conversation deletes its pod.")) {
             assertTrue(present(text), text)
         }
 
