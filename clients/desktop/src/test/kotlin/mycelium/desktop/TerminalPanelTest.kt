@@ -17,6 +17,7 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.serialization.json.Json
@@ -53,7 +54,12 @@ class TerminalPanelTest {
             requests += "${request.method.value} ${request.url.encodedPath}"
             bodies += String(request.body.toByteArray())
 
-            if (request.url.encodedPath.endsWith("/terminal")) respond("""{"terminal_id":"t1"}""", HttpStatusCode.OK, json) else respond("", HttpStatusCode.NoContent)
+            when {
+                request.url.encodedPath.endsWith("/terminal") -> respond("""{"terminal_id":"t1"}""", HttpStatusCode.OK, json)
+                request.url.encodedPath.endsWith("/terminals") -> respond("[]", HttpStatusCode.OK, json)
+                request.url.encodedPath.endsWith("/terminal-layout") && request.method == HttpMethod.Get -> respond("{}", HttpStatusCode.OK, json)
+                else -> respond("", HttpStatusCode.NoContent)
+            }
         }
 
         return Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
