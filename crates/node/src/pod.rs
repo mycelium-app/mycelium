@@ -3,11 +3,11 @@ use anyhow::{Context, Result, bail};
 use futures_util::{AsyncBufReadExt as _, StreamExt as _};
 use k8s_openapi::api::core::v1::{Container, EmptyDirVolumeSource, EnvVar, PersistentVolumeClaim, PersistentVolumeClaimSpec, PersistentVolumeClaimVolumeSource, Pod, PodSecurityContext, PodSpec, ResourceRequirements, SecretVolumeSource, Volume, VolumeMount, VolumeResourceRequirements};
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
-use kube::api::{Api, AttachParams, DeleteParams, ListParams, LogParams, ObjectMeta, PostParams};
+use kube::api::{Api, AttachParams, DeleteParams, ListParams, LogParams, ObjectMeta, Patch, PatchParams, PostParams};
 use kube::{Client, ResourceExt};
 use mycelium_proto::api::{KubernetesNode, PodState, SessionPod};
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write as _;
 use std::path::Path;
 use std::time::Duration;
@@ -24,6 +24,7 @@ pub const AGENT_CONTAINER: &str = "agent";
 pub const WORKSPACE_PATH: &str = "/workspace";
 pub const CREDENTIALS_PATH: &str = "/var/run/mycelium/credentials";
 pub const AGENT_HOME: &str = "/home/agent";
+const BEFORE_OUTPOSTS_POD_PREFIX: &str = "mycelium-session-";
 
 const AGENT_USER: i64 = 1000;
 const START_POLL: Duration = Duration::from_millis(500);
@@ -184,11 +185,57 @@ impl PodRuntime {
     pub async fn connect(config: KubernetesConfig, node_id: Uuid) -> Result<PodRuntime> {
         let client = Client::try_default().await.context("This node could not reach the Kubernetes API. Run it inside the cluster with a service account, or set KUBECONFIG.")?;
 
-        Ok(PodRuntime::with_client(client, config, node_id))
+        let runtime = PodRuntime::with_client(client, config, node_id);
+        let adopted = runtime.adopt_unlabelled().await;
+
+        match adopted {
+            Ok(0) => {}
+            Ok(count) => tracing::info!("adopted {count} session pods from before outposts into the outpost {}", runtime.config.outpost),
+            Err(error) => tracing::warn!("could not adopt session pods from before outposts: {error}"),
+        }
+
+        Ok(runtime)
     }
 
     pub fn with_client(client: Client, config: KubernetesConfig, node_id: Uuid) -> PodRuntime {
         PodRuntime { pods: Api::namespaced(client.clone(), &config.namespace), claims: Api::namespaced(client, &config.namespace), config, node_id }
+    }
+
+    pub async fn adopt_unlabelled(&self) -> Result<usize> {
+        let namespace = self.pods.list(&ListParams::default()).await.context("list the namespace's pods")?;
+        let node = self.node_id.to_string();
+        let before_outposts: Vec<&Pod> = namespace
+            .items
+            .iter()
+            .filter(|pod| {
+                let labels = pod.labels();
+
+                !labels.contains_key(OUTPOST_LABEL)
+                    && labels.get(MANAGED_BY_LABEL).is_some_and(|managed_by| managed_by == MANAGED_BY)
+                    && labels.get(NODE_LABEL).is_some_and(|owner| *owner == node)
+                    && pod.name_any().starts_with(BEFORE_OUTPOSTS_POD_PREFIX)
+            })
+            .collect();
+
+        if before_outposts.is_empty() {
+            return Ok(0);
+        }
+
+        let outposts: BTreeSet<&String> = namespace.items.iter().filter_map(|pod| pod.labels().get(OUTPOST_LABEL)).collect();
+
+        if outposts.iter().any(|outpost| **outpost != self.config.outpost) {
+            tracing::warn!("{} session pods from before outposts were left alone: other outposts run in the namespace {}", before_outposts.len(), self.config.namespace);
+
+            return Ok(0);
+        }
+
+        let label = Patch::Merge(json!({"metadata": {"labels": {OUTPOST_LABEL: self.config.outpost}}}));
+
+        for pod in &before_outposts {
+            self.pods.patch(&pod.name_any(), &PatchParams::default(), &label).await.context("label a session pod from before outposts")?;
+        }
+
+        Ok(before_outposts.len())
     }
 
     pub async fn create(&self, conversation_id: Uuid, launch: &PodLaunch) -> Result<()> {
@@ -287,14 +334,18 @@ impl PodRuntime {
     }
 
     pub async fn bridge(self, conversation_id: Uuid, dir: &Path, launch: Option<PodLaunch>, after: usize, entries: mpsc::UnboundedSender<Value>, mut frames: mpsc::UnboundedReceiver<Value>) -> Result<()> {
-        let name = pod_name(&self.config.outpost, conversation_id);
+        let mut name = pod_name(&self.config.outpost, conversation_id);
         let journal_path = dir.join("journal.jsonl");
 
         if let Some(launch) = &launch {
             std::fs::write(&journal_path, "")?;
             self.create(conversation_id, launch).await?;
-        } else if self.find(conversation_id).await?.is_none() {
-            bail!("The session's pod {name} is gone.");
+        } else {
+            let Some(pod) = self.find(conversation_id).await? else {
+                bail!("The session's pod {name} is gone.");
+            };
+
+            name = pod.name_any();
         }
 
         let mut seq = 0;
@@ -562,6 +613,82 @@ mod kube_tests {
         runtime.delete(conversation()).await.unwrap();
 
         assert!(requests.lock().unwrap().iter().all(|request| request.starts_with("GET")));
+    }
+
+    fn answering_by_method(requests: Arc<Mutex<Vec<String>>>, list: Value, patched: Value) -> Client {
+        let service = tower::service_fn(move |request: http::Request<Body>| {
+            let requests = requests.clone();
+            let answer = if request.method() == http::Method::PATCH { patched.clone() } else { list.clone() };
+
+            async move {
+                requests.lock().unwrap().push(format!("{} {}", request.method(), request.uri()));
+
+                Ok::<_, std::convert::Infallible>(http::Response::builder().header("content-type", "application/json").body(Body::from(answer.to_string().into_bytes())).unwrap())
+            }
+        });
+
+        Client::new(service, "agents")
+    }
+
+    fn pod_from_before_outposts(conversation_id: Uuid, owner: Uuid) -> Pod {
+        let mut pod = pod_spec(&KubernetesConfig { outpost: "mycelium".into(), ..config() }, owner, conversation_id, &launch());
+        pod.metadata.labels.as_mut().unwrap().remove(OUTPOST_LABEL);
+
+        pod
+    }
+
+    fn node_pod_of(outpost: &str) -> Pod {
+        Pod { metadata: ObjectMeta { name: Some(format!("{outpost}-node-5d9")), labels: Some(BTreeMap::from([(OUTPOST_LABEL.to_string(), outpost.to_string())])), ..Default::default() }, ..Default::default() }
+    }
+
+    async fn adoption_requests(items: Vec<Pod>) -> (usize, Vec<String>) {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let list = json!({"apiVersion": "v1", "kind": "PodList", "metadata": {}, "items": items});
+        let mut patched = serde_json::to_value(&items[0]).unwrap();
+        patched["apiVersion"] = json!("v1");
+        patched["kind"] = json!("Pod");
+        let runtime = PodRuntime::with_client(answering_by_method(requests.clone(), list, patched), config(), node());
+
+        let adopted = runtime.adopt_unlabelled().await.unwrap();
+        let sent = requests.lock().unwrap().clone();
+
+        (adopted, sent)
+    }
+
+    #[tokio::test]
+    async fn a_pod_from_before_outposts_is_labelled_when_only_this_outpost_runs_in_the_namespace() {
+        let old = pod_from_before_outposts(conversation(), node());
+        let (adopted, sent) = adoption_requests(vec![old, node_pod_of("lab")]).await;
+
+        assert_eq!(adopted, 1);
+        assert!(sent.iter().any(|request| request.starts_with("PATCH /api/v1/namespaces/agents/pods/mycelium-session-00000000-0000-0000-0000-000000000007")), "{sent:?}");
+    }
+
+    #[tokio::test]
+    async fn pods_from_before_outposts_are_left_alone_when_another_outpost_runs_in_the_namespace() {
+        let old = pod_from_before_outposts(conversation(), node());
+        let (adopted, sent) = adoption_requests(vec![old, node_pod_of("lab"), node_pod_of("edge")]).await;
+
+        assert_eq!(adopted, 0);
+        assert!(sent.iter().all(|request| request.starts_with("GET")), "{sent:?}");
+    }
+
+    #[tokio::test]
+    async fn a_pod_from_before_outposts_that_belongs_to_another_node_is_left_alone() {
+        let old = pod_from_before_outposts(conversation(), Uuid::from_u128(2));
+        let (adopted, sent) = adoption_requests(vec![old, node_pod_of("lab")]).await;
+
+        assert_eq!(adopted, 0);
+        assert!(sent.iter().all(|request| request.starts_with("GET")), "{sent:?}");
+    }
+
+    #[tokio::test]
+    async fn a_pod_that_already_has_an_outpost_label_is_not_relabelled() {
+        let current = pod_spec(&config(), node(), conversation(), &launch());
+        let (adopted, sent) = adoption_requests(vec![current]).await;
+
+        assert_eq!(adopted, 0);
+        assert!(sent.iter().all(|request| request.starts_with("GET")), "{sent:?}");
     }
 
     #[tokio::test]
