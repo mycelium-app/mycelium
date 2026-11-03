@@ -411,6 +411,7 @@ struct LoginRow {
 
 #[derive(sqlx::FromRow)]
 struct ReportedModelsRow {
+    config_options: Option<sqlx::types::Json<Value>>,
     node_id: Uuid,
     agent: String,
     account: String,
@@ -441,7 +442,7 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
     .await?;
     let usage_history = crate::account_usage::project_windows(state, &ids).await?;
     let reported_models = sqlx::query_as::<_, ReportedModelsRow>(
-        "select node_id, agent, account, models, default_model, reported_at from harness_models where node_id = any($1) order by agent, account",
+        "select node_id, agent, account, models, default_model, config_options, reported_at from harness_models where node_id = any($1) order by agent, account",
     )
     .bind(&ids)
     .fetch_all(&state.pool)
@@ -476,7 +477,7 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
         let mut harness_models = Vec::new();
 
         for reported in reported_models.iter().filter(|row| row.node_id == node.id) {
-            harness_models.push(HarnessModels { agent: parse_enum(&reported.agent)?, account: Some(reported.account.clone()).filter(|account| !account.is_empty()), models: reported.models.0.clone(), default_model: reported.default_model.clone(), reported_at: reported.reported_at });
+            harness_models.push(HarnessModels { config_options: reported.config_options.as_ref().map(|options| options.0.clone()), agent: parse_enum(&reported.agent)?, account: Some(reported.account.clone()).filter(|account| !account.is_empty()), models: reported.models.0.clone(), default_model: reported.default_model.clone(), reported_at: reported.reported_at });
         }
 
         summaries.push(NodeSummary {

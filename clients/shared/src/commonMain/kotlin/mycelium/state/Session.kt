@@ -76,7 +76,7 @@ private fun latestUpdate(events: List<Event>, kept: List<JsonObject>, kind: Stri
     return fromEvents ?: kept.lastOrNull { it.string("sessionUpdate") == kind && accept(it) }
 }
 
-private fun settingsFrom(element: JsonElement?): List<Setting> {
+fun settingsFrom(element: JsonElement?): List<Setting> {
     val list = element as? JsonArray ?: return emptyList()
 
     return list.mapNotNull { item ->

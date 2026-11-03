@@ -153,6 +153,8 @@ pub struct HarnessModel {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HarnessModels {
+    #[serde(default)]
+    pub config_options: Option<Value>,
     pub agent: AgentId,
     #[serde(default)]
     pub account: Option<String>,
@@ -249,6 +251,10 @@ pub struct ResizeTerminalRequest {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CreateConversationRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<std::collections::BTreeMap<String, Value>>,
     pub node_id: Uuid,
     pub agent: AgentId,
     #[serde(default, skip_serializing_if = "Option::is_none")]

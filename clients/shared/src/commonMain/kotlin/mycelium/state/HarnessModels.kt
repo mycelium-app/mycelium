@@ -39,3 +39,14 @@ fun modelMenu(node: NodeSummary, agent: String, account: String?, now: Instant =
 fun reportedModelChoices(node: NodeSummary?, agent: String, account: String?): List<Choice> =
     node?.let { reportFor(it, agent, account) }?.models.orEmpty().map { Choice(it.id, it.name) }
 
+fun reportedEffort(node: NodeSummary?, agent: String?, account: String?, model: String): Setting? {
+    val report = node?.harnessModels?.firstOrNull { it.agent == agent && it.account == account } ?: return null
+
+    if (model.isNotEmpty() && model != report.defaultModel) {
+        return null
+    }
+
+    return settingsFrom(report.configOptions).firstOrNull {
+        it.choices.isNotEmpty() && (it.category == "thought_level" || it.id.contains("effort") || it.id.contains("reasoning"))
+    }
+}

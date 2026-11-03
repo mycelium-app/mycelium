@@ -104,6 +104,8 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
             (None, AgentId::Codex) => Some(Routing::CodexAny),
         };
         let started = CreateConversationRequest {
+            mode: None,
+            config: None,
             node_id: chosen.node_id,
             agent,
             account: Some(chosen.account.clone()),

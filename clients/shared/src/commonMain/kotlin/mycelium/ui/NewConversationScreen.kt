@@ -2,6 +2,8 @@ package mycelium.ui
 
 import mycelium.state.accountShortName
 import mycelium.state.favouriteOptions
+import mycelium.state.reportedEffort
+import kotlinx.serialization.json.JsonPrimitive
 import mycelium.state.modelOptions
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -33,7 +35,6 @@ import androidx.compose.ui.unit.dp
 import mycelium.api.AnyNodeId
 import mycelium.api.AnyNodePick
 import mycelium.api.AgentSettings
-import mycelium.api.ConfigRequest
 import mycelium.api.Conversation
 import mycelium.api.CreateProjectRequest
 import mycelium.api.Forge
@@ -181,6 +182,8 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     }.orEmpty()
 
     val chosenModel = explicitOption?.model.orEmpty()
+    val effort = if (anyNode || routing != null) null else reportedEffort(node, chosenAgent, chosenAccount?.account, chosenModel)
+    var pickedEffort by remember(node?.id, chosenAgent, chosenAccount?.account, chosenModel, effort) { mutableStateOf<String?>(null) }
     val modes = fallbackModes(chosenAgent.orEmpty())
     val defaultMode = agentSettings?.let { defaultModeOf(it, chosenAgent.orEmpty()) }
     val chosenMode = listOfNotNull(pickedMode, defaultMode).firstOrNull { held -> modes.any { it.id == held } } ?: modes.firstOrNull()?.id
@@ -274,10 +277,10 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                     branch = if (project != null && worktree) branch.trim() else null,
                     prompt = text.ifEmpty { null }.takeIf { files.isEmpty() },
                     model = chosenModel.ifEmpty { null },
+                    mode = pickedMode?.takeIf { it == chosenMode },
+                    config = effort?.let { setting -> pickedEffort?.let { mapOf(setting.id to JsonPrimitive(it)) } },
                 ),
             )
-
-            pickedMode?.takeIf { it == chosenMode }?.let { store.api.setConfig(created.id, ConfigRequest(mode = it)) }
 
             if (files.isNotEmpty()) {
                 store.send(created.id, text, files)
@@ -596,6 +599,10 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                         },
                                     ),
                                 )
+                            }
+
+                            effort?.let { setting ->
+                                OptionMenu(setting.name, setting.choices, pickedEffort ?: setting.current, { pickedEffort = it })
                             }
                         },
                     )

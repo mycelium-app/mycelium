@@ -2009,3 +2009,31 @@ async fn a_conversation_whose_pull_request_was_merged_is_archived_with_the_state
     assert_eq!(recorded["pull_request_number"], 12);
     assert!(recorded["archived_at"].is_string(), "{recorded}");
 }
+
+#[tokio::test]
+async fn initial_settings_are_sent_before_the_first_prompt() {
+    let server = Server::start().await;
+    let mut link = server.online_node("atlas").await;
+    let (status, created) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({
+        "node_id": link.id, "agent": "claude", "cwd": "/tmp/project.test", "prompt": "Check the build", "mode": "plan", "config": {"effort": "brief"}
+    }))).await;
+    assert_eq!(status, 201);
+    let conversation_id = link.expect_start_session().await;
+    assert_eq!(created["id"], conversation_id.to_string());
+    link.send(NodeToControl::SessionStarted {
+        conversation_id, acp_session_id: "s1".into(), modes: Some(json!({"currentModeId": "default", "availableModes": [{"id": "default", "name": "Default"}, {"id": "plan", "name": "Plan"}]})), models: None,
+        config_options: Some(json!([{"id": "effort", "currentValue": "balanced", "options": [{"value": "brief", "name": "Brief"}, {"value": "balanced", "name": "Balanced"}]}])),
+    }).await;
+
+    match link.next().await {
+        ControlToNode::SetConfig { config: Some(config), .. } => assert_eq!(config.get("effort"), Some(&json!("brief"))),
+        other => panic!("expected initial settings, got {other:?}"),
+    }
+
+    match link.next().await {
+        ControlToNode::SetConfig { mode: Some(mode), .. } => assert_eq!(mode, "plan"),
+        other => panic!("expected chosen mode, got {other:?}"),
+    }
+
+    assert_eq!(link.expect_prompt().await.1, "Check the build");
+}

@@ -178,6 +178,8 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 return Ok(nothing("The agent is claude or codex.".to_string()));
             };
             let request = mycelium_proto::api::CreateConversationRequest {
+                mode: None,
+                config: None,
                 node_id: place.0,
                 agent,
                 account: None,

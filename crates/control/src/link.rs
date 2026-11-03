@@ -3,7 +3,7 @@ use crate::api_access;
 use crate::auth::AuthNode;
 use crate::device::client_address;
 use crate::environments;
-use crate::error::ApiResult;
+use crate::error::{ApiError, ApiResult};
 use crate::imports;
 use crate::prompts::pump;
 use crate::ssh_access;
@@ -665,23 +665,24 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
     .await?;
     let reported = reported_models(models_value.as_ref(), config_value.as_ref());
 
-    if !reported.is_empty() {
+    if !reported.is_empty() || config_value.is_some() {
         sqlx::query(
-            "insert into harness_models (node_id, agent, account, models, default_model, reported_at) values ($1, $2, $3, $4, $5, now())
-             on conflict (node_id, agent, account) do update set models = excluded.models, default_model = excluded.default_model, reported_at = now()",
+            "insert into harness_models (node_id, agent, account, models, default_model, config_options, reported_at) values ($1, $2, $3, $4, $5, $6, now())
+             on conflict (node_id, agent, account) do update set models = excluded.models, default_model = excluded.default_model, config_options = excluded.config_options, reported_at = now()",
         )
         .bind(node_id)
         .bind(&updated.agent)
         .bind(updated.account.clone().unwrap_or_default())
         .bind(sqlx::types::Json(&reported))
         .bind(models_value.as_ref().and_then(|models| models["currentModelId"].as_str()))
+        .bind(config_value.as_ref())
         .execute(&mut *tx)
         .await?;
     }
 
     tx.commit().await?;
 
-    if !reported.is_empty() {
+    if !reported.is_empty() || config_value.is_some() {
         publish_node(state, node_id).await?;
     }
 
@@ -696,6 +697,11 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
 
     if let Some(chosen) = before.model.as_deref() && updated.model.as_deref() != Some(chosen) && let Err(error) = crate::prompts::apply_model(state, updated.owner, conversation_id, Some(chosen), None).await {
         tracing::warn!("could not set the model {chosen} chosen for conversation {conversation_id}: {}", error.message());
+    }
+
+    if before.acp_session_id.is_none() && let Some(config) = before.options.as_ref().and_then(|options| options.get("initial_config")) {
+        let config = serde_json::from_value(config.clone()).map_err(|_| ApiError::bad_request("invalid_config", "Choose an available agent setting."))?;
+        crate::prompts::set_config(state, updated.owner, conversation_id, mycelium_proto::api::ConfigRequest { mode: None, model: None, config: Some(config) }).await?;
     }
 
     if let Err(error) = crate::agent_settings::apply_session_mode(state, &updated, before.mode.as_deref()).await {

@@ -54,6 +54,8 @@ data class CreateConversationRequest(
     val prompt: String? = null,
     val model: String? = null,
     val routing: String? = null,
+    val config: Map<String, JsonElement>? = null,
+    val mode: String? = null,
 )
 
 @Serializable

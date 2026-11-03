@@ -87,6 +87,8 @@ async fn the_modes_models_and_settings_a_session_offers_are_kept_on_the_conversa
     assert_eq!(conversation["model"], "opus");
     assert_eq!(conversation["options"]["models"], models);
     assert_eq!(conversation["options"]["config_options"], settings);
+    let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
+    assert_eq!(nodes[0]["harness_models"][0]["config_options"], settings);
 }
 
 #[tokio::test]

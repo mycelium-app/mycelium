@@ -194,7 +194,7 @@ pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConvers
     let mut tx = state.pool.begin().await?;
     let row = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
-        "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, title_user_set, predicted_title, parent_id, side_kind, branch, assistant_id, model, routing, id, scratch) values ($1, $2, $3, $4, $5, $6, $7, coalesce($8, project_for_folder($1, $2, $4)), $9, $10, $11, $12, $13, $14, $15, $16, coalesce($17, gen_random_uuid()), $18)
+        "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, title_user_set, predicted_title, parent_id, side_kind, branch, assistant_id, model, routing, id, scratch, options, mode) values ($1, $2, $3, $4, $5, $6, $7, coalesce($8, project_for_folder($1, $2, $4)), $9, $10, $11, $12, $13, $14, $15, $16, coalesce($17, gen_random_uuid()), $18, $19, $20)
          returning {CONVERSATION_COLUMNS}",
     )),
     )
@@ -216,6 +216,8 @@ pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConvers
     .bind(request.routing.map(|routing| routing.as_str()))
     .bind(scratch_id)
     .bind(scratch)
+    .bind(request.config.as_ref().map(|config| json!({"initial_config": config})))
+    .bind(&request.mode)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -311,6 +313,8 @@ pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<
         (false, _) => Some("Side chat".to_string()),
     };
     let started = CreateConversationRequest {
+        mode: None,
+        config: None,
         node_id: parent.node_id,
         agent: parse_enum(&parent.agent)?,
         account: parent.account.clone(),

@@ -475,7 +475,7 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
                 }
                 Choice::Workspace { agent, account, node_id, .. } => {
                     let account = account_for(state, owner, node_id, agent, account).await?;
-                    let started = CreateConversationRequest { node_id, agent, account, cwd: folder_of(id), project_id: None, branch: None, title: None, prompt: None, parent_id: None, side_kind: None, model: None, routing: None };
+                    let started = CreateConversationRequest { mode: None, config: None, node_id, agent, account, cwd: folder_of(id), project_id: None, branch: None, title: None, prompt: None, parent_id: None, side_kind: None, model: None, routing: None };
                     let started = conversations::start_for(state, owner, started, Some(id), false).await?;
 
                     sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started.id).execute(&state.pool).await?;

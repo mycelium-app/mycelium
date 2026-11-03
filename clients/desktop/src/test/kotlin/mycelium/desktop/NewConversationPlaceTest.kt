@@ -29,6 +29,7 @@ import mycelium.ui.NewConversationScreen
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 private const val OrionId = "aaaaaaaa-0000-0000-0000-000000000001"
 
@@ -119,8 +120,10 @@ class NewConversationPlaceTest {
         rule.onNodeWithContentDescription("Message").performTextInput("Plan the restore")
         rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }
 
-        rule.waitUntil(5_000) { created != null && configs.isNotEmpty() }
-        assertEquals("""{"mode":"plan"}""", configs.single())
+        rule.waitUntil(5_000) { created != null && bodies.isNotEmpty() }
+        assertTrue(bodies.single().contains("\"mode\":\"plan\""))
+        assertTrue(bodies.single().contains("\"prompt\":\"Plan the restore\""))
+        assertEquals(0, configs.size)
     }
 
     @Test
@@ -134,6 +137,7 @@ class NewConversationPlaceTest {
         rule.waitUntil(5_000) { created != null }
         rule.waitForIdle()
         assertEquals(0, configs.size)
+        assertTrue(!bodies.single().contains("\"mode\""))
     }
 
     @Test

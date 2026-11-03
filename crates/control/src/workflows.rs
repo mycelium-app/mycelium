@@ -805,6 +805,8 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
                         state,
                         row.owner,
                         CreateConversationRequest {
+                            mode: None,
+                            config: None,
                             node_id,
                             agent,
                             account: spec.account.clone(),

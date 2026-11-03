@@ -70,9 +70,12 @@ class NewConversationSetupTest {
     @Volatile
     private var projectsLagBehindCheckout = false
 
-    private fun store(checkoutStatus: HttpStatusCode, checkoutBody: String): Store {
+    private fun store(checkoutStatus: HttpStatusCode, checkoutBody: String, effort: Boolean = false): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
-        val nodes = "[${node(Atlas, "atlas")},${node(Willow, "willow")}]"
+        val atlas = node(Atlas, "atlas").let { original ->
+            if (effort) original.replace("\"harness_models\":[]", """"harness_models":[{"agent":"claude","models":[{"id":"opus","name":"Opus"}],"default_model":"opus","reported_at":"2026-10-22T10:00:00Z","config_options":[{"id":"reasoning_level","name":"Effort","currentValue":"balanced","options":[{"value":"brief","name":"Brief"},{"value":"balanced","name":"Balanced"}]}]}]""") else original
+        }
+        val nodes = "[$atlas,${node(Willow, "willow")}]"
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
 
@@ -114,6 +117,23 @@ class NewConversationSetupTest {
                 }
             }
         }
+    }
+
+    @Test
+    fun effortChoicesComeFromTheHarnessAndTheSelectionTravelsWithTheFirstPrompt() {
+        show(store(HttpStatusCode.Created, HarbourOnWillow, effort = true))
+
+        rule.onNodeWithContentDescription("Effort: Balanced").performClick()
+        rule.onNodeWithText("Brief").performClick()
+        rule.onNodeWithContentDescription("Effort: Brief").assertExists()
+        rule.captureScreen("new-conversation-effort")
+        rule.onNodeWithContentDescription("Message").performTextInput("Check the build")
+        rule.onNodeWithContentDescription("Send").performClick()
+
+        rule.waitUntil(5_000) { bodies.isNotEmpty() }
+        val request = kotlinx.serialization.json.Json.parseToJsonElement(bodies.single()).toString()
+        assertTrue(request.contains("\"config\":{\"reasoning_level\":\"brief\"}"))
+        assertTrue(request.contains("\"prompt\":\"Check the build\""))
     }
 
     @Test
