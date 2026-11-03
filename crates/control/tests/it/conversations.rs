@@ -316,6 +316,30 @@ async fn answering_a_permission_the_turn_already_ended_without_does_not_resume_t
 }
 
 #[tokio::test]
+async fn a_permission_request_left_unanswered_when_the_turn_ends_is_withdrawn() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = waiting_for_permission(&server, &mut link).await;
+
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 6, stop_reason: "cancelled".into(), usage: None }).await;
+    link.barrier(id, 7).await;
+    let events = server.events(id).await;
+    let withdrawal = events.iter().find(|event| event["kind"] == "permission_resolved").unwrap();
+
+    assert_eq!((withdrawal["payload"]["request_id"].clone(), withdrawal["payload"]["option_id"].clone()), (json!("req-1"), json!("withdrawn")));
+}
+
+#[tokio::test]
+async fn a_permission_request_left_unanswered_when_the_session_fails_is_withdrawn() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = waiting_for_permission(&server, &mut link).await;
+
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 6, message: "agent exited with code 1".into() }).await;
+    common::eventually("the request to be withdrawn", || async { server.events(id).await.iter().any(|event| event["kind"] == "permission_resolved" && event["payload"]["option_id"] == "withdrawn").then_some(()) }).await;
+}
+
+#[tokio::test]
 async fn a_new_session_reusing_an_answered_request_id_can_still_be_answered() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

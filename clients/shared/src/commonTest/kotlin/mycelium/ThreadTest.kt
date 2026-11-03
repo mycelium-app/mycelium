@@ -193,6 +193,9 @@ class ThreadTest {
 
         val resolved = buildThread(listOf(request, event(2, EventKinds.PermissionResolved, """{"request_id":"r1"}""")))
         assertEquals(true, assertIs<ThreadItem.Permission>(resolved.single()).resolved)
+
+        val withdrawn = buildThread(listOf(request, event(2, EventKinds.PermissionResolved, """{"request_id":"r1","option_id":"withdrawn"}""")))
+        assertEquals(true, assertIs<ThreadItem.Permission>(withdrawn.single()).resolved)
     }
 
     @Test

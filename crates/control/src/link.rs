@@ -681,9 +681,25 @@ async fn record(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: Opt
 
     let event = append_event(&mut tx, conversation_id, kind, &payload, seq).await?;
     let mut updated = None;
+    let mut withdrawn = Vec::new();
 
     if event.is_some() && kind == EventKind::TurnEnd {
         sqlx::query("update conversations set agent_active = false where id = $1").bind(conversation_id).execute(&mut *tx).await?;
+    }
+
+    if event.is_some() && matches!(kind, EventKind::TurnEnd | EventKind::Error) {
+        let abandoned = sqlx::query_scalar::<_, String>(
+            "select r.payload->>'request_id' from events r where r.conversation_id = $1 and r.kind = 'permission_request'
+               and not exists (select 1 from events s where s.conversation_id = $1 and s.kind = 'permission_resolved' and s.payload->>'request_id' = r.payload->>'request_id' and s.seq > r.seq)
+             order by r.seq",
+        )
+        .bind(conversation_id)
+        .fetch_all(&mut *tx)
+        .await?;
+
+        for request_id in abandoned {
+            withdrawn.extend(append_event(&mut tx, conversation_id, EventKind::PermissionResolved, &json!({"request_id": request_id, "option_id": "withdrawn"}), None).await?);
+        }
     }
 
     if event.is_some()
@@ -701,6 +717,10 @@ async fn record(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: Opt
     let inserted = event.is_some();
 
     if let Some(event) = event {
+        state.publish(Some(row.owner), StreamMessage::Event(event));
+    }
+
+    for event in withdrawn {
         state.publish(Some(row.owner), StreamMessage::Event(event));
     }
 
