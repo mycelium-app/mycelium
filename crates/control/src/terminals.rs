@@ -47,9 +47,10 @@ pub async fn open(State(state): State<AppState>, user: AuthUser, Path(id): Path<
 
     let state = &state;
     let reads = state.hub.terminals_of_conversation(id).into_iter().map(|terminal_id| async move {
-        let buffer = read_buffer(state, terminal_id).await?;
-
-        Some(OpenTerminal { terminal_id, scrollback: buffer.data, offset: buffer.total })
+        match read_buffer(state, terminal_id).await {
+            Some(buffer) => Some(OpenTerminal { terminal_id, scrollback: buffer.data, offset: buffer.total }),
+            None => state.hub.terminal_total(terminal_id).map(|total| OpenTerminal { terminal_id, scrollback: String::new(), offset: total }),
+        }
     });
     let open = join_all(reads).await.into_iter().flatten().collect();
 

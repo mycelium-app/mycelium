@@ -639,6 +639,10 @@ impl Hub {
         self.terminals.lock().ok().and_then(|terminals| terminals.get(&terminal_id).map(|session| session.owner))
     }
 
+    pub fn terminal_total(&self, terminal_id: Uuid) -> Option<u64> {
+        self.terminals.lock().ok().and_then(|terminals| terminals.get(&terminal_id).map(|session| session.total))
+    }
+
     pub fn terminals_of_conversation(&self, conversation_id: Uuid) -> Vec<Uuid> {
         let Ok(terminals) = self.terminals.lock() else {
             return Vec::new();

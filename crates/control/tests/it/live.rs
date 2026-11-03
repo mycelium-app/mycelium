@@ -660,6 +660,27 @@ async fn a_returning_client_lists_the_open_terminals_with_the_output_the_node_ke
 }
 
 #[tokio::test]
+async fn a_terminal_whose_node_is_slow_to_send_its_output_is_still_listed_without_scrollback() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    let terminal_id = start_terminal(&server, &mut link, conversation.id).await;
+
+    let request = server.user.json(server.user.get(&format!("/api/v1/conversations/{}/terminals", conversation.id)));
+    let node = async {
+        let ControlToNode::ReadTerminal { .. } = link.next().await else {
+            panic!("expected the control plane to ask the node for the terminal's output");
+        };
+    };
+    let ((status, listed), ()) = tokio::join!(request, node);
+
+    assert_eq!(status, 200, "{listed}");
+    assert_eq!(listed[0]["terminal_id"], json!(terminal_id));
+    assert_eq!(listed[0]["scrollback"], "");
+}
+
+#[tokio::test]
 async fn a_terminal_survives_its_node_link_dropping_and_comes_back_with_its_scrollback() {
     let server = Server::start().await;
     let (mut link, token) = server.online_node_with_token("laptop", env!("CARGO_PKG_VERSION")).await;
