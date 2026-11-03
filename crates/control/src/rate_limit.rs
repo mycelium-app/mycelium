@@ -12,19 +12,20 @@ const PRUNE_ABOVE: usize = 4096;
 pub enum Limited {
     StartDevice,
     PollDeviceToken,
+    RedeemJoinToken,
 }
 
 impl Limited {
     fn capacity(self) -> f64 {
         match self {
-            Limited::StartDevice => 10.0,
+            Limited::StartDevice | Limited::RedeemJoinToken => 10.0,
             Limited::PollDeviceToken => 30.0,
         }
     }
 
     fn refill_per_second(self) -> f64 {
         match self {
-            Limited::StartDevice => 1.0 / 6.0,
+            Limited::StartDevice | Limited::RedeemJoinToken => 1.0 / 6.0,
             Limited::PollDeviceToken => 1.0,
         }
     }

@@ -50,6 +50,25 @@ pub struct DeviceTokenResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateJoinToken {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JoinToken {
+    pub token: String,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RedeemJoinToken {
+    pub token: String,
+    pub hostname: String,
+    pub os: String,
+    pub arch: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PendingDevice {
     pub user_code: String,
     pub kind: DeviceKind,

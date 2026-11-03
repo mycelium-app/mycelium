@@ -21,6 +21,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/device/token",
     "POST /api/v1/device/{user_code}/approve",
     "POST /api/v1/device/{user_code}/deny",
+    "POST /api/v1/nodes/join",
     "DELETE /api/v1/nodes/{id}",
     "POST /api/v1/nodes/{id}/drain",
     "POST /api/v1/nodes/{id}/instructions/take-over",
@@ -121,6 +122,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
 ];
 
 const SILENT_ROUTES: &[&str] = &[
+    "POST /api/v1/nodes/join-tokens",
     "PUT /api/v1/agent-settings",
     "PUT /api/v1/agent-settings/account-mode",
     "PUT /api/v1/account-prices",

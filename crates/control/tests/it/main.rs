@@ -37,6 +37,7 @@ mod health;
 mod history;
 mod hours;
 mod instructions;
+mod join_tokens;
 mod integration_proxy;
 mod integration_sign_in;
 mod issues;

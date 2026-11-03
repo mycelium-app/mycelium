@@ -37,6 +37,7 @@ mod assistant_backup;
 mod assistants;
 mod groups;
 mod device;
+mod join_tokens;
 mod error;
 mod experiments;
 mod file_arguments;
@@ -203,6 +204,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/device/{user_code}/deny", post(device::deny))
         .route("/api/v1/nodes", get(nodes::list))
         .route("/api/v1/nodes/any", get(node_pick::preview))
+        .route("/api/v1/nodes/join-tokens", post(join_tokens::create))
+        .route("/api/v1/nodes/join", post(join_tokens::redeem))
         .route("/api/v1/nodes/{id}", patch(nodes::update).delete(nodes::revoke))
         .route("/api/v1/nodes/{id}/directories", get(nodes::directories).post(nodes::create_directory))
         .route("/api/v1/nodes/{id}/drain", post(nodes::drain))
