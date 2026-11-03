@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.23.0
+
+- The New conversation project menu lists each project once. The node follows the project you choose; when no online node has it, Run on asks you to choose a node and offers to clone it there. Tasks and Schedules pick projects the same way, and a project you just cloned stays chosen.
+- Terminals keep running under tmux when the node restarts, and come back with their conversation and scrollback.
+- Environments open no network ports: the desktop is shared over a private socket and the browser is driven over a pipe.
+- Kubernetes outposts join with a single-use token from Add an outpost, and adopt session pods from before outposts.
+- New conversation applies the chosen Mode and reported Effort before its first prompt, underlines the project in the headline and shows nodes in their colours everywhere.
+- Provider accounts are named by the part after the @ everywhere, two-line sidebar rows show a larger project icon, and the phone Projects screen fits its rows.
+
 ## v0.22.0
 
 - Stored secrets are encrypted at rest. Set MYCELIUM_SECRET_KEY, or the control plane creates a key in its data folder on first boot; back that file up. `mycelium control rotate-secrets` rotates it.
