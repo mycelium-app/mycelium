@@ -1,12 +1,19 @@
-use futures_util::{SinkExt, StreamExt};
 use mycelium_proto::link::{BrowserAction, BrowserControl};
+use nix::fcntl::{FcntlArg, OFlag, fcntl};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
-use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::Message;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::unix::pipe;
+use tokio::process::Command;
 
 const CDP_TIMEOUT: Duration = Duration::from_secs(10);
+const CDP_INPUT_FD: i32 = 3;
+const CDP_OUTPUT_FD: i32 = 4;
+const FIRST_PRIVATE_FD: i32 = 10;
+const NO_BROWSER: &str = "No Chromium-based browser is answering in the environment. Open Chromium or Chrome from the app launcher, then try again.";
 const NO_PAGE: &str = "The browser has no page open to read. Open a page in the environment, then try again.";
 
 const READ_SCRIPT: &str = r#"(() => {
@@ -73,50 +80,172 @@ fn act_script(action: &BrowserAction) -> String {
     }
 }
 
-async fn page_socket(debug_port: u16) -> Result<String, String> {
-    let listed = reqwest::get(format!("http://127.0.0.1:{debug_port}/json/list")).await.map_err(|_| "No Chromium-based browser is answering in the environment. Open Chromium or Chrome from the app launcher, then try again.".to_string())?;
-    let pages: Vec<Value> = listed.json().await.map_err(|_| "The environment's browser answered in a shape the node does not know.".to_string())?;
-
-    pages
-        .iter()
-        .find(|page| page["type"] == "page" && page["webSocketDebuggerUrl"].is_string())
-        .and_then(|page| page["webSocketDebuggerUrl"].as_str())
-        .map(str::to_string)
-        .ok_or_else(|| NO_PAGE.to_string())
+enum Failure {
+    Closed,
+    Refused(String),
 }
 
-async fn evaluate(socket_url: &str, expression: &str) -> Result<String, String> {
-    let (mut socket, _) = connect_async(socket_url).await.map_err(|error| format!("The node could not reach the environment's browser: {error}."))?;
-    let request = json!({"id": 1, "method": "Runtime.evaluate", "params": {"expression": expression, "returnByValue": true}});
+struct Ends {
+    sender: pipe::Sender,
+    receiver: pipe::Receiver,
+    buffer: Vec<u8>,
+    next_id: u64,
+}
 
-    socket.send(Message::text(request.to_string())).await.map_err(|error| format!("The node could not talk to the environment's browser: {error}."))?;
+pub struct BrowserEnds {
+    input: OwnedFd,
+    output: OwnedFd,
+}
 
-    while let Some(message) = socket.next().await {
-        let Ok(Message::Text(text)) = message else {
-            continue;
-        };
-        let Ok(reply) = serde_json::from_str::<Value>(text.as_str()) else {
-            continue;
-        };
+pub struct CdpPipe {
+    ends: tokio::sync::Mutex<Ends>,
+}
 
-        if reply["id"] != 1 {
-            continue;
-        }
+#[derive(Clone, Default)]
+pub struct BrowserPipes {
+    open: Arc<Mutex<Vec<Arc<CdpPipe>>>>,
+}
 
-        if let Some(exception) = reply["result"]["exceptionDetails"]["text"].as_str() {
-            return Err(format!("The page refused the instruction: {exception}."));
-        }
+impl CdpPipe {
+    pub fn open() -> Result<(CdpPipe, BrowserEnds), String> {
+        let unavailable = |error: std::io::Error| format!("The environment could not open a private channel to the browser: {error}.");
+        let (browser_input, node_output) = nix::unistd::pipe2(OFlag::O_CLOEXEC).map_err(|error| unavailable(error.into()))?;
+        let (node_input, browser_output) = nix::unistd::pipe2(OFlag::O_CLOEXEC).map_err(|error| unavailable(error.into()))?;
+        let sender = pipe::Sender::from_owned_fd(node_output).map_err(unavailable)?;
+        let receiver = pipe::Receiver::from_owned_fd(node_input).map_err(unavailable)?;
+        let ends = Ends { sender, receiver, buffer: Vec::new(), next_id: 0 };
 
-        return Ok(reply["result"]["result"]["value"].as_str().unwrap_or_default().to_string());
+        Ok((CdpPipe { ends: tokio::sync::Mutex::new(ends) }, BrowserEnds { input: browser_input, output: browser_output }))
     }
 
-    Err("The environment's browser closed the connection before it answered.".to_string())
+    async fn evaluate(&self, expression: &str) -> Result<String, Failure> {
+        let mut ends = self.ends.lock().await;
+        let targets = ends.call("Target.getTargets", json!({}), None).await?;
+        let target = targets["targetInfos"]
+            .as_array()
+            .and_then(|infos| infos.iter().find(|info| info["type"] == "page"))
+            .and_then(|info| info["targetId"].as_str())
+            .map(str::to_string)
+            .ok_or_else(|| Failure::Refused(NO_PAGE.to_string()))?;
+        let attached = ends.call("Target.attachToTarget", json!({"targetId": target, "flatten": true}), None).await?;
+        let session = attached["sessionId"].as_str().unwrap_or_default().to_string();
+        let evaluated = ends.call("Runtime.evaluate", json!({"expression": expression, "returnByValue": true}), Some(&session)).await;
+        let _ = ends.call("Target.detachFromTarget", json!({"sessionId": session}), None).await;
+        let result = evaluated?;
+
+        if let Some(exception) = result["exceptionDetails"]["text"].as_str() {
+            return Err(Failure::Refused(format!("The page refused the instruction: {exception}.")));
+        }
+
+        Ok(result["result"]["value"].as_str().unwrap_or_default().to_string())
+    }
 }
 
-pub async fn read(debug_port: u16) -> Result<(String, Vec<BrowserControl>), String> {
+impl Ends {
+    async fn call(&mut self, method: &str, params: Value, session: Option<&str>) -> Result<Value, Failure> {
+        self.next_id += 1;
+        let id = self.next_id;
+        let mut request = json!({"id": id, "method": method, "params": params});
+
+        if let Some(session) = session {
+            request["sessionId"] = json!(session);
+        }
+
+        let mut frame = request.to_string().into_bytes();
+        frame.push(0);
+        self.sender.write_all(&frame).await.map_err(|_| Failure::Closed)?;
+
+        loop {
+            let reply = self.next_frame().await?;
+
+            if reply["id"] != id {
+                continue;
+            }
+
+            if let Some(message) = reply["error"]["message"].as_str() {
+                return Err(Failure::Refused(format!("The environment's browser refused the request: {message}.")));
+            }
+
+            return Ok(reply["result"].clone());
+        }
+    }
+
+    async fn next_frame(&mut self) -> Result<Value, Failure> {
+        loop {
+            if let Some(end) = self.buffer.iter().position(|byte| *byte == 0) {
+                let frame: Vec<u8> = self.buffer.drain(..=end).collect();
+
+                if let Ok(value) = serde_json::from_slice::<Value>(&frame[..end]) {
+                    return Ok(value);
+                }
+
+                continue;
+            }
+
+            let mut chunk = [0u8; 16 * 1024];
+            let count = self.receiver.read(&mut chunk).await.map_err(|_| Failure::Closed)?;
+
+            if count == 0 {
+                return Err(Failure::Closed);
+            }
+
+            self.buffer.extend_from_slice(&chunk[..count]);
+        }
+    }
+}
+
+impl BrowserPipes {
+    fn lock(&self) -> MutexGuard<'_, Vec<Arc<CdpPipe>>> {
+        self.open.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub fn attach(&self, command: &mut Command) -> Result<(), String> {
+        let (pipe, ends) = CdpPipe::open()?;
+        let input = move_clear_of_inherited(ends.input)?;
+        let output = move_clear_of_inherited(ends.output)?;
+        let (input_fd, output_fd) = (input.as_raw_fd(), output.as_raw_fd());
+
+        unsafe {
+            command.pre_exec(move || {
+                let _keep = (&input, &output);
+
+                if libc::dup2(input_fd, CDP_INPUT_FD) < 0 || libc::dup2(output_fd, CDP_OUTPUT_FD) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+
+                Ok(())
+            });
+        }
+
+        self.lock().push(Arc::new(pipe));
+
+        Ok(())
+    }
+
+    async fn evaluate(&self, expression: &str) -> Result<String, String> {
+        let candidates: Vec<Arc<CdpPipe>> = self.lock().iter().rev().cloned().collect();
+
+        for pipe in candidates {
+            match pipe.evaluate(expression).await {
+                Ok(value) => return Ok(value),
+                Err(Failure::Refused(message)) => return Err(message),
+                Err(Failure::Closed) => self.lock().retain(|open| !Arc::ptr_eq(open, &pipe)),
+            }
+        }
+
+        Err(NO_BROWSER.to_string())
+    }
+}
+
+fn move_clear_of_inherited(end: OwnedFd) -> Result<OwnedFd, String> {
+    let moved = fcntl(&end, FcntlArg::F_DUPFD_CLOEXEC(FIRST_PRIVATE_FD)).map_err(|error| format!("The environment could not open a private channel to the browser: {error}."))?;
+
+    Ok(unsafe { OwnedFd::from_raw_fd(moved) })
+}
+
+pub async fn read(pipes: &BrowserPipes) -> Result<(String, Vec<BrowserControl>), String> {
     let work = async {
-        let socket_url = page_socket(debug_port).await?;
-        let value = evaluate(&socket_url, READ_SCRIPT).await?;
+        let value = pipes.evaluate(READ_SCRIPT).await?;
         let page: ReadPage = serde_json::from_str(&value).map_err(|_| "The page's controls could not be read. Try again.".to_string())?;
 
         Ok((page.page, page.controls))
@@ -125,10 +254,9 @@ pub async fn read(debug_port: u16) -> Result<(String, Vec<BrowserControl>), Stri
     tokio::time::timeout(CDP_TIMEOUT, work).await.map_err(|_| "The page took too long to answer. Try again.".to_string())?
 }
 
-pub async fn act(debug_port: u16, action: &BrowserAction) -> Result<(), String> {
+pub async fn act(pipes: &BrowserPipes, action: &BrowserAction) -> Result<(), String> {
     let work = async {
-        let socket_url = page_socket(debug_port).await?;
-        let outcome = evaluate(&socket_url, &act_script(action)).await?;
+        let outcome = pipes.evaluate(&act_script(action)).await?;
 
         match outcome.as_str() {
             "ok" => Ok(()),
@@ -144,53 +272,55 @@ pub async fn act(debug_port: u16, action: &BrowserAction) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
 
-    async fn fake_browser(answers: Vec<&'static str>) -> u16 {
-        let sockets = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let socket_port = sockets.local_addr().unwrap().port();
-        let listing = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let debug_port = listing.local_addr().unwrap().port();
+    fn fake_browser(pipes: &BrowserPipes, answers: Vec<&'static str>) {
+        let (pipe, ends) = CdpPipe::open().unwrap();
+        pipes.lock().push(Arc::new(pipe));
+        let mut requests = pipe::Receiver::from_owned_fd(ends.input).unwrap();
+        let mut replies = pipe::Sender::from_owned_fd(ends.output).unwrap();
 
-        tokio::spawn(async move {
-            loop {
-                let Ok((mut connection, _)) = listing.accept().await else {
-                    return;
-                };
-                let mut buffer = [0u8; 1024];
-                let _ = connection.read(&mut buffer).await;
-                let body = json!([{"type": "page", "webSocketDebuggerUrl": format!("ws://127.0.0.1:{socket_port}/page")}]).to_string();
-                let response = format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
-                let _ = connection.write_all(response.as_bytes()).await;
-            }
-        });
         tokio::spawn(async move {
             let mut answers = answers.into_iter();
+            let mut buffer = Vec::new();
+            let mut chunk = [0u8; 4096];
 
-            while let Ok((connection, _)) = sockets.accept().await {
-                let Ok(mut socket) = tokio_tungstenite::accept_async(connection).await else {
+            loop {
+                let Some(end) = buffer.iter().position(|byte| *byte == 0) else {
+                    match requests.read(&mut chunk).await {
+                        Ok(count) if count > 0 => buffer.extend_from_slice(&chunk[..count]),
+                        _ => return,
+                    }
+
                     continue;
                 };
-                let Some(Ok(Message::Text(request))) = socket.next().await else {
-                    continue;
+                let frame: Vec<u8> = buffer.drain(..=end).collect();
+                let request: Value = serde_json::from_slice(&frame[..end]).unwrap();
+                let result = match request["method"].as_str().unwrap() {
+                    "Target.getTargets" => json!({"targetInfos": [{"type": "service_worker", "targetId": "w"}, {"type": "page", "targetId": "p"}]}),
+                    "Target.attachToTarget" => json!({"sessionId": "s"}),
+                    "Runtime.evaluate" => {
+                        assert_eq!(request["sessionId"], "s");
+                        json!({"result": {"type": "string", "value": answers.next().unwrap_or("")}})
+                    }
+                    _ => json!({}),
                 };
-                let request: Value = serde_json::from_str(request.as_str()).unwrap();
-                let value = answers.next().unwrap_or("");
-                let reply = json!({"id": request["id"], "result": {"result": {"type": "string", "value": value}}});
-                let _ = socket.send(Message::text(reply.to_string())).await;
+                let mut reply = json!({"id": request["id"], "result": result}).to_string().into_bytes();
+                reply.push(0);
+
+                if replies.write_all(&reply).await.is_err() {
+                    return;
+                }
             }
         });
-
-        debug_port
     }
 
     #[tokio::test]
     async fn reading_returns_the_pages_visible_controls_in_order() {
         let page = r#"{"page":"Book a flight (https://flights.example/)","controls":[{"index":1,"role":"textbox","name":"From","value":""},{"index":2,"role":"button","name":"Search flights","value":""}]}"#;
-        let port = fake_browser(vec![page]).await;
+        let pipes = BrowserPipes::default();
+        fake_browser(&pipes, vec![page]);
 
-        let (title, controls) = read(port).await.unwrap();
+        let (title, controls) = read(&pipes).await.unwrap();
 
         assert_eq!(title, "Book a flight (https://flights.example/)");
         assert_eq!(controls.iter().map(|control| (control.index, control.name.as_str())).collect::<Vec<_>>(), [(1, "From"), (2, "Search flights")]);
@@ -198,20 +328,34 @@ mod tests {
 
     #[tokio::test]
     async fn acting_on_a_control_the_page_no_longer_has_says_to_read_again() {
-        let port = fake_browser(vec!["missing"]).await;
+        let pipes = BrowserPipes::default();
+        fake_browser(&pipes, vec!["missing"]);
 
-        let outcome = act(port, &BrowserAction::Click { index: 9 }).await;
+        let outcome = act(&pipes, &BrowserAction::Click { index: 9 }).await;
 
         assert_eq!(outcome, Err("That control is no longer on the page. Read the page again.".to_string()));
     }
 
     #[tokio::test]
-    async fn a_browser_that_is_not_listening_is_reported_plainly() {
-        let free = TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap().port();
+    async fn an_environment_without_a_browser_is_reported_plainly() {
+        let outcome = read(&BrowserPipes::default()).await;
 
-        let outcome = read(free).await;
+        assert_eq!(outcome.unwrap_err(), NO_BROWSER);
+    }
 
-        assert_eq!(outcome.unwrap_err(), "No Chromium-based browser is answering in the environment. Open Chromium or Chrome from the app launcher, then try again.");
+    #[tokio::test]
+    async fn a_browser_that_has_exited_is_dropped_and_the_next_one_answers() {
+        let pipes = BrowserPipes::default();
+        let page = r#"{"page":"Home (https://home.example/)","controls":[]}"#;
+        fake_browser(&pipes, vec![page]);
+        let (gone, ends) = CdpPipe::open().unwrap();
+        drop(ends);
+        pipes.lock().push(Arc::new(gone));
+
+        let (title, _) = read(&pipes).await.unwrap();
+
+        assert_eq!(title, "Home (https://home.example/)");
+        assert_eq!(pipes.lock().len(), 1);
     }
 
     #[test]

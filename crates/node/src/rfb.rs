@@ -2,7 +2,9 @@ use anyhow::{Context, Result, bail};
 use mycelium_proto::link::EnvironmentInputAction;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use std::path::Path;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::UnixStream;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const EVENT_GAP: Duration = Duration::from_millis(12);
@@ -188,7 +190,7 @@ pub fn input_messages(action: &EnvironmentInputAction) -> Result<Vec<Vec<u8>>> {
     }
 }
 
-async fn handshake(stream: &mut TcpStream) -> Result<()> {
+async fn handshake(stream: &mut (impl AsyncRead + AsyncWrite + Unpin)) -> Result<()> {
     let mut greeting = [0u8; 12];
     stream.read_exact(&mut greeting).await.context("The environment's screen server did not greet us")?;
     stream.write_all(b"RFB 003.008\n").await?;
@@ -225,10 +227,10 @@ async fn handshake(stream: &mut TcpStream) -> Result<()> {
     Ok(())
 }
 
-pub async fn send_input(port: u16, action: &EnvironmentInputAction) -> Result<()> {
+pub async fn send_input(socket: &Path, action: &EnvironmentInputAction) -> Result<()> {
     let messages = input_messages(action)?;
     let mut stream = tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
-        let mut stream = TcpStream::connect(("127.0.0.1", port)).await?;
+        let mut stream = UnixStream::connect(socket).await?;
         handshake(&mut stream).await?;
 
         anyhow::Ok(stream)

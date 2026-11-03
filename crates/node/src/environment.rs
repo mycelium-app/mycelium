@@ -1,5 +1,5 @@
 use crate::apps::{self, DesktopApp};
-use crate::browser_control;
+use crate::browser_control::{self, BrowserPipes};
 use crate::rfb;
 use crate::sway;
 use crate::terminal::find_in_path;
@@ -18,7 +18,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::net::UnixStream;
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
@@ -35,6 +35,7 @@ const BROWSERS: [&str; 4] = ["chromium", "chromium-browser", "google-chrome-stab
 const WINDOW_POLL: Duration = Duration::from_millis(1500);
 const LAUNCH_WINDOW_WAIT: Duration = Duration::from_secs(5);
 const LAUNCH_WINDOW_POLL: Duration = Duration::from_millis(200);
+const VNC_SOCKET: &str = "vnc.sock";
 const PAGE_SIZE: u64 = 4096;
 const NON_LINUX_NOTE: &str = "Environments need a Linux node";
 
@@ -62,7 +63,7 @@ pub struct Tools {
 struct SessionEnv {
     runtime_dir: PathBuf,
     display: String,
-    debug_port: u16,
+    browser: BrowserPipes,
 }
 
 struct SessionDirectory {
@@ -74,7 +75,6 @@ struct Launched {
     pids: Vec<u32>,
     directory: SessionDirectory,
     session: SessionEnv,
-    port: u16,
     browser: Option<String>,
 }
 
@@ -82,7 +82,6 @@ struct Entry {
     generation: Uuid,
     started_at: DateTime<Utc>,
     ready: bool,
-    port: u16,
     session: Option<SessionEnv>,
     browser: Option<String>,
     pids: Vec<u32>,
@@ -97,6 +96,12 @@ pub struct EnvironmentManager {
     data_dirs: Vec<PathBuf>,
     running: Arc<Mutex<HashMap<Uuid, Entry>>>,
     streams: Arc<Mutex<HashMap<Uuid, mpsc::UnboundedSender<Vec<u8>>>>>,
+}
+
+impl SessionEnv {
+    fn vnc_socket(&self) -> PathBuf {
+        self.runtime_dir.join(VNC_SOCKET)
+    }
 }
 
 impl Tools {
@@ -222,15 +227,14 @@ fn session_command(program: &str, runtime_dir: &Path, display: Option<&str>) -> 
     command
 }
 
-fn browser_arguments(runtime_dir: &Path, debug_port: u16) -> Vec<String> {
+fn browser_arguments(runtime_dir: &Path) -> Vec<String> {
     vec![
         "--ozone-platform=wayland".to_string(),
         "--no-first-run".to_string(),
         "--disable-gpu".to_string(),
         "--start-maximized".to_string(),
         format!("--user-data-dir={}", runtime_dir.join("profile").display()),
-        "--remote-debugging-address=127.0.0.1".to_string(),
-        format!("--remote-debugging-port={debug_port}"),
+        "--remote-debugging-pipe".to_string(),
     ]
 }
 
@@ -249,7 +253,8 @@ fn app_command(app: &DesktopApp, file: Option<&str>, session: &SessionEnv) -> Re
     let chromium_based = Path::new(program).file_name().is_some_and(|name| BROWSERS.iter().any(|browser| name == *browser));
 
     if chromium_based {
-        command.args(browser_arguments(&session.runtime_dir, session.debug_port));
+        command.args(browser_arguments(&session.runtime_dir));
+        session.browser.attach(&mut command)?;
     }
 
     Ok(command)
@@ -293,12 +298,12 @@ async fn wait_for_socket(launched: &mut Launched, name: &str) -> Result<String, 
     }
 }
 
-async fn wait_for_port(launched: &mut Launched) -> Result<(), String> {
+async fn wait_for_vnc_socket(launched: &mut Launched) -> Result<(), String> {
     let deadline = tokio::time::Instant::now() + READY_TIMEOUT;
     let wayvnc = launched.children.len() - 1;
 
     loop {
-        if TcpStream::connect(("127.0.0.1", launched.port)).await.is_ok() {
+        if UnixStream::connect(launched.session.vnc_socket()).await.is_ok() {
             return Ok(());
         }
 
@@ -308,13 +313,6 @@ async fn wait_for_port(launched: &mut Launched) -> Result<(), String> {
 
         tokio::time::sleep(READY_POLL).await;
     }
-}
-
-fn free_loopback_port() -> Result<u16, String> {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|error| format!("The environment could not start. The node found no free local port for wayvnc: {error}."))?;
-    let address = listener.local_addr().map_err(|error| format!("The environment could not start. The node found no free local port for wayvnc: {error}."))?;
-
-    Ok(address.port())
 }
 
 async fn launch(tools: &Tools, width: u32, height: u32, apps: &[DesktopApp]) -> Result<Launched, String> {
@@ -329,9 +327,7 @@ async fn launch(tools: &Tools, width: u32, height: u32, apps: &[DesktopApp]) -> 
     };
     let directory = SessionDirectory::create()?;
     let runtime_dir = directory.path.clone();
-    let port = free_loopback_port()?;
-    let debug_port = free_loopback_port()?;
-    let mut launched = Launched { children: Vec::new(), pids: Vec::new(), directory, session: SessionEnv { runtime_dir: runtime_dir.clone(), display: String::new(), debug_port }, port, browser: None };
+    let mut launched = Launched { children: Vec::new(), pids: Vec::new(), directory, session: SessionEnv { runtime_dir: runtime_dir.clone(), display: String::new(), browser: BrowserPipes::default() }, browser: None };
 
     if let Some(browser) = &tools.browser {
         let browser_version = version_of(browser, true).await;
@@ -355,7 +351,7 @@ async fn launch(tools: &Tools, width: u32, height: u32, apps: &[DesktopApp]) -> 
             let [app] = apps else {
                 return Err("This node runs cage, which shows one app at a time. Start with one app, or install sway.".to_string());
             };
-            let session = SessionEnv { runtime_dir: runtime_dir.clone(), display: String::new(), debug_port };
+            let session = SessionEnv { runtime_dir: runtime_dir.clone(), display: String::new(), browser: BrowserPipes::default() };
             let process = app_command(app, None, &session)?;
             let mut command = session_command(&compositor.program, &runtime_dir, None);
             command.arg("--").arg(process.as_std().get_program()).args(process.as_std().get_args());
@@ -373,9 +369,9 @@ async fn launch(tools: &Tools, width: u32, height: u32, apps: &[DesktopApp]) -> 
     }
 
     let mut wayvnc_command = session_command(wayvnc, &runtime_dir, Some(&launched.session.display));
-    wayvnc_command.arg("127.0.0.1").arg(port.to_string());
+    wayvnc_command.arg("--unix-socket").arg(launched.session.vnc_socket());
     spawn_into(&mut wayvnc_command, &mut launched, "wayvnc")?;
-    wait_for_port(&mut launched).await?;
+    wait_for_vnc_socket(&mut launched).await?;
 
     if compositor.kind == CompositorKind::Sway {
         for app in apps {
@@ -451,10 +447,6 @@ impl EnvironmentManager {
         let _ = self.out.send(NodeToControl::EnvironmentChanged { conversation_id, state, failure, browser });
     }
 
-    fn ready_port(&self, conversation_id: Uuid) -> Option<u16> {
-        self.entries().get(&conversation_id).filter(|entry| entry.ready).map(|entry| entry.port)
-    }
-
     fn ready_session(&self, conversation_id: Uuid) -> Option<SessionEnv> {
         self.entries().get(&conversation_id).filter(|entry| entry.ready).and_then(|entry| entry.session.clone())
     }
@@ -481,7 +473,7 @@ impl EnvironmentManager {
                 return;
             }
 
-            running.insert(conversation_id, Entry { generation, started_at: Utc::now(), ready: false, port: 0, session: None, browser: None, pids: Vec::new(), apps: Vec::new(), stop: None });
+            running.insert(conversation_id, Entry { generation, started_at: Utc::now(), ready: false, session: None, browser: None, pids: Vec::new(), apps: Vec::new(), stop: None });
         }
 
         self.send_changed(conversation_id, EnvironmentState::Starting, None, None);
@@ -524,7 +516,6 @@ impl EnvironmentManager {
             match running.get_mut(&conversation_id) {
                 Some(entry) if entry.generation == generation => {
                     entry.ready = true;
-                    entry.port = launched.port;
                     entry.session = Some(launched.session.clone());
                     entry.browser = launched.browser.clone();
                     entry.pids = launched.pids.clone();
@@ -583,12 +574,12 @@ impl EnvironmentManager {
     }
 
     pub fn input(&self, request_id: Uuid, conversation_id: Uuid, action: EnvironmentInputAction) {
-        let port = self.ready_port(conversation_id);
+        let socket = self.ready_session(conversation_id).map(|session| session.vnc_socket());
         let out = self.out.clone();
 
         tokio::spawn(async move {
-            let result = match port {
-                Some(port) => rfb::send_input(port, &action).await.map_err(|error| error.to_string()),
+            let result = match socket {
+                Some(socket) => rfb::send_input(&socket, &action).await.map_err(|error| error.to_string()),
                 None => Err("There is no environment running for this conversation. Start one, then send the input.".to_string()),
             };
             let _ = out.send(NodeToControl::EnvironmentInputDone { request_id, error: result.err() });
@@ -610,12 +601,12 @@ impl EnvironmentManager {
     }
 
     pub fn browser_read(&self, request_id: Uuid, conversation_id: Uuid) {
-        let debug_port = self.ready_session(conversation_id).map(|session| session.debug_port);
+        let browser = self.ready_session(conversation_id).map(|session| session.browser);
         let out = self.out.clone();
 
         tokio::spawn(async move {
-            let read = match debug_port {
-                Some(debug_port) => browser_control::read(debug_port).await,
+            let read = match browser {
+                Some(browser) => browser_control::read(&browser).await,
                 None => Err("There is no environment running for this conversation. Start one, then read the page.".to_string()),
             };
             let message = match read {
@@ -627,12 +618,12 @@ impl EnvironmentManager {
     }
 
     pub fn browser_act(&self, request_id: Uuid, conversation_id: Uuid, action: BrowserAction) {
-        let debug_port = self.ready_session(conversation_id).map(|session| session.debug_port);
+        let browser = self.ready_session(conversation_id).map(|session| session.browser);
         let out = self.out.clone();
 
         tokio::spawn(async move {
-            let result = match debug_port {
-                Some(debug_port) => browser_control::act(debug_port, &action).await,
+            let result = match browser {
+                Some(browser) => browser_control::act(&browser, &action).await,
                 None => Err("There is no environment running for this conversation. Start one, then act on the page.".to_string()),
             };
             let _ = out.send(NodeToControl::EnvironmentBrowserActed { request_id, error: result.err() });
@@ -708,7 +699,7 @@ impl EnvironmentManager {
     }
 
     pub fn open_stream(&self, stream_id: Uuid, conversation_id: Uuid) {
-        let Some(port) = self.ready_port(conversation_id) else {
+        let Some(socket) = self.ready_session(conversation_id).map(|session| session.vnc_socket()) else {
             let _ = self.out.send(NodeToControl::EnvironmentStreamClosed { stream_id });
 
             return;
@@ -718,7 +709,7 @@ impl EnvironmentManager {
         let manager = self.clone();
 
         tokio::spawn(async move {
-            let Ok(connection) = TcpStream::connect(("127.0.0.1", port)).await else {
+            let Ok(connection) = UnixStream::connect(&socket).await else {
                 manager.stream_senders().remove(&stream_id);
                 let _ = manager.out.send(NodeToControl::EnvironmentStreamClosed { stream_id });
 
@@ -957,5 +948,162 @@ mod tests {
         };
         assert_eq!(state, EnvironmentState::Failed);
         assert!(failure.unwrap().contains("sway, wayvnc, grim"));
+    }
+
+    async fn next_message(messages: &mut mpsc::UnboundedReceiver<NodeToControl>, wanted: impl Fn(&NodeToControl) -> bool) -> NodeToControl {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let message = messages.recv().await.expect("the node stopped sending");
+
+                if wanted(&message) {
+                    return message;
+                }
+            }
+        })
+        .await
+        .expect("the expected message never arrived")
+    }
+
+    fn descendants(roots: &[u32]) -> HashSet<u32> {
+        let mut pending = roots.to_vec();
+        let mut seen = HashSet::new();
+
+        while let Some(pid) = pending.pop() {
+            if !seen.insert(pid) {
+                continue;
+            }
+
+            for task in std::fs::read_dir(format!("/proc/{pid}/task")).into_iter().flatten().flatten() {
+                let children = std::fs::read_to_string(task.path().join("children")).unwrap_or_default();
+                pending.extend(children.split_whitespace().filter_map(|child| child.parse::<u32>().ok()));
+            }
+        }
+
+        seen
+    }
+
+    fn tcp_listening_sockets_of(pids: &HashSet<u32>) -> Vec<String> {
+        let mut listening_inodes = HashSet::new();
+
+        for table in ["/proc/net/tcp", "/proc/net/tcp6"] {
+            let text = std::fs::read_to_string(table).unwrap_or_default();
+
+            for line in text.lines().skip(1) {
+                let columns: Vec<&str> = line.split_whitespace().collect();
+
+                if columns.get(3) == Some(&"0A") {
+                    listening_inodes.insert(format!("socket:[{}]", columns[9]));
+                }
+            }
+        }
+
+        let mut found = Vec::new();
+
+        for pid in pids {
+            for descriptor in std::fs::read_dir(format!("/proc/{pid}/fd")).into_iter().flatten().flatten() {
+                let Ok(target) = std::fs::read_link(descriptor.path()) else {
+                    continue;
+                };
+                let target = target.to_string_lossy().into_owned();
+
+                if listening_inodes.contains(&target) {
+                    found.push(format!("pid {pid} listens on {target}"));
+                }
+            }
+        }
+
+        found
+    }
+
+    #[tokio::test]
+    async fn a_real_environment_is_reachable_only_through_private_sockets() {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let tools = locate(&path);
+
+        if !tools.missing().is_empty() || tools.compositor.as_ref().is_none_or(|compositor| compositor.kind != CompositorKind::Sway) || tools.browser.is_none() {
+            eprintln!("skipped: this machine needs sway, wayvnc, grim and a Chromium-based browser for a real environment");
+
+            return;
+        }
+
+        let data = tempfile::tempdir().unwrap();
+        std::fs::create_dir(data.path().join("applications")).unwrap();
+        let browser = tools.browser.clone().unwrap();
+        std::fs::write(data.path().join("applications/browser.desktop"), format!("[Desktop Entry]\nType=Application\nName=Browser\nExec={browser} --no-sandbox --disable-dev-shm-usage %U\nCategories=Network;WebBrowser;\n")).unwrap();
+        let page = data.path().join("page.html");
+        std::fs::write(&page, "<title>Booking</title><button>Search flights</button><script>document.querySelector('button').onclick = () => { document.title = 'Searched'; }</script>").unwrap();
+
+        let (out, mut messages) = mpsc::unbounded_channel();
+        let mut manager = EnvironmentManager::new(out, path);
+        manager.data_dirs = vec![data.path().to_path_buf()];
+        let conversation_id = Uuid::new_v4();
+
+        manager.start(conversation_id, 1280, 800, Vec::new());
+        let running = next_message(&mut messages, |message| matches!(message, NodeToControl::EnvironmentChanged { state: EnvironmentState::Running | EnvironmentState::Failed, .. })).await;
+        let NodeToControl::EnvironmentChanged { state, failure, .. } = running else {
+            unreachable!();
+        };
+        assert_eq!(state, EnvironmentState::Running, "{failure:?}");
+
+        let session = manager.ready_session(conversation_id).unwrap();
+        let runtime_mode = std::fs::metadata(&session.runtime_dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(runtime_mode, 0o700);
+
+        let stream_id = Uuid::new_v4();
+        manager.open_stream(stream_id, conversation_id);
+        let frame = next_message(&mut messages, |message| matches!(message, NodeToControl::EnvironmentStreamData { .. })).await;
+        let NodeToControl::EnvironmentStreamData { data: greeting, .. } = frame else {
+            unreachable!();
+        };
+        assert!(STANDARD.decode(greeting).unwrap().starts_with(b"RFB "));
+
+        let request_id = Uuid::new_v4();
+        manager.launch(request_id, conversation_id, "browser".to_string(), Some(format!("file://{}", page.display())));
+        let launched = next_message(&mut messages, |message| matches!(message, NodeToControl::EnvironmentLaunched { .. })).await;
+        let NodeToControl::EnvironmentLaunched { error, .. } = launched else {
+            unreachable!();
+        };
+        assert_eq!(error, None);
+
+        let mut controls = Vec::new();
+
+        for _ in 0..60 {
+            manager.browser_read(request_id, conversation_id);
+            let read = next_message(&mut messages, |message| matches!(message, NodeToControl::EnvironmentBrowserControls { .. })).await;
+            let NodeToControl::EnvironmentBrowserControls { controls: found, .. } = read else {
+                unreachable!();
+            };
+            controls = found;
+
+            if !controls.is_empty() {
+                break;
+            }
+
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+
+        assert_eq!(controls.iter().map(|control| control.name.as_str()).collect::<Vec<_>>(), ["Search flights"]);
+
+        manager.browser_act(request_id, conversation_id, BrowserAction::Click { index: 1 });
+        let acted = next_message(&mut messages, |message| matches!(message, NodeToControl::EnvironmentBrowserActed { .. })).await;
+        let NodeToControl::EnvironmentBrowserActed { error, .. } = acted else {
+            unreachable!();
+        };
+        assert_eq!(error, None);
+
+        manager.browser_read(request_id, conversation_id);
+        let reread = next_message(&mut messages, |message| matches!(message, NodeToControl::EnvironmentBrowserControls { .. })).await;
+        let NodeToControl::EnvironmentBrowserControls { page: title, .. } = reread else {
+            unreachable!();
+        };
+        assert!(title.starts_with("Searched"), "{title}");
+
+        let roots: Vec<u32> = manager.entries().get(&conversation_id).map(|entry| entry.pids.iter().copied().chain(entry.apps.iter().filter_map(|app| app.id())).collect()).unwrap();
+        let tree = descendants(&roots);
+        assert_eq!(tcp_listening_sockets_of(&tree), Vec::<String>::new());
+
+        manager.stop(conversation_id);
+        next_message(&mut messages, |message| matches!(message, NodeToControl::EnvironmentChanged { state: EnvironmentState::Stopped, .. })).await;
+        assert!(!session.runtime_dir.exists());
     }
 }

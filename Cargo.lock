@@ -2808,6 +2808,7 @@ dependencies = [
  "http",
  "k8s-openapi",
  "kube",
+ "libc",
  "mycelium-keeper",
  "mycelium-proto",
  "nix 0.31.3",
