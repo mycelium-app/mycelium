@@ -2,6 +2,7 @@ package mycelium.desktop
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -17,6 +18,9 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import io.ktor.client.engine.mock.MockEngine
@@ -33,6 +37,7 @@ import mycelium.api.MyceliumApi
 import mycelium.api.Project
 import mycelium.state.AppState
 import mycelium.state.Store
+import mycelium.ui.LocalTouch
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.NewConversationScreen
 import mycelium.ui.NewProjectDialog
@@ -170,6 +175,28 @@ class ProjectsTest {
 
         rule.waitUntil(5_000) { posts.isNotEmpty() }
         assertEquals("""{"node_id":"$AtlasId","forge_id":"f1","repository":"immich-app/immich"}""", posts.single().second)
+    }
+
+    @Test
+    fun everyRowActionIsFullyInsideTheTableOnAPhone() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); Box(Modifier.width(360.dp).testTag("screen")) { CompositionLocalProvider(LocalTouch provides true) { ProjectsScreen(store, state, onNewConversation = {}) } } } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("immich").fetchSemanticsNodes().isNotEmpty() }
+
+        val density = rule.density.density
+        val screen = rule.onNodeWithTag("screen").fetchSemanticsNode().boundsInRoot
+        val actions = rule.onAllNodes(hasContentDescription("New conversation in", substring = true) or (hasContentDescription("Set up", substring = true) and hasContentDescription("Set up on ", substring = true).not())).fetchSemanticsNodes()
+
+        assertTrue(actions.size >= 3)
+
+        for (action in actions) {
+            val bounds = action.boundsInRoot
+            assertTrue(bounds.right <= screen.right - 16 * density, "${bounds.right} beyond ${screen.right}")
+            assertTrue(bounds.width >= 24 * density && bounds.height >= 24 * density, "$bounds smaller than 24dp")
+        }
+
+        rule.onNodeWithContentDescription("New conversation in acme-org/acme-backups").assertIsDisplayed()
     }
 
     @Test

@@ -2,6 +2,7 @@ package mycelium.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -59,6 +60,8 @@ private class FolderRow(val folder: Project, val updatedAt: String) : ProjectRow
 private const val RepositoriesList = "repositories"
 
 private val ProjectActionsExtra = Tokens.Size.IconSm + Tokens.Space.S1_5 * 5 + Tokens.Space.S1 * 2
+
+private val CompactActionsExtra = Tokens.Size.IconSm + Tokens.Space.S1_5 * 5 + Tokens.Space.S1 * 2
 
 @Composable
 fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) -> Unit) {
@@ -257,6 +260,11 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                     LoadFailedState("repositories", loadRepositories, Modifier.fillMaxWidth().padding(vertical = Tokens.Space.S2))
                 }
 
+                BoxWithConstraints {
+                val compact = maxWidth < 480.dp
+                val control = touchMin(Tokens.Size.ControlSm)
+                val compactExtra = CompactActionsExtra + control * 2
+
                 Table(
                     listOf(
                         Col("Repository", 80.dp, weight = 1f),
@@ -298,7 +306,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                                         }
                                     }
 
-                                    else -> TableCell.Slot("${projectGroupLabel(state, setUp)} New conversation", ProjectActionsExtra) {
+                                    else -> TableCell.Slot(if (compact) projectGroupLabel(state, setUp) else "${projectGroupLabel(state, setUp)} New conversation", if (compact) compactExtra else ProjectActionsExtra) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
                                             if (key in cloning) {
                                                 Box(Modifier.width(Tokens.Size.NumberField)) {
@@ -363,13 +371,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                                             }
 
                                             if (setUp.isNotEmpty()) {
-                                                MyButton(
-                                                    { onNewConversation(newConversationProject(setUp, state).id) },
-                                                    text = "New conversation",
-                                                    size = ButtonSize.Sm,
-                                                    variant = ButtonVariant.Outline,
-                                                    description = "New conversation in ${repository.fullName}",
-                                                )
+                                                NewConversationButton({ onNewConversation(newConversationProject(setUp, state).id) }, repository.fullName, compact)
                                             }
                                         }
                                     }
@@ -395,17 +397,11 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                                         }
                                     }
 
-                                    else -> TableCell.Slot("${projectGroupLabel(state, listOf(folder))} New conversation", ProjectActionsExtra) {
+                                    else -> TableCell.Slot(if (compact) projectGroupLabel(state, listOf(folder)) else "${projectGroupLabel(state, listOf(folder))} New conversation", if (compact) compactExtra else ProjectActionsExtra) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
                                             ProjectGroupMenu(store, state, listOf(folder), folder.name)
 
-                                            MyButton(
-                                                { onNewConversation(folder.id) },
-                                                text = "New conversation",
-                                                size = ButtonSize.Sm,
-                                                variant = ButtonVariant.Outline,
-                                                description = "New conversation in ${folder.name}",
-                                            )
+                                            NewConversationButton({ onNewConversation(folder.id) }, folder.name, compact)
                                         }
                                     }
                                 }
@@ -414,6 +410,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                     },
                     lazy = false,
                 )
+                }
             }
 
             if (forges != null && connected.isNotEmpty() && listing != null && repositories.isEmpty() && folders.isEmpty()) {
@@ -428,6 +425,15 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
 
     if (creating) {
         NewProjectDialog(store, state, onDismiss = { creating = false }, onCreated = { creating = false; onNewConversation(it.id) })
+    }
+}
+
+@Composable
+private fun NewConversationButton(onClick: () -> Unit, name: String, compact: Boolean) {
+    if (compact) {
+        MyButton(onClick, icon = MyIcon.Chat, description = "New conversation in $name", tooltip = "New conversation", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+    } else {
+        MyButton(onClick, text = "New conversation", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "New conversation in $name")
     }
 }
 
