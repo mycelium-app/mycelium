@@ -4,7 +4,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -227,5 +229,109 @@ class NewConversationSetupTest {
 
         rule.waitUntil(5_000) { checkouts.size == 2 }
         rule.onNodeWithText("Keep this draft").assertExists()
+    }
+}
+
+private const val Ledger = "aaaaaaaa-0000-0000-0000-000000000003"
+
+private fun nodeJson(id: String, name: String, online: Boolean) = node(id, name).replace(""""online":true""", """"online":$online""")
+
+private const val HarbourOnLedger = """{"id":"p3","node_id":"$Ledger","name":"harbour","path":"/srv/harbour","forge_id":"f1","repository":"example-org/harbour","created_at":"2026-10-22T10:00:00Z"}"""
+
+private const val OnlyOnLedger = """{"id":"p4","node_id":"$Ledger","name":"ledgerbook","path":"/srv/ledgerbook","forge_id":"f1","repository":"example-org/ledgerbook","created_at":"2026-10-22T10:00:00Z"}"""
+
+private const val OnlyOnWillow = """{"id":"p5","node_id":"$Willow","name":"willowbook","path":"/srv/willowbook","forge_id":"f1","repository":"example-org/willowbook","created_at":"2026-10-22T10:00:00Z"}"""
+
+class NewConversationNodeChoiceTest {
+    @get:Rule
+    val rule = createComposeRule()
+
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val bodies = CopyOnWriteArrayList<String>()
+    private val checkouts = CopyOnWriteArrayList<String>()
+
+    private fun show(projects: String, recentProject: String) {
+        val json = headersOf(HttpHeaders.ContentType, "application/json")
+        val nodes = "[${node(Atlas, "atlas")},${node(Willow, "willow")},${nodeJson(Ledger, "ledger", false)}]"
+        val engine = MockEngine { request ->
+            val path = request.url.encodedPath
+
+            when {
+                path.endsWith("/checkout") -> {
+                    checkouts += path
+                    respond(HarbourOnWillow, HttpStatusCode.Created, json)
+                }
+                path.endsWith("/conversations") && request.method == HttpMethod.Post -> {
+                    bodies += String(request.body.toByteArray())
+                    respond(CreatedJson, HttpStatusCode.Created, json)
+                }
+                path.endsWith("/projects") -> respond(projects, HttpStatusCode.OK, json)
+                path.endsWith("/nodes/any") -> respond("""{"node_id":"$Atlas","name":"atlas"}""", HttpStatusCode.OK, json)
+                path.endsWith("/nodes") -> respond(nodes, HttpStatusCode.OK, json)
+                path.endsWith("/conversations") -> respond(RecentJson.replace("\"p1\"", "\"$recentProject\""), HttpStatusCode.OK, json)
+                else -> respond("{}", HttpStatusCode.OK, json)
+            }
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
+
+        runBlocking { store.refresh(); store.refreshProjects() }
+
+        rule.setContent {
+            MyceliumTheme(true) {
+                val state by store.state.collectAsState()
+
+                CompositionLocalProvider(LocalTouch provides false) {
+                    NewConversationScreen(store, state, onCreated = {})
+                }
+            }
+        }
+    }
+
+    @Test
+    fun aProjectCheckedOutOnTwoNodesIsListedOnceWithoutAnyNodeName() {
+        show("[$HarbourOnAtlas,$HarbourOnWillow,$OnlyOnWillow]", "p1")
+
+        rule.onNodeWithContentDescription("Project: harbour").performClick()
+
+        rule.onAllNodesWithText("harbour").assertCountEquals(2)
+        rule.onAllNodesWithText("willow").assertCountEquals(0)
+    }
+
+    @Test
+    fun choosingAProjectTheSelectedNodeLacksSwitchesRunOnToANodeThatHasIt() {
+        show("[$HarbourOnAtlas,$OnlyOnWillow]", "p1")
+
+        rule.onNodeWithContentDescription("Run on atlas").assertExists()
+        rule.onNodeWithContentDescription("Project: harbour").performClick()
+        rule.onNodeWithText("willowbook").performClick()
+
+        rule.onNodeWithContentDescription("Run on willow").assertExists()
+    }
+
+    @Test
+    fun choosingAProjectNoOnlineNodeHasLeavesRunOnToChooseAndSendingSaysToChooseANode() {
+        show("[$HarbourOnAtlas,$OnlyOnLedger]", "p1")
+
+        rule.onNodeWithContentDescription("Project: harbour").performClick()
+        rule.onNodeWithText("ledgerbook").performClick()
+        rule.onNodeWithText("Choose a node").assertExists()
+        rule.onNodeWithContentDescription("Message").performTextInput("Restore the copy")
+        rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }
+
+        rule.onNodeWithText("Choose a node to run on.").assertExists()
+        rule.runOnIdle { assertTrue(bodies.isEmpty()) }
+    }
+
+    @Test
+    fun cloningOntoANodeFromTheChooseANodeMenuSendsTheCloneRequest() {
+        show("[$OnlyOnLedger]", "p4")
+
+        rule.onNodeWithText("Choose a node").performClick()
+        rule.onNodeWithText("Clone onto willow").performClick()
+
+        rule.waitUntil(5_000) { checkouts.isNotEmpty() }
+        assertTrue(checkouts.single().endsWith("/projects/p4/checkout"))
     }
 }

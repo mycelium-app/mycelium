@@ -223,13 +223,15 @@ private fun NewProjectForm(option: NewProjectOption) {
 }
 
 @Composable
-fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, selected: String?, label: String, onDismiss: () -> Unit, setUpFolder: String? = null, onSetUp: () -> Unit = {}, recent: List<Project> = emptyList(), noProjectLabel: String = "No project", onNewProject: (() -> Unit)? = null, newProject: NewProjectOption? = null, onSelect: (String?) -> Unit) {
+fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, selected: String?, label: String, onDismiss: () -> Unit, setUpFolder: String? = null, onSetUp: () -> Unit = {}, recent: List<Project> = emptyList(), noProjectLabel: String = "No project", showNodes: Boolean = true, onNewProject: (() -> Unit)? = null, newProject: NewProjectOption? = null, onSelect: (String?) -> Unit) {
     var query by remember { mutableStateOf("") }
     val matching = projects.filter { project ->
-        listOf(project.name, project.path, nodes[project.nodeId]?.name.orEmpty()).any { it.contains(query.trim(), ignoreCase = true) }
+        listOf(project.name, project.path, nodes[project.nodeId]?.name.orEmpty().takeIf { showNodes }.orEmpty()).any { it.contains(query.trim(), ignoreCase = true) }
     }
 
-    val severalNodes = projects.map { it.nodeId }.distinct().size > 1
+    val severalNodes = showNodes && projects.map { it.nodeId }.distinct().size > 1
+    val duplicateNames = projects.groupingBy { it.name }.eachCount().filterValues { it > 1 }.keys
+    val hintFor = { option: Project -> if (showNodes) nodes[option.nodeId]?.name else projectName(option.path).takeIf { option.name in duplicateNames } }
     val searching = query.isNotBlank()
     val recentShown = recent.filter { it in matching }.takeIf { !searching }.orEmpty()
     val rest = matching.filter { it !in recentShown }
@@ -255,7 +257,7 @@ fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, select
                 item { MenuLabel("Recent projects") }
 
                 items(recentShown, key = { "recent-${it.id}" }) { option ->
-                    MenuItem(option.name, onClick = { onSelect(option.id) }, checked = option.id == selected, hint = nodes[option.nodeId]?.name, leadingContent = { ProjectIcon(option) })
+                    MenuItem(option.name, onClick = { onSelect(option.id) }, checked = option.id == selected, hint = hintFor(option), leadingContent = { ProjectIcon(option) })
                 }
 
                 if (rest.isNotEmpty()) {
@@ -265,7 +267,7 @@ fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, select
             }
 
             items(rest, key = { it.id }) { option ->
-                MenuItem(option.name, onClick = { onSelect(option.id) }, checked = option.id == selected, hint = nodes[option.nodeId]?.name?.takeIf { severalNodes || recentShown.isNotEmpty() }, leadingContent = { ProjectIcon(option) })
+                MenuItem(option.name, onClick = { onSelect(option.id) }, checked = option.id == selected, hint = hintFor(option)?.takeIf { !showNodes || severalNodes || recentShown.isNotEmpty() }, leadingContent = { ProjectIcon(option) })
             }
 
             if (matching.isEmpty()) {

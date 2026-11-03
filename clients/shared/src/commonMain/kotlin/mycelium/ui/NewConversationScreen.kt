@@ -117,8 +117,20 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
 
     val groupFilter = LocalGroupFilter.current
     val projects = state.projects.values.filter { inGroup(it.groupId, groupFilter) }.sortedBy { it.name }
-    val recent = state.conversations.values.filter { it.projectId != null }.sortedByDescending { it.updatedAt }.mapNotNull { conversation -> projects.firstOrNull { it.id == conversation.projectId } }.distinct().take(RecentProjects)
-    val project = if (withoutProject || newProjectChosen) null else state.projects[chosenProject] ?: recent.firstOrNull()
+    val repositoryKey = { held: Project -> if (held.repository == null) held.id else "${held.forgeId}/${held.repository}" }
+    val newestConversations = state.conversations.values.sortedByDescending { it.updatedAt }
+    val chosenCheckout = if (withoutProject || newProjectChosen) null else state.projects[chosenProject]
+    val keptNodeId = if (anyNode) null else chosenCheckout?.nodeId ?: nodeId
+    val entries = projects.groupBy(repositoryKey).values.map { group ->
+        val online = group.filter { held -> nodes.any { it.id == held.nodeId } }
+        val lastUsed = newestConversations.firstNotNullOfOrNull { conversation -> online.firstOrNull { it.id == conversation.projectId } }
+
+        online.firstOrNull { it.nodeId == keptNodeId } ?: lastUsed ?: online.firstOrNull() ?: group.first()
+    }.sortedBy { it.name }
+    val recent = newestConversations.mapNotNull { conversation -> state.projects[conversation.projectId]?.let { held -> entries.firstOrNull { repositoryKey(it) == repositoryKey(held) } } }.distinct().take(RecentProjects)
+    val project = if (withoutProject || newProjectChosen) null else chosenCheckout ?: recent.firstOrNull()
+    val projectNode = project?.let { held -> nodes.firstOrNull { it.id == held.nodeId } }
+    val choosingNode = project != null && !anyNode && setup == null && nodes.isNotEmpty() && projectNode == null
     val creatingProject = !withoutProject && project == null && (newProjectChosen || cwd.isBlank())
     val newProjectName = draft.name.trim()
     LaunchedEffect(runOnMenuOpen, workInMenuOpen, anyNode, state.nodes, project?.id) {
@@ -131,8 +143,8 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val previewedNode = anyNodePick?.let { state.nodes[it.nodeId] }
     val node = when {
         setup != null -> setup?.node
-        project != null && anyNode -> previewedNode ?: state.nodes[project.nodeId]
-        project != null -> state.nodes[project.nodeId]
+        project != null && anyNode -> previewedNode ?: projectNode ?: nodes.firstOrNull()
+        project != null -> projectNode ?: nodes.firstOrNull()
         anyNode -> previewedNode ?: nodes.firstOrNull()
         else -> nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
     }
@@ -206,6 +218,11 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
         }
 
         if (nodes.isEmpty() || node == null || chosenAgent == null || setup is ProjectSetup.Failed) {
+            return
+        }
+
+        if (choosingNode) {
+            cwdError = "Choose a node to run on."
             return
         }
 
@@ -297,12 +314,13 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
 
                             if (projectMenuOpen) {
                                 ProjectMenu(
-                                    projects,
+                                    entries,
                                     state.nodes,
-                                    project?.id,
+                                    project?.let { held -> entries.firstOrNull { repositoryKey(it) == repositoryKey(held) }?.id },
                                     "Project",
                                     onDismiss = { projectMenuOpen = false },
                                     recent = recent,
+                                    showNodes = false,
                                     noProjectLabel = "No project, choose a folder",
                                     onNewProject = { projectMenuOpen = false; settingUpProject = true },
                                     newProject = NewProjectOption(
@@ -391,9 +409,9 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                     Box {
                                         MyButton(
                                             { runOnMenuOpen = true },
-                                            text = if (anyNode) "Any node" else placed.name,
-                                            icon = if (anyNode) MyIcon.Server else nodeIcon(placed),
-                                            description = "Run on ${if (anyNode) "any node" else placed.name}",
+                                            text = if (anyNode) "Any node" else if (choosingNode) "Choose a node" else placed.name,
+                                            icon = if (anyNode || choosingNode) MyIcon.Server else nodeIcon(placed),
+                                            description = "Run on ${if (anyNode) "any node" else if (choosingNode) "nothing, choose a node" else placed.name}",
                                             muted = true,
                                             size = ButtonSize.Sm,
                                             selected = runOnMenuOpen,
@@ -413,8 +431,10 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                                 Hairline(Modifier.padding(vertical = Tokens.Space.S1))
 
                                                 for (option in nodes) {
+                                                    val cloning = choosingNode && project != null && cloneable(project)
+
                                                     MenuItem(
-                                                        option.name,
+                                                        if (cloning) "Clone onto ${option.name}" else option.name,
                                                         onClick = {
                                                             val held = project?.let { checkoutOn(state, it, option.id) }
 
@@ -437,10 +457,11 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                                             }
 
                                                             anyNode = false
+                                                            cwdError = null
                                                             nodeId = option.id
                                                         },
-                                                        checked = !anyNode && option.id == placed.id,
-                                                        hint = project?.let { held -> checkoutOn(state, held, option.id)?.path ?: if (cloneable(held)) "Not set up yet, clones ${held.name}" else "No checkout, choose a folder" },
+                                                        checked = !anyNode && !choosingNode && option.id == placed.id,
+                                                        hint = project?.takeIf { !cloning }?.let { held -> checkoutOn(state, held, option.id)?.path ?: if (cloneable(held)) "Not set up yet, clones ${held.name}" else "No checkout, choose a folder" },
                                                         leading = nodeIcon(option),
                                                     )
                                                 }
