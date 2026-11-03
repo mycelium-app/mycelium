@@ -51,6 +51,8 @@ private const val BuiltOutside = """{"uuid":"a2","name":"orphan-app","status":"r
 private const val ConversationJson = """{"id":"c1","owner":"u1","node_id":"n1","agent":"claude","cwd":"/work","title":"c1","status":"done",
 "acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}"""
 
+private val OtherConversationJson = ConversationJson.replace("\"c1\"", "\"c2\"")
+
 class AppBesideChatTest {
     @get:Rule
     val rule = createComposeRule()
@@ -68,8 +70,9 @@ class AppBesideChatTest {
                 path.endsWith("/apps/a1") -> BuiltInChat
                 path.endsWith("/apps/a2") -> BuiltOutside
                 path.endsWith("/apps") -> """{"apps":[$BuiltInChat,$BuiltOutside]}"""
-                path.endsWith("/conversations") -> "[$ConversationJson]"
+                path.endsWith("/conversations") -> "[$ConversationJson,$OtherConversationJson]"
                 path.endsWith("/conversations/c1") -> ConversationJson
+                path.endsWith("/conversations/c2") -> OtherConversationJson
                 path.endsWith("/nodes") || path.endsWith("/groups") || path.endsWith("/events") -> "[]"
                 else -> "{}"
             }
@@ -151,5 +154,25 @@ class AppBesideChatTest {
         show(Route.App("a2", viewing = true))
 
         rule.waitUntil(5_000) { composerShown() }
+    }
+
+    @Test
+    fun aChosenConversationCanBeChangedForAnotherFromTheBar() {
+        platform.preferences["beside-chat:a2"] = "c1"
+        show(Route.App("a2", viewing = true))
+        rule.waitUntil(5_000) { composerShown() }
+
+        rule.onNodeWithContentDescription("Change chat").performClick()
+        rule.onNodeWithText("c2").performClick()
+
+        assertEquals("c2", platform.preferences["beside-chat:a2"])
+    }
+
+    @Test
+    fun anAppBuiltInAConversationOffersNoChangeChat() {
+        show(Route.App("a1", viewing = true))
+        rule.waitUntil(5_000) { composerShown() }
+
+        assertTrue(rule.onAllNodesWithContentDescription("Change chat").fetchSemanticsNodes().isEmpty())
     }
 }

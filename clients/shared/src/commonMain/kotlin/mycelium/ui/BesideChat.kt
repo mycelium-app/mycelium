@@ -1,5 +1,6 @@
 package mycelium.ui
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -59,13 +61,19 @@ fun BesideChat(
 
     val toggle: @Composable RowScope.() -> Unit = {
         Box {
-            MyButton(
-                { if (attached != null) chatShown = !chatShown else picking = true },
-                icon = MyIcon.Chat,
-                description = if (attached != null && chatShown) "Hide chat" else "Show chat",
-                muted = true,
-                selected = attached != null && chatShown,
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                if (attached != null && conversationId == null) {
+                    MyButton({ picking = true }, icon = MyIcon.Refresh, description = "Change chat", muted = true, selected = picking)
+                }
+
+                MyButton(
+                    { if (attached != null) chatShown = !chatShown else picking = true },
+                    icon = MyIcon.Chat,
+                    description = if (attached != null && chatShown) "Hide chat" else "Show chat",
+                    muted = true,
+                    selected = attached != null && chatShown,
+                )
+            }
 
             if (picking) {
                 val matches = state.conversations.values
@@ -91,6 +99,7 @@ fun BesideChat(
                                     chatShown = true
                                     picking = false
                                 },
+                                checked = row.id == attached,
                                 leading = MyIcon.Chat,
                             )
                         }
