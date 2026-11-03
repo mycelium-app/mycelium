@@ -589,7 +589,7 @@ pub async fn put_secret(State(state): State<AppState>, user: AuthUser, Path((id,
         )
         .bind(id)
         .bind(&name)
-        .bind(value)
+        .bind(crate::secrets::Sealed::from(value.as_str()))
         .bind(request.description.as_deref())
         .execute(&state.pool)
         .await?;
@@ -984,7 +984,7 @@ async fn secrets_of(state: &AppState, id: Uuid) -> ApiResult<Vec<AssistantSecret
 }
 
 pub async fn secret_env(state: &AppState, conversation_id: Uuid) -> ApiResult<Vec<(String, String)>> {
-    let rows = sqlx::query_as::<_, (String, String)>(
+    let rows = sqlx::query_as::<_, (String, crate::secrets::Sealed)>(
         "select s.name, s.value from conversations c join assistant_secrets s on s.assistant_id = c.assistant_id where c.id = $1 and c.agent <> $2 and s.value is not null order by s.name",
     )
     .bind(conversation_id)
@@ -992,7 +992,7 @@ pub async fn secret_env(state: &AppState, conversation_id: Uuid) -> ApiResult<Ve
     .fetch_all(&state.pool)
     .await?;
 
-    Ok(rows)
+    Ok(rows.into_iter().map(|(name, value)| (name, value.into_string())).collect())
 }
 
 async fn push_secrets(state: &AppState, assistant_id: Uuid) -> ApiResult<()> {
@@ -1057,7 +1057,7 @@ pub async fn secret_tool(state: &AppState, conversation_id: Option<Uuid>, tool: 
         )
         .bind(id)
         .bind(&name)
-        .bind(&value)
+        .bind(crate::secrets::Sealed::from(value.as_str()))
         .bind(description.as_deref())
         .execute(&state.pool)
         .await?;

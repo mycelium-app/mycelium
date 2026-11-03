@@ -50,6 +50,8 @@ enum Command {
 #[derive(Subcommand)]
 enum ControlCommand {
     Serve,
+    /// Re-encrypt every stored secret under the current secret key, generating a new key first when none is set in the environment
+    RotateSecrets,
 }
 
 #[derive(Subcommand)]
@@ -84,6 +86,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::Control { command: ControlCommand::Serve } => mycelium_control::serve().await,
+        Command::Control { command: ControlCommand::RotateSecrets } => mycelium_control::rotate_secrets().await,
         Command::Artifacts => mycelium_artifacts::serve().await,
         Command::Node { command: NodeCommand::Join { url, join_token_file, name } } => {
             mycelium_node::join(mycelium_node::JoinOptions { control_plane: url, join_token_file, name, config_path: None }).await

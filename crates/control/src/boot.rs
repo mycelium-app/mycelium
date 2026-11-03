@@ -100,7 +100,10 @@ async fn apply_migrations(state: &AppState) -> Result<()> {
 
     sqlx::query("select pg_advisory_lock($1)").bind(MIGRATION_LOCK_KEY).execute(&mut *connection).await?;
 
-    let migrated = MIGRATOR.run(&state.pool).await;
+    let migrated = match MIGRATOR.run(&state.pool).await {
+        Ok(()) => crate::secrets::reseal(&state.pool, &crate::secrets::installed_ring()?).await.map(|_| ()),
+        Err(error) => Err(error.into()),
+    };
     let unlocked = sqlx::query("select pg_advisory_unlock($1)").bind(MIGRATION_LOCK_KEY).execute(&mut *connection).await;
 
     migrated?;

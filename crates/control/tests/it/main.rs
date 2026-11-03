@@ -58,6 +58,7 @@ mod provider_usage;
 mod puzzles;
 mod routing;
 mod schedules;
+mod secrets;
 mod sessions;
 mod sign_in;
 mod snapshots;

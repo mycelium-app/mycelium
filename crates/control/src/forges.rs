@@ -37,7 +37,7 @@ pub struct ForgeRow {
     pub kind: String,
     pub base_url: String,
     pub account: String,
-    pub token: String,
+    pub token: crate::secrets::Sealed,
     pub organisations: Vec<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub mcp_server_id: Option<Uuid>,
@@ -94,7 +94,7 @@ impl ForgeRow {
             ForgeKind::Forgejo => self.account.as_str(),
         };
 
-        Ok(GitCredentials { username: username.to_string(), password: self.token.clone() })
+        Ok(GitCredentials { username: username.to_string(), password: self.token.to_string() })
     }
 
     pub async fn approved_clone_urls(&self, http: &reqwest::Client, repository: &str) -> ApiResult<Vec<String>> {
@@ -162,7 +162,7 @@ impl ForgeApi {
     }
 
     pub fn from_row(row: &ForgeRow) -> ApiResult<ForgeApi> {
-        Ok(ForgeApi::new(row.id, parse_kind(&row.kind)?, row.base_url.clone(), row.token.clone()))
+        Ok(ForgeApi::new(row.id, parse_kind(&row.kind)?, row.base_url.clone(), row.token.to_string()))
     }
 
     fn api_url(&self) -> String {
@@ -999,7 +999,7 @@ pub async fn connect(State(state): State<AppState>, user: AuthUser, Json(request
     .bind(crate::store::enum_text(&request.kind))
     .bind(&base_url)
     .bind(&account)
-    .bind(&token)
+    .bind(crate::secrets::Sealed::from(token.as_str()))
     .bind(&organisations)
     .fetch_one(&state.pool)
     .await?;

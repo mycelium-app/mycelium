@@ -240,7 +240,7 @@ pub async fn callback(State(state): State<AppState>, Query(query): Query<Callbac
         return page(StatusCode::BAD_GATEWAY, "Last.fm did not give Mycelium access. Start the sign-in again from Settings, Integrations.");
     };
 
-    let stored = sqlx::query("update chat_tool_servers set session_key = $2 where id = $1").bind(row.id).bind(&key).execute(&state.pool).await;
+    let stored = sqlx::query("update chat_tool_servers set session_key = $2 where id = $1").bind(row.id).bind(crate::secrets::Sealed::from(key.as_str())).execute(&state.pool).await;
 
     if stored.is_err() {
         return page(StatusCode::INTERNAL_SERVER_ERROR, "Mycelium could not save the sign-in. Try again.");

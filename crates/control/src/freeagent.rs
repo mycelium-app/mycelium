@@ -165,7 +165,7 @@ async fn renewed(state: &AppState, owner: Uuid, server: &ServerRow, credentials:
 
         return None;
     };
-    let stored = sqlx::query("update chat_tool_servers set session_key = $2, oauth_refresh_token = coalesce($3, oauth_refresh_token), oauth_expires_at = $4 where id = $1").bind(server.id).bind(&tokens.access).bind(&tokens.refresh).bind(tokens.expires_at).execute(&state.pool).await;
+    let stored = sqlx::query("update chat_tool_servers set session_key = $2, oauth_refresh_token = coalesce($3, oauth_refresh_token), oauth_expires_at = $4 where id = $1").bind(server.id).bind(crate::secrets::Sealed::from(tokens.access.as_str())).bind(tokens.refresh.as_deref().map(crate::secrets::Sealed::from)).bind(tokens.expires_at).execute(&state.pool).await;
 
     stored.ok().map(|_| tokens.access)
 }
@@ -373,7 +373,7 @@ pub async fn callback(State(state): State<AppState>, Query(query): Query<Callbac
     let Some(tokens) = tokens else {
         return page(StatusCode::BAD_GATEWAY, "FreeAgent did not give Mycelium access. Check the client id and secret, then start the sign-in again from Settings, Integrations.");
     };
-    let stored = sqlx::query("update chat_tool_servers set session_key = $2, oauth_refresh_token = $3, oauth_expires_at = $4 where id = $1").bind(row.id).bind(&tokens.access).bind(&tokens.refresh).bind(tokens.expires_at).execute(&state.pool).await;
+    let stored = sqlx::query("update chat_tool_servers set session_key = $2, oauth_refresh_token = $3, oauth_expires_at = $4 where id = $1").bind(row.id).bind(crate::secrets::Sealed::from(tokens.access.as_str())).bind(tokens.refresh.as_deref().map(crate::secrets::Sealed::from)).bind(tokens.expires_at).execute(&state.pool).await;
 
     if stored.is_err() {
         return page(StatusCode::INTERNAL_SERVER_ERROR, "Mycelium could not save the sign-in. Try again.");

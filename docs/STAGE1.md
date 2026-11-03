@@ -57,6 +57,8 @@ release binaries are static musl.
 | `MYCELIUM_LISTEN` | `0.0.0.0:8080` | HTTP listen address |
 | `MYCELIUM_PUBLIC_URL` | required | e.g. `https://mycelium.example.com`, used in links and OIDC redirects |
 | `MYCELIUM_DATA_DIR` | `/var/lib/mycelium` | Transcript copy and node journals |
+| `MYCELIUM_SECRET_KEY` | generated | Base64 of 32 bytes that encrypts stored secrets. Unset, the control plane generates one at `$MYCELIUM_DATA_DIR/secret.key` on first boot. See `docs/SECURITY.md` |
+| `MYCELIUM_SECRET_KEY_PREVIOUS` | empty | Comma-separated retired keys, kept so values sealed under them can still be read until they are re-encrypted |
 | `MYCELIUM_OIDC_ISSUER` | required unless dev login | OIDC issuer URL |
 | `MYCELIUM_OIDC_CLIENT_ID` | required unless dev login | |
 | `MYCELIUM_OIDC_CLIENT_SECRET` | empty | Public clients use PKCE only |

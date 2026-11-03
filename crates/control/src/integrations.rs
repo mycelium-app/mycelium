@@ -212,7 +212,7 @@ impl ServerRow {
     }
 
     pub fn credentials(&self) -> Credentials {
-        Credentials { address: self.url.clone(), account: self.account.clone().unwrap_or_default(), secret: self.bearer_token.clone().unwrap_or_default(), settings: self.settings.0.clone(), session: self.session_key.clone() }
+        Credentials { address: self.url.clone(), account: self.account.clone().unwrap_or_default(), secret: self.bearer_token.as_deref().unwrap_or_default().to_string(), settings: self.settings.0.clone(), session: self.session_key.as_deref().map(str::to_string) }
     }
 
     pub fn tool_kind(&self, tool: &str) -> ToolKind {

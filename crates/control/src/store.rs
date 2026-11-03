@@ -247,13 +247,16 @@ pub async fn append_event(tx: &mut Tx<'_>, conversation_id: Uuid, kind: EventKin
     } else {
         payload
     };
-    let secrets = sqlx::query_scalar::<_, String>(
-        "select s.value from conversations c join assistant_secrets s on s.assistant_id = c.assistant_id where c.id = $1 and s.value is not null and length(s.value) >= $2",
+    let secrets = sqlx::query_scalar::<_, crate::secrets::Sealed>(
+        "select s.value from conversations c join assistant_secrets s on s.assistant_id = c.assistant_id where c.id = $1 and s.value is not null",
     )
     .bind(conversation_id)
-    .bind(MIN_REDACTED_SECRET)
     .fetch_all(&mut **tx)
-    .await?;
+    .await?
+    .into_iter()
+    .map(crate::secrets::Sealed::into_string)
+    .filter(|secret| secret.chars().count() >= MIN_REDACTED_SECRET as usize)
+    .collect::<Vec<_>>();
     let redacted;
     let payload = if secrets.is_empty() {
         payload

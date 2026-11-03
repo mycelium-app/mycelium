@@ -18,6 +18,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use uuid::Uuid;
 
+pub const TEST_SECRET_KEY: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
 pub const WAIT: Duration = Duration::from_secs(60);
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -359,6 +360,8 @@ impl Server {
             listen: address,
             public_url: base.clone(),
             data_dir: data_dir.clone(),
+            secret_key: Some(TEST_SECRET_KEY.into()),
+            previous_secret_keys: Vec::new(),
             oidc: None,
             dev_login: Some("dev@example.com".into()),
             allowed_emails: Vec::new(),

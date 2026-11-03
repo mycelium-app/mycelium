@@ -28,7 +28,7 @@ pub struct ProviderRow {
     pub kind: String,
     pub name: String,
     pub base_url: Option<String>,
-    pub api_key: Option<String>,
+    pub api_key: Option<crate::secrets::Sealed>,
     pub models: Vec<String>,
     pub default_model: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -284,9 +284,9 @@ impl ProviderRow {
         let request = request.header("user-agent", "mycelium");
 
         Ok(match (self.parsed_kind()?, &self.api_key) {
-            (ModelProviderKind::OpenaiCompatible, Some(key)) => request.bearer_auth(key),
+            (ModelProviderKind::OpenaiCompatible, Some(key)) => request.bearer_auth(&**key),
             (ModelProviderKind::OpenaiCompatible, None) => request,
-            (ModelProviderKind::Anthropic, key) => request.header("anthropic-version", ANTHROPIC_VERSION).header("x-api-key", key.clone().unwrap_or_default()),
+            (ModelProviderKind::Anthropic, key) => request.header("anthropic-version", ANTHROPIC_VERSION).header("x-api-key", key.as_deref().unwrap_or_default()),
         })
     }
 
@@ -577,7 +577,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         }
         None => None,
     };
-    let draft = ProviderRow { id: Uuid::nil(), kind: enum_text(&request.kind), name: name.to_string(), base_url: base_url.clone(), api_key: key.map(str::to_string), models: Vec::new(), default_model: None, created_at: chrono::Utc::now(), model_class: "cloud".into() };
+    let draft = ProviderRow { id: Uuid::nil(), kind: enum_text(&request.kind), name: name.to_string(), base_url: base_url.clone(), api_key: key.map(crate::secrets::Sealed::from), models: Vec::new(), default_model: None, created_at: chrono::Utc::now(), model_class: "cloud".into() };
     let mut models = draft.list_models(&state.http).await?.map_err(|error| error.into_api(name, &draft.address().unwrap_or_default()))?;
 
     if models.is_empty() && request.kind == ModelProviderKind::Anthropic {

@@ -1039,7 +1039,7 @@ pub async fn set_target(State(state): State<AppState>, user: AuthUser, Path(id):
         fields.extend(discovered.clone());
     }
 
-    sqlx::query("update chat_tool_servers set settings = $3 where id = $1 and owner = $2").bind(id).bind(user.id).bind(sqlx::types::Json(settings)).execute(&state.pool).await?;
+    sqlx::query("update chat_tool_servers set settings = $3 where id = $1 and owner = $2").bind(id).bind(user.id).bind(crate::secrets::SealedSettings(settings)).execute(&state.pool).await?;
     state.hub.tools_changed(user.id);
 
     Ok(Json(serde_json::to_value(crate::chat_tool_servers::reloaded(&state, user.id, id).await?).map_err(ApiError::internal)?))

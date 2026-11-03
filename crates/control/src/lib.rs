@@ -109,6 +109,7 @@ mod web;
 mod worktrees;
 mod workflows;
 mod lastfm;
+pub mod secrets;
 mod freeagent;
 mod discord;
 mod actual;
@@ -139,10 +140,23 @@ pub async fn serve() -> Result<()> {
     run(config, listener).await
 }
 
+pub async fn rotate_secrets() -> Result<()> {
+    let config = Config::from_env()?;
+    let ring = secrets::retire_current_key(&config)?;
+    let pool = sqlx::PgPool::connect(&config.database_url).await?;
+    let changed = secrets::reseal(&pool, &ring).await?;
+
+    println!("Re-encrypted {changed} stored secrets under the current key.");
+
+    Ok(())
+}
+
 pub async fn run(config: Config, listener: TcpListener) -> Result<()> {
     if config.oidc.is_some() && config.allowed_emails.is_empty() {
         tracing::warn!("MYCELIUM_ALLOWED_EMAILS is empty, so every account at the identity provider can sign in and run agents on every node.");
     }
+
+    secrets::install(secrets::load(&config)?);
 
     let state = boot::new_state(config)?;
 

@@ -25,7 +25,7 @@ pub struct DecisionRow {
     pub id: Uuid,
     pub name: String,
     pub base_url: String,
-    pub api_key: Option<String>,
+    pub api_key: Option<crate::secrets::Sealed>,
     pub model: String,
     pub uses: Vec<String>,
     pub model_provider_id: Option<Uuid>,
@@ -170,7 +170,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         .bind(user.id)
         .bind(name)
         .bind(&base_url)
-        .bind(key)
+        .bind(key.map(crate::secrets::Sealed::from))
         .bind(model)
         .bind(&uses)
         .bind(request.model_provider_id)
@@ -214,7 +214,7 @@ pub async fn update(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     .bind(user.id)
     .bind(name)
     .bind(&base_url)
-    .bind(key)
+    .bind(key.map(crate::secrets::Sealed::from))
     .bind(model)
     .bind(&uses)
     .fetch_optional(&state.pool)

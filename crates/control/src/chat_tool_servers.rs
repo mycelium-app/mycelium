@@ -1,6 +1,7 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::forges::token_hint;
+use crate::secrets::{Sealed, SealedSettings};
 use crate::integrations::{Credentials, Integration};
 use crate::mcp_client::{McpConnection, McpError, McpTool};
 use crate::state::AppState;
@@ -81,9 +82,9 @@ pub struct ServerRow {
     pub kind: String,
     pub url: String,
     pub account: Option<String>,
-    pub settings: sqlx::types::Json<Value>,
-    pub bearer_token: Option<String>,
-    pub oauth_refresh_token: Option<String>,
+    pub settings: SealedSettings,
+    pub bearer_token: Option<Sealed>,
+    pub oauth_refresh_token: Option<Sealed>,
     pub oauth_expires_at: Option<chrono::DateTime<chrono::Utc>>,
     pub oauth: Option<sqlx::types::Json<Value>>,
     pub enabled: bool,
@@ -93,7 +94,7 @@ pub struct ServerRow {
     pub last_used_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_error: Option<String>,
     pub policy: sqlx::types::Json<IntegrationPolicy>,
-    pub session_key: Option<String>,
+    pub session_key: Option<Sealed>,
     pub forge_id: Option<Uuid>,
     #[sqlx(skip)]
     pub groups: Vec<Uuid>,
@@ -187,8 +188,8 @@ const REFRESH_MARGIN: chrono::Duration = chrono::Duration::seconds(60);
 pub async fn bearer(state: &AppState, row: &ServerRow) -> ApiResult<Option<String>> {
     if row.oauth.is_none() {
         return match (&row.bearer_token, row.forge_id) {
-            (None, Some(forge_id)) => Ok(sqlx::query_scalar::<_, String>("select token from forges where id = $1").bind(forge_id).fetch_optional(&state.pool).await?),
-            _ => Ok(row.bearer_token.clone()),
+            (None, Some(forge_id)) => Ok(sqlx::query_scalar::<_, Sealed>("select token from forges where id = $1").bind(forge_id).fetch_optional(&state.pool).await?.map(Sealed::into_string)),
+            _ => Ok(row.bearer_token.clone().map(Sealed::into_string)),
         };
     }
 
@@ -196,7 +197,7 @@ pub async fn bearer(state: &AppState, row: &ServerRow) -> ApiResult<Option<Strin
     let expiring = current.oauth_expires_at.is_some_and(|expires_at| expires_at - chrono::Utc::now() < REFRESH_MARGIN);
 
     if !expiring {
-        return Ok(current.bearer_token);
+        return Ok(current.bearer_token.map(Sealed::into_string));
     }
 
     renew(state, row).await
@@ -209,14 +210,14 @@ pub fn refreshable_after_rejection(row: &ServerRow) -> bool {
 pub async fn renew(state: &AppState, row: &ServerRow) -> ApiResult<Option<String>> {
     let current = reload(state, row).await?;
     let (Some(refresh_token), Some(oauth)) = (current.oauth_refresh_token.as_deref(), current.oauth.as_ref()) else {
-        return Ok(current.bearer_token);
+        return Ok(current.bearer_token.map(Sealed::into_string));
     };
     let tokens = crate::mcp_oauth::refresh(state, &oauth.0, refresh_token).await.map_err(|_| ApiError::conflict("sign_in_again", format!("Sign in to {} again in Settings, Integrations.", current.name)))?;
 
     sqlx::query("update chat_tool_servers set bearer_token = $2, oauth_refresh_token = coalesce($3, oauth_refresh_token), oauth_expires_at = $4 where id = $1")
         .bind(current.id)
-        .bind(&tokens.access_token)
-        .bind(&tokens.refresh_token)
+        .bind(Sealed::from(tokens.access_token.as_str()))
+        .bind(tokens.refresh_token.as_deref().map(Sealed::from))
         .bind(tokens.expires_at)
         .execute(&state.pool)
         .await?;
@@ -365,9 +366,9 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         .bind(kind)
         .bind(&address)
         .bind(account)
-        .bind(token)
+        .bind(token.map(Sealed::from))
         .bind(sqlx::types::Json(tools))
-        .bind(sqlx::types::Json(settings))
+        .bind(SealedSettings(settings))
         .bind(request.token_expires_at)
         .bind(sqlx::types::Json(request.policy.clone().unwrap_or_else(|| IntegrationPolicy { preset: Integration::parse(kind).map_or(ApprovalPreset::AskAll, Integration::default_preset), ..Default::default() })))
         .fetch_one(&state.pool)
@@ -402,7 +403,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .bind(request.clear_token_expiry)
     .bind(request.token_expires_at)
     .bind(request.policy.map(sqlx::types::Json))
-    .bind(request.bearer_token.as_deref().map(str::trim).filter(|token| !token.is_empty()))
+    .bind(request.bearer_token.as_deref().map(str::trim).filter(|token| !token.is_empty()).map(Sealed::from))
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("That tool server"))?;
