@@ -156,8 +156,6 @@ pub async fn run(config: Config, listener: TcpListener) -> Result<()> {
         tracing::warn!("MYCELIUM_ALLOWED_EMAILS is empty, so every account at the identity provider can sign in and run agents on every node.");
     }
 
-    secrets::install(secrets::load(&config)?);
-
     let state = boot::new_state(config)?;
 
     tokio::spawn(boot::migrate_until_ready(state.clone()));

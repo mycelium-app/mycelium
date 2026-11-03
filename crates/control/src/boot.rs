@@ -49,13 +49,34 @@ fn set_readiness(state: &AppState, readiness: Readiness) {
 }
 
 pub async fn migrate_until_ready(state: AppState) {
+    let mut reported = false;
+
+    loop {
+        match crate::secrets::load(&state.config) {
+            Ok(ring) => {
+                crate::secrets::install(ring);
+
+                break;
+            }
+            Err(cause) => {
+                if !reported {
+                    tracing::error!("the secret key could not be loaded, the control plane stays up and reports not ready: {cause:#}");
+                    reported = true;
+                }
+
+                set_readiness(&state, Readiness::Failed);
+                tokio::time::sleep(RETRY_INTERVAL).await;
+            }
+        }
+    }
+
     if state.config.skip_migrations {
         set_readiness(&state, Readiness::Ready);
 
         return;
     }
 
-    let mut reported = false;
+    reported = false;
 
     loop {
         match apply_migrations(&state).await {
