@@ -26,6 +26,7 @@ use uuid::Uuid;
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
 const READY_POLL: Duration = Duration::from_millis(100);
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(5);
+const DIRECTORY_REMOVAL_ATTEMPTS: usize = 40;
 const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 const CAGE_OUTPUT: &str = "HEADLESS-1";
 const RESIZE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -549,7 +550,25 @@ impl EnvironmentManager {
             }
         }
 
+        for pid in &launched.pids {
+            let _ = killpg(Pid::from_raw(*pid as i32), Signal::SIGKILL);
+        }
+
+        for child in &mut launched.children {
+            let _ = child.wait().await;
+        }
+
+        let directory = launched.directory.path.clone();
         drop(launched);
+
+        for _ in 0..DIRECTORY_REMOVAL_ATTEMPTS {
+            if !directory.exists() || std::fs::remove_dir_all(&directory).is_ok() {
+                break;
+            }
+
+            tokio::time::sleep(SHUTDOWN_POLL).await;
+        }
+
         self.forget(conversation_id, generation);
         self.send_changed(conversation_id, EnvironmentState::Stopped, None, None);
     }
