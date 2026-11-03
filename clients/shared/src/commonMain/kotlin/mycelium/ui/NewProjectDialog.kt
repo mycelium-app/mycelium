@@ -217,6 +217,7 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
                         { nodeId = option.id },
                         text = option.name,
                         icon = nodeIcon(option),
+                        iconColour = nodeColour(option),
                         description = "Set up on ${option.name}",
                         variant = ButtonVariant.Outline,
                         size = ButtonSize.Sm,

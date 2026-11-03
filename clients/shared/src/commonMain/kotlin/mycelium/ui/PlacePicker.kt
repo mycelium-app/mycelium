@@ -65,14 +65,14 @@ fun NodeChooser(nodes: List<NodeSummary>, node: NodeSummary?, cloning: Boolean =
     var open by remember { mutableStateOf(false) }
 
     Box {
-        MyButton({ open = true }, text = node?.name ?: "Choose a node", icon = node?.let(::nodeIcon) ?: MyIcon.Server, description = "Node: ${node?.name ?: "choose a node"}", variant = ButtonVariant.Outline, trailingIcon = MyIcon.ChevronDown)
+        MyButton({ open = true }, text = node?.name ?: "Choose a node", icon = node?.let(::nodeIcon) ?: MyIcon.Server, iconColour = node?.let { nodeColour(it) }, description = "Node: ${node?.name ?: "choose a node"}", variant = ButtonVariant.Outline, trailingIcon = MyIcon.ChevronDown)
 
         if (open) {
             MenuPopup(onDismiss = { open = false }) {
                 MenuLabel("Run on")
 
                 for (option in nodes) {
-                    MenuItem(if (cloning) "Clone onto ${option.name}" else option.name, onClick = { onChoose(option.id); open = false }, checked = option.id == node?.id, leading = nodeIcon(option))
+                    MenuItem(if (cloning) "Clone onto ${option.name}" else option.name, onClick = { onChoose(option.id); open = false }, checked = option.id == node?.id, leading = nodeIcon(option), leadingColour = nodeColour(option))
                 }
             }
         }

@@ -31,6 +31,8 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import mycelium.api.AnyNodeId
 import mycelium.api.AnyNodePick
+import mycelium.api.AgentSettings
+import mycelium.api.ConfigRequest
 import mycelium.api.Conversation
 import mycelium.api.CreateProjectRequest
 import mycelium.api.Forge
@@ -103,9 +105,15 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var branchError by remember { mutableStateOf<String?>(null) }
     var pinnedAccount by remember { mutableStateOf<String?>(null) }
     var signIn by remember { mutableStateOf<LoginSession?>(null) }
+    var pickedMode by remember { mutableStateOf<String?>(null) }
+    var agentSettings by remember { mutableStateOf<AgentSettings?>(null) }
 
     LaunchedEffect(Unit) {
         store.load { store.refreshProjects() }
+    }
+
+    LaunchedEffect(Unit) {
+        agentSettings = store.agentSettings()
     }
 
     LaunchedEffect(draft.forgeId) {
@@ -172,6 +180,9 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     }.orEmpty()
 
     val chosenModel = explicitOption?.model.orEmpty()
+    val modes = fallbackModes(chosenAgent.orEmpty())
+    val defaultMode = agentSettings?.let { defaultModeOf(it, chosenAgent.orEmpty()) }
+    val chosenMode = listOfNotNull(pickedMode, defaultMode).firstOrNull { held -> modes.any { it.id == held } } ?: modes.firstOrNull()?.id
 
     fun startSetup(target: Project, onNode: NodeSummary) {
         setupJob?.cancel()
@@ -265,6 +276,8 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                 ),
             )
 
+            pickedMode?.takeIf { it == chosenMode }?.let { store.api.setConfig(created.id, ConfigRequest(mode = it)) }
+
             if (files.isNotEmpty()) {
                 store.send(created.id, text, files)
             }
@@ -304,7 +317,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                 Modifier.pressable({ projectMenuOpen = true }, description = if (creatingProject) "Project: $newProjectName, new" else "Project: ${project?.name ?: "No project"}", shape = ControlShape),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Label(if (creatingProject) newProjectName else project?.name ?: "No project", style = Tokens.Type.Display)
+                                Label(if (creatingProject) newProjectName else project?.name ?: "No project", style = Tokens.Type.Display, decoration = LabelDecoration.DottedUnderline)
                                 Icon(MyIcon.ChevronDown, colors.textMuted)
                             }
 
@@ -407,6 +420,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                             { runOnMenuOpen = true },
                                             text = if (anyNode) "Any node" else if (choosingNode) "Choose a node" else placed.name,
                                             icon = if (anyNode || choosingNode) MyIcon.Server else nodeIcon(placed),
+                                            iconColour = if (anyNode || choosingNode) null else nodeColour(placed),
                                             description = "Run on ${if (anyNode) "any node" else if (choosingNode) "nothing, choose a node" else placed.name}",
                                             muted = true,
                                             size = ButtonSize.Sm,
@@ -459,6 +473,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                                         checked = !anyNode && !choosingNode && option.id == placed.id,
                                                         hint = project?.takeIf { !cloning }?.let { held -> checkoutOn(state, held, option.id)?.path ?: if (cloneable(held)) "Not set up yet, clones ${held.name}" else "No checkout, choose a folder" },
                                                         leading = nodeIcon(option),
+                                                        leadingColour = nodeColour(option),
                                                     )
                                                 }
 
@@ -538,6 +553,9 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                 MyButton(onOpenNodes, text = "Nodes", description = "Nodes", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
                             }
                         }) else null,
+                        mode = if (modes.isEmpty()) null else ({
+                            OptionMenu("Mode", modes, chosenMode, { pickedMode = it })
+                        }),
                         model = {
                             if (agents.isNotEmpty()) {
                                 ModelPicker(

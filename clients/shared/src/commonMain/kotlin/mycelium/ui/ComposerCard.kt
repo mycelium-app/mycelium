@@ -269,6 +269,7 @@ fun ComposerCard(
     notice: (@Composable () -> Unit)? = null,
     setup: (@Composable () -> Unit)? = null,
     model: (@Composable () -> Unit)? = null,
+    mode: (@Composable () -> Unit)? = null,
 ) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
@@ -319,6 +320,7 @@ fun ComposerCard(
                     BarControl.Attach -> MyButton({ platform?.pickFiles(attachments.onAdd) }, icon = MyIcon.Paperclip, description = "Attach files", muted = true)
                     BarControl.Actions -> assistantActions?.let { ActionsButton(it) }
                     BarControl.Model -> model?.invoke()
+                    BarControl.Mode -> mode?.invoke()
                     BarControl.Send -> MyButton(onSubmit, icon = MyIcon.Send, description = "Send", muted = true)
                     else -> Unit
                 }
@@ -326,6 +328,7 @@ fun ComposerCard(
 
             if (LocalTouch.current && kind == ConversationKind.NewConversation) {
                 Row(Modifier.fillMaxWidth().horizontalScrollFaded(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                    control(BarControl.Mode)
                     control(BarControl.Model)
                 }
 
@@ -334,7 +337,7 @@ fun ComposerCard(
                     control(BarControl.Send)
                 }
             } else {
-                ComposerBar(barControls(kind, HarnessReport(models = model != null)), render = control)
+                ComposerBar(barControls(kind, HarnessReport(models = model != null, modes = mode != null)), render = control)
             }
         }
 

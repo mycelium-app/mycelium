@@ -98,6 +98,7 @@ fun MoveSheet(store: Store, state: AppState, conversation: Conversation, onDismi
                         { chosenId = option.id },
                         text = option.name,
                         icon = nodeIcon(option),
+                        iconColour = nodeColour(option),
                         description = "Move to ${option.name}",
                         variant = ButtonVariant.Outline,
                         size = ButtonSize.Sm,

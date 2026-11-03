@@ -63,6 +63,9 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
@@ -86,6 +89,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -117,6 +121,12 @@ fun rowHeight(): Dp = touchMin(Tokens.Size.Row)
 @Composable
 fun barHeight(): Dp = if (LocalTouch.current) Tokens.Size.BarTouch else densed(Tokens.Size.Bar)
 
+enum class LabelDecoration { Underline, DottedUnderline }
+
+private val DottedUnderlineOffset = 6.dp
+
+private val DottedUnderlineThickness = 1.5.dp
+
 @Composable
 fun Label(
     text: String,
@@ -125,8 +135,31 @@ fun Label(
     color: Color = MyTheme.colors.text,
     maxLines: Int = Int.MAX_VALUE,
     overflow: TextOverflow = if (maxLines == 1) TextOverflow.Ellipsis else TextOverflow.Clip,
+    decoration: LabelDecoration? = null,
 ) {
-    BasicText(text, modifier, style.themed().copy(color = color), maxLines = maxLines, overflow = overflow)
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val dots = MyTheme.colors.textMuted
+    val dotted = if (decoration == LabelDecoration.DottedUnderline) {
+        Modifier.drawBehind {
+            layout?.let { held ->
+                val y = held.firstBaseline + DottedUnderlineOffset.toPx()
+                val thickness = DottedUnderlineThickness.toPx()
+
+                drawLine(dots, Offset(0f, y), Offset(held.size.width.toFloat(), y), thickness, StrokeCap.Round, PathEffect.dashPathEffect(floatArrayOf(0f, thickness * 2), 0f))
+            }
+        }
+    } else {
+        Modifier
+    }
+
+    BasicText(
+        text,
+        modifier.then(dotted),
+        style.themed().copy(color = color, textDecoration = if (decoration == LabelDecoration.Underline) TextDecoration.Underline else null),
+        onTextLayout = { layout = it },
+        maxLines = maxLines,
+        overflow = overflow,
+    )
 }
 
 @Composable
@@ -235,6 +268,7 @@ fun MyButton(
     fill: Boolean = false,
     stateDescription: String? = null,
     maxWidth: Dp? = null,
+    iconColour: Color? = null,
 ) {
     val colors = MyTheme.colors
     val source = remember { MutableInteractionSource() }
@@ -289,7 +323,7 @@ fun MyButton(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
-                Icon(icon, contentColor, iconSize)
+                Icon(icon, iconColour ?: contentColor, iconSize)
             }
 
             if (text != null) {
@@ -909,7 +943,7 @@ fun RenameDialog(title: String, label: String, value: String, onValueChange: (St
 }
 
 @Composable
-fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint: String? = null, leading: MyIcon? = null, meter: Int? = null, trailing: (@Composable () -> Unit)? = null, leadingContent: (@Composable () -> Unit)? = null, description: String? = null, hintContent: (@Composable () -> Unit)? = null, checkSlot: Boolean = false, greyed: Boolean = false) {
+fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint: String? = null, leading: MyIcon? = null, meter: Int? = null, trailing: (@Composable () -> Unit)? = null, leadingContent: (@Composable () -> Unit)? = null, description: String? = null, hintContent: (@Composable () -> Unit)? = null, checkSlot: Boolean = false, greyed: Boolean = false, leadingColour: Color? = null) {
     val colors = MyTheme.colors
 
     Row(
@@ -925,7 +959,7 @@ fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint:
         leadingContent?.invoke()
 
         if (leading != null) {
-            Icon(leading, colors.textMuted)
+            Icon(leading, leadingColour ?: colors.textMuted)
         }
 
         Label(label, color = if (greyed) colors.textFaint else colors.text, maxLines = 1, overflow = TextOverflow.Visible)

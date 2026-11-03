@@ -44,7 +44,7 @@ private val DefaultModeNameWidth = 120.dp
 
 private const val SameAsAgent = ""
 
-private fun defaultModeOf(settings: AgentSettings, agent: String): String? = if (agent == "codex") settings.defaultModes.codex else settings.defaultModes.claude
+fun defaultModeOf(settings: AgentSettings, agent: String): String? = if (agent == "codex") settings.defaultModes.codex else settings.defaultModes.claude
 
 private fun accountModeOf(settings: AgentSettings, account: AgentAccount): String? = settings.accountModes.firstOrNull { it.agent == account.agent && it.account == account.label }?.mode
 
