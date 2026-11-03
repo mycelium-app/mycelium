@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.23.1
+
+- Tab copies a prepared squash or merge message into an empty commit field so it can be edited.
+- Two-line conversation icons are smaller, with the same title alignment.
+- Conversation rows hide a standalone main branch subtitle and retain feature branches and pull request details.
+
 ## v0.23.0
 
 - The New conversation project menu lists each project once. The node follows the project you choose; when no online node has it, Run on asks you to choose a node and offers to clone it there. Tasks and Schedules pick projects the same way, and a project you just cloned stays chosen.
