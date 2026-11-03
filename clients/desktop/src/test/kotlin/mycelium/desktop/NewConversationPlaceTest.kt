@@ -96,7 +96,7 @@ class NewConversationPlaceTest {
         show(store(), onCreated = { created = it })
 
         rule.onNodeWithContentDescription("Project: harbour").assertExists()
-        rule.onNodeWithContentDescription("Work in: existing checkout").assertExists()
+        rule.onNodeWithContentDescription("Work in the existing checkout").assertExists()
         rule.onNodeWithContentDescription("Message").performTextInput("Restore the copy")
         rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }
 
@@ -123,7 +123,7 @@ class NewConversationPlaceTest {
         rule.onNodeWithText("or start without a project").performClick()
 
         rule.onNodeWithContentDescription("Project: No project").assertExists()
-        rule.onNodeWithContentDescription("Work in: choose a folder").assertExists()
+        rule.onNodeWithContentDescription("Folder: choose a folder").assertExists()
         rule.onNodeWithText("or start without a project").assertDoesNotExist()
     }
 
@@ -146,9 +146,9 @@ class NewConversationPlaceTest {
 
         rule.onNodeWithContentDescription("Project: harbour").performClick()
         rule.onNodeWithText("No project, choose a folder").performClick()
-        rule.onNodeWithContentDescription("Work in: choose a folder").performClick()
+        rule.onNodeWithContentDescription("Folder: choose a folder").performClick()
         rule.onNodeWithContentDescription("Folder").performTextInput("/srv/sites/willow-site")
-        rule.onNodeWithContentDescription("Work in: folder willow-site").assertExists()
+        rule.onNodeWithContentDescription("Folder: /srv/sites/willow-site").assertExists()
         rule.onNodeWithContentDescription("Folder").performKeyInput { pressKey(Key.Enter) }
 
         rule.waitUntil(5_000) { created != null }
@@ -172,10 +172,10 @@ class NewConversationPlaceTest {
         var created: Conversation? = null
         show(store(), onCreated = { created = it })
 
-        rule.onNodeWithContentDescription("Work in: existing checkout").performClick()
+        rule.onNodeWithContentDescription("Work in the existing checkout").performClick()
         rule.onNodeWithText("New worktree").performClick()
         rule.onNodeWithContentDescription("New branch").performTextInput("restore-copy")
-        rule.onNodeWithContentDescription("Work in: new worktree").assertExists()
+        rule.onNodeWithContentDescription("Work in a new worktree").assertExists()
         rule.onNodeWithContentDescription("New branch").performKeyInput { pressKey(Key.Enter) }
 
         rule.waitUntil(5_000) { created != null }
@@ -215,7 +215,7 @@ class NewConversationPlaceTest {
 
         rule.onNodeWithContentDescription("Place").assertExists()
         rule.onNodeWithContentDescription("Project: harbour").assertExists()
-        rule.onNodeWithContentDescription("Work in: existing checkout").assertExists()
+        rule.onNodeWithContentDescription("Work in the existing checkout").assertExists()
         rule.onNodeWithContentDescription("Attach files").assertExists()
         rule.onNodeWithContentDescription("Send").assertExists()
     }
@@ -226,11 +226,11 @@ class NewConversationPlaceTest {
 
         rule.onNodeWithContentDescription("Project: harbour").performClick()
         rule.onNodeWithText("No project, choose a folder").performClick()
-        rule.onNodeWithContentDescription("Work in: choose a folder").performClick()
+        rule.onNodeWithContentDescription("Folder: choose a folder").performClick()
         rule.onNodeWithContentDescription("Browse folders on orion").performClick()
 
         rule.onNodeWithText("Choose a folder on orion").assertExists()
         rule.onNodeWithText("Cancel").performClick()
-        rule.onNodeWithContentDescription("Work in: choose a folder").assertExists()
+        rule.onNodeWithContentDescription("Folder: choose a folder").assertExists()
     }
 }

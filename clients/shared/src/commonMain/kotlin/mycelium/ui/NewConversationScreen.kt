@@ -55,6 +55,7 @@ import mycelium.state.accountsOn
 import mycelium.state.agentName
 import mycelium.state.inGroup
 import mycelium.state.switchableAccounts
+import mycelium.state.checkedOutBranch
 import mycelium.state.worktreeHint
 import mycelium.state.isLaptop
 import mycelium.state.randomFolderName
@@ -64,7 +65,7 @@ private const val AgentAccountSeparator = "|"
 private const val RecentProjects = 3
 private const val NewProjectForgePreference = "new-project-forge"
 
-private val PlaceMenuWidth = 340.dp
+private val PlaceMenuWidth = 360.dp
 
 fun startableNodes(state: AppState) = state.nodes.values.filter { it.online && !it.draining }.sortedBy { it.name }
 
@@ -370,29 +371,32 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                             }
                         } else node?.let { placed ->
                             {
+                                val from = project?.let { checkedOutBranch(it, state.conversations.values) }
                                 val where = when {
                                     creatingProject -> "New folder"
                                     project == null && cwd.isBlank() -> "Choose a folder"
                                     project == null -> cwd.trim().trimEnd('/').substringAfterLast('/').ifEmpty { cwd.trim() }
-                                    worktree -> branch.trim().ifEmpty { "New worktree" }
+                                    worktree -> from?.let { "From $it" } ?: "New worktree"
                                     else -> "Checkout"
                                 }
-                                val summary = when {
-                                    creatingProject -> "new folder ~/projects/$newProjectName"
-                                    project == null && cwd.isBlank() -> "choose a folder"
-                                    project == null -> "folder $where"
-                                    worktree -> "new worktree"
-                                    else -> "existing checkout"
+                                val description = when {
+                                    creatingProject -> "Folder: new folder ~/projects/$newProjectName"
+                                    project == null && cwd.isBlank() -> "Folder: choose a folder"
+                                    project == null -> "Folder: ${cwd.trim()}"
+                                    worktree -> "Work in a new worktree${from?.let { ", from $it" }.orEmpty()}"
+                                    else -> "Work in the existing checkout"
                                 }
 
-                                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                     Box {
                                         MyButton(
                                             { runOnMenuOpen = true },
-                                            text = "Run on ${if (anyNode) "any node" else placed.name}",
+                                            text = if (anyNode) "Any node" else placed.name,
                                             icon = if (anyNode) MyIcon.Server else nodeIcon(placed),
-                                            description = "Run on: ${if (anyNode) "Any node" else placed.name}",
+                                            description = "Run on ${if (anyNode) "any node" else placed.name}",
                                             muted = true,
+                                            size = ButtonSize.Sm,
+                                            selected = runOnMenuOpen,
                                             trailingIcon = MyIcon.ChevronDown,
                                         )
 
@@ -405,6 +409,8 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                                     hint = anyNodePick?.let { "${it.name} now, most free" },
                                                     leading = MyIcon.Server,
                                                 )
+
+                                                Hairline(Modifier.padding(vertical = Tokens.Space.S1))
 
                                                 for (option in nodes) {
                                                     MenuItem(
@@ -450,9 +456,15 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                         MyButton(
                                             { workInMenuOpen = true },
                                             text = where,
-                                            icon = if (worktree) MyIcon.Branch else MyIcon.Folder,
-                                            description = "Work in: $summary",
+                                            icon = when {
+                                                creatingProject -> MyIcon.FolderPlus
+                                                project != null && worktree -> MyIcon.Branch
+                                                else -> MyIcon.Folder
+                                            },
+                                            description = description,
                                             muted = true,
+                                            size = ButtonSize.Sm,
+                                            selected = workInMenuOpen,
                                             trailingIcon = MyIcon.ChevronDown,
                                         )
 

@@ -83,7 +83,7 @@ class WorktreesTest {
     }
 
     private fun chooseNewWorktree() {
-        rule.onNodeWithContentDescription("Work in: ", substring = true).performClick()
+        rule.onNodeWithContentDescription("Work in the existing checkout").performClick()
         rule.onNodeWithText("New worktree").performClick()
     }
 

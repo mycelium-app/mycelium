@@ -133,7 +133,7 @@ class ConversationAreaInteractionTest {
     fun aNewWorktreeNamesItsFolderAndTheBranchItStartsFrom() {
         showNewConversation()
 
-        rule.onNodeWithContentDescription("Work in: ", substring = true).performClick()
+        rule.onNodeWithContentDescription("Work in the existing checkout").performClick()
         rule.onNodeWithText("New worktree").performClick()
         rule.onNodeWithContentDescription("New branch", substring = true).performTextInput("fix/restore-copy")
 
