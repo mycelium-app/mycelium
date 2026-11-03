@@ -80,6 +80,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var anyNode by remember { mutableStateOf(false) }
     var setup by remember { mutableStateOf<ProjectSetup?>(null) }
     var setupJob by remember { mutableStateOf<Job?>(null) }
+    var checkedOut by remember { mutableStateOf<Project?>(null) }
     var sendAfterSetup by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     var anyNodePick by remember { mutableStateOf<AnyNodePick?>(null) }
@@ -117,16 +118,10 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
 
     val groupFilter = LocalGroupFilter.current
     val projects = state.projects.values.filter { inGroup(it.groupId, groupFilter) }.sortedBy { it.name }
-    val repositoryKey = { held: Project -> if (held.repository == null) held.id else "${held.forgeId}/${held.repository}" }
     val newestConversations = state.conversations.values.sortedByDescending { it.updatedAt }
-    val chosenCheckout = if (withoutProject || newProjectChosen) null else state.projects[chosenProject]
+    val chosenCheckout = if (withoutProject || newProjectChosen) null else state.projects[chosenProject] ?: checkedOut?.takeIf { it.id == chosenProject }
     val keptNodeId = if (anyNode) null else chosenCheckout?.nodeId ?: nodeId
-    val entries = projects.groupBy(repositoryKey).values.map { group ->
-        val online = group.filter { held -> nodes.any { it.id == held.nodeId } }
-        val lastUsed = newestConversations.firstNotNullOfOrNull { conversation -> online.firstOrNull { it.id == conversation.projectId } }
-
-        online.firstOrNull { it.nodeId == keptNodeId } ?: lastUsed ?: online.firstOrNull() ?: group.first()
-    }.sortedBy { it.name }
+    val entries = projectEntries(projects, nodes, newestConversations, keptNodeId)
     val recent = newestConversations.mapNotNull { conversation -> state.projects[conversation.projectId]?.let { held -> entries.firstOrNull { repositoryKey(it) == repositoryKey(held) } } }.distinct().take(RecentProjects)
     val project = if (withoutProject || newProjectChosen) null else chosenCheckout ?: recent.firstOrNull()
     val projectNode = project?.let { held -> nodes.firstOrNull { it.id == held.nodeId } }
@@ -187,6 +182,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                 val checkout = store.api.checkoutProject(target.id, onNode.id)
 
                 store.refreshProjects()
+                checkedOut = checkout
                 chosenProject = checkout.id
                 withoutProject = false
                 setup = null

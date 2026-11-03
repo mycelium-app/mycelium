@@ -41,7 +41,8 @@ data class PlaceTarget(val node: NodeSummary, val agent: String, val project: Pr
 
 fun Place.target(state: AppState): PlaceTarget? {
     val project = state.projects[projectId]
-    val node = if (project != null) state.nodes[project.nodeId] else startableNodes(state).let { nodes -> nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull() }
+    val nodes = startableNodes(state)
+    val node = if (project != null) nodes.firstOrNull { it.id == project.nodeId } else nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
     val agents = node?.agents?.filter { it.available }.orEmpty()
     val chosen = agents.firstOrNull { it.agent == agent }?.agent ?: agents.firstOrNull()?.agent
 
@@ -59,18 +60,18 @@ fun NoAgentNotice(node: NodeSummary) {
 }
 
 @Composable
-fun NodeChooser(nodes: List<NodeSummary>, node: NodeSummary, onChoose: (String) -> Unit) {
+fun NodeChooser(nodes: List<NodeSummary>, node: NodeSummary?, cloning: Boolean = false, onChoose: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
 
     Box {
-        MyButton({ open = true }, text = node.name, icon = nodeIcon(node), description = "Node: ${node.name}", variant = ButtonVariant.Outline, trailingIcon = MyIcon.ChevronDown)
+        MyButton({ open = true }, text = node?.name ?: "Choose a node", icon = node?.let(::nodeIcon) ?: MyIcon.Server, description = "Node: ${node?.name ?: "choose a node"}", variant = ButtonVariant.Outline, trailingIcon = MyIcon.ChevronDown)
 
         if (open) {
             MenuPopup(onDismiss = { open = false }) {
                 MenuLabel("Run on")
 
                 for (option in nodes) {
-                    MenuItem(option.name, onClick = { onChoose(option.id); open = false }, checked = option.id == node.id, leading = nodeIcon(option))
+                    MenuItem(if (cloning) "Clone onto ${option.name}" else option.name, onClick = { onChoose(option.id); open = false }, checked = option.id == node?.id, leading = nodeIcon(option))
                 }
             }
         }
@@ -88,9 +89,12 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
     }
 
     val projects = state.projects.values.sortedBy { it.name }
+    val project = state.projects[place.projectId]
+    val projectNode = project?.let { held -> nodes.firstOrNull { it.id == held.nodeId } }
+    val choosingNode = project != null && nodes.isNotEmpty() && projectNode == null
+    val entries = projectEntries(projects, nodes, state.conversations.values.sortedByDescending { it.updatedAt }, project?.nodeId ?: place.nodeId)
     val target = place.target(state)
-    val project = target?.project
-    val node = target?.node ?: nodes.firstOrNull()
+    val node = projectNode ?: nodes.firstOrNull { it.id == place.nodeId }?.takeIf { project == null } ?: nodes.firstOrNull()
     val agents = node?.agents?.filter { it.available }.orEmpty()
 
     if (projects.isNotEmpty()) {
@@ -101,14 +105,14 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
                 MyButton(
                     { projectMenu = true },
                     text = project?.name ?: "No project",
-                    icon = if (project != null) state.nodes[project.nodeId]?.let(::nodeIcon) else MyIcon.Folder,
+                    icon = MyIcon.Folder,
                     description = "Project: ${project?.name ?: "No project"}",
                     variant = ButtonVariant.Outline,
                     trailingIcon = MyIcon.ChevronDown,
                 )
 
                 if (projectMenu) {
-                    ProjectMenu(projects, state.nodes, project?.id, "Work in", onDismiss = { projectMenu = false }) {
+                    ProjectMenu(entries, state.nodes, project?.let { held -> entries.firstOrNull { repositoryKey(it) == repositoryKey(held) }?.id }, "Work in", onDismiss = { projectMenu = false }, showNodes = false) {
                         place.projectId = it
                         projectMenu = false
                     }
@@ -123,13 +127,34 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
         return
     }
 
-    if (project == null) {
-        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-            Label("Node", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+        Label("Node", style = Tokens.Type.MetaStrong, color = colors.textMuted)
 
-            NodeChooser(nodes, node) { place.nodeId = it }
+        NodeChooser(nodes, node.takeIf { !choosingNode }, cloning = choosingNode && project != null && cloneable(project)) { chosenId ->
+            val held = project?.let { checkoutOn(state, it, chosenId) }
+
+            when {
+                project == null -> place.nodeId = chosenId
+                held != null -> place.projectId = held.id
+                cloneable(project) -> store.act {
+                    val checkout = store.api.checkoutProject(project.id, chosenId)
+
+                    store.refreshProjects()
+                    place.projectId = checkout.id
+                }
+                else -> {
+                    place.projectId = null
+                    place.nodeId = chosenId
+                }
+            }
         }
 
+        if (choosingNode) {
+            Label("Choose a node to run on.", color = colors.statusFailed)
+        }
+    }
+
+    if (project == null) {
         FolderField(store, node, place.cwd, { place.cwd = it }, label = "Folder", placeholder = "/home/you/project", error = cwdError)
     }
 

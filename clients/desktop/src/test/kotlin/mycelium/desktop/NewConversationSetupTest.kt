@@ -29,6 +29,8 @@ import mycelium.state.Store
 import mycelium.ui.LocalTouch
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.NewConversationScreen
+import mycelium.ui.Place
+import mycelium.ui.PlacePicker
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -65,6 +67,9 @@ class NewConversationSetupTest {
     @Volatile
     private var checkedOut = false
 
+    @Volatile
+    private var projectsLagBehindCheckout = false
+
     private fun store(checkoutStatus: HttpStatusCode, checkoutBody: String): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val nodes = "[${node(Atlas, "atlas")},${node(Willow, "willow")}]"
@@ -82,7 +87,7 @@ class NewConversationSetupTest {
                     bodies += String(request.body.toByteArray())
                     respond(CreatedJson, HttpStatusCode.Created, json)
                 }
-                path.endsWith("/projects") -> respond(if (checkedOut) "[$HarbourOnAtlas,$HarbourOnWillow]" else "[$HarbourOnAtlas]", HttpStatusCode.OK, json)
+                path.endsWith("/projects") -> respond(if (checkedOut && !projectsLagBehindCheckout) "[$HarbourOnAtlas,$HarbourOnWillow]" else "[$HarbourOnAtlas]", HttpStatusCode.OK, json)
                 path.endsWith("/nodes/any") -> {
                     previewProjects += request.url.parameters["project_id"].orEmpty()
                     respond("""{"node_id":"$Atlas","name":"atlas"}""", HttpStatusCode.OK, json)
@@ -194,6 +199,23 @@ class NewConversationSetupTest {
         assertTrue(bodies.single().contains("\"node_id\":\"$Willow\""))
         assertTrue(bodies.single().contains("\"project_id\":\"p2\""))
         assertTrue(bodies.single().contains("\"prompt\":\"Restore the copy\""))
+    }
+
+    @Test
+    fun aConversationStartsOnTheNewCheckoutEvenBeforeTheProjectListIncludesIt() {
+        projectsLagBehindCheckout = true
+        show(store(HttpStatusCode.Created, HarbourOnWillow))
+
+        rule.onNodeWithContentDescription("Run on atlas").performClick()
+        rule.onNodeWithText("willow").performClick()
+        rule.waitUntil(5_000) { runCatching { rule.onNodeWithContentDescription("Run on willow").assertExists() }.isSuccess }
+        rule.onRoot().performKeyInput { pressKey(Key.Escape) }
+        rule.onNodeWithContentDescription("Message").performTextInput("Restore the copy")
+        rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }
+
+        rule.waitUntil(5_000) { bodies.isNotEmpty() }
+        assertTrue(bodies.single().contains(""""node_id":"$Willow""""))
+        assertTrue(bodies.single().contains(""""project_id":"p2""""))
     }
 
     @Test
@@ -329,6 +351,73 @@ class NewConversationNodeChoiceTest {
         show("[$OnlyOnLedger]", "p4")
 
         rule.onNodeWithText("Choose a node").performClick()
+        rule.onNodeWithText("Clone onto willow").performClick()
+
+        rule.waitUntil(5_000) { checkouts.isNotEmpty() }
+        assertTrue(checkouts.single().endsWith("/projects/p4/checkout"))
+    }
+}
+
+class PlacePickerNodeChoiceTest {
+    @get:Rule
+    val rule = createComposeRule()
+
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val checkouts = CopyOnWriteArrayList<String>()
+    private val place = Place()
+
+    private fun show(projects: String) {
+        val json = headersOf(HttpHeaders.ContentType, "application/json")
+        val nodes = "[${node(Atlas, "atlas")},${node(Willow, "willow")},${nodeJson(Ledger, "ledger", false)}]"
+        val engine = MockEngine { request ->
+            val path = request.url.encodedPath
+
+            when {
+                path.endsWith("/checkout") -> {
+                    checkouts += path
+                    respond(HarbourOnWillow, HttpStatusCode.Created, json)
+                }
+                path.endsWith("/projects") -> respond(projects, HttpStatusCode.OK, json)
+                path.endsWith("/nodes") -> respond(nodes, HttpStatusCode.OK, json)
+                path.endsWith("/conversations") -> respond("[]", HttpStatusCode.OK, json)
+                else -> respond("{}", HttpStatusCode.OK, json)
+            }
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
+
+        runBlocking { store.refresh(); store.refreshProjects() }
+
+        rule.setContent {
+            MyceliumTheme(true) {
+                val state by store.state.collectAsState()
+
+                androidx.compose.foundation.layout.Column {
+                    PlacePicker(store, state, place, withBranch = false)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun aProjectCheckedOutOnTwoNodesIsListedOnceWithoutNodeNames() {
+        show("[$HarbourOnAtlas,$HarbourOnWillow]")
+
+        rule.onNodeWithContentDescription("Project: No project").performClick()
+
+        rule.onAllNodesWithText("harbour").assertCountEquals(1)
+        rule.onAllNodesWithText("willow").assertCountEquals(0)
+    }
+
+    @Test
+    fun aProjectNoOnlineNodeHasAsksForANodeAndClonesOntoTheOneChosen() {
+        show("[$OnlyOnLedger]")
+
+        rule.onNodeWithContentDescription("Project: No project").performClick()
+        rule.onNodeWithText("ledgerbook").performClick()
+        rule.onNodeWithText("Choose a node to run on.").assertExists()
+        rule.onNodeWithContentDescription("Node: choose a node").performClick()
         rule.onNodeWithText("Clone onto willow").performClick()
 
         rule.waitUntil(5_000) { checkouts.isNotEmpty() }

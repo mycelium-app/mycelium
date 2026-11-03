@@ -19,6 +19,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import mycelium.api.Conversation
 import mycelium.api.NodeSummary
 import mycelium.api.Project
 import mycelium.state.AppState
@@ -45,6 +46,16 @@ fun checkoutOn(state: AppState, project: Project, nodeId: String): Project? = wh
 }
 
 fun cloneable(project: Project): Boolean = project.forgeId != null && project.repository != null
+
+fun repositoryKey(project: Project): String = if (project.repository == null) project.id else "${project.forgeId}/${project.repository}"
+
+fun projectEntries(projects: List<Project>, onlineNodes: List<NodeSummary>, newestConversations: List<Conversation>, keptNodeId: String?): List<Project> =
+    projects.groupBy(::repositoryKey).values.map { group ->
+        val online = group.filter { held -> onlineNodes.any { it.id == held.nodeId } }
+        val lastUsed = newestConversations.firstNotNullOfOrNull { conversation -> online.firstOrNull { it.id == conversation.projectId } }
+
+        online.firstOrNull { it.nodeId == keptNodeId } ?: lastUsed ?: online.firstOrNull() ?: group.first()
+    }.sortedBy { it.name }
 
 @Composable
 fun SetupStrip(setup: ProjectSetup, actions: SetupActions) {
