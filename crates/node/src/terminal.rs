@@ -5,6 +5,7 @@ use mycelium_proto::link::{NodeTerminal, NodeToControl};
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -13,6 +14,9 @@ const SCROLLBACK_BYTES: usize = 256 * 1024;
 const MAX_TERMINALS: usize = 32;
 const SECRET_NAME_PARTS: [&str; 5] = ["TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "API_KEY"];
 const NODE_VARIABLE_PREFIX: &str = "MYCELIUM_";
+const TMUX_VARIABLES: [&str; 2] = ["TMUX", "TMUX_PANE"];
+const TMUX_HISTORY_LINES: usize = 2000;
+const TMUX_CONVERSATION_OPTION: &str = "@mycelium_conversation";
 
 #[derive(Default)]
 struct Scrollback {
@@ -52,6 +56,103 @@ fn safe_start(bytes: &[u8]) -> usize {
     }
 }
 
+#[derive(Clone)]
+struct Tmux {
+    program: String,
+    socket: PathBuf,
+}
+
+impl Tmux {
+    fn command(&self, args: &[&str]) -> std::process::Command {
+        let mut command = std::process::Command::new(&self.program);
+        command.arg("-S").arg(&self.socket).arg("-f").arg("/dev/null").args(args);
+
+        for (name, _) in std::env::vars() {
+            if is_scrubbed_variable(&name) {
+                command.env_remove(&name);
+            }
+        }
+
+        command
+    }
+
+    fn pty_command(&self, args: &[&str]) -> CommandBuilder {
+        let mut builder = CommandBuilder::new(&self.program);
+        builder.arg("-S");
+        builder.arg(&self.socket);
+        builder.args(args);
+        builder.env("TERM", "xterm-256color");
+        scrub(&mut builder);
+
+        builder
+    }
+
+    fn output(&self, args: &[&str]) -> Option<String> {
+        let output = self.command(args).output().ok()?;
+
+        output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
+    fn kill_session(&self, terminal_id: Uuid) {
+        let target = session_target(terminal_id);
+        let _ = self.command(&["kill-session", "-t", &target]).output();
+    }
+
+    fn sessions(&self) -> Vec<TmuxSession> {
+        let format = format!("#{{session_name}} #{{{TMUX_CONVERSATION_OPTION}}} #{{window_width}} #{{window_height}}");
+        let Some(listing) = self.output(&["list-sessions", "-F", &format]) else {
+            return Vec::new();
+        };
+
+        listing.lines().filter_map(TmuxSession::parse).collect()
+    }
+
+    fn history(&self, terminal_id: Uuid) -> Vec<u8> {
+        let target = format!("{}:", session_target(terminal_id));
+        let start = format!("-{TMUX_HISTORY_LINES}");
+        let captured = self.output(&["capture-pane", "-p", "-e", "-S", &start, "-E", "-1", "-t", &target]).unwrap_or_default();
+
+        captured.replace('\n', "\r\n").into_bytes()
+    }
+}
+
+struct TmuxSession {
+    terminal_id: Uuid,
+    conversation_id: Uuid,
+    cols: u16,
+    rows: u16,
+}
+
+impl TmuxSession {
+    fn parse(line: &str) -> Option<TmuxSession> {
+        let mut fields = line.split(' ');
+        let terminal_id = fields.next()?.parse().ok()?;
+        let conversation_id = fields.next()?.parse().ok()?;
+        let cols = fields.next()?.parse().ok()?;
+        let rows = fields.next()?.parse().ok()?;
+
+        Some(TmuxSession { terminal_id, conversation_id, cols, rows })
+    }
+}
+
+fn session_target(terminal_id: Uuid) -> String {
+    format!("={terminal_id}")
+}
+
+fn is_scrubbed_variable(name: &str) -> bool {
+    let upper = name.to_uppercase();
+
+    upper.starts_with(NODE_VARIABLE_PREFIX) || TMUX_VARIABLES.contains(&upper.as_str()) || SECRET_NAME_PARTS.iter().any(|part| upper.contains(part))
+}
+
+fn scrub(builder: &mut CommandBuilder) {
+    for (name, _) in std::env::vars() {
+        if is_scrubbed_variable(&name) {
+            builder.env_remove(&name);
+        }
+    }
+}
+
 struct TerminalProcess {
     conversation_id: Uuid,
     cols: u16,
@@ -66,6 +167,7 @@ struct TerminalProcess {
 pub struct TerminalManager {
     out: mpsc::UnboundedSender<NodeToControl>,
     shell: String,
+    tmux: Option<Tmux>,
     running: Arc<Mutex<HashMap<Uuid, TerminalProcess>>>,
 }
 
@@ -78,8 +180,12 @@ pub fn user_shell() -> String {
 }
 
 impl TerminalManager {
-    pub fn new(out: mpsc::UnboundedSender<NodeToControl>, shell: String) -> TerminalManager {
-        TerminalManager { out, shell, running: Arc::new(Mutex::new(HashMap::new())) }
+    pub fn new(out: mpsc::UnboundedSender<NodeToControl>, shell: String, tmux_dir: Option<&Path>) -> TerminalManager {
+        let tmux = tmux_dir.and_then(Self::find_tmux);
+        let manager = TerminalManager { out, shell, tmux, running: Arc::new(Mutex::new(HashMap::new())) };
+        manager.adopt_sessions();
+
+        manager
     }
 
     pub fn start(&self, terminal_id: Uuid, conversation_id: Uuid, cwd: &str, cols: u16, rows: u16) {
@@ -133,6 +239,10 @@ impl TerminalManager {
     }
 
     pub fn stop(&self, terminal_id: Uuid) {
+        if let Some(tmux) = &self.tmux {
+            tmux.kill_session(terminal_id);
+        }
+
         let Ok(mut running) = self.running.lock() else {
             return;
         };
@@ -147,26 +257,35 @@ impl TerminalManager {
         anyhow::ensure!(open < MAX_TERMINALS, "This node already has {MAX_TERMINALS} terminals open. Close one before opening another.");
         anyhow::ensure!(std::path::Path::new(cwd).is_dir(), "Could not start a terminal in {cwd}. Check that the folder exists on this node.");
 
-        let pair = native_pty_system().openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).context("Could not open a terminal on this node.")?;
-        let mut builder = CommandBuilder::new(&self.shell);
-        builder.cwd(cwd);
-        builder.env("TERM", "xterm-256color");
-
-        for (name, _) in std::env::vars() {
-            let upper = name.to_uppercase();
-
-            if upper.starts_with(NODE_VARIABLE_PREFIX) || SECRET_NAME_PARTS.iter().any(|part| upper.contains(part)) {
-                builder.env_remove(&name);
+        let builder = match &self.tmux {
+            Some(tmux) => {
+                let created = self.create_session(tmux, terminal_id, conversation_id, cwd, cols, rows)?;
+                anyhow::ensure!(created, "Could not start a terminal on this node.");
+                tmux.pty_command(&["attach-session", "-t", &session_target(terminal_id)])
             }
-        }
+            None => {
+                let mut builder = CommandBuilder::new(&self.shell);
+                builder.cwd(cwd);
+                builder.env("TERM", "xterm-256color");
+                scrub(&mut builder);
+                builder
+            }
+        };
 
+        self.attach(terminal_id, conversation_id, cols, rows, builder, Vec::new())
+    }
+
+    fn attach(&self, terminal_id: Uuid, conversation_id: Uuid, cols: u16, rows: u16, builder: CommandBuilder, history: Vec<u8>) -> Result<()> {
+        let pair = native_pty_system().openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).context("Could not open a terminal on this node.")?;
         let mut child = pair.slave.spawn_command(builder).context("Could not start a terminal on this node.")?;
         drop(pair.slave);
 
         let mut reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
         let killer = child.clone_killer();
-        self.running.lock().map_err(|_| anyhow::anyhow!("terminal table poisoned"))?.insert(terminal_id, TerminalProcess { conversation_id, cols, rows, scrollback: Scrollback::default(), writer, master: pair.master, killer });
+        let mut scrollback = Scrollback::default();
+        scrollback.push(&history);
+        self.running.lock().map_err(|_| anyhow::anyhow!("terminal table poisoned"))?.insert(terminal_id, TerminalProcess { conversation_id, cols, rows, scrollback, writer, master: pair.master, killer });
 
         let out = self.out.clone();
         let running = self.running.clone();
@@ -196,6 +315,71 @@ impl TerminalManager {
         });
 
         Ok(())
+    }
+
+    fn find_tmux(directory: &Path) -> Option<Tmux> {
+        let program = find_in_path("tmux", &std::env::var_os("PATH").unwrap_or_default());
+        let Some(program) = program else {
+            tracing::warn!("tmux is not installed, so terminals end when the node restarts");
+
+            return None;
+        };
+
+        if let Err(error) = crate::config::create_private_directory(directory) {
+            tracing::warn!("could not create the tmux directory {}, so terminals end when the node restarts: {error}", directory.display());
+
+            return None;
+        }
+
+        Some(Tmux { program, socket: directory.join("tmux.sock") })
+    }
+
+    fn create_session(&self, tmux: &Tmux, terminal_id: Uuid, conversation_id: Uuid, cwd: &str, cols: u16, rows: u16) -> Result<bool> {
+        let name = terminal_id.to_string();
+        let target = format!("{}:", session_target(terminal_id));
+        let size = (cols.to_string(), rows.to_string());
+        let history = TMUX_HISTORY_LINES.to_string();
+        let conversation = conversation_id.to_string();
+        let status = tmux
+            .command(&[
+                "start-server", ";",
+                "set-option", "-g", "history-limit", &history, ";",
+                "set-option", "-g", "default-terminal", "xterm-256color", ";",
+                "set-option", "-s", "escape-time", "0", ";",
+                "set-option", "-s", "-a", "terminal-overrides", ",*:smcup@:rmcup@", ";",
+                "new-session", "-d", "-s", &name, "-x", &size.0, "-y", &size.1, "-c", cwd, &self.shell, ";",
+                "set-option", "-t", &target, "status", "off", ";",
+                "set-option", "-t", &target, "prefix", "None", ";",
+                "set-option", "-t", &target, TMUX_CONVERSATION_OPTION, &conversation,
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .context("Could not start a terminal on this node.")?;
+
+        Ok(status.success())
+    }
+
+    fn adopt_sessions(&self) {
+        let Some(tmux) = &self.tmux else {
+            return;
+        };
+
+        for session in tmux.sessions() {
+            let open = self.running.lock().map(|running| running.len()).unwrap_or(MAX_TERMINALS);
+
+            if open >= MAX_TERMINALS {
+                break;
+            }
+
+            let builder = tmux.pty_command(&["attach-session", "-t", &session_target(session.terminal_id)]);
+            let attached = self.attach(session.terminal_id, session.conversation_id, session.cols, session.rows, builder, tmux.history(session.terminal_id));
+
+            if let Err(error) = attached {
+                tracing::warn!("could not reattach terminal {}: {error:#}", session.terminal_id);
+            }
+        }
     }
 }
 
@@ -227,7 +411,164 @@ mod tests {
     fn shell_manager() -> (TerminalManager, mpsc::UnboundedReceiver<NodeToControl>) {
         let (out, messages) = mpsc::unbounded_channel();
 
-        (TerminalManager::new(out, "/bin/sh".into()), messages)
+        (TerminalManager::new(out, "/bin/sh".into(), None), messages)
+    }
+
+    fn tmux_manager(directory: &Path) -> Option<(TerminalManager, mpsc::UnboundedReceiver<NodeToControl>)> {
+        if find_in_path("tmux", &std::env::var_os("PATH").unwrap_or_default()).is_none() {
+            eprintln!("skipping: tmux is not installed");
+
+            return None;
+        }
+
+        let (out, messages) = mpsc::unbounded_channel();
+
+        Some((TerminalManager::new(out, "/bin/sh".into(), Some(directory)), messages))
+    }
+
+    async fn simulate_node_restart(manager: TerminalManager) {
+        for process in manager.running.lock().unwrap().values_mut() {
+            process.killer.kill().unwrap();
+        }
+
+        let tmux = manager.tmux.as_ref().unwrap();
+
+        while tmux.output(&["list-clients"]).is_some_and(|clients| !clients.is_empty()) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        manager.running.lock().unwrap().clear();
+    }
+
+    fn end_tmux(manager: &TerminalManager) {
+        manager.tmux.as_ref().unwrap().command(&["kill-server"]).output().unwrap();
+    }
+
+    async fn wait_for_history(manager: &TerminalManager, terminal_id: Uuid, wanted: &str) {
+        for _ in 0..250 {
+            if let Some((data, _, _)) = manager.read(terminal_id, 0) {
+                if String::from_utf8_lossy(&data).contains(wanted) {
+                    return;
+                }
+            }
+
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        panic!("the scrollback never contained {wanted}");
+    }
+
+    #[tokio::test]
+    async fn a_tmux_terminal_survives_a_node_restart_with_its_conversation_scrollback_and_input() {
+        let directory = tempfile::tempdir().unwrap();
+        let Some((manager, mut messages)) = tmux_manager(directory.path()) else {
+            return;
+        };
+        let terminal_id = Uuid::from_u128(11);
+        let conversation_id = Uuid::from_u128(12);
+
+        manager.start(terminal_id, conversation_id, "/", 90, 30);
+        manager.input(terminal_id, &STANDARD.encode("echo before-$((20+22))\n"));
+        read_until(&mut messages, "before-42").await;
+        simulate_node_restart(manager).await;
+
+        let (restarted, mut restarted_messages) = tmux_manager(directory.path()).unwrap();
+        let listed = restarted.list();
+        assert_eq!(listed.len(), 1);
+        assert_eq!((listed[0].terminal_id, listed[0].conversation_id, listed[0].cols, listed[0].rows), (terminal_id, conversation_id, 90, 30));
+
+        wait_for_history(&restarted, terminal_id, "before-42").await;
+        restarted.input(terminal_id, &STANDARD.encode("echo after-$((1+2))\n"));
+        read_until(&mut restarted_messages, "after-3").await;
+
+        restarted.stop(terminal_id);
+        end_tmux(&restarted);
+    }
+
+    #[tokio::test]
+    async fn output_scrolled_off_the_screen_is_restored_after_a_node_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let Some((manager, mut messages)) = tmux_manager(directory.path()) else {
+            return;
+        };
+        let terminal_id = Uuid::from_u128(13);
+
+        manager.start(terminal_id, Uuid::from_u128(14), "/", 80, 24);
+        manager.input(terminal_id, &STANDARD.encode("echo old-$((20+22)); seq 1 60\n"));
+        read_until(&mut messages, "old-42").await;
+        read_until(&mut messages, "60").await;
+        simulate_node_restart(manager).await;
+
+        let (restarted, _messages) = tmux_manager(directory.path()).unwrap();
+
+        wait_for_history(&restarted, terminal_id, "old-42").await;
+
+        restarted.stop(terminal_id);
+        end_tmux(&restarted);
+    }
+
+    #[tokio::test]
+    async fn closing_a_tmux_terminal_ends_its_session() {
+        let directory = tempfile::tempdir().unwrap();
+        let Some((manager, mut messages)) = tmux_manager(directory.path()) else {
+            return;
+        };
+        let terminal_id = Uuid::from_u128(15);
+
+        manager.start(terminal_id, Uuid::from_u128(16), "/", 80, 24);
+        manager.input(terminal_id, &STANDARD.encode("echo ready\n"));
+        read_until(&mut messages, "ready").await;
+        assert_eq!(manager.tmux.as_ref().unwrap().sessions().len(), 1);
+
+        manager.stop(terminal_id);
+
+        let mut next = next_message(&mut messages).await;
+        while matches!(next, NodeToControl::TerminalOutput { .. }) {
+            next = next_message(&mut messages).await;
+        }
+
+        assert_eq!(next, NodeToControl::TerminalExited { terminal_id });
+        assert!(manager.tmux.as_ref().unwrap().sessions().is_empty());
+        end_tmux(&manager);
+    }
+
+    #[tokio::test]
+    async fn the_tmux_socket_directory_is_private_to_the_node_user() {
+        let parent = tempfile::tempdir().unwrap();
+        let directory = parent.path().join("tmux");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+        if tmux_manager(&directory).is_none() {
+            return;
+        }
+
+        let mode = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&directory).unwrap().permissions());
+        assert_eq!(mode & 0o777, 0o700);
+    }
+
+    #[tokio::test]
+    async fn a_tmux_terminal_does_not_inherit_the_nodes_secrets() {
+        let directory = tempfile::tempdir().unwrap();
+        let Some((manager, mut messages)) = tmux_manager(directory.path()) else {
+            return;
+        };
+        let terminal_id = Uuid::from_u128(17);
+
+        unsafe {
+            std::env::set_var("MYCELIUM_TMUX_TEST_NODE", "node-value");
+            std::env::set_var("TMUX_TEST_API_TOKEN", "token-value");
+            std::env::set_var("TMUX_TEST_HARMLESS", "harmless-value");
+        }
+
+        manager.start(terminal_id, Uuid::from_u128(18), "/", 80, 24);
+        manager.input(terminal_id, &STANDARD.encode("echo seen-[$MYCELIUM_TMUX_TEST_NODE]-[$TMUX_TEST_API_TOKEN]-[$TMUX_TEST_HARMLESS]\n"));
+
+        let seen = read_until(&mut messages, "-[harmless-value]").await;
+        assert!(seen.contains("seen-[]-[]-[harmless-value]"), "{seen}");
+
+        manager.stop(terminal_id);
+        end_tmux(&manager);
     }
 
     #[tokio::test]

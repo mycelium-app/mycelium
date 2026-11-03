@@ -127,7 +127,7 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     let daemon = Arc::new(Daemon {
         logins: LoginManager::new(out.clone(), login_report),
         usage,
-        terminals: TerminalManager::new(out.clone(), user_shell()),
+        terminals: TerminalManager::new(out.clone(), user_shell(), Some(&config.state_dir.join("tmux"))),
         environments: EnvironmentManager::new(out.clone(), std::env::var_os("PATH").unwrap_or_default()),
         ssh: SshServer::new(out.clone(), config.ssh_host_key_path(), options.home.clone(), user_shell()),
         watcher: Watcher::new(out.clone(), PathBuf::from("/proc"), watched_disks(&config.projects_root), RESOURCE_INTERVAL),
