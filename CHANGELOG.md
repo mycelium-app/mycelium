@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.24.3
+
+- Any account, and each favourite in the Any model list, now picks the account whose weekly window resets soonest while it still has usage, so weekly usage is not lost at the reset.
+
 ## v0.24.2
 
 - The break reminder can no longer be dismissed. It ends when you start a break or switch break reminders off, and it can be snoozed once: when it comes back it offers only Start break.
