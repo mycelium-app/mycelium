@@ -97,7 +97,7 @@ class NewArtifactTest {
         runBlocking { store.refresh() }
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ArtifactsScreen(store, state, Me("u1", "p@example.test", "Person"), QuietPlatform) } }
 
-        rule.onNodeWithText("Backup health").assertExists()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Backup health").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Kind: All kinds").performClick()
         rule.onAllNodesWithText("Slides").onLast().performClick()
 
