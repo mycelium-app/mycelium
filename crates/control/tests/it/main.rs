@@ -45,6 +45,7 @@ mod lastfm;
 mod learning;
 mod live;
 mod mcp_board;
+mod mcp_coverage;
 mod mcp_live_tools;
 mod memory;
 mod message_proposals;
