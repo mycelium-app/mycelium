@@ -39,6 +39,7 @@ import mycelium.api.PullRequestItem
 import mycelium.api.PullRequestState
 import mycelium.state.AppState
 import mycelium.state.Store
+import mycelium.state.parsedMarkdown
 import mycelium.api.Conversation
 import mycelium.state.ToolStatus
 import mycelium.state.initials
@@ -132,7 +133,7 @@ fun PullRequestPanel(store: Store, request: PullRequestItem, modifier: Modifier 
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
             when (tab) {
-                "Summary" -> Label(current.body.ifBlank { "No description." }, color = if (current.body.isBlank()) colors.textMuted else colors.text)
+                "Summary" -> if (current.body.isBlank()) Label("No description.", color = colors.textMuted) else MarkdownBlocks(parsedMarkdown(current.body))
                 "Timeline" -> {
                     val timeline = detail?.timeline.orEmpty()
                     val shown = if (onlyUnresolved) unresolvedOnly(timeline) else timeline
@@ -183,7 +184,7 @@ private fun PullRequestCommentCard(comment: PullRequestComment, forgeId: String)
             }
 
             comment.path?.let { Label(it, style = Tokens.Type.Code, color = colors.textMuted, maxLines = 1, modifier = Modifier.horizontalScroll(rememberScrollState())) }
-            Label(comment.body)
+            MarkdownBlocks(parsedMarkdown(comment.body))
         }
     }
 }

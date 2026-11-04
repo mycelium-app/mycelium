@@ -1,5 +1,7 @@
 package mycelium.desktop
 
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -73,5 +75,30 @@ class PullRequestPanelTest {
         store.receive(StreamMessage.ForgeChanged)
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Updated description").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun theSummaryAndCommentsRenderTheirMarkdown() {
+        val markdown = "## Changes\\n\\n- Pins **0.31.2** to match the shared packages"
+        val engine = MockEngine {
+            respond(
+                """{"pull_request":${RequestJson.replace("Original description", markdown)},"timeline":[{"body":"## Review\n\nPlease keep **the retry**","resolved":false}]}""",
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
+        val request = PullRequestItem("f1", "example/harbour", 9, "PR #9", "Restore", "https://example.org/pull/9", state = PullRequestState.Open)
+        rule.setContent { MyceliumTheme(true) { PullRequestPanel(store, request) } }
+
+        rule.waitUntil(5_000) { rule.onAllNodes(isHeading() and hasText("Changes")).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Pins 0.31.2 to match the shared packages", substring = true).assertExists()
+        rule.captureScreen("pull-request-markdown-summary")
+        assertEquals(0, rule.onAllNodesWithText("**", substring = true).fetchSemanticsNodes().size)
+
+        rule.onNodeWithText("Timeline").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodes(isHeading() and hasText("Review")).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Please keep the retry").assertExists()
+        assertEquals(0, rule.onAllNodesWithText("**", substring = true).fetchSemanticsNodes().size)
     }
 }
