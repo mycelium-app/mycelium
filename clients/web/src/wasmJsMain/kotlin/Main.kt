@@ -5,6 +5,8 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.window.ComposeViewport
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 import mycelium.AudioPlayer
 import mycelium.PageReading
 import mycelium.App
@@ -44,6 +46,9 @@ private external fun closeThisWindow()
 
 @JsFun("(text) => { navigator.clipboard.writeText(text); }")
 private external fun writeClipboard(text: String)
+
+@JsFun("(onText) => { navigator.clipboard.readText().then((text) => onText(text), () => onText(null)); }")
+private external fun readClipboardText(onText: (JsString?) -> Unit)
 
 @JsFun("() => window.matchMedia('(prefers-reduced-motion: reduce)').matches")
 private external fun prefersReducedMotion(): Boolean
@@ -269,6 +274,8 @@ private object WebPlatform : Platform {
     override fun closeWindow() = closeThisWindow()
 
     override fun copyToClipboard(text: String) = writeClipboard(text)
+
+    override suspend fun readClipboard(): String? = suspendCoroutine { continuation -> readClipboardText { text -> continuation.resume(text?.toString()) } }
 
     @Composable
     override fun WebContent(url: String, token: String?, modifier: Modifier, reading: PageReading?) = IframeWebContent(url, modifier)

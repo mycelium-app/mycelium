@@ -253,4 +253,10 @@ class AndroidPlatform(private val context: Context, private val launchPicker: ()
 
         clipboard.setPrimaryClip(ClipData.newPlainText("mycelium", text))
     }
+
+    override suspend fun readClipboard(): String? {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+
+        return clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
+    }
 }

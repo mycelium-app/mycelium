@@ -65,6 +65,8 @@ interface Platform {
 
     fun copyToClipboard(text: String)
 
+    suspend fun readClipboard(): String? = null
+
     @Composable
     fun WebContent(url: String, token: String?, modifier: Modifier, reading: PageReading? = null) {
         Column(modifier.fillMaxSize(), Arrangement.spacedBy(Tokens.Space.S3, Alignment.CenterVertically), Alignment.CenterHorizontally) {

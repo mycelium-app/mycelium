@@ -2,8 +2,14 @@ package mycelium.desktop
 
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.withKeyDown
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.runtime.mutableStateOf
@@ -24,22 +30,42 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import mycelium.Connection
+import mycelium.DeviceInfo
+import mycelium.Platform
 import mycelium.api.Conversation
 import mycelium.api.MyceliumApi
 import mycelium.api.MyceliumJson
 import mycelium.state.AppState
 import mycelium.state.Store
+import mycelium.ui.LocalPlatform
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.TerminalPanel
+import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Rule
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 private const val ConversationJson = """{"id":"c1","owner":"u","node_id":"n","agent":"claude","cwd":"/work/midden","title":"Bump","status":"working",
 "acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}"""
 
-@OptIn(InternalComposeUiApi::class)
+private class ClipboardPlatform(private val clipboard: String) : Platform {
+    override val originUrl: String? = null
+    override val signsInThroughTheBrowser = false
+    override fun loadConnection(): Connection? = null
+    override fun saveConnection(connection: Connection?) = Unit
+    override fun device() = DeviceInfo("Desktop", "atlas", "linux", "x86_64")
+    override fun approveCode(): String? = null
+    override fun currentPath() = "/"
+    override fun navigate(url: String) = Unit
+    override fun openUrl(url: String) = Unit
+    override fun copyToClipboard(text: String) = Unit
+    override suspend fun readClipboard() = clipboard
+}
+
+@OptIn(InternalComposeUiApi::class, ExperimentalTestApi::class)
 class TerminalPanelTest {
     @get:Rule
     val scopes = TestScopes()
@@ -126,4 +152,36 @@ class TerminalPanelTest {
         waitFor(scene, "the panel to ask to close") { closed }
         scene.close()
     }
+
+    private fun typedInput(): String =
+        requests.withIndex().filter { it.value.endsWith("/input") }.joinToString("") { String(Base64.getDecoder().decode(Json.parseToJsonElement(bodies[it.index]).jsonObject.getValue("data").jsonPrimitive.content)) }
+
+    private fun pasteWith(shortcut: Key, key: Key) {
+        val conversation = MyceliumJson.decodeFromString(Conversation.serializer(), ConversationJson)
+        val store = store()
+        compose.setContent {
+            MyceliumTheme(true) {
+                CompositionLocalProvider(LocalPlatform provides ClipboardPlatform("git status\n")) {
+                    TerminalPanel(store, AppState(), conversation, Modifier.width(440.dp).fillMaxHeight())
+                }
+            }
+        }
+
+        compose.waitUntil(5_000) { requests.any { it == "POST /api/v1/conversations/c1/terminal" } }
+        val terminal = compose.onNodeWithContentDescription("Terminal for midden. Press Shift and Tab to leave it.")
+        terminal.performClick()
+        terminal.performKeyInput { withKeyDown(shortcut) { pressKey(key) } }
+
+        compose.waitUntil(5_000) { typedInput().isNotEmpty() }
+        assertEquals("git status\n", typedInput())
+    }
+
+    @Test
+    fun commandVPastesTheClipboardIntoTheTerminal() = pasteWith(Key.MetaLeft, Key.V)
+
+    @Test
+    fun controlVPastesTheClipboardIntoTheTerminal() = pasteWith(Key.CtrlLeft, Key.V)
+
+    @Test
+    fun shiftInsertPastesTheClipboardIntoTheTerminal() = pasteWith(Key.ShiftLeft, Key.Insert)
 }

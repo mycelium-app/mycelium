@@ -16,7 +16,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
@@ -47,6 +46,7 @@ import mycelium.state.agentTerminalActivity
 import mycelium.state.dividers
 import mycelium.state.paneIds
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -91,6 +91,7 @@ import androidx.compose.ui.unit.IntSize
 import kotlin.io.encoding.Base64
 import kotlin.math.floor
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import mycelium.api.Conversation
 import mycelium.api.OpenTerminal
 import mycelium.state.AppState
@@ -386,7 +387,8 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
     var typing by remember(emulator) { mutableStateOf(false) }
     val inputFocus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
-    val clipboard = LocalClipboardManager.current
+    val platform = LocalPlatform.current
+    val scope = rememberCoroutineScope()
     val press = { input: String ->
         ctrl = false
         store.typeIntoTerminal(id!!, input)
@@ -395,6 +397,15 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
         val control = if (ctrl && text.length == 1) terminalControlInput(text[0]) else null
 
         press(control ?: text)
+    }
+    val paste = {
+        scope.launch {
+            val text = platform?.readClipboard()
+
+            if (!text.isNullOrEmpty()) {
+                press(text)
+            }
+        }
     }
 
     Column(modifier) {
@@ -430,6 +441,12 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
                 .focusRing(focused, inside = true)
                 .focusRequester(focusRequester)
                 .onPreviewKeyEvent { event ->
+                    if (id != null && !exited && isPasteShortcut(event)) {
+                        paste()
+
+                        return@onPreviewKeyEvent true
+                    }
+
                     val typed = if (id == null || exited) null else terminalInputFor(event, emulator.applicationCursorKeys)
 
                     if (typed != null) {
@@ -509,7 +526,7 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
                 ctrl = ctrl,
                 onCtrl = { ctrl = !ctrl },
                 onPress = press,
-                onPaste = { clipboard.getText()?.text?.let { store.typeIntoTerminal(id, it) } },
+                onPaste = { paste() },
                 applicationCursorKeys = emulator.applicationCursorKeys,
             )
         }
@@ -555,6 +572,18 @@ private const val CursorBlockAlpha = 0.6f
 
 private val ModifierKeys = setOf(Key.ShiftLeft, Key.ShiftRight, Key.CtrlLeft, Key.CtrlRight, Key.AltLeft, Key.AltRight, Key.MetaLeft, Key.MetaRight, Key.CapsLock, Key.Function)
 private val PrivateUseCodePoints = 0xE000..0xF8FF
+
+private fun isPasteShortcut(event: KeyEvent): Boolean {
+    if (event.type != KeyEventType.KeyDown) {
+        return false
+    }
+
+    return when (event.key) {
+        Key.V -> event.isMetaPressed || event.isCtrlPressed
+        Key.Insert -> event.isShiftPressed
+        else -> false
+    }
+}
 
 private fun terminalInputFor(event: KeyEvent, applicationCursorKeys: Boolean): String? {
     if (event.type != KeyEventType.KeyDown) {

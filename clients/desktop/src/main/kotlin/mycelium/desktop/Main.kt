@@ -187,6 +187,9 @@ private object DesktopPlatform : Platform {
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
     }
 
+    override suspend fun readClipboard(): String? =
+        runCatching { Toolkit.getDefaultToolkit().systemClipboard.getData(DataFlavor.stringFlavor) as String }.getOrNull()
+
     override fun audioRecorder(): AudioRecorder = JavaSoundRecorder()
 
     override fun audioPlayer(): AudioPlayer = JavaSoundPlayer()
