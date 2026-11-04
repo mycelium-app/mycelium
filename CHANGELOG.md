@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.24.1
+
+- View staged in the git panel opens a Staged changes tab with only the staged files and their staged hunks, and says so when nothing is staged. View diff still shows every change.
+
 ## v0.24.0
 
 - The default mode in Settings, Agents offers the modes each agent last reported, under its own names. Auto for Claude Code is its real auto mode and Accept edits is a choice of its own, and Codex defaults are applied with the ids Codex reports. Saved Codex defaults move to the new ids.
