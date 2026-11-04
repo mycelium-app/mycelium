@@ -9,6 +9,10 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.swipe
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -86,6 +90,19 @@ class PhoneDrawerTest {
         rule.waitForIdle()
 
         assertEquals(true, drawerIsOpen())
+    }
+
+    @Test
+    fun swipingTheSidebarOpenTakesFocusOffTheMessageSoTheKeyboardCloses() {
+        show()
+        rule.waitUntil(5_000) { rule.onAllNodes(hasContentDescription("Message") and hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasContentDescription("Message") and hasSetTextAction()).performClick().assertIsFocused()
+
+        rule.onRoot().performTouchInput { swipe(Offset(width / 2f, height / 2f), Offset(width * 0.95f, height / 2f)) }
+        rule.waitForIdle()
+
+        assertEquals(true, drawerIsOpen())
+        rule.onNode(hasContentDescription("Message") and hasSetTextAction()).assertIsNotFocused()
     }
 
     @Test
