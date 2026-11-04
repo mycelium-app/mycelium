@@ -22,6 +22,7 @@ pub struct Usage {
     pub limited: bool,
     pub five_left: Option<f64>,
     pub week_left: Option<f64>,
+    pub week_resets: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,19 +44,22 @@ pub fn usage_of(windows: &[UsageWindow], now: DateTime<Utc>) -> Usage {
     };
     let five_left = left(FIVE_HOUR);
     let week_left = left(SEVEN_DAY);
+    let week_resets = windows.iter().find(|window| window.name == SEVEN_DAY).and_then(|window| window.resets_at).filter(|reset| *reset > now);
 
-    Usage { limited: [five_left, week_left].into_iter().flatten().any(|remaining| remaining <= 0.0), five_left, week_left }
+    Usage { limited: [five_left, week_left].into_iter().flatten().any(|remaining| remaining <= 0.0), five_left, week_left, week_resets }
 }
 
 fn usage_with_fallback(windows: &[UsageWindow], usage_left: Option<i16>, now: DateTime<Utc>) -> Usage {
     match usage_left.filter(|_| windows.is_empty()) {
-        Some(left) => Usage { limited: left <= 0, five_left: Some(f64::from(left)), week_left: None },
+        Some(left) => Usage { limited: left <= 0, five_left: Some(f64::from(left)), week_left: None, week_resets: None },
         None => usage_of(windows, now),
     }
 }
 
-fn standing(candidate: &Candidate) -> (bool, f64, f64) {
-    (candidate.usage.five_left.is_some(), candidate.usage.five_left.unwrap_or(UNKNOWN), candidate.usage.week_left.unwrap_or(UNKNOWN))
+fn standing(candidate: &Candidate) -> (bool, Option<std::cmp::Reverse<DateTime<Utc>>>, f64, f64) {
+    let usage = candidate.usage;
+
+    (usage.five_left.is_some(), usage.week_resets.map(std::cmp::Reverse), usage.five_left.unwrap_or(UNKNOWN), usage.week_left.unwrap_or(UNKNOWN))
 }
 
 pub fn most_left<'a>(candidates: impl Iterator<Item = &'a Candidate>) -> Option<&'a Candidate> {
@@ -436,6 +440,18 @@ mod tests {
 
         assert!(!usage.limited);
         assert_eq!(usage.five_left, Some(100.0));
+    }
+
+    #[test]
+    fn the_account_whose_weekly_window_resets_sooner_wins_while_both_have_usage() {
+        let now = at("2026-11-04T13:00:00Z");
+        let candidate = |account: &str, week_used: f64, resets: &str| Candidate { node_id: Uuid::nil(), account: account.into(), usage: usage_of(&[window(FIVE_HOUR, 2.0, None), window(SEVEN_DAY, week_used, Some(resets))], now) };
+        let soon = candidate("work", 81.0, "2026-11-04T15:00:00Z");
+        let later = candidate("home", 41.0, "2026-11-07T15:00:00Z");
+        let spent = candidate("spent", 100.0, "2026-11-04T14:00:00Z");
+
+        assert_eq!(best(&[later.clone(), soon.clone()]).map(|chosen| chosen.account.as_str()), Some("work"));
+        assert_eq!(best(&[later, spent]).map(|chosen| chosen.account.as_str()), Some("home"));
     }
 
     #[test]
