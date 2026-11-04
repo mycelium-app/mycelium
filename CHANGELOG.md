@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.24.4
+
+- The pull request panel renders markdown in its summary and comments.
+
 ## v0.24.3
 
 - Any account, and each favourite in the Any model list, now picks the account whose weekly window resets soonest while it still has usage, so weekly usage is not lost at the reset.
