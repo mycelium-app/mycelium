@@ -27,6 +27,8 @@ struct FileRows {
     hunks: Vec<u32>,
     truncated: bool,
     staged_rows: u32,
+    staged_added: u32,
+    staged_removed: u32,
 }
 
 struct Row {
@@ -52,6 +54,8 @@ pub fn layout(cwd: &Path) -> Result<Value> {
             "rows": rows.rows.len(),
             "hunks": rows.hunks,
             "staged_rows": rows.staged_rows,
+            "staged_added": rows.staged_added,
+            "staged_removed": rows.staged_removed,
             "truncated": rows.truncated,
             "fingerprint": cached.fingerprint,
         })
@@ -250,6 +254,8 @@ fn file_rows(cwd: &Path, path: &str, flags: [bool; 3]) -> Result<FileRows> {
 
         if cached {
             built.staged_rows = built.rows.len() as u32;
+            built.staged_added = built.added;
+            built.staged_removed = built.removed;
         }
     }
 
@@ -415,5 +421,22 @@ mod tests {
         let second_row = file["hunks"][1].as_u64().unwrap() as u32;
         apply_hunk(dir.path(), "a.txt", second_row, file["fingerprint"].as_str().unwrap(), "revert").unwrap();
         assert_eq!(std::fs::read_to_string(dir.path().join("a.txt")).unwrap(), original.replace("line 2\n", "first edit\n"));
+    }
+
+    #[test]
+    fn the_layout_counts_the_staged_part_of_a_file_apart_from_the_rest() {
+        let dir = support::repository();
+        let original = (1..30).map(|line| format!("line {line}\n")).collect::<String>();
+        support::write(&dir, "a.txt", &original);
+        support::commit_all(&dir, "initial");
+        support::write(&dir, "a.txt", &original.replace("line 2\n", "first edit\n").replace("line 25\n", "second edit\nthird edit\n"));
+        let fingerprint = super::layout(dir.path()).unwrap()["files"][0]["fingerprint"].as_str().unwrap().to_string();
+        apply_hunk(dir.path(), "a.txt", 0, &fingerprint, "stage").unwrap();
+
+        let layout = super::layout(dir.path()).unwrap();
+        let file = &layout["files"][0];
+
+        assert_eq!((file["staged_added"].clone(), file["staged_removed"].clone()), (json!(1), json!(1)));
+        assert_eq!((file["added"].clone(), file["removed"].clone()), (json!(3), json!(2)));
     }
 }

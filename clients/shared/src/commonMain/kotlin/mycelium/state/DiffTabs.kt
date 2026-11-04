@@ -1,6 +1,8 @@
 package mycelium.state
 
-data class DiffTab(val key: String, val title: String, val closeLabel: String, val hash: String? = null, val reveal: String? = null)
+enum class ChangesScope { All, Staged }
+
+data class DiffTab(val key: String, val title: String, val closeLabel: String, val hash: String? = null, val reveal: String? = null, val scope: ChangesScope = ChangesScope.All)
 
 data class DiffTabs(val tabs: List<DiffTab> = emptyList(), val active: String? = null)
 
@@ -8,8 +10,10 @@ private const val ShortHashLength = 7
 
 const val ChangesTabKey = "changes"
 
-fun changesTab(reveal: String? = null): DiffTab =
-    DiffTab(key = ChangesTabKey, title = "Changes", closeLabel = "Close Changes", reveal = reveal)
+fun changesTab(reveal: String? = null, scope: ChangesScope = ChangesScope.All): DiffTab = when (scope) {
+    ChangesScope.All -> DiffTab(key = ChangesTabKey, title = "Changes", closeLabel = "Close Changes", reveal = reveal)
+    ChangesScope.Staged -> DiffTab(key = "$ChangesTabKey:staged", title = "Staged changes", closeLabel = "Close Staged changes", reveal = reveal, scope = scope)
+}
 
 fun commitDiffTab(hash: String): DiffTab {
     val short = hash.take(ShortHashLength)

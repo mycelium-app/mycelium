@@ -45,6 +45,8 @@ data class ChangedFile(
     val truncated: Boolean = false,
     val fingerprint: String,
     @SerialName("staged_rows") val stagedRows: Int = 0,
+    @SerialName("staged_added") val stagedAdded: Int? = null,
+    @SerialName("staged_removed") val stagedRemoved: Int? = null,
 )
 
 @Serializable

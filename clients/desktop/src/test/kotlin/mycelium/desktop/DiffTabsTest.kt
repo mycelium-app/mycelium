@@ -6,6 +6,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.MouseButton
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -46,6 +47,18 @@ private const val RowsJson = """{"ranges":[
 {"path":"src/restore/Screen.tsx","from":0,"fingerprint":"a","rows":[{"k":"h","t":"@@ -1 +1 @@"},{"k":"d","o":1,"t":"const title = 1"},{"k":"a","n":1,"t":"const title = 2"}]},
 {"path":"src/restore/strings.ts","from":0,"fingerprint":"b","rows":[{"k":"h","t":"@@ -1 +1,2 @@"},{"k":"a","n":1,"t":"const word = 3"},{"k":"a","n":2,"t":"const word = 4"}]}]}"""
 
+private const val StagedStatus = """{"branch":"main","ahead":0,"behind":0,"files":[
+{"path":"src/restore/Screen.tsx","staged":true,"unstaged":true,"untracked":false,"additions":2,"deletions":2},
+{"path":"src/restore/strings.ts","staged":false,"unstaged":true,"untracked":false,"additions":2,"deletions":0}]}"""
+
+private const val StagedLayoutJson = """{"files":[
+{"path":"src/restore/Screen.tsx","staged":true,"unstaged":true,"untracked":false,"added":2,"removed":2,"staged_added":1,"staged_removed":1,"rows":6,"hunks":[0,3],"staged_rows":3,"fingerprint":"a"},
+{"path":"src/restore/strings.ts","staged":false,"unstaged":true,"untracked":false,"added":2,"removed":0,"rows":3,"hunks":[0],"fingerprint":"b"}]}"""
+
+private const val StagedRowsJson = """{"ranges":[
+{"path":"src/restore/Screen.tsx","from":0,"fingerprint":"a","rows":[{"k":"h","t":"@@ -1 +1 @@"},{"k":"d","o":1,"t":"const title = 1"},{"k":"a","n":1,"t":"const title = staged"},{"k":"h","t":"@@ -9 +9 @@"},{"k":"d","o":9,"t":"const footer = 1"},{"k":"a","n":9,"t":"const footer = unstaged"}]},
+{"path":"src/restore/strings.ts","from":0,"fingerprint":"b","rows":[{"k":"h","t":"@@ -1 +1,2 @@"},{"k":"a","n":1,"t":"const word = 3"},{"k":"a","n":2,"t":"const word = 4"}]}]}"""
+
 @OptIn(ExperimentalTestApi::class)
 class DiffTabsTest {
     @get:Rule
@@ -56,15 +69,15 @@ class DiffTabsTest {
 
     private val requests = CopyOnWriteArrayList<String>()
 
-    private fun show() {
+    private fun show(status: String = Status, layout: String = LayoutJson, rows: String = RowsJson) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             requests += path
             val reply = when {
-                path.endsWith("/git/status") -> Status
-                path.endsWith("/git/changes-layout") -> LayoutJson
-                path.endsWith("/git/changes-rows") -> RowsJson
+                path.endsWith("/git/status") -> status
+                path.endsWith("/git/changes-layout") -> layout
+                path.endsWith("/git/changes-rows") -> rows
                 path.endsWith("/git/log") || path.endsWith("/events") || path.endsWith("/queue") || path.endsWith("/nodes") -> "[]"
                 path.endsWith("/walkthrough") || path.endsWith("/goal") -> "null"
                 path.endsWith("/conversations") -> "[$Chat]"
@@ -92,6 +105,40 @@ class DiffTabsTest {
     private fun openGit() {
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open git").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Open git").performClick()
+    }
+
+    private fun viewStaged() {
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More ways to view diff").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("More ways to view diff").performClick()
+        rule.onNode(hasText("View staged") and hasClickAction()).performClick()
+    }
+
+    @Test
+    fun viewStagedShowsOnlyTheStagedFileAndItsStagedHunksInAStagedChangesTab() {
+        show(StagedStatus, StagedLayoutJson, StagedRowsJson)
+        openGit()
+
+        viewStaged()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("const title = staged").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Close Staged changes").assertExists()
+        rule.onNodeWithText("Staged changes").assertIsDisplayed()
+        rule.captureScreen("staged-changes-tab")
+        assertEquals(0, rule.onAllNodesWithText("const footer = unstaged").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("const word = 3").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithContentDescription("Close Changes").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun viewStagedWithNothingStagedSaysSoInsteadOfShowingEveryChange() {
+        show()
+        openGit()
+
+        viewStaged()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Nothing is staged.").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Close Staged changes").assertExists()
+        assertEquals(0, rule.onAllNodesWithText("const title = 2").fetchSemanticsNodes().size)
     }
 
     @Test

@@ -126,10 +126,29 @@ fun fileTag(file: GitFile): String = when {
     else -> "Unstaged"
 }
 
-fun changeSections(layout: List<ChangedFile>): List<DiffSection> {
+fun changeSections(layout: List<ChangedFile>, scope: ChangesScope = ChangesScope.All): List<DiffSection> {
     val byPath = layout.associateBy { it.path }
     val files = layout.map { GitFile(it.path, it.staged, it.unstaged, it.untracked, it.added, it.removed) }
     val ordered = changeRows(files).filterIsInstance<ChangeRow.Change>().map { it.file }
+
+    if (scope == ChangesScope.Staged) {
+        return ordered.filter { it.staged }.map { file ->
+            val changed = byPath.getValue(file.path)
+
+            DiffSection(
+                path = file.path,
+                tag = "Staged",
+                added = changed.stagedAdded ?: changed.added,
+                removed = changed.stagedRemoved ?: changed.removed,
+                rowCount = changed.stagedRows,
+                hunks = changed.hunks.filter { it < changed.stagedRows },
+                truncated = changed.truncated,
+                canUnstage = true,
+                fingerprint = changed.fingerprint,
+                stagedRows = changed.stagedRows,
+            )
+        }
+    }
 
     return ordered.map { file ->
         val changed = byPath.getValue(file.path)

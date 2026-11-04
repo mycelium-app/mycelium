@@ -55,6 +55,7 @@ import mycelium.state.changeRows
 import mycelium.state.changesTab
 import mycelium.state.commitDiffTab
 import mycelium.state.commitProblem
+import mycelium.state.ChangesScope
 import mycelium.state.diffIsStaged
 import mycelium.state.firstChange
 import mycelium.state.fullyStaged
@@ -243,13 +244,17 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                     ChangesList(
                         files = files,
                         shownPath = shownPath,
-                        onViewDiff = { file ->
-                            if (onOpenDiff != null) {
-                                onOpenDiff(changesTab(file.path))
-                            } else {
-                                viewing = file
-                                diff = null
-                                runner { diff = store.api.gitDiff(id, file.path, diffIsStaged(file)) }
+                        onViewDiff = { file, scope ->
+                            val staged = scope == ChangesScope.Staged
+
+                            when {
+                                onOpenDiff != null -> onOpenDiff(changesTab(file?.path, scope))
+                                file == null -> runner.failure = "Nothing is staged. Stage a file or a hunk to view the staged changes."
+                                else -> {
+                                    viewing = file
+                                    diff = null
+                                    runner { diff = store.api.gitDiff(id, file.path, staged || diffIsStaged(file)) }
+                                }
                             }
                         },
                         onWalkthrough = {
@@ -368,7 +373,7 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
 }
 
 @Composable
-private fun ChangesList(files: List<GitFile>, shownPath: String?, onViewDiff: (GitFile) -> Unit, onWalkthrough: () -> Unit, onStageAll: () -> Unit, onToggle: (GitFile) -> Unit) {
+private fun ChangesList(files: List<GitFile>, shownPath: String?, onViewDiff: (GitFile?, ChangesScope) -> Unit, onWalkthrough: () -> Unit, onStageAll: () -> Unit, onToggle: (GitFile) -> Unit) {
     val colors = MyTheme.colors
     val additions = files.sumOf { it.additions }
     val deletions = files.sumOf { it.deletions }
@@ -382,9 +387,9 @@ private fun ChangesList(files: List<GitFile>, shownPath: String?, onViewDiff: (G
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
             SplitButton(
                 "View diff",
-                { first?.let(onViewDiff) },
+                { first?.let { onViewDiff(it, ChangesScope.All) } },
                 listOf(
-                    SplitAlternative("View staged", { (files.firstOrNull { it.staged } ?: first)?.let(onViewDiff) }),
+                    SplitAlternative("View staged", { onViewDiff(firstChange(files.filter { it.staged }), ChangesScope.Staged) }),
                     SplitAlternative("Walk me through changes", onWalkthrough),
                 ),
                 icon = MyIcon.Diff,
@@ -413,7 +418,7 @@ private fun ChangesList(files: List<GitFile>, shownPath: String?, onViewDiff: (G
                 Icon(MyIcon.Folder, colors.textMuted, Tokens.Size.IconSm)
                 Label(row.path, style = Tokens.Type.Ui, color = colors.textMuted, maxLines = 1)
             }
-            is ChangeRow.Change -> ChangeItem(row, shownPath == row.file.path, onOpen = { onViewDiff(row.file) }, onToggle = { onToggle(row.file) })
+            is ChangeRow.Change -> ChangeItem(row, shownPath == row.file.path, onOpen = { onViewDiff(row.file, ChangesScope.All) }, onToggle = { onToggle(row.file) })
         }
     }
 }

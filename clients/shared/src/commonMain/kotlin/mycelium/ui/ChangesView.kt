@@ -68,6 +68,7 @@ import mycelium.api.RowsChunk
 import mycelium.state.DiffLayout
 import mycelium.state.DiffLine
 import mycelium.state.DiffSection
+import mycelium.state.ChangesScope
 import mycelium.state.DiffTab
 import mycelium.state.FileDiff
 import mycelium.state.RowChunk
@@ -174,7 +175,7 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
     var original by remember(id) { mutableStateOf("") }
     var draft by remember(id) { mutableStateOf("") }
     val source = remember(id) { RowSource(scope) { ranges -> store.api.gitChangesRows(id, ranges).ranges } }
-    val sections = remember(layout) { layout?.let { changeSections(it.files) }.orEmpty() }
+    val sections = remember(layout, tab.scope) { layout?.let { changeSections(it.files, tab.scope) }.orEmpty() }
 
     LaunchedEffect(id) {
         while (true) {
@@ -249,7 +250,7 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
                 }
             }, modifier = Modifier.padding(Tokens.Space.S3))
             layout == null -> Label("Loading the changes", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
-            sections.isEmpty() -> Label("There are no changes in this folder.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
+            sections.isEmpty() -> Label(if (tab.scope == ChangesScope.Staged) "Nothing is staged." else "There are no changes in this folder.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
             else -> DiffStack(
                 sections = sections,
                 rowAt = source::at,
