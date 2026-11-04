@@ -42,4 +42,5 @@ data class Walkthrough(
     val scope: String = "branch",
     val note: String? = null,
     val checks: List<WalkthroughCheck> = emptyList(),
+    val reviewed: List<Int> = emptyList(),
 )

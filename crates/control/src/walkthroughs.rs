@@ -27,6 +27,7 @@ struct WalkthroughRow {
     scope: String,
     note: Option<String>,
     checks: Option<Value>,
+    reviewed: Vec<i32>,
 }
 
 struct GivenFile {
@@ -40,7 +41,7 @@ impl WalkthroughRow {
 
         let checks = self.checks.and_then(|checks| checks.as_array().cloned()).unwrap_or_default().iter().filter_map(shown_check).collect();
 
-        Ok(Walkthrough { id: self.id, conversation_id: self.conversation_id, steps, created_at: self.created_at, dismissed: self.dismissed_at.is_some(), scope: self.scope, note: self.note, checks })
+        Ok(Walkthrough { id: self.id, conversation_id: self.conversation_id, steps, created_at: self.created_at, dismissed: self.dismissed_at.is_some(), scope: self.scope, note: self.note, checks, reviewed: self.reviewed })
     }
 }
 
@@ -189,7 +190,7 @@ pub async fn record(state: &AppState, owner: Uuid, conversation_id: Uuid, argume
 
     let note = changes.is_none().then(|| "The changes in this scope could not be read from the node, so the diffs are as the agent wrote them.".to_string());
 
-    let row = sqlx::query_as::<_, WalkthroughRow>("insert into walkthroughs (conversation_id, steps, scope, note, checks) values ($1, $2, $3, $4, $5) returning id, conversation_id, steps, created_at, dismissed_at, scope, note, checks")
+    let row = sqlx::query_as::<_, WalkthroughRow>("insert into walkthroughs (conversation_id, steps, scope, note, checks) values ($1, $2, $3, $4, $5) returning id, conversation_id, steps, created_at, dismissed_at, scope, note, checks, reviewed")
         .bind(conversation_id)
         .bind(serde_json::to_value(&steps).map_err(ApiError::internal)?)
         .bind(&scope)
@@ -206,13 +207,13 @@ pub async fn record(state: &AppState, owner: Uuid, conversation_id: Uuid, argume
 pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Option<Walkthrough>>> {
     store::find_owned(&state.pool, id, user.id).await?;
 
-    let row = sqlx::query_as::<_, WalkthroughRow>("select id, conversation_id, steps, created_at, dismissed_at, scope, note, checks from walkthroughs where conversation_id = $1 order by created_at desc, id desc limit 1").bind(id).fetch_optional(&state.pool).await?;
+    let row = sqlx::query_as::<_, WalkthroughRow>("select id, conversation_id, steps, created_at, dismissed_at, scope, note, checks, reviewed from walkthroughs where conversation_id = $1 order by created_at desc, id desc limit 1").bind(id).fetch_optional(&state.pool).await?;
 
     Ok(Json(row.map(WalkthroughRow::to_proto).transpose()?))
 }
 
 pub async fn uncovered(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<WalkthroughFile>>> {
-    let row = sqlx::query_as::<_, WalkthroughRow>("select w.id, w.conversation_id, w.steps, w.created_at, w.dismissed_at, w.scope, w.note, w.checks from walkthroughs w join conversations c on c.id = w.conversation_id where w.id = $1 and c.owner = $2")
+    let row = sqlx::query_as::<_, WalkthroughRow>("select w.id, w.conversation_id, w.steps, w.created_at, w.dismissed_at, w.scope, w.note, w.checks, w.reviewed from walkthroughs w join conversations c on c.id = w.conversation_id where w.id = $1 and c.owner = $2")
         .bind(id)
         .bind(user.id)
         .fetch_optional(&state.pool)
@@ -235,24 +236,34 @@ async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<usize>
     steps.map(|steps| steps.as_array().map_or(0, Vec::len)).ok_or_else(|| ApiError::not_found("That walkthrough"))
 }
 
-pub async fn reads(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<i32>>> {
-    find_owned(&state, id, user.id).await?;
-
-    let steps = sqlx::query_scalar::<_, i32>("select step from walkthrough_reads where walkthrough_id = $1 and user_id = $2 order by step").bind(id).bind(user.id).fetch_all(&state.pool).await?;
-
-    Ok(Json(steps))
-}
-
-pub async fn mark_read(State(state): State<AppState>, user: AuthUser, Path((id, step)): Path<(Uuid, i32)>) -> ApiResult<StatusCode> {
-    let count = find_owned(&state, id, user.id).await?;
+async fn set_reviewed(state: &AppState, user: &AuthUser, id: Uuid, step: i32, reviewed: bool) -> ApiResult<Json<Walkthrough>> {
+    let count = find_owned(state, id, user.id).await?;
 
     if step < 0 || step as usize >= count {
         return Err(ApiError::bad_request("no_such_step", format!("This walkthrough has {count} steps. Choose a step from 0 to {}.", count.saturating_sub(1))));
     }
 
-    sqlx::query("insert into walkthrough_reads (walkthrough_id, user_id, step) values ($1, $2, $3) on conflict do nothing").bind(id).bind(user.id).bind(step).execute(&state.pool).await?;
+    let row = sqlx::query_as::<_, WalkthroughRow>(
+        "update walkthroughs set reviewed = case when $3 then array(select distinct unnest(array_append(reviewed, $2)) order by 1) else array_remove(reviewed, $2) end
+         where id = $1 returning id, conversation_id, steps, created_at, dismissed_at, scope, note, checks, reviewed",
+    )
+    .bind(id)
+    .bind(step)
+    .bind(reviewed)
+    .fetch_one(&state.pool)
+    .await?;
+    let walkthrough = row.to_proto()?;
+    state.publish(Some(user.id), StreamMessage::Walkthrough(walkthrough.clone()));
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Json(walkthrough))
+}
+
+pub async fn review(State(state): State<AppState>, user: AuthUser, Path((id, step)): Path<(Uuid, i32)>) -> ApiResult<Json<Walkthrough>> {
+    set_reviewed(&state, &user, id, step, true).await
+}
+
+pub async fn unreview(State(state): State<AppState>, user: AuthUser, Path((id, step)): Path<(Uuid, i32)>) -> ApiResult<Json<Walkthrough>> {
+    set_reviewed(&state, &user, id, step, false).await
 }
 
 pub async fn answers(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<WalkthroughAnswer>>> {
@@ -298,7 +309,7 @@ pub async fn answer(State(state): State<AppState>, user: AuthUser, Path((id, ste
 
 async fn set_dismissed(state: &AppState, user: &AuthUser, id: Uuid, dismissed: bool) -> ApiResult<StatusCode> {
     let row = sqlx::query_as::<_, WalkthroughRow>(
-        "update walkthroughs w set dismissed_at = case when $3 then now() else null end from conversations c where c.id = w.conversation_id and w.id = $1 and c.owner = $2 returning w.id, w.conversation_id, w.steps, w.created_at, w.dismissed_at, w.scope, w.note, w.checks",
+        "update walkthroughs w set dismissed_at = case when $3 then now() else null end from conversations c where c.id = w.conversation_id and w.id = $1 and c.owner = $2 returning w.id, w.conversation_id, w.steps, w.created_at, w.dismissed_at, w.scope, w.note, w.checks, w.reviewed",
     )
     .bind(id)
     .bind(user.id)

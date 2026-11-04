@@ -1147,6 +1147,13 @@ class Store(
         act { if (dismissed) api.dismissWalkthrough(walkthrough.id) else api.reopenWalkthrough(walkthrough.id) }
     }
 
+    fun setWalkthroughStepReviewed(conversationId: String, step: Int, reviewed: Boolean) {
+        val walkthrough = state.value.walkthroughs[conversationId] ?: return
+        val steps = if (reviewed) (walkthrough.reviewed + step).distinct().sorted() else walkthrough.reviewed - step
+        mutableState.update { it.copy(walkthroughs = it.walkthroughs + (conversationId to walkthrough.copy(reviewed = steps))) }
+        act { api.reviewWalkthroughStep(walkthrough.id, step, reviewed) }
+    }
+
     private val avatarCache = mutableMapOf<Pair<String, String>, ByteArray>()
 
     suspend fun forgeAvatarBytes(forgeId: String, url: String): ByteArray? {

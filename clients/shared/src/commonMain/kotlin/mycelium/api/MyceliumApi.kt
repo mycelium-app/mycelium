@@ -1013,16 +1013,13 @@ class MyceliumApi(
 
     suspend fun walkthroughUncovered(id: String): List<WalkthroughFile> = call("/walkthroughs/$id/uncovered") { client.get(it) { authorise() } }.body()
 
-    suspend fun walkthroughReads(id: String): List<Int> = call("/walkthroughs/$id/reads") { client.get(it) { authorise() } }.body()
-
     suspend fun walkthroughAnswers(id: String): List<WalkthroughAnswer> = call("/walkthroughs/$id/answers") { client.get(it) { authorise() } }.body()
 
     suspend fun answerWalkthroughCheck(id: String, step: Int, request: WalkthroughAnswerRequest): WalkthroughAnswer =
         call("/walkthroughs/$id/answers/$step") { client.put(it) { authorise(); json(request) } }.body()
 
-    suspend fun markWalkthroughRead(id: String, step: Int) {
-        call("/walkthroughs/$id/reads/$step") { client.put(it) { authorise() } }
-    }
+    suspend fun reviewWalkthroughStep(id: String, step: Int, reviewed: Boolean): Walkthrough =
+        call("/walkthroughs/$id/reviewed/$step") { if (reviewed) client.put(it) { authorise() } else client.delete(it) { authorise() } }.body()
 
     suspend fun addWalkthroughNote(id: String, request: WalkthroughNoteRequest): WalkthroughNote = call("/walkthroughs/$id/notes") { client.post(it) { authorise(); json(request) } }.body()
 

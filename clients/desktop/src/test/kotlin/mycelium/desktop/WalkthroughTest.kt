@@ -4,6 +4,12 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.MouseButton
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.isToggleable
+import androidx.compose.ui.test.isHeading
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
@@ -56,7 +62,6 @@ class WalkthroughTest {
     val scopes = TestScopes()
 
     private val requests = CopyOnWriteArrayList<Pair<String, String>>()
-    private var reads = "[]"
     private var uncovered = "[]"
     private var notes = "[]"
 
@@ -67,7 +72,7 @@ class WalkthroughTest {
             requests += "${request.method.value} $path" to String(request.body.toByteArray())
             val reply = when {
                 path.endsWith("/experiments") -> EnabledExperiments
-                path.endsWith("/reads") -> reads
+                path.contains("/reviewed/") -> walkthrough
                 path.endsWith("/uncovered") -> uncovered
                 path.endsWith("/notes") && request.method == HttpMethod.Get -> notes
                 path.endsWith("/notes") -> String(request.body.toByteArray()).replaceFirst("{", "{\"id\":\"n1\",\"sent\":false,")
@@ -89,6 +94,11 @@ class WalkthroughTest {
         runBlocking { store.refresh() }
 
         rule.setContent { MyceliumTheme(true) { Shell(store, HandsOffPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Chat("c1")) } }
+    }
+
+    private fun assertOnStep(number: Int) {
+        val title = listOf("Add the shared strings file", "Restore reads its copy from strings", "Tests", "Loose end")[number - 1]
+        rule.onNode(hasContentDescription("Step $number: $title", substring = true) and hasClickAction()).assertIsSelected()
     }
 
     private fun openWalkthrough() {
@@ -130,7 +140,7 @@ class WalkthroughTest {
 
         rule.onNodeWithText("A new file holds every screen's copy.").assertIsDisplayed()
         rule.onNodeWithText("export const strings = {}").assertIsDisplayed()
-        rule.onNodeWithText("Step 1 of 4").assertIsDisplayed()
+        assertOnStep(1)
     }
 
     @Test
@@ -140,12 +150,12 @@ class WalkthroughTest {
 
         rule.onNodeWithContentDescription("Next step").performClick()
 
-        rule.onNodeWithText("Step 2 of 4").assertIsDisplayed()
+        assertOnStep(2)
         rule.onNodeWithText("const title = strings.title").assertIsDisplayed()
         rule.onNodeWithText("const title = \"Restore\"").assertIsDisplayed()
 
         rule.onNodeWithContentDescription("Previous step").performClick()
-        rule.onNodeWithText("Step 1 of 4").assertIsDisplayed()
+        assertOnStep(1)
     }
 
     @Test
@@ -155,41 +165,57 @@ class WalkthroughTest {
 
         rule.onNodeWithContentDescription("Step 4: Loose end", substring = true).performClick()
 
-        rule.onNodeWithText("Step 4 of 4").assertIsDisplayed()
+        assertOnStep(4)
         rule.onNodeWithContentDescription("Next step").performClick()
-        rule.onNodeWithText("Step 4 of 4").assertIsDisplayed()
+        assertOnStep(4)
     }
 
     @Test
-    fun aStepSelectedForAMomentShowsAsViewedAndIsSavedAsRead() {
+    fun theReviewedToggleInAStepRowSavesTheStepAndCountsItOnce() {
         show(Walkthrough)
         openWalkthrough()
-        assertEquals(0, rule.onAllNodesWithContentDescription("viewed", substring = true).fetchSemanticsNodes().size)
+        rule.onNodeWithText("0 of 4 reviewed").assertIsDisplayed()
 
-        rule.mainClock.advanceTimeBy(2_000)
+        rule.onNode(isToggleable() and hasContentDescription("Reviewed: Tests")).assertIsOff().performClick()
 
-        rule.onNodeWithContentDescription("Step 1: Add the shared strings file, viewed").assertIsDisplayed()
-        rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/walkthroughs/w1/reads/0" } }
+        rule.onNode(isToggleable() and hasContentDescription("Reviewed: Tests")).assertIsOn()
+        rule.onNodeWithText("1 of 4 reviewed").assertIsDisplayed()
+        assertOnStep(1)
+        rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/walkthroughs/w1/reviewed/2" } }
     }
 
     @Test
-    fun nextMarksTheStepItLeavesAsReadWithoutWaiting() {
-        show(Walkthrough)
+    fun aSectionWhoseStepsAreAllReviewedShowsAsReviewed() {
+        show(Walkthrough.replace("\"created_at\":", "\"reviewed\":[0],\"created_at\":"))
         openWalkthrough()
+        assertEquals(0, rule.onAllNodesWithContentDescription("Strings, reviewed").fetchSemanticsNodes().size)
 
-        rule.onNodeWithContentDescription("Next step").performClick()
+        rule.onNode(isToggleable() and hasContentDescription("Reviewed: Restore reads its copy from strings")).performClick()
 
-        rule.onNodeWithContentDescription("Step 1: Add the shared strings file, viewed").assertIsDisplayed()
-        rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/walkthroughs/w1/reads/0" } }
+        rule.onNode(isHeading() and hasContentDescription("Strings, reviewed")).assertExists()
     }
 
     @Test
-    fun stepsReadBeforeAreCheckedWhenTheTabOpens() {
-        reads = "[2]"
-        show(Walkthrough)
+    fun approvingAStepSavesItAndOpensTheNextUnreviewedStep() {
+        show(Walkthrough.replace("\"created_at\":", "\"reviewed\":[1],\"created_at\":"))
         openWalkthrough()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Step 3: Tests, viewed").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasText("Approve") and hasClickAction()).performClick()
+
+        assertOnStep(3)
+        rule.onNode(isToggleable() and hasContentDescription("Reviewed: Add the shared strings file")).assertIsOn()
+        rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/walkthroughs/w1/reviewed/0" } }
+    }
+
+    @Test
+    fun anApprovedStepCanBeClearedFromItsDetail() {
+        show(Walkthrough.replace("\"created_at\":", "\"reviewed\":[0],\"created_at\":"))
+        openWalkthrough()
+
+        rule.onNode(hasText("Approved") and hasClickAction()).performClick()
+
+        rule.onNode(isToggleable() and hasContentDescription("Reviewed: Add the shared strings file")).assertIsOff()
+        rule.waitUntil(5_000) { requests.any { it.first == "DELETE /api/v1/walkthroughs/w1/reviewed/0" } }
     }
 
     @Test
@@ -198,16 +224,16 @@ class WalkthroughTest {
         openWalkthrough()
         rule.onNodeWithContentDescription("Step 1: Add the shared strings file", substring = true).performClick()
         rule.onNodeWithContentDescription("Step 1: Add the shared strings file", substring = true).performKeyInput { pressKey(Key.DirectionDown) }
-        rule.onNodeWithText("Step 2 of 4").assertIsDisplayed()
+        assertOnStep(2)
 
         rule.onNodeWithContentDescription("Step 2: Restore reads its copy from strings", substring = true).performKeyInput { pressKey(Key.J) }
-        rule.onNodeWithText("Step 3 of 4").assertIsDisplayed()
+        assertOnStep(3)
 
         rule.onNodeWithContentDescription("Step 3: Tests", substring = true).performKeyInput { pressKey(Key.K) }
-        rule.onNodeWithText("Step 2 of 4").assertIsDisplayed()
+        assertOnStep(2)
 
         rule.onNodeWithContentDescription("Step 2: Restore reads its copy from strings", substring = true).performKeyInput { pressKey(Key.DirectionUp) }
-        rule.onNodeWithText("Step 1 of 4").assertIsDisplayed()
+        assertOnStep(1)
     }
 
     @Test
@@ -248,7 +274,7 @@ class WalkthroughTest {
         rule.onNodeWithText("Conversation").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
-        assertEquals(0, rule.onAllNodesWithText("Step 1 of 4").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("0 of 4 reviewed").fetchSemanticsNodes().size)
     }
 
     @Test
@@ -285,7 +311,7 @@ class WalkthroughTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithText("const title = 2", substring = true, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Dismiss walkthrough").assertIsDisplayed()
         rule.onNodeWithText("Walkthrough").performClick()
-        rule.onNodeWithText("Step 1 of 4").assertIsDisplayed()
+        assertOnStep(1)
     }
 
     @Test
@@ -319,16 +345,17 @@ class WalkthroughTest {
     }
 
     @Test
-    fun changesNoStepCoversAreListedInAFinalNotCoveredYetStepThatCountsInTheTotal() {
+    fun changesNoStepCoversAreListedInAFinalNotCoveredYetStepThatIsNotReviewed() {
         uncovered = """[{"path":"src/new.ts","diff":"@@ -0,0 +1 @@\n+added later","unchanged":false}]"""
         show(Walkthrough)
         openWalkthrough()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Step 1 of 5").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Step 5: Not covered yet").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Step 5: Not covered yet").performClick()
 
         rule.onNodeWithText("src/new.ts").assertIsDisplayed()
-        rule.onNodeWithText("Step 5 of 5").assertIsDisplayed()
+        rule.onNodeWithText("0 of 4 reviewed").assertIsDisplayed()
+        assertEquals(0, rule.onAllNodesWithContentDescription("Reviewed: Not covered yet").fetchSemanticsNodes().size)
     }
 
     @Test
@@ -336,7 +363,7 @@ class WalkthroughTest {
         show(Walkthrough)
         openWalkthrough()
 
-        rule.onNodeWithText("Step 1 of 4").assertIsDisplayed()
+        assertOnStep(1)
         assertEquals(0, rule.onAllNodesWithContentDescription("Not covered yet", substring = true).fetchSemanticsNodes().size)
     }
 

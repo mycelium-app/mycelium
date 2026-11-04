@@ -213,22 +213,7 @@ private fun ColumnScope.ClosedEnvironment(
                         for (option in eligible) {
                             val chosen = option.id == node?.id
 
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = rowHeight())
-                                    .pressable({ onChooseNode(option.id) }, role = Role.RadioButton, shape = ControlShape, selected = chosen, stateDescription = if (chosen) "Selected" else null)
-                                    .semantics { this.selected = chosen }
-                                    .padding(horizontal = Tokens.Space.S1),
-                                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Box(Modifier.size(Tokens.Size.IconMd).border(Tokens.Size.Hairline, colors.text, CircleShape).padding(Tokens.Space.S0_5).clearAndSetSemantics {}) {
-                                    if (chosen) {
-                                        Box(Modifier.fillMaxSize().background(colors.text, CircleShape))
-                                    }
-                                }
-
+                            RadioRow(chosen, { onChooseNode(option.id) }) {
                                 Icon(nodeIcon(option), colors.textMuted, Tokens.Size.IconMd, Modifier.clearAndSetSemantics {})
                                 Label(option.name)
 

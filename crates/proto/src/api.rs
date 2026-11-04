@@ -2147,6 +2147,8 @@ pub struct Walkthrough {
     pub note: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub checks: Vec<WalkthroughCheck>,
+    #[serde(default)]
+    pub reviewed: Vec<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

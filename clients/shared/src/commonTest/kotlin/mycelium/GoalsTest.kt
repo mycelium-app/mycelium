@@ -32,7 +32,8 @@ import mycelium.state.parseTimeLimit
 import mycelium.state.parseTokenBudget
 import mycelium.state.parseWindowLimit
 import mycelium.state.reduce
-import mycelium.state.stepPosition
+import mycelium.state.nextUnreviewed
+import mycelium.state.reviewProgress
 import mycelium.state.walkthroughDiff
 import kotlin.test.Test
 import kotlin.test.assertContains
@@ -316,8 +317,15 @@ class GoalsTest {
     }
 
     @Test
-    fun theStepPositionIsCountedFromOne() {
-        assertEquals("Step 2 of 4", stepPosition(1, 4))
+    fun progressCountsTheReviewedSteps() {
+        assertEquals("1 of 4 reviewed", reviewProgress(1, 4))
+    }
+
+    @Test
+    fun theNextUnreviewedStepWrapsPastTheEnd() {
+        assertEquals(3, nextUnreviewed(1, setOf(0, 1, 2), 4))
+        assertEquals(0, nextUnreviewed(2, setOf(1, 2, 3), 4))
+        assertEquals(null, nextUnreviewed(3, setOf(0, 1, 2, 3), 4))
     }
 
     @Test

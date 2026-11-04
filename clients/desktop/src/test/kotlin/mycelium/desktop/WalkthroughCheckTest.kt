@@ -1,6 +1,15 @@
 package mycelium.desktop
 
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -64,7 +73,7 @@ class WalkthroughCheckTest {
                     }
                 }
                 path.endsWith("/answers") -> "[]"
-                path.endsWith("/reads") || path.endsWith("/uncovered") || path.endsWith("/notes") -> "[]"
+                path.endsWith("/uncovered") || path.endsWith("/notes") -> "[]"
                 path.endsWith("/walkthrough") -> walkthrough
                 path.endsWith("/goal") -> "null"
                 path.endsWith("/nodes") -> "[]"
@@ -84,9 +93,17 @@ class WalkthroughCheckTest {
         rule.onNodeWithText("Walkthrough").performClick()
     }
 
+    private val question = "Where does the title come from?"
+
+    private fun group(): SemanticsMatcher = SemanticsMatcher.keyIsDefined(SemanticsProperties.SelectableGroup) and hasContentDescription(question)
+
+    private fun radio(label: String): SemanticsMatcher = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton) and hasText(label) and hasAnyAncestor(group())
+
+    private fun checkButton(): SemanticsMatcher = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button) and hasContentDescription("Check your answer to step 2")
+
     private fun openCheck() {
         rule.onNodeWithContentDescription("Step 3: Check your understanding", substring = true).performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Step 2: Where does the title come from?").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodes(group()).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -98,25 +115,37 @@ class WalkthroughCheckTest {
     }
 
     @Test
-    fun theRightChoiceReadsCorrectWithItsExplanation() {
+    fun eachQuestionIsARadioGroupWhoseWholeRowSelectsTheAnswer() {
         show(WithChecks)
         openCheck()
 
-        rule.onNodeWithText("The strings file").performClick()
-        rule.onNodeWithContentDescription("Check your answer to step 2").performClick()
+        rule.onNode(radio("The strings file")).assertIsNotSelected().performClick()
+
+        rule.onNode(radio("The strings file")).assertIsSelected()
+        rule.onNode(radio("A literal")).assertIsNotSelected()
+    }
+
+    @Test
+    fun theRightChoiceReadsCorrectWithItsExplanationInALiveRegion() {
+        show(WithChecks)
+        openCheck()
+
+        rule.onNode(radio("The strings file")).performClick()
+        rule.onNode(checkButton()).performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Correct").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasText("Correct") and hasAnyAncestor(SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion))).assertIsDisplayed()
         rule.onNodeWithText("Step 2 reads it from strings.").assertIsDisplayed()
         assertEquals(listOf("""{"choice":1}"""), answers.toList())
     }
 
     @Test
-    fun aWrongChoiceReadsNotQuiteAndBackToStepReturnsToTheStep() {
+    fun aWrongChoiceReadsNotQuiteAndTheBackLinkReturnsToTheStep() {
         show(WithChecks)
         openCheck()
 
-        rule.onNodeWithText("A literal").performClick()
-        rule.onNodeWithContentDescription("Check your answer to step 2").performClick()
+        rule.onNode(radio("A literal")).performClick()
+        rule.onNode(checkButton()).performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Not quite").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Back to step 2").performClick()
 
@@ -128,7 +157,7 @@ class WalkthroughCheckTest {
         show(WithChecks)
         openCheck()
 
-        rule.onNodeWithContentDescription("Check your answer to step 2").performClick()
+        rule.onNode(checkButton()).performClick()
 
         rule.onNodeWithText("Choose an answer to check it.").assertIsDisplayed()
         assertEquals(emptyList(), answers.toList())
@@ -139,10 +168,10 @@ class WalkthroughCheckTest {
         show(WithChecks)
         openCheck()
 
-        rule.onNodeWithContentDescription("Skip the questions").performClick()
+        rule.onNode(hasText("Skip the questions") and hasClickAction()).performClick()
 
         assertEquals(emptyList(), answers.toList())
         rule.onNodeWithText("Answer the questions").performClick()
-        rule.onNodeWithText("Step 2: Where does the title come from?").assertIsDisplayed()
+        rule.onNode(group()).assertExists()
     }
 }

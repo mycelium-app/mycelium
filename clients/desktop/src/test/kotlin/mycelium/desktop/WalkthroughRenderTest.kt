@@ -17,10 +17,13 @@ import mycelium.api.MyceliumJson
 import mycelium.api.Walkthrough
 import mycelium.state.Store
 import mycelium.state.changesTab
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import mycelium.api.Me
 import mycelium.ui.Route
 import mycelium.ui.Shell
 import mycelium.ui.MyTheme
+import mycelium.ui.WalkthroughCheckStep
 import mycelium.ui.WalkthroughView
 import org.junit.Rule
 import org.junit.Test
@@ -50,7 +53,6 @@ class WalkthroughRenderTest {
             val body = when {
                 path.endsWith("/notes") -> RenderNotes
                 path.endsWith("/uncovered") -> RenderUncovered
-                path.endsWith("/reads") -> "[]"
                 else -> "{}"
             }
 
@@ -69,6 +71,24 @@ class WalkthroughRenderTest {
     @Test
     fun walkthroughWithDiffAnnotationNoteAndNotCoveredSection() {
         render("walkthrough-notes")
+    }
+
+    @Test
+    fun theCheckStepShowsEachQuestionAsACardWithRadiosAndFeedback() {
+        val engine = MockEngine { request ->
+            val body = if (request.url.encodedPath.endsWith("/answers")) """[{"step":2,"choice":0,"correct":false,"explanation":"Step 2 reads it from strings, so the restore screen no longer holds a literal of its own."}]""" else "[]"
+
+            respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
+        val source = RenderWalkthrough.replace("\"created_at\":", "\"checks\":[{\"step\":2,\"question\":\"Where does the title come from?\",\"choices\":[\"A literal\",\"The strings file\",\"The server\"]},{\"step\":3,\"question\":\"What do the new tests cover?\",\"choices\":[\"Only the happy path\",\"The happy path and a 503 retry\",\"Nothing yet\"]}],\"created_at\":")
+        val walkthrough = MyceliumJson.decodeFromString(Walkthrough.serializer(), source)
+
+        val file = renderAt("walkthrough-check", true, false, interact = { it.render(100_000_000L) }) {
+            Box(Modifier.fillMaxSize().background(MyTheme.colors.bgContent).padding(horizontal = 24.dp, vertical = 16.dp)) { WalkthroughCheckStep(store, walkthrough, onBackToStep = {}) }
+        }
+
+        assertTrue(file.length() > 1_000)
     }
 
     @Test
@@ -91,7 +111,6 @@ class WalkthroughRenderTest {
             val body = when {
                 path.endsWith("/notes") -> RenderNotes
                 path.endsWith("/uncovered") -> "[]"
-                path.endsWith("/reads") -> "[]"
                 path.endsWith("/experiments") -> EnabledExperiments
                 path.endsWith("/walkthrough") -> RenderWalkthrough
                 path.endsWith("/git/changes-layout") -> """{"files":[{"path":"src/restore/Screen.tsx","staged":false,"unstaged":true,"untracked":false,"added":3,"removed":2,"rows":6,"hunks":[0],"fingerprint":"f1"}]}"""

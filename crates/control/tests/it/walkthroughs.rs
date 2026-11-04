@@ -202,23 +202,39 @@ async fn stored_id(server: &Server, conversation: Uuid) -> Uuid {
 }
 
 #[tokio::test]
-async fn read_steps_are_remembered_for_the_person_and_marking_twice_changes_nothing() {
+async fn a_reviewed_step_is_kept_on_the_walkthrough_and_can_be_cleared() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let conversation = server.create_conversation(link.id, None).await;
     call(&server, &mut link, Some(conversation.id), steps()).await;
     let id = stored_id(&server, conversation.id).await;
-
-    let (empty_status, empty) = server.user.json(server.user.get(&format!("/api/v1/walkthroughs/{id}/reads"))).await;
-    assert_eq!((empty_status, empty), (200, json!([])));
+    assert_eq!(latest(&server, conversation.id).await["reviewed"], json!([]));
 
     for step in [1, 1, 0] {
-        let (status, _) = server.user.json(server.user.put(&format!("/api/v1/walkthroughs/{id}/reads/{step}"))).await;
-        assert_eq!(status, 204);
+        let (status, _) = server.user.json(server.user.put(&format!("/api/v1/walkthroughs/{id}/reviewed/{step}"))).await;
+        assert_eq!(status, 200);
     }
 
-    let (_, reads) = server.user.json(server.user.get(&format!("/api/v1/walkthroughs/{id}/reads"))).await;
-    assert_eq!(reads, json!([0, 1]));
+    let (status, cleared) = server.user.json(server.user.delete(&format!("/api/v1/walkthroughs/{id}/reviewed/1"))).await;
+
+    assert_eq!((status, cleared["reviewed"].clone()), (200, json!([0])));
+    assert_eq!(latest(&server, conversation.id).await["reviewed"], json!([0]));
+}
+
+#[tokio::test]
+async fn calling_walkthrough_again_starts_every_step_unreviewed() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    call(&server, &mut link, Some(conversation.id), steps()).await;
+    let first = stored_id(&server, conversation.id).await;
+    server.user.json(server.user.put(&format!("/api/v1/walkthroughs/{first}/reviewed/0"))).await;
+
+    call(&server, &mut link, Some(conversation.id), steps()).await;
+
+    let replaced = latest(&server, conversation.id).await;
+    assert_ne!(replaced["id"], json!(first));
+    assert_eq!(replaced["reviewed"], json!([]));
 }
 
 #[tokio::test]
@@ -229,14 +245,14 @@ async fn a_step_the_walkthrough_does_not_have_is_refused_with_the_range_to_choos
     call(&server, &mut link, Some(conversation.id), steps()).await;
     let id = stored_id(&server, conversation.id).await;
 
-    let (status, body) = server.user.json(server.user.put(&format!("/api/v1/walkthroughs/{id}/reads/2"))).await;
+    let (status, body) = server.user.json(server.user.put(&format!("/api/v1/walkthroughs/{id}/reviewed/2"))).await;
 
     assert_eq!(status, 400);
     assert!(body["message"].as_str().unwrap().contains("Choose a step from 0 to 1"), "{body}");
 }
 
 #[tokio::test]
-async fn only_the_owner_can_read_or_mark_a_walkthroughs_steps() {
+async fn only_the_owner_can_review_a_walkthroughs_steps() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let conversation = server.create_conversation(link.id, None).await;
@@ -244,10 +260,10 @@ async fn only_the_owner_can_read_or_mark_a_walkthroughs_steps() {
     let id = stored_id(&server, conversation.id).await;
     let other = server.second_user("other@example.com").await;
 
-    let (read_status, _) = other.json(other.get(&format!("/api/v1/walkthroughs/{id}/reads"))).await;
-    let (mark_status, _) = other.json(other.put(&format!("/api/v1/walkthroughs/{id}/reads/0"))).await;
+    let (review_status, _) = other.json(other.put(&format!("/api/v1/walkthroughs/{id}/reviewed/0"))).await;
+    let (clear_status, _) = other.json(other.delete(&format!("/api/v1/walkthroughs/{id}/reviewed/0"))).await;
 
-    assert_eq!((read_status, mark_status), (404, 404));
+    assert_eq!((review_status, clear_status), (404, 404));
 }
 
 #[tokio::test]

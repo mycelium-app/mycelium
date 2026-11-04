@@ -313,7 +313,6 @@ class BoardsRenderTest {
 {"title":"Add the shared strings file","section":"Strings","icon":"data"},
 {"title":"Restore reads its copy from strings","key":true,"section":"Strings","icon":"data","explanation":"The restore screen no longer holds its own copy, so a change to the wording reaches every screen at once.","files":[{"path":"src/restore/Screen.tsx","diff":"${jsonText(diff)}"}]},
 {"title":"Update the retry screen","section":"Retry logic","icon":"logic"},{"title":"Cover the restore flow","section":"Tests","icon":"tests"}]}""",
-            "/reads" to "[0]",
         )
         assertTrue(renderAt("board-walkthrough", true, false, interact = { click(it, 437f, 56f); click(it, 330f, 190f) }, content = shell(Route.Chat(BackupsId), walkthrough)).length() > 1_000)
     }

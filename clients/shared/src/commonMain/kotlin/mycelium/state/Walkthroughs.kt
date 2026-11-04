@@ -15,7 +15,10 @@ fun walkthroughDiff(file: WalkthroughFile): FileDiff {
     return parsed.copy(lines = parsed.lines.drop(1).map { it.copy(oldNumber = null, newNumber = null) })
 }
 
-fun stepPosition(index: Int, total: Int): String = "Step ${index + 1} of $total"
+fun reviewProgress(reviewed: Int, total: Int): String = "$reviewed of $total reviewed"
+
+fun nextUnreviewed(after: Int, reviewed: Set<Int>, total: Int): Int? =
+    ((after + 1 until total) + (0 until after)).firstOrNull { it !in reviewed }
 
 enum class WalkthroughScope(val label: String, val subject: String, val key: String) {
     Branch("This branch", "this branch against its base branch", "branch"),

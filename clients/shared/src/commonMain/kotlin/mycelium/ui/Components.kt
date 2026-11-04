@@ -2,6 +2,7 @@ package mycelium.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -939,6 +940,32 @@ fun RenameDialog(title: String, label: String, value: String, onValueChange: (St
             MyButton(onDismiss, text = "Cancel", muted = true)
             MyButton(onSave, text = "Save", variant = ButtonVariant.Outline)
         }
+    }
+}
+
+@Composable
+fun RadioRow(chosen: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, bordered: Boolean = false, content: @Composable RowScope.() -> Unit) {
+    val colors = MyTheme.colors
+    val outline = if (bordered) Modifier.border(Tokens.Size.Hairline, if (chosen) colors.text else colors.borderControl, ControlShape) else Modifier
+
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = rowHeight())
+            .then(outline)
+            .pressable(onClick, role = Role.RadioButton, shape = ControlShape, selected = chosen, stateDescription = if (chosen) "Selected" else null)
+            .semantics { this.selected = chosen }
+            .padding(horizontal = if (bordered) Tokens.Space.S2 else Tokens.Space.S1, vertical = if (bordered) Tokens.Space.S1_5 else 0.dp),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(Tokens.Size.IconMd).border(Tokens.Size.Hairline, colors.text, CircleShape).padding(Tokens.Space.S0_5).clearAndSetSemantics {}) {
+            if (chosen) {
+                Box(Modifier.fillMaxSize().background(colors.text, CircleShape))
+            }
+        }
+
+        content()
     }
 }
 

@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -34,8 +35,11 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.delay
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.unit.dp
 import mycelium.api.Walkthrough
 import mycelium.api.WalkthroughFile
 import mycelium.api.WalkthroughNote
@@ -46,14 +50,15 @@ import mycelium.state.FileDiff
 import mycelium.state.Store
 import mycelium.state.ToolStatus
 import mycelium.state.WalkthroughScope
-import mycelium.state.stepPosition
+import mycelium.state.nextUnreviewed
+import mycelium.state.reviewProgress
 import mycelium.state.walkthroughDiff
 import mycelium.state.walkthroughLines
 import mycelium.state.walkthroughNoteLabel
 import mycelium.state.walkthroughSections
 
-private const val ReadAfterMillis = 1_500L
 private const val NotCoveredTitle = "Not covered yet"
+private val StackedBelow = 640.dp
 
 private fun sectionIcon(name: String?): MyIcon = when (name) {
     "logic" -> MyIcon.Code
@@ -68,7 +73,6 @@ private fun sectionIcon(name: String?): MyIcon = when (name) {
 @Composable
 fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrough, modifier: Modifier = Modifier) {
     var selected by remember(walkthrough.id) { mutableStateOf(0) }
-    var reads by remember(walkthrough.id) { mutableStateOf(emptySet<Int>()) }
     val scopes by store.walkthroughScopes.collectAsState()
     val allNotes by store.walkthroughNotes.collectAsState()
     val notes = allNotes[conversationId].orEmpty()
@@ -78,21 +82,8 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
         listOfNotNull(WalkthroughStep(CheckStepTitle, section = "Check").takeIf { walkthrough.checks.isNotEmpty() })
     val last = steps.lastIndex
     val index = selected.coerceIn(0, maxOf(last, 0))
-
-    fun markRead(step: Int) {
-        if (step in reads || step >= walkthrough.steps.size) {
-            return
-        }
-
-        reads = reads + step
-        store.act { store.api.markWalkthroughRead(walkthrough.id, step) }
-    }
-
-    LaunchedEffect(walkthrough.id) {
-        var stored = emptyList<Int>()
-        attempt { stored = store.api.walkthroughReads(walkthrough.id) }
-        reads = reads + stored
-    }
+    val reviewable = walkthrough.steps.size
+    val reviewed = walkthrough.reviewed.toSet()
 
     LaunchedEffect(walkthrough.id) {
         store.loadWalkthroughNotes(conversationId, walkthrough.id)
@@ -103,28 +94,37 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
         attempt { uncovered = store.api.walkthroughUncovered(walkthrough.id) }
     }
 
-    LaunchedEffect(walkthrough.id, index) {
-        delay(ReadAfterMillis)
-        markRead(index)
-    }
-
     fun move(to: Int) {
         selected = to.coerceIn(0, maxOf(last, 0))
     }
 
     fun next() {
-        markRead(index)
         move(index + 1)
+    }
+
+    fun toggleReviewed(step: Int) {
+        store.setWalkthroughStepReviewed(conversationId, step, step !in reviewed)
+    }
+
+    fun approve(step: Int) {
+        if (step in reviewed) {
+            toggleReviewed(step)
+            return
+        }
+
+        toggleReviewed(step)
+        nextUnreviewed(step, reviewed + step, reviewable)?.let(::move)
     }
 
     val stepList: @Composable () -> Unit = {
         for (section in walkthroughSections(steps)) {
             if (section.name != null) {
-                SectionHeader(section.name, sectionIcon(section.icon))
+                SectionHeader(section.name, sectionIcon(section.icon), section.steps.all { it.index < reviewable && it.index in reviewed })
             }
 
             for ((position, step) in section.steps) {
-                StepRow(position, step, position == index, position in reads) { selected = position }
+                val toggle = if (position < reviewable) { { toggleReviewed(position) } } else null
+                StepRow(position, step, position == index, position in reviewed, onClick = { selected = position }, onToggleReviewed = toggle)
             }
         }
     }
@@ -139,6 +139,8 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
                 walkthrough = walkthrough,
                 notes = notes.filter { it.step == index },
                 annotatable = index < walkthrough.steps.size,
+                approved = index in reviewed,
+                onApprove = { approve(index) }.takeIf { index < reviewable },
                 onAnnotate = { file, diff, annotation ->
                     val lines = walkthroughLines(diff, annotation.quote)
                     store.addWalkthroughNote(conversationId, walkthrough.id, WalkthroughNoteRequest(index, file.path, lines?.first, lines?.second, annotation.quote, annotation.comment))
@@ -151,7 +153,7 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
     val header: @Composable () -> Unit = {
         WalkthroughHeader(
             scope = scopes[conversationId] ?: WalkthroughScope.Branch,
-            position = stepPosition(index, steps.size),
+            position = reviewProgress(reviewed.count { it < reviewable }, reviewable),
             onPrevious = index.takeIf { it > 0 }?.let { { move(index - 1) } },
             onNext = index.takeIf { it < last }?.let { { next() } },
             onScope = { store.chooseWalkthroughScope(conversationId, it) },
@@ -176,30 +178,30 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
         true
     }
 
-    if (LocalTouch.current) {
-        Column(modifier.fillMaxSize().verticalScrollWithBar().padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-            header()
-            Column(stepKeys.semantics { contentDescription = "Walkthrough steps" }) { stepList() }
-            Hairline()
-            detail()
-        }
-
-        return
-    }
-
-    Column(modifier.fillMaxSize()) {
-        Box(Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1_5)) { header() }
-        Hairline()
-
-        Row(Modifier.weight(1f).fillMaxWidth()) {
-            Column(stepKeys.width(Tokens.Size.Sidebar).fillMaxHeight().verticalScrollWithBar().padding(Tokens.Space.S2).semantics { contentDescription = "Walkthrough steps" }) {
-                stepList()
-            }
-
-            VerticalHairline()
-
-            Column(Modifier.weight(1f).fillMaxHeight().verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        if (LocalTouch.current || maxWidth < StackedBelow) {
+            Column(Modifier.fillMaxSize().verticalScrollWithBar().padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+                header()
+                Column(stepKeys.semantics { contentDescription = "Walkthrough steps" }) { stepList() }
+                Hairline()
                 detail()
+            }
+        } else {
+            Column(Modifier.fillMaxSize()) {
+                Box(Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1_5)) { header() }
+                Hairline()
+
+                Row(Modifier.weight(1f).fillMaxWidth()) {
+                    Column(stepKeys.width(Tokens.Size.Sidebar).fillMaxHeight().verticalScrollWithBar().padding(Tokens.Space.S2).semantics { contentDescription = "Walkthrough steps" }) {
+                        stepList()
+                    }
+
+                    VerticalHairline()
+
+                    Column(Modifier.weight(1f).fillMaxHeight().verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+                        detail()
+                    }
+                }
             }
         }
     }
@@ -260,43 +262,64 @@ private fun WalkthroughHeader(scope: WalkthroughScope, position: String, onPrevi
 }
 
 @Composable
-private fun SectionHeader(name: String, icon: MyIcon) {
+private fun SectionHeader(name: String, icon: MyIcon, reviewed: Boolean) {
     val colors = MyTheme.colors
 
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1_5).semantics(mergeDescendants = true) { heading() },
+        Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1_5).semantics(mergeDescendants = true) {
+            heading()
+
+            if (reviewed) {
+                contentDescription = "$name, reviewed"
+            }
+        },
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, colors.textMuted, Tokens.Size.IconSm)
+        Icon(if (reviewed) MyIcon.CircleCheck else icon, colors.textMuted, Tokens.Size.IconSm)
         Label(name.uppercase(), style = Tokens.Type.Meta, color = colors.textMuted)
     }
 }
 
 @Composable
-private fun StepRow(position: Int, step: WalkthroughStep, on: Boolean, read: Boolean, onClick: () -> Unit) {
+private fun StepRow(position: Int, step: WalkthroughStep, on: Boolean, reviewed: Boolean, onClick: () -> Unit, onToggleReviewed: (() -> Unit)?) {
     val colors = MyTheme.colors
-    val notes = listOfNotNull("key change".takeIf { step.key }, "viewed".takeIf { read })
+    val notes = listOfNotNull("key change".takeIf { step.key })
 
     Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = rowHeight())
-            .pressable(onClick, role = Role.Tab, description = (listOf("Step ${position + 1}: ${step.title}") + notes).joinToString(", "), shape = ControlShape, selected = on)
-            .padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
-        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+        Modifier.fillMaxWidth().heightIn(min = rowHeight()).background(if (on) colors.bgSelected else Color.Transparent, ControlShape).padding(end = Tokens.Space.S1),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        NumberChip(position, on)
+        Row(
+            Modifier
+                .weight(1f)
+                .heightIn(min = rowHeight())
+                .pressable(onClick, role = Role.Tab, description = (listOf("Step ${position + 1}: ${step.title}") + notes).joinToString(", "), shape = ControlShape, selected = on)
+                .semantics { selected = on }
+                .padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NumberChip(position, on)
 
-        Label(step.title, Modifier.weight(1f), if (step.key || on) Tokens.Type.UiStrong else Tokens.Type.Ui, if (step.key || on) colors.text else colors.textMuted)
+            Label(step.title, Modifier.weight(1f), if (step.key || on) Tokens.Type.UiStrong else Tokens.Type.Ui, if (step.key || on) colors.text else colors.textMuted)
 
-        if (step.key) {
-            Tag("Key")
+            if (step.key) {
+                Tag("Key")
+            }
         }
 
-        if (read) {
-            Icon(MyIcon.Check, colors.textMuted, Tokens.Size.IconSm)
+        if (onToggleReviewed != null) {
+            Box(
+                Modifier
+                    .size(touchMin(Tokens.Size.ControlSm))
+                    .pressable(onToggleReviewed, role = Role.Checkbox, description = "Reviewed: ${step.title}", shape = ControlShape)
+                    .semantics { toggleableState = if (reviewed) ToggleableState.On else ToggleableState.Off },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(if (reviewed) MyIcon.CircleCheck else MyIcon.Circle, if (reviewed) colors.text else colors.textMuted)
+            }
         }
     }
 }
@@ -323,6 +346,8 @@ private fun StepDetail(
     walkthrough: Walkthrough,
     notes: List<WalkthroughNote>,
     annotatable: Boolean,
+    approved: Boolean,
+    onApprove: (() -> Unit)?,
     onAnnotate: (WalkthroughFile, FileDiff, Annotation) -> Unit,
     onNote: (String) -> Unit,
     onRemoveNote: (WalkthroughNote) -> Unit,
@@ -331,12 +356,19 @@ private fun StepDetail(
     val outer = LocalAnnotate.current
     val annotate by rememberUpdatedState(onAnnotate)
 
-    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
         NumberChip(index, true)
-        Label(step.title, Modifier.weight(1f, fill = false).semantics { heading() }, Tokens.Type.Title)
 
-        if (step.key) {
-            Tag("Key change")
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+            Label(step.title, Modifier.weight(1f, fill = false).semantics { heading() }, Tokens.Type.Title)
+
+            if (step.key) {
+                Tag("Key change")
+            }
+        }
+
+        if (onApprove != null) {
+            MyButton(onApprove, text = if (approved) "Approved" else "Approve", icon = if (approved) MyIcon.CircleCheck else MyIcon.Circle, variant = ButtonVariant.Outline, size = ButtonSize.Sm, selected = approved)
         }
     }
 
