@@ -1,6 +1,8 @@
 use super::call::{ToolCall, ToolReply};
 use crate::error::ApiResult;
+use crate::state::AppState;
 use serde_json::{Value, json};
+use uuid::Uuid;
 
 pub fn definitions() -> Value {
     json!([
@@ -19,17 +21,20 @@ pub fn definitions() -> Value {
     ])
 }
 
-pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
-    let ToolCall { caller, arguments, .. } = call;
-    let state = caller.state;
+pub struct Page {
+    pub messages: Vec<(i64, String, String)>,
+    pub more: bool,
+}
 
-    let Some((conversation_id, _)) = caller.conversation().await? else {
-        return Ok(ToolReply::text("There is nothing to read. Earlier turns belong to a conversation, and this call did not come from one.", true));
-    };
+pub fn speaker(kind: &str) -> &'static str {
+    if kind == "user_message" { "User" } else { "Agent" }
+}
+
+pub async fn page(state: &AppState, conversation_id: Uuid, arguments: &Value) -> ApiResult<Page> {
     let query = arguments.get("query").and_then(Value::as_str).map(str::trim).filter(|query| !query.is_empty());
     let before = arguments.get("before").and_then(Value::as_i64).unwrap_or(i64::MAX);
     let limit = arguments.get("limit").and_then(Value::as_i64).unwrap_or(10).clamp(1, 50);
-    let mut found = sqlx::query_as::<_, (i64, String, String)>(
+    let mut messages = sqlx::query_as::<_, (i64, String, String)>(
         "select s.seq, e.kind, s.text from search_entries s join events e on e.conversation_id = s.conversation_id and e.seq = s.seq
          where s.conversation_id = $1 and s.seq < $2 and ($3::text is null or s.tsv @@ websearch_to_tsquery('english', $3))
          order by s.seq desc limit $4",
@@ -40,15 +45,27 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
     .bind(limit + 1)
     .fetch_all(&state.pool)
     .await?;
-    let more = found.len() as i64 > limit;
+    let more = messages.len() as i64 > limit;
 
-    found.truncate(limit as usize);
-    found.reverse();
+    messages.truncate(limit as usize);
+    messages.reverse();
 
-    let Some(oldest) = found.first().map(|(seq, _, _)| *seq) else {
+    Ok(Page { messages, more })
+}
+
+pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
+    let ToolCall { caller, arguments, .. } = call;
+    let state = caller.state;
+
+    let Some((conversation_id, _)) = caller.conversation().await? else {
+        return Ok(ToolReply::text("There is nothing to read. Earlier turns belong to a conversation, and this call did not come from one.", true));
+    };
+    let Page { messages, more } = page(state, conversation_id, &arguments).await?;
+
+    let Some(oldest) = messages.first().map(|(seq, _, _)| *seq) else {
         return Ok(ToolReply::text("No earlier messages match.", false));
     };
-    let mut lines: Vec<String> = found.iter().map(|(seq, kind, text)| format!("#{seq} {}: {}", if kind == "user_message" { "User" } else { "Agent" }, text.chars().take(4000).collect::<String>())).collect();
+    let mut lines: Vec<String> = messages.iter().map(|(seq, kind, text)| format!("#{seq} {}: {}", speaker(kind), text.chars().take(4000).collect::<String>())).collect();
 
     if more {
         lines.push(format!("Call again with before={oldest} for older turns."));

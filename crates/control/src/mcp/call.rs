@@ -27,6 +27,24 @@ pub enum ToolReply {
     Invalid(String),
 }
 
+pub fn data_block(tag: &str, attributes: &[(&str, Option<String>)], text: &str) -> String {
+    let attributes: Vec<String> = attributes.iter().filter_map(|(name, value)| Some(format!("{name}=\"{}\"", value.as_ref()?.replace('"', "'").replace('<', "\u{2039}")))).collect();
+    let closing = format!("</{tag}");
+    let lowered = text.to_ascii_lowercase();
+    let mut escaped = String::new();
+    let mut copied = 0;
+
+    for (at, _) in lowered.match_indices(&closing) {
+        escaped.push_str(&text[copied..at]);
+        escaped.push_str("<\\/");
+        copied = at + 2;
+    }
+
+    escaped.push_str(&text[copied..]);
+
+    format!("<{tag} {}>\n{escaped}\n</{tag}>", attributes.join(" "))
+}
+
 impl ToolReply {
     pub fn text(text: &str, is_error: bool) -> Self {
         ToolReply::Text { text: text.to_string(), is_error }

@@ -82,16 +82,23 @@ fn publish(state: &AppState, owner: Uuid, row: ProposalRow) -> MessageProposal {
     proposal
 }
 
-pub async fn propose(state: &AppState, conversation_id: Uuid, target: &str, message: &str, reason: &str) -> ApiResult<Result<MessageProposal, String>> {
-    let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+pub async fn resolve(state: &AppState, owner: Uuid, target: &str) -> ApiResult<Result<Uuid, String>> {
     let candidates = sqlx::query_as::<_, (Uuid, bool)>("select id, archived_at is not null from conversations where owner = $1 and (id::text = lower($2) or title = $2) order by updated_at desc").bind(owner).bind(target).fetch_all(&state.pool).await?;
     let live: Vec<Uuid> = candidates.iter().filter(|(_, archived)| !archived).map(|(id, _)| *id).collect();
 
-    let target_id = match (candidates.is_empty(), live.as_slice()) {
-        (true, _) => return Ok(Err(format!("Nothing was proposed. None of the person's conversations is {target}. Look one up with find_conversations."))),
-        (false, []) => return Ok(Err(format!("Nothing was proposed. The conversation {target} is archived."))),
-        (false, [only]) => *only,
-        (false, _) => return Ok(Err(format!("Nothing was proposed. More than one conversation is titled {target}. Use its id, from find_conversations."))),
+    Ok(match (candidates.is_empty(), live.as_slice()) {
+        (true, _) => Err(format!("None of the person's conversations is {target}. Look one up with find_conversations.")),
+        (false, []) => Err(format!("The conversation {target} is archived.")),
+        (false, [only]) => Ok(*only),
+        (false, _) => Err(format!("More than one conversation is titled {target}. Use its id, from find_conversations.")),
+    })
+}
+
+pub async fn propose(state: &AppState, conversation_id: Uuid, target: &str, message: &str, reason: &str) -> ApiResult<Result<MessageProposal, String>> {
+    let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+    let target_id = match resolve(state, owner, target).await? {
+        Ok(target_id) => target_id,
+        Err(reason) => return Ok(Err(format!("Nothing was proposed. {reason}"))),
     };
 
     if target_id == conversation_id {

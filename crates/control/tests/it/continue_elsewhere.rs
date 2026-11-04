@@ -377,7 +377,7 @@ async fn continuing_on_a_chat_model_sends_the_handoff_then_only_new_turns_and_ca
     assert_eq!((back["node_id"].clone(), back["cwd"].clone(), back["agent"].clone()), (json!(link.id), json!("/work/app"), json!("claude")));
 }
 
-async fn said(server: &Server, link: &mut NodeLink, id: Uuid, user_text: &str, answer: &str, seq: i64) {
+pub async fn said(server: &Server, link: &mut NodeLink, id: Uuid, user_text: &str, answer: &str, seq: i64) {
     server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": user_text}))).await;
     expect_prompt(link).await;
     link.send(NodeToControl::AcpUpdate { conversation_id: id, seq, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": answer}}}) }).await;
