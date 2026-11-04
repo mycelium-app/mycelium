@@ -1722,6 +1722,7 @@ pub enum TaskStatus {
     Claimed,
     Done,
     Declined,
+    Closed,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

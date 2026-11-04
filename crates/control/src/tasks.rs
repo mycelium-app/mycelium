@@ -14,7 +14,7 @@ use mycelium_proto::api::{AnswerTaskRequest, CreateConversationRequest, CreateTa
 use mycelium_proto::conversation::Conversation;
 use uuid::Uuid;
 
-const TASK_SELECT: &str = "select t.id, t.node_id, t.agent, t.cwd, t.project_id, t.branch, t.title, t.prompt, t.status, t.options, t.answer, t.source_id, s.title as source_title, t.conversation_id, t.depends_on, (select count(*) from tasks d where d.id = any(t.depends_on) and d.status not in ('done', 'declined')) as waits_on, t.created_at from tasks t left join conversations s on s.id = t.source_id";
+const TASK_SELECT: &str = "select t.id, t.node_id, t.agent, t.cwd, t.project_id, t.branch, t.title, t.prompt, t.status, t.options, t.answer, t.source_id, s.title as source_title, t.conversation_id, t.depends_on, (select count(*) from tasks d where d.id = any(t.depends_on) and d.status not in ('done', 'declined', 'closed')) as waits_on, t.created_at from tasks t left join conversations s on s.id = t.source_id";
 
 #[derive(sqlx::FromRow)]
 struct TaskRow {
@@ -312,6 +312,20 @@ pub async fn answer(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 
 pub async fn done(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Task>> {
     Ok(Json(move_to(&state, &user, id, TaskStatus::Claimed, TaskStatus::Done).await?))
+}
+
+pub async fn close_owned(state: &AppState, owner: Uuid, ids: &[Uuid]) -> ApiResult<Vec<Uuid>> {
+    let closed = sqlx::query_scalar::<_, Uuid>("update tasks set status = 'closed' where owner = $1 and id = any($2) and status in ('question', 'proposed', 'open', 'claimed') returning id").bind(owner).bind(ids).fetch_all(&state.pool).await?;
+
+    Ok(closed)
+}
+
+pub async fn close(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Task>> {
+    if close_owned(&state, user.id, &[id]).await?.is_empty() {
+        return Err(ApiError::not_found("That task"));
+    }
+
+    Ok(Json(load(&state, id).await?))
 }
 
 pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {

@@ -30,6 +30,7 @@ object TaskStatuses {
     const val Claimed = "claimed"
     const val Done = "done"
     const val Declined = "declined"
+    const val Closed = "closed"
 }
 
 @Serializable

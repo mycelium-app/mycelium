@@ -89,6 +89,7 @@ fun laneOf(task: Task, showDeclined: Boolean): Lane? = when (task.status) {
     TaskStatuses.Open -> Lane.Open
     TaskStatuses.Claimed -> Lane.Claimed
     TaskStatuses.Declined -> Lane.Done.takeIf { showDeclined }
+    TaskStatuses.Closed -> null
     else -> Lane.Done
 }
 

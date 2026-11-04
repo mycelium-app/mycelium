@@ -487,6 +487,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/tasks/{id}/decline", post(tasks::decline))
         .route("/api/v1/tasks/{id}/answer", post(tasks::answer))
         .route("/api/v1/tasks/{id}/done", post(tasks::done))
+        .route("/api/v1/tasks/{id}/close", post(tasks::close))
         .route("/api/v1/schedules", get(schedules::list).post(schedules::create))
         .route("/api/v1/schedules/{id}", patch(schedules::patch).delete(schedules::delete))
         .route("/api/v1/schedules/{id}/run", post(schedules::run_now))

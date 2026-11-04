@@ -98,6 +98,13 @@ class BoardTest {
     }
 
     @Test
+    fun aClosedTaskLeavesTheBoardEvenWithDeclinedOnesShown() {
+        val tasks = listOf(task("d", TaskStatuses.Done), task("closed", TaskStatuses.Closed))
+
+        assertEquals(listOf("d"), boardCards(state(tasks = tasks), BoardFilter(showDeclined = true)).values.flatten().map { it.key })
+    }
+
+    @Test
     fun aClaimedTaskCarriesItsConversationAndItsConversationIsNotListedAgain() {
         val claimed = task("t1", TaskStatuses.Claimed, conversationId = "a")
         val lanes = boardCards(state(conversation("a", ConversationStatus.Review), conversation("b", ConversationStatus.Working), tasks = listOf(claimed)))
