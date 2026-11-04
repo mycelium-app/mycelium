@@ -42,7 +42,7 @@ class WellnessRenderTest {
                 assertTrue(renderAt("wellness-puzzles", dark, phone) { WellnessScreen(store, ReadingPlatform(), startOn = "puzzles") }.length() > 3_000)
                 assertTrue(renderAt("wellness-skills", dark, phone) { WellnessScreen(store, OpeningPlatform(), startOn = "skills") }.length() > 3_000)
                 assertTrue(renderAt("time-and-focus", dark, phone) { TimeAndFocusSettings(store) }.length() > 3_000)
-                assertTrue(renderAt("break-toast", dark, phone) { Box(Modifier.fillMaxSize(), Alignment.BottomEnd) { BreakToast(BreakClock(BreakPhase.Due, activeMinutes = 50), 5, {}, {}, {}) } }.length() > 1_000)
+                assertTrue(renderAt("break-toast", dark, phone) { Box(Modifier.fillMaxSize(), Alignment.BottomEnd) { BreakToast(BreakClock(BreakPhase.Due, activeMinutes = 50), 5, {}, {}) } }.length() > 1_000)
             }
         }
     }

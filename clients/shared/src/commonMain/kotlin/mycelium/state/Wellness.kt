@@ -97,16 +97,19 @@ sealed interface BreakPhase {
     data object Noting : BreakPhase
 }
 
-data class BreakClock(val phase: BreakPhase = BreakPhase.Idle, val activeMinutes: Int = 0, val blocksDone: Int = 0) {
+data class BreakClock(val phase: BreakPhase = BreakPhase.Idle, val activeMinutes: Int = 0, val blocksDone: Int = 0, val snoozed: Boolean = false) {
     fun remindsAfter(settings: WellnessSettings): Int? = when {
         settings.breakReminders -> settings.breakAfterMinutes
         else -> null
     }
 
-    fun tick(settings: WellnessSettings, quiet: Boolean): BreakClock {
-        val threshold = remindsAfter(settings)
+    fun following(settings: WellnessSettings): BreakClock =
+        if (remindsAfter(settings) == null && (phase == BreakPhase.Due || phase is BreakPhase.Snoozed)) copy(phase = BreakPhase.Idle, activeMinutes = 0, snoozed = false) else this
 
-        if (threshold == null || quiet) {
+    fun tick(settings: WellnessSettings, quiet: Boolean): BreakClock {
+        val threshold = remindsAfter(settings) ?: return following(settings)
+
+        if (quiet) {
             return this
         }
 
@@ -117,18 +120,16 @@ data class BreakClock(val phase: BreakPhase = BreakPhase.Idle, val activeMinutes
                 if (minutes >= threshold) copy(phase = BreakPhase.Due, activeMinutes = minutes) else copy(activeMinutes = minutes)
             }
 
-            is BreakPhase.Snoozed -> if (phase.minutesLeft <= 1) copy(phase = BreakPhase.Due) else copy(phase = BreakPhase.Snoozed(phase.minutesLeft - 1))
+            is BreakPhase.Snoozed -> if (phase.minutesLeft <= 1) copy(phase = BreakPhase.Due, activeMinutes = activeMinutes + 1) else copy(phase = BreakPhase.Snoozed(phase.minutesLeft - 1), activeMinutes = activeMinutes + 1)
             BreakPhase.Due, BreakPhase.OnBreak, BreakPhase.Noting -> this
         }
     }
 
-    fun snooze(settings: WellnessSettings): BreakClock = if (phase == BreakPhase.Due) copy(phase = BreakPhase.Snoozed(settings.snoozeMinutes)) else this
-
-    fun dismiss(): BreakClock = copy(phase = BreakPhase.Idle, activeMinutes = 0)
+    fun snooze(settings: WellnessSettings): BreakClock = if (phase == BreakPhase.Due && !snoozed) copy(phase = BreakPhase.Snoozed(settings.snoozeMinutes), snoozed = true) else this
 
     fun breakLength(settings: WellnessSettings): Int = settings.breakMinutes
 
-    fun startBreak(): BreakClock = copy(phase = BreakPhase.OnBreak, activeMinutes = 0, blocksDone = blocksDone + 1)
+    fun startBreak(): BreakClock = copy(phase = BreakPhase.OnBreak, activeMinutes = 0, blocksDone = blocksDone + 1, snoozed = false)
 
     fun endBreak(): BreakClock = copy(phase = BreakPhase.Noting, activeMinutes = 0)
 
@@ -340,7 +341,7 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
         val before = mutableState.value.settings
         val changed = change(before)
 
-        mutableState.update { it.copy(settings = changed) }
+        mutableState.update { it.copy(settings = changed, clock = it.clock.following(changed)) }
         scope.launch {
             val saved = catching { api.saveWellnessSettings(changed) }.getOrNull()
 
@@ -350,10 +351,6 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
 
     fun snooze() {
         mutableState.update { it.copy(clock = it.clock.snooze(it.settings)) }
-    }
-
-    fun dismiss() {
-        mutableState.update { it.copy(clock = it.clock.dismiss()) }
     }
 
     fun startBreak() {

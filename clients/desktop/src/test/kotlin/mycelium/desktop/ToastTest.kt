@@ -70,7 +70,7 @@ class ToastTest {
             MyceliumTheme(true) {
                 Column {
                     ErrorToast(failure, onDismiss = {}, onRetry = { taken += "retry" })
-                    BreakToast(BreakClock(BreakPhase.Due, activeMinutes = 50), 5, { taken += "snooze" }, { taken += "break" }, {})
+                    BreakToast(BreakClock(BreakPhase.Due, activeMinutes = 50), 5, { taken += "snooze" }, { taken += "break" })
                 }
             }
         }

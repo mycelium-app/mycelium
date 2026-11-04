@@ -27,11 +27,27 @@ class WellnessClockTest {
     }
 
     @Test
-    fun dismissingStartsTheFullIntervalAgain() {
-        val dismissed = BreakClock().after(50, settings).dismiss()
+    fun aReminderCanBeSnoozedOnceAndThenOnlyEndsInABreak() {
+        val back = BreakClock().after(50, settings).snooze(settings).after(10, settings)
 
-        assertEquals(BreakPhase.Idle, dismissed.after(49, settings).phase)
-        assertEquals(BreakPhase.Due, dismissed.after(50, settings).phase)
+        assertEquals(BreakPhase.Due, back.phase)
+        assertEquals(60, back.activeMinutes)
+        assertEquals(back, back.snooze(settings))
+    }
+
+    @Test
+    fun takingABreakGivesTheNextReminderItsSnoozeBack() {
+        val next = BreakClock().after(50, settings).snooze(settings).after(10, settings).startBreak().endBreak().backToWork().after(50, settings)
+
+        assertEquals(BreakPhase.Snoozed(10), next.snooze(settings).phase)
+    }
+
+    @Test
+    fun switchingRemindersOffEndsAShownReminder() {
+        val due = BreakClock().after(50, settings)
+
+        assertEquals(BreakPhase.Idle, due.following(settings.copy(breakReminders = false)).phase)
+        assertEquals(BreakPhase.Idle, due.snooze(settings).tick(settings.copy(breakReminders = false), quiet = false).phase)
     }
 
     @Test

@@ -9,7 +9,7 @@ import mycelium.state.BreakClock
 import mycelium.state.BreakPhase
 
 @Composable
-fun BreakToast(clock: BreakClock, minutes: Int, onSnooze: () -> Unit, onStartBreak: () -> Unit, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+fun BreakToast(clock: BreakClock, minutes: Int, onSnooze: () -> Unit, onStartBreak: () -> Unit, modifier: Modifier = Modifier) {
     if (clock.phase != BreakPhase.Due) {
         return
     }
@@ -19,11 +19,14 @@ fun BreakToast(clock: BreakClock, minutes: Int, onSnooze: () -> Unit, onStartBre
     Toast(
         MyIcon.Cup,
         colors.accent,
-        onDismiss,
+        null,
         modifier.semantics { liveRegion = LiveRegionMode.Polite },
         actions = {
             MyButton(onStartBreak, text = "Start break", variant = ButtonVariant.Primary)
-            MyButton(onSnooze, text = "Snooze", variant = ButtonVariant.Outline)
+
+            if (!clock.snoozed) {
+                MyButton(onSnooze, text = "Snooze", variant = ButtonVariant.Outline)
+            }
         },
     ) {
         Label("Time for a break", style = Tokens.Type.UiStrong)

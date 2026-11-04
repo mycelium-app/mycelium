@@ -38,7 +38,7 @@ enum class ToastTone { Neutral, Error }
 fun Toast(
     icon: MyIcon,
     iconColor: Color,
-    onDismiss: () -> Unit,
+    onDismiss: (() -> Unit)?,
     modifier: Modifier = Modifier,
     tone: ToastTone = ToastTone.Neutral,
     actions: (@Composable () -> Unit)? = null,
@@ -54,7 +54,7 @@ fun Toast(
             .border(Tokens.Size.Hairline, border, ControlShape)
             .padding(start = Tokens.Space.S3, top = Tokens.Space.S2, end = Tokens.Space.S2, bottom = Tokens.Space.S3)
             .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
+                if (onDismiss != null && event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
                     onDismiss()
                     true
                 } else {
@@ -72,7 +72,9 @@ fun Toast(
                 text()
             }
 
-            MyButton(onDismiss, icon = MyIcon.Close, description = "Dismiss", muted = true)
+            if (onDismiss != null) {
+                MyButton(onDismiss, icon = MyIcon.Close, description = "Dismiss", muted = true)
+            }
         }
 
         if (actions != null) {
@@ -123,7 +125,6 @@ fun ToastHost(store: Store, phone: Boolean, raised: Boolean) {
                     wellness.clock.breakLength(wellness.settings),
                     onSnooze = store.wellness::snooze,
                     onStartBreak = store.wellness::startBreak,
-                    onDismiss = store.wellness::dismiss,
                 )
             }
         }
