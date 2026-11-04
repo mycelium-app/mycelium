@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.24.2
+
+- The break reminder can no longer be dismissed. It ends when you start a break or switch break reminders off, and it can be snoozed once: when it comes back it offers only Start break.
+
 ## v0.24.1
 
 - View staged in the git panel opens a Staged changes tab with only the staged files and their staged hunks, and says so when nothing is staged. View diff still shows every change.
