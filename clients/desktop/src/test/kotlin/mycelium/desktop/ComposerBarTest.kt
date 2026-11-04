@@ -165,8 +165,15 @@ class ComposerBarTest {
     }
 
     @Test
-    fun anAssistantHasNeitherGoalModelNorMode() {
+    fun anAssistantInAWorkspaceHasTheModeOfAnyWorkspaceConversationButNoGoal() {
         showBar(conversation(assistantId = "a1"))
+
+        assertBar("Attach files", "Dictate", "Teach me", "Model: ", "Mode: ", "Conversation usage", "Send")
+    }
+
+    @Test
+    fun anAssistantChattingOnAModelHasNeitherGoalNorMode() {
+        showBar(conversation(agent = "chat", assistantId = "a1"))
 
         assertBar("Attach files", "Dictate", "Teach me", "Model: ", "Conversation usage", "Send")
     }

@@ -17,6 +17,7 @@ enum class ConversationKind {
     ChatOnAgent,
     ChatOnModel,
     Assistant,
+    AssistantWorkspace,
     NewConversation,
     NewChat,
 }
@@ -47,6 +48,7 @@ data class HarnessReport(
 )
 
 fun conversationKind(conversation: Conversation, working: Boolean): ConversationKind = when {
+    conversation.assistantId != null && !conversation.isChat && !conversation.scratch -> ConversationKind.AssistantWorkspace
     conversation.assistantId != null -> ConversationKind.Assistant
     conversation.isChat -> ConversationKind.ChatOnModel
     conversation.scratch -> ConversationKind.ChatOnAgent
@@ -58,11 +60,12 @@ fun conversationKind(conversation: Conversation, working: Boolean): Conversation
 fun barControls(kind: ConversationKind, harness: HarnessReport): List<BarControl> {
     val starting = kind == ConversationKind.NewConversation || kind == ConversationKind.NewChat
     val workspace = kind == ConversationKind.WorkspaceIdle || kind == ConversationKind.WorkspaceWorking || kind == ConversationKind.WorkspaceFailed
-    val configurable = workspace || kind == ConversationKind.ChatOnAgent
+    val assistant = kind == ConversationKind.Assistant || kind == ConversationKind.AssistantWorkspace
+    val configurable = workspace || kind == ConversationKind.ChatOnAgent || kind == ConversationKind.AssistantWorkspace
 
     return listOfNotNull(
         BarControl.Attach,
-        BarControl.Actions.takeIf { kind == ConversationKind.Assistant },
+        BarControl.Actions.takeIf { assistant },
         BarControl.Dictate.takeIf { harness.voice && !starting },
         BarControl.TeachMe.takeIf { harness.teachMe && !starting },
         BarControl.Goal.takeIf { workspace },
