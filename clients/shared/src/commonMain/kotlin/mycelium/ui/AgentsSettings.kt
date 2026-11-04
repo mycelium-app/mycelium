@@ -35,6 +35,7 @@ import mycelium.state.agentAccounts
 import mycelium.state.agentName
 import mycelium.state.displayName
 import mycelium.state.modelOptions
+import mycelium.state.reportedModes
 import mycelium.state.splitSignedOut
 import mycelium.state.withFavourite
 
@@ -50,7 +51,7 @@ private fun accountModeOf(settings: AgentSettings, account: AgentAccount): Strin
 
 private fun entryHarness(entry: ModelChoice): String = if (entry.anyModel) "" else entry.agent?.let(::agentName) ?: "Chat"
 
-private fun modeName(agent: String, id: String?): String? = fallbackModes(agent).firstOrNull { it.id == id }?.name
+private fun modeName(modes: List<Choice>, id: String?): String? = modes.firstOrNull { it.id == id }?.name
 
 @Composable
 fun AgentsSettings(store: Store) {
@@ -83,13 +84,13 @@ fun AgentsSettings(store: Store) {
                 Label("Environment tools never ask, in any mode: they only reach the environment.", style = Tokens.Type.Meta, color = colors.textMuted)
 
                 for (agent in listOf("claude", "codex")) {
-                    val modes = fallbackModes(agent)
+                    val modes = reportedModes(state.nodes.values, agent)
 
                     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
                         Label(agentName(agent), Modifier.width(DefaultModeNameWidth))
                         Segmented(
                             modes.map { it.name },
-                            modeName(agent, defaultModeOf(current, agent)).orEmpty(),
+                            modeName(modes, defaultModeOf(current, agent)).orEmpty(),
                             { label ->
                                 val picked = modes.first { it.name == label }.id
                                 val defaults = if (agent == "codex") current.defaultModes.copy(codex = picked) else current.defaultModes.copy(claude = picked)
@@ -115,7 +116,7 @@ fun AgentsSettings(store: Store) {
                             when (column) {
                                 0 -> TableCell.Text(account.label)
                                 1 -> TableCell.Text(agentName(account.agent), color = colors.textMuted)
-                                2 -> TableCell.Text(modeName(account.agent, accountModeOf(current, account)) ?: "Same as ${agentName(account.agent)}", color = if (accountModeOf(current, account) == null) colors.textMuted else colors.text)
+                                2 -> TableCell.Text(modeName(reportedModes(state.nodes.values, account.agent, account.label), accountModeOf(current, account)) ?: "Same as ${agentName(account.agent)}", color = if (accountModeOf(current, account) == null) colors.textMuted else colors.text)
 
                                 else -> TableCell.Slot {
                                     RowMenu(account.label) { close ->
@@ -207,6 +208,7 @@ fun AgentsSettings(store: Store) {
         if (current != null) {
             AccountModeDialog(
                 account,
+                reportedModes(state.nodes.values, account.agent, account.label),
                 accountModeOf(current, account),
                 defaultModeOf(current, account.agent),
                 onSave = { mode ->
@@ -232,12 +234,12 @@ fun AgentsSettings(store: Store) {
 }
 
 @Composable
-private fun AccountModeDialog(account: AgentAccount, current: String?, agentDefault: String?, onSave: suspend (String?) -> Unit, onDismiss: () -> Unit) {
+private fun AccountModeDialog(account: AgentAccount, modes: List<Choice>, current: String?, agentDefault: String?, onSave: suspend (String?) -> Unit, onDismiss: () -> Unit) {
     var mode by remember(account.label) { mutableStateOf(current ?: SameAsAgent) }
     val runner = rememberAction(account.label)
     val agent = agentName(account.agent)
-    val inherited = modeName(account.agent, agentDefault)?.let { "Same as $agent ($it)" } ?: "Same as $agent"
-    val choices = listOf(Choice(SameAsAgent, inherited)) + fallbackModes(account.agent)
+    val inherited = modeName(modes, agentDefault)?.let { "Same as $agent ($it)" } ?: "Same as $agent"
+    val choices = listOf(Choice(SameAsAgent, inherited)) + modes
 
     Dialog(onDismiss) {
         Label("Default mode for ${account.label}", Modifier.semantics { heading() }, Tokens.Type.Title)

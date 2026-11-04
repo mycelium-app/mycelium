@@ -106,6 +106,7 @@ data class HarnessModels(
     @SerialName("default_model") val defaultModel: String? = null,
     @SerialName("reported_at") val reportedAt: String,
     @SerialName("config_options") val configOptions: kotlinx.serialization.json.JsonArray? = null,
+    val modes: List<HarnessModel> = emptyList(),
 )
 
 @Serializable

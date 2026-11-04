@@ -5,23 +5,16 @@ use crate::store::{enum_text, parse_enum};
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use mycelium_proto::api::ModelChoice;
+use mycelium_proto::api::{HarnessModel, ModelChoice};
 use mycelium_proto::conversation::AgentId;
 use mycelium_proto::routing::{AccountMode, AgentSettings, DefaultModes, NodePreference, SaveAgentSettingsRequest, SetAccountModeRequest};
 use sqlx::types::Json as Sql;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-const CLAUDE_MODES: [&str; 4] = ["default", "plan", "acceptEdits", "bypassPermissions"];
-const CODEX_MODES: [&str; 3] = ["read-only", "auto", "full-access"];
+const CLAUDE_MODES: [(&str, &str); 5] = [("default", "Manual"), ("acceptEdits", "Accept edits"), ("plan", "Plan"), ("auto", "Auto"), ("bypassPermissions", "Bypass permissions")];
+const CODEX_MODES: [(&str, &str); 4] = [("read-only", "Read-only"), ("workspace-write", "Workspace access"), ("agent", "Auto review"), ("agent-full-access", "Full access")];
 const ANY_MODEL_LIMIT: usize = 20;
-
-fn modes_of(agent: AgentId) -> &'static [&'static str] {
-    match agent {
-        AgentId::Claude => &CLAUDE_MODES,
-        AgentId::Codex => &CODEX_MODES,
-    }
-}
 
 fn agent_name(agent: AgentId) -> &'static str {
     match agent {
@@ -30,14 +23,37 @@ fn agent_name(agent: AgentId) -> &'static str {
     }
 }
 
-fn valid_mode(agent: AgentId, mode: &str) -> ApiResult<()> {
-    if modes_of(agent).contains(&mode) {
+async fn offered_modes(state: &AppState, agent: AgentId) -> ApiResult<Vec<HarnessModel>> {
+    let reported = sqlx::query_scalar::<_, Sql<Vec<HarnessModel>>>("select modes from harness_models where agent = $1 and modes is not null order by reported_at desc").bind(enum_text(&agent)).fetch_all(&state.pool).await?;
+    let mut offered: Vec<HarnessModel> = Vec::new();
+
+    for mode in reported.into_iter().flat_map(|modes| modes.0) {
+        if !offered.iter().any(|held| held.id == mode.id) {
+            offered.push(mode);
+        }
+    }
+
+    if offered.is_empty() {
+        let known = match agent {
+            AgentId::Claude => CLAUDE_MODES.as_slice(),
+            AgentId::Codex => CODEX_MODES.as_slice(),
+        };
+        offered = known.iter().map(|(id, name)| HarnessModel { id: id.to_string(), name: name.to_string() }).collect();
+    }
+
+    Ok(offered)
+}
+
+fn valid_mode(agent: AgentId, offered: &[HarnessModel], mode: &str) -> ApiResult<()> {
+    if offered.iter().any(|offer| offer.id == mode) {
         return Ok(());
     }
 
-    let choices = match agent {
-        AgentId::Claude => "Default, Plan, Auto or Bypass",
-        AgentId::Codex => "Default, Auto or Bypass",
+    let names: Vec<&str> = offered.iter().map(|offer| offer.name.as_str()).collect();
+    let choices = match names.split_last() {
+        Some((last, [])) => last.to_string(),
+        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+        None => "a mode".to_string(),
     };
 
     Err(ApiError::bad_request("mode_invalid", format!("Choose {choices} as the default mode for {}.", agent_name(agent))))
@@ -86,11 +102,11 @@ pub async fn read(state: &AppState, owner: Uuid) -> ApiResult<AgentSettings> {
 
 pub async fn save(State(state): State<AppState>, user: AuthUser, Json(request): Json<SaveAgentSettingsRequest>) -> ApiResult<Json<AgentSettings>> {
     if let Some(mode) = &request.default_modes.claude {
-        valid_mode(AgentId::Claude, mode)?;
+        valid_mode(AgentId::Claude, &offered_modes(&state, AgentId::Claude).await?, mode)?;
     }
 
     if let Some(mode) = &request.default_modes.codex {
-        valid_mode(AgentId::Codex, mode)?;
+        valid_mode(AgentId::Codex, &offered_modes(&state, AgentId::Codex).await?, mode)?;
     }
 
     let any_model = without_duplicates(request.any_model);
@@ -126,7 +142,7 @@ pub async fn set_account_mode(State(state): State<AppState>, user: AuthUser, Jso
     }
 
     if let Some(mode) = &request.mode {
-        valid_mode(request.agent, mode)?;
+        valid_mode(request.agent, &offered_modes(&state, request.agent).await?, mode)?;
     }
 
     sqlx::query(
@@ -212,10 +228,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_mode_must_belong_to_its_agent() {
-        assert!(valid_mode(AgentId::Claude, "plan").is_ok());
-        assert!(valid_mode(AgentId::Codex, "plan").is_err());
-        assert!(valid_mode(AgentId::Codex, "full-access").is_ok());
+    fn a_mode_must_be_one_the_agent_offers() {
+        let offered = [HarnessModel { id: "read-only".into(), name: "Read-only".into() }, HarnessModel { id: "agent".into(), name: "Auto review".into() }];
+
+        assert!(valid_mode(AgentId::Codex, &offered, "agent").is_ok());
+        assert_eq!(valid_mode(AgentId::Codex, &offered, "plan").unwrap_err().message(), "Choose Read-only or Auto review as the default mode for Codex.");
     }
 
     #[test]

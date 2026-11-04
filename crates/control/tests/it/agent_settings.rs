@@ -1,5 +1,6 @@
 use crate::common::Server;
 use crate::continue_elsewhere::{next_command, node_with_accounts, with_usage};
+use mycelium_proto::conversation::{AgentId, LoginInfo};
 use mycelium_proto::link::{ControlToNode, NodeToControl};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -9,10 +10,15 @@ async fn save(server: &Server, body: Value) -> (u16, Value) {
 }
 
 async fn start_with_modes(server: &Server, link: &mut crate::common::NodeLink, account: &str) -> Uuid {
-    let (_, created) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/work/app", "account": account}))).await;
+    let modes = json!({"currentModeId": "default", "availableModes": [{"id": "default", "name": "Default"}, {"id": "plan", "name": "Plan"}, {"id": "bypassPermissions", "name": "Bypass"}]});
+
+    start_reporting(server, link, "claude", account, modes).await
+}
+
+async fn start_reporting(server: &Server, link: &mut crate::common::NodeLink, agent: &str, account: &str, modes: Value) -> Uuid {
+    let (_, created) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": agent, "cwd": "/work/app", "account": account}))).await;
     let id: Uuid = serde_json::from_value(created["id"].clone()).unwrap();
     next_command(link).await;
-    let modes = json!({"currentModeId": "default", "availableModes": [{"id": "default", "name": "Default"}, {"id": "plan", "name": "Plan"}, {"id": "bypassPermissions", "name": "Bypass"}]});
     link.send(NodeToControl::SessionStarted { conversation_id: id, acp_session_id: "acp-1".into(), modes: Some(modes), models: None, config_options: None }).await;
     crate::common::eventually("the session to start", || async { Some(server.conversation(id).await).filter(|conversation| conversation["acp_session_id"].is_string()) }).await;
 
@@ -34,11 +40,11 @@ async fn settings_start_empty_and_keep_what_was_saved() {
     assert_eq!(empty["any_model"], json!([]));
     assert!(empty["default_modes"]["claude"].is_null());
 
-    let (status, saved) = save(&server, json!({"default_modes": {"claude": "plan", "codex": "auto"}, "any_model": [{"agent": "claude"}, {"agent": "codex", "model": "gpt-5.5"}]})).await;
+    let (status, saved) = save(&server, json!({"default_modes": {"claude": "plan", "codex": "workspace-write"}, "any_model": [{"agent": "claude"}, {"agent": "codex", "model": "gpt-5.5"}]})).await;
 
     assert_eq!(status, 200, "{saved}");
     let (_, again) = server.user.json(server.user.get("/api/v1/agent-settings")).await;
-    assert_eq!((again["default_modes"]["claude"].clone(), again["default_modes"]["codex"].clone()), (json!("plan"), json!("auto")));
+    assert_eq!((again["default_modes"]["claude"].clone(), again["default_modes"]["codex"].clone()), (json!("plan"), json!("workspace-write")));
     assert_eq!(again["any_model"][1]["model"], "gpt-5.5");
 }
 
@@ -49,7 +55,81 @@ async fn a_mode_the_agent_does_not_have_is_refused_in_plain_words() {
     let (status, body) = save(&server, json!({"default_modes": {"codex": "plan"}, "any_model": []})).await;
 
     assert_eq!((status, body["error"].as_str()), (400, Some("mode_invalid")));
-    assert_eq!(body["message"], "Choose Default, Auto or Bypass as the default mode for Codex.");
+    assert_eq!(body["message"], "Choose Read-only, Workspace access, Auto review or Full access as the default mode for Codex.");
+}
+
+fn claude_code_modes(current: &str) -> Value {
+    json!({"currentModeId": current, "availableModes": [{"id": "default", "name": "Manual"}, {"id": "acceptEdits", "name": "Accept edits"}, {"id": "plan", "name": "Plan"}, {"id": "auto", "name": "Auto"}, {"id": "bypassPermissions", "name": "Bypass permissions"}]})
+}
+
+#[tokio::test]
+async fn a_claude_code_conversation_with_auto_as_its_default_ends_up_in_auto() {
+    let server = Server::start().await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 90)]).await;
+    let (status, body) = save(&server, json!({"default_modes": {"claude": "auto"}, "any_model": []})).await;
+    assert_eq!(status, 200, "{body}");
+
+    let id = start_reporting(&server, &mut link, "claude", "sam@example.com", claude_code_modes("default")).await;
+    assert_eq!(mode_set_on_start(&mut link).await.as_deref(), Some("auto"));
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 1, update: json!({"update": {"sessionUpdate": "current_mode_update", "currentModeId": "auto"}}) }).await;
+
+    crate::common::eventually("the conversation in auto", || async { (server.conversation(id).await["mode"] == "auto").then_some(()) }).await;
+}
+
+#[tokio::test]
+async fn accept_edits_is_its_own_claude_code_default() {
+    let server = Server::start().await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 90)]).await;
+    save(&server, json!({"default_modes": {"claude": "acceptEdits"}, "any_model": []})).await;
+
+    start_reporting(&server, &mut link, "claude", "sam@example.com", claude_code_modes("auto")).await;
+
+    assert_eq!(mode_set_on_start(&mut link).await.as_deref(), Some("acceptEdits"));
+}
+
+#[tokio::test]
+async fn a_codex_default_is_applied_with_the_modes_codex_reports() {
+    let server = Server::start().await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![LoginInfo { agent: AgentId::Codex, ..with_usage("codex@example.com", 90) }]).await;
+    save(&server, json!({"default_modes": {"codex": "agent-full-access"}, "any_model": []})).await;
+    let modes = json!({"currentModeId": "agent", "availableModes": [{"id": "read-only", "name": "Read-only"}, {"id": "workspace-write", "name": "Workspace access"}, {"id": "agent", "name": "Auto review"}, {"id": "agent-full-access", "name": "Full access"}]});
+
+    start_reporting(&server, &mut link, "codex", "codex@example.com", modes).await;
+
+    assert_eq!(mode_set_on_start(&mut link).await.as_deref(), Some("agent-full-access"));
+}
+
+#[tokio::test]
+async fn settings_offer_and_accept_the_modes_a_node_last_reported() {
+    let server = Server::start().await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 90)]).await;
+    let renamed = json!({"currentModeId": "ask", "availableModes": [{"id": "ask", "name": "Ask"}, {"id": "build", "name": "Build"}]});
+    start_reporting(&server, &mut link, "claude", "sam@example.com", renamed).await;
+
+    let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
+    let reported = nodes.as_array().unwrap().iter().find(|node| node["id"] == json!(link.id)).unwrap()["harness_models"].clone();
+    assert_eq!(reported[0]["modes"], json!([{"id": "ask", "name": "Ask"}, {"id": "build", "name": "Build"}]));
+
+    let (status, body) = save(&server, json!({"default_modes": {"claude": "build"}, "any_model": []})).await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = save(&server, json!({"default_modes": {"claude": "plan"}, "any_model": []})).await;
+    assert_eq!((status, body["message"].as_str()), (400, Some("Choose Ask or Build as the default mode for Claude Code.")));
+}
+
+#[tokio::test]
+async fn saved_codex_defaults_move_to_the_ids_codex_reports_now_and_accept_edits_stays_once() {
+    let server = Server::start().await;
+    save(&server, json!({"default_modes": {"claude": "plan"}, "any_model": []})).await;
+    sqlx::query("update user_settings set default_mode_claude = 'acceptEdits', default_mode_codex = 'auto'").execute(&server.pool).await.unwrap();
+    sqlx::query("insert into account_settings (owner, agent, account, default_mode) select id, 'codex', 'work@example.org', 'full-access' from users order by created_at limit 1").execute(&server.pool).await.unwrap();
+    let migration = include_str!("../../migrations/0155_current_mode_ids.sql");
+
+    sqlx::raw_sql(migration).execute(&server.pool).await.unwrap();
+    sqlx::raw_sql(migration).execute(&server.pool).await.unwrap();
+
+    let (_, settings) = server.user.json(server.user.get("/api/v1/agent-settings")).await;
+    assert_eq!(settings["default_modes"], json!({"claude": "acceptEdits", "codex": "workspace-write"}));
+    assert_eq!(settings["account_modes"], json!([{"agent": "codex", "account": "work@example.org", "mode": "agent-full-access"}]));
 }
 
 #[tokio::test]

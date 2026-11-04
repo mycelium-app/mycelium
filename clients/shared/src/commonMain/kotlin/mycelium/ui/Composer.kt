@@ -122,22 +122,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import mycelium.api.Conversation
+import mycelium.state.fallbackModes
 import mycelium.api.QueuedPrompt
-
-fun fallbackModes(agent: String): List<Choice> = when (agent) {
-    "claude" -> listOf(
-        Choice("default", "Default"),
-        Choice("plan", "Plan"),
-        Choice("acceptEdits", "Auto"),
-        Choice("bypassPermissions", "Bypass"),
-    )
-    "codex" -> listOf(
-        Choice("read-only", "Default"),
-        Choice("auto", "Auto"),
-        Choice("full-access", "Bypass"),
-    )
-    else -> emptyList()
-}
 
 @Composable
 fun Composer(

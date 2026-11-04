@@ -115,7 +115,7 @@ class NewConversationPlaceTest {
         var created: Conversation? = null
         show(store(), onCreated = { created = it })
 
-        rule.onNodeWithContentDescription("Mode: Default").performClick()
+        rule.onNodeWithContentDescription("Mode: Manual").performClick()
         rule.onNodeWithText("Plan").performClick()
         rule.onNodeWithContentDescription("Message").performTextInput("Plan the restore")
         rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }

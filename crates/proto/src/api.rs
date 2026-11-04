@@ -161,6 +161,8 @@ pub struct HarnessModels {
     pub models: Vec<HarnessModel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,
+    #[serde(default)]
+    pub modes: Vec<HarnessModel>,
     pub reported_at: chrono::DateTime<chrono::Utc>,
 }
 

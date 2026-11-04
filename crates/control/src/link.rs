@@ -638,6 +638,12 @@ fn reported_models(models: Option<&Value>, config_options: Option<&Value>) -> Ve
     found
 }
 
+fn reported_modes(modes: Option<&Value>) -> Vec<HarnessModel> {
+    let advertised = modes.and_then(|modes| modes["availableModes"].as_array()).into_iter().flatten();
+
+    advertised.filter_map(|mode| Some(HarnessModel { id: mode["id"].as_str()?.to_string(), name: mode["name"].as_str().unwrap_or_else(|| mode["id"].as_str().unwrap_or_default()).to_string() })).collect()
+}
+
 async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid, acp_session_id: String, modes: Option<Value>, models: Option<Value>, config_options: Option<Value>) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
     let Some(before) = lock_on_node(&mut tx, conversation_id, node_id).await? else {
@@ -664,11 +670,18 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
     .fetch_one(&mut *tx)
     .await?;
     let reported = reported_models(models_value.as_ref(), config_value.as_ref());
+    let offered_modes = reported_modes(modes.as_ref());
+    let models_reported = !reported.is_empty() || config_value.is_some();
+    let reports = models_reported || !offered_modes.is_empty();
 
-    if !reported.is_empty() || config_value.is_some() {
+    if reports {
         sqlx::query(
-            "insert into harness_models (node_id, agent, account, models, default_model, config_options, reported_at) values ($1, $2, $3, $4, $5, $6, now())
-             on conflict (node_id, agent, account) do update set models = excluded.models, default_model = excluded.default_model, config_options = excluded.config_options, reported_at = now()",
+            "insert into harness_models (node_id, agent, account, models, default_model, config_options, modes, reported_at) values ($1, $2, $3, $4, $5, $6, $7, now())
+             on conflict (node_id, agent, account) do update set
+                models = case when $8 then excluded.models else harness_models.models end,
+                default_model = case when $8 then excluded.default_model else harness_models.default_model end,
+                config_options = case when $8 then excluded.config_options else harness_models.config_options end,
+                modes = coalesce(excluded.modes, harness_models.modes), reported_at = now()",
         )
         .bind(node_id)
         .bind(&updated.agent)
@@ -676,13 +689,15 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
         .bind(sqlx::types::Json(&reported))
         .bind(models_value.as_ref().and_then(|models| models["currentModelId"].as_str()))
         .bind(config_value.as_ref())
+        .bind(Some(sqlx::types::Json(&offered_modes)).filter(|_| !offered_modes.is_empty()))
+        .bind(models_reported)
         .execute(&mut *tx)
         .await?;
     }
 
     tx.commit().await?;
 
-    if !reported.is_empty() || config_value.is_some() {
+    if reports {
         publish_node(state, node_id).await?;
     }
 

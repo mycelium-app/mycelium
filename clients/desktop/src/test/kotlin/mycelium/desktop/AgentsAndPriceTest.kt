@@ -3,6 +3,7 @@ package mycelium.desktop
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -34,7 +35,8 @@ import kotlin.test.assertEquals
 
 private const val AccountNodes = """[{"id":"n1","name":"willow","hostname":"willow","os":"linux","arch":"x86_64","version":"v0.11.0","address":"10.0.0.5","online":true,"draining":false,"sessions":[],
 "agents":[{"agent":"claude","available":true},{"agent":"codex","available":true}],
-"logins":[{"agent":"claude","account":"sam@example.com","method":"token","state":"signed_in"},{"agent":"claude","account":"work@example.org","method":"token","state":"signed_in"},{"agent":"codex","account":"codex@example.com","method":"token","state":"signed_in"}]}]"""
+"logins":[{"agent":"claude","account":"sam@example.com","method":"token","state":"signed_in"},{"agent":"claude","account":"work@example.org","method":"token","state":"signed_in"},{"agent":"codex","account":"codex@example.com","method":"token","state":"signed_in"}],
+"harness_models":[{"agent":"claude","account":"sam@example.com","models":[],"reported_at":"2026-10-22T08:00:00Z","modes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"},{"id":"bypassPermissions","name":"Bypass permissions"}]}]}]"""
 
 private const val NoSettings = """{"default_modes":{},"account_modes":[],"any_model":[]}"""
 
@@ -89,10 +91,24 @@ class AgentsAndPriceTest {
         rule.setContent { MyceliumTheme(true) { AgentsSettings(store) } }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Default mode").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNode(hasText("Auto") and hasAnyAncestor(hasContentDescription("Default mode for Codex"))).performClick()
+        rule.onNode(hasText("Full access") and hasAnyAncestor(hasContentDescription("Default mode for Codex"))).performClick()
 
         waitFor("PUT /api/v1/agent-settings")
-        assertEquals("""{"default_modes":{"claude":"plan","codex":"auto"}}""", body("PUT /api/v1/agent-settings"))
+        assertEquals("""{"default_modes":{"claude":"plan","codex":"agent-full-access"}}""", body("PUT /api/v1/agent-settings"))
+    }
+
+    @Test
+    fun autoForClaudeCodeIsItsAutoModeAndAcceptEditsIsItsOwnChoice() {
+        val store = store(settings = """{"default_modes":{"claude":"acceptEdits","codex":"read-only"},"account_modes":[],"any_model":[]}""")
+        rule.setContent { MyceliumTheme(true) { AgentsSettings(store) } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Default mode").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasText("Accept edits") and hasAnyAncestor(hasContentDescription("Default mode for Claude Code"))).assertIsSelected()
+        rule.captureScreen("settings-agents-default-modes")
+        rule.onNode(hasText("Auto") and hasAnyAncestor(hasContentDescription("Default mode for Claude Code"))).performClick()
+
+        waitFor("PUT /api/v1/agent-settings")
+        assertEquals("""{"default_modes":{"claude":"auto","codex":"read-only"}}""", body("PUT /api/v1/agent-settings"))
     }
 
     @Test
@@ -104,7 +120,7 @@ class AgentsAndPriceTest {
         rule.onNodeWithContentDescription("More for work@example.org").performClick()
         rule.onNodeWithText("Change default mode").performClick()
         rule.onNodeWithContentDescription("Mode: Same as Claude Code (Plan)").performClick()
-        rule.onAllNodesWithText("Bypass").onLast().performClick()
+        rule.onAllNodesWithText("Bypass permissions").onLast().performClick()
         rule.onNodeWithText("Save").performClick()
 
         waitFor("PUT /api/v1/agent-settings/account-mode")

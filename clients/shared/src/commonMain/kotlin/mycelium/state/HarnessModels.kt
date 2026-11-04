@@ -36,6 +36,30 @@ fun modelMenu(node: NodeSummary, agent: String, account: String?, now: Instant =
     return ModelMenu("${agentName(agent)} on ${node.name}, ${reportedAgo(report.reportedAt, now)}", listOf(defaultChoice(report)) + report.models.map { Choice(it.id, it.name) })
 }
 
+fun fallbackModes(agent: String): List<Choice> = when (agent) {
+    "claude" -> listOf(
+        Choice("default", "Manual"),
+        Choice("acceptEdits", "Accept edits"),
+        Choice("plan", "Plan"),
+        Choice("auto", "Auto"),
+        Choice("bypassPermissions", "Bypass permissions"),
+    )
+    "codex" -> listOf(
+        Choice("read-only", "Read-only"),
+        Choice("workspace-write", "Workspace access"),
+        Choice("agent", "Auto review"),
+        Choice("agent-full-access", "Full access"),
+    )
+    else -> emptyList()
+}
+
+fun reportedModes(nodes: Collection<NodeSummary>, agent: String, account: String? = null): List<Choice> {
+    val reports = nodes.mapNotNull { reportFor(it, agent, account) }.filter { it.modes.isNotEmpty() }.sortedByDescending { it.reportedAt }
+    val modes = reports.flatMap { it.modes }.distinctBy { it.id }.map { Choice(it.id, it.name) }
+
+    return modes.ifEmpty { fallbackModes(agent) }
+}
+
 fun reportedModelChoices(node: NodeSummary?, agent: String, account: String?): List<Choice> =
     node?.let { reportFor(it, agent, account) }?.models.orEmpty().map { Choice(it.id, it.name) }
 

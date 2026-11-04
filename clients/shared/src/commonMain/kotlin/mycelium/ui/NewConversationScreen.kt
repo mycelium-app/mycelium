@@ -3,6 +3,7 @@ package mycelium.ui
 import mycelium.state.accountShortName
 import mycelium.state.favouriteOptions
 import mycelium.state.reportedEffort
+import mycelium.state.reportedModes
 import kotlinx.serialization.json.JsonPrimitive
 import mycelium.state.modelOptions
 import androidx.compose.foundation.background
@@ -184,7 +185,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val chosenModel = explicitOption?.model.orEmpty()
     val effort = if (anyNode || routing != null) null else reportedEffort(node, chosenAgent, chosenAccount?.account, chosenModel)
     var pickedEffort by remember(node?.id, chosenAgent, chosenAccount?.account, chosenModel, effort) { mutableStateOf<String?>(null) }
-    val modes = fallbackModes(chosenAgent.orEmpty())
+    val modes = reportedModes(listOfNotNull(node).ifEmpty { state.nodes.values }, chosenAgent.orEmpty(), chosenAccount?.account)
     val defaultMode = agentSettings?.let { defaultModeOf(it, chosenAgent.orEmpty()) }
     val chosenMode = listOfNotNull(pickedMode, defaultMode).firstOrNull { held -> modes.any { it.id == held } } ?: modes.firstOrNull()?.id
 
