@@ -369,7 +369,7 @@ async fn outcome_of(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolb
     let mut answer = None;
 
     if toolbox.needs_approval(&tool, &arguments) {
-        let approval = Approval { title: &call.name, input: &arguments, server: &tool.server, account: tool.server_row().and_then(|server| server.account.as_deref()), filter: filter.as_deref(), edits_by_setting };
+        let approval = Approval { title: &call.name, input: &arguments, server: &tool.server, account: tool.server_row().and_then(|server| server.account.as_deref()), filter: filter.as_deref(), edits_by_setting, once_only: false };
         let answered = request_approval(state, owner, id, &call.id, &approval).await?;
 
         if answered == ALWAYS {
@@ -490,16 +490,24 @@ pub struct Approval<'a> {
     pub account: Option<&'a str>,
     pub filter: Option<&'a str>,
     pub edits_by_setting: bool,
+    pub once_only: bool,
 }
 
 pub async fn request_approval(state: &AppState, owner: Uuid, id: Uuid, request_id: &str, approval: &Approval<'_>) -> ApiResult<String> {
     let answer = state.hub.await_chat_approval(id, request_id);
-    let options = json!([
-        {"optionId": APPROVE, "name": "Approve", "kind": "allow_once"},
-        {"optionId": APPROVE_EDIT, "name": "Approve and edit response", "kind": "allow_once"},
-        {"optionId": ALWAYS, "name": "Approve for this session", "kind": "allow_always"},
-        {"optionId": DENY, "name": "Deny", "kind": "reject_once"},
-    ]);
+    let options = if approval.once_only {
+        json!([
+            {"optionId": APPROVE, "name": "Approve", "kind": "allow_once"},
+            {"optionId": DENY, "name": "Deny", "kind": "reject_once"},
+        ])
+    } else {
+        json!([
+            {"optionId": APPROVE, "name": "Approve", "kind": "allow_once"},
+            {"optionId": APPROVE_EDIT, "name": "Approve and edit response", "kind": "allow_once"},
+            {"optionId": ALWAYS, "name": "Approve for this session", "kind": "allow_always"},
+            {"optionId": DENY, "name": "Deny", "kind": "reject_once"},
+        ])
+    };
     let request = json!({
         "request_id": request_id,
         "toolCall": {"toolCallId": request_id, "title": approval.title, "rawInput": crate::coolify::approval_input(approval.title, approval.input), "server": approval.server, "account": approval.account, "filter": approval.filter, "edit": approval.edits_by_setting},

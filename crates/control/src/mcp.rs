@@ -1,4 +1,5 @@
 mod api_access;
+mod approval;
 mod artifacts;
 mod assistants;
 mod browser_task;
@@ -14,6 +15,7 @@ mod learning;
 mod memory;
 mod outline;
 mod project_icon;
+mod projects;
 mod screens;
 mod server_tools;
 mod ssh_access;
@@ -59,6 +61,7 @@ enum Area {
     GoalAndUsage,
     Todos,
     ProjectIcon,
+    Projects,
     Outline,
     Screens,
     Conversations,
@@ -76,7 +79,7 @@ fn area_of(tool: &str) -> Option<Area> {
         "find_integration_tools" => Some(Area::IntegrationTools),
         "start_workflow" | "start_subagent" | "list_places" | "get_workflow" => Some(Area::Workflows),
         "recall" | "remember" => Some(Area::Memory),
-        "propose_task" | "ask_question" | "propose_schedule" => Some(Area::Tasks),
+        "propose_task" | "ask_question" | "list_tasks" | "approve_task" | "decline_task" | "close_tasks" | "propose_schedule" => Some(Area::Tasks),
         "read_earlier_turns" => Some(Area::EarlierTurns),
         "assistant_list_files" | "assistant_read_file" | "assistant_write_file" | "assistant_delete_file" | "assistant_set_secret" | "assistant_request_secret" | "assistant_propose_action" | "assistant_list" | "assistant_create" | "assistant_update" | "assistant_use_workspace" => Some(Area::Assistants),
         "walkthrough" | "save_reflection" | "propose_exercise" | "note_learned" | "save_exercise_review" => Some(Area::Learning),
@@ -84,6 +87,7 @@ fn area_of(tool: &str) -> Option<Area> {
         "get_goal" | "report_goal" | "get_account_usage" => Some(Area::GoalAndUsage),
         "set_todos" => Some(Area::Todos),
         "set_project_icon" => Some(Area::ProjectIcon),
+        "create_project" | "update_project" => Some(Area::Projects),
         "open_outline" => Some(Area::Outline),
         "open_screen" => Some(Area::Screens),
         "find_conversations" | "start_conversation" | "read_conversation" | "send_to_conversation" => Some(Area::Conversations),
@@ -113,6 +117,7 @@ async fn call_area(area: Area, call: ToolCall<'_>) -> ApiResult<ToolReply> {
         Area::GoalAndUsage => goal_and_usage::call(call).await,
         Area::Todos => todos::call(call).await,
         Area::ProjectIcon => project_icon::call(call).await,
+        Area::Projects => projects::call(call).await,
         Area::Outline => outline::call(call).await,
         Area::Screens => screens::call(call).await,
         Area::Conversations => conversations::call(call).await,
@@ -151,6 +156,7 @@ pub fn tool_definitions() -> Value {
         goal_and_usage::definitions(),
         todos::definitions(),
         project_icon::definitions(),
+        projects::definitions(),
         outline::definitions(),
         screens::definitions(),
         conversations::definitions(),

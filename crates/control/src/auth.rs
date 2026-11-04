@@ -35,6 +35,12 @@ pub struct AuthUser {
 }
 
 impl AuthUser {
+    pub async fn of(state: &AppState, id: Uuid) -> ApiResult<AuthUser> {
+        let (email, name) = sqlx::query_as::<_, (String, String)>("select email, name from users where id = $1").bind(id).fetch_one(&state.pool).await?;
+
+        Ok(AuthUser { id, email, name, session: None, scopes: None, expires_at: None })
+    }
+
     pub fn require_full_access(&self) -> ApiResult<()> {
         if self.scopes.is_some() || self.expires_at.is_some() {
             return Err(ApiError::new(StatusCode::FORBIDDEN, "scope_not_granted", "This token does not cover that. Ask the person for access that does."));

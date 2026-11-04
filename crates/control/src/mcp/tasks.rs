@@ -1,8 +1,12 @@
+use super::approval;
 use super::call::{ToolCall, ToolReply};
+use crate::auth::AuthUser;
 use crate::error::ApiResult;
 use crate::schedules::{self, ProposedSchedule, preset_cron};
 use crate::tasks;
-use mycelium_proto::api::{EachRun, TaskStatus};
+use axum::Json;
+use axum::extract::{Path, State};
+use mycelium_proto::api::{EachRun, Task, TaskStatus};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -32,6 +36,39 @@ pub fn definitions() -> Value {
                     "options": {"type": "array", "items": {"type": "string"}, "description": "Suggested answers the person can pick."},
                 },
                 "required": ["question"],
+            },
+        },
+        {
+            "name": "list_tasks",
+            "description": "List the person's Tasks board: each item's id, column, title, age and the conversation it came from. Done, declined and closed items are left out unless asked for. It only reads.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "column": {"type": "string", "enum": ["question", "proposed", "open", "claimed", "done", "declined", "closed"], "description": "Only items in this column."},
+                    "older_than_days": {"type": "number", "description": "Only items created more than this many days ago."},
+                },
+            },
+        },
+        {
+            "name": "approve_task",
+            "description": "Approve a proposed task so it moves to Open on the person's Tasks board. The person confirms it in a card in this conversation first.",
+            "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "The id of the task, from list_tasks."}}, "required": ["id"]},
+        },
+        {
+            "name": "decline_task",
+            "description": "Decline a proposed task. The person confirms it in a card in this conversation first.",
+            "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "The id of the task, from list_tasks."}}, "required": ["id"]},
+        },
+        {
+            "name": "close_tasks",
+            "description": "Close one or more questions, proposed, open or started tasks so they leave the person's Tasks board, for example the stale ones from list_tasks. The person confirms the whole batch in one card in this conversation first.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "ids": {"type": "array", "items": {"type": "string"}, "description": "The ids of the tasks to close, from list_tasks."},
+                    "reason": {"type": "string", "description": "Why they should be closed, shown on the card."},
+                },
+                "required": ["ids"],
             },
         },
         {
@@ -90,6 +127,76 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 Err(message) => ToolReply::text(&message, true),
             }
         }
+        "list_tasks" => {
+            let owner = caller.owner().await?;
+            let Json(all) = tasks::list(State(state.clone()), AuthUser::of(state, owner).await?).await?;
+            let column = arguments.get("column").and_then(Value::as_str).map(str::to_string);
+            let older_than = arguments.get("older_than_days").and_then(Value::as_f64);
+            let now = chrono::Utc::now();
+            let lines: Vec<String> = all
+                .iter()
+                .filter(|task| match &column {
+                    Some(column) => crate::store::enum_text(&task.status) == *column,
+                    None => matches!(task.status, TaskStatus::Question | TaskStatus::Proposed | TaskStatus::Open | TaskStatus::Claimed),
+                })
+                .filter(|task| older_than.is_none_or(|days| (now - task.created_at).num_hours() as f64 / 24.0 > days))
+                .map(|task| listed(task, now))
+                .collect();
+
+            if lines.is_empty() { ToolReply::text("No tasks match.", false) } else { ToolReply::text(&lines.join("\n"), false) }
+        }
+        "approve_task" | "decline_task" => {
+            let Some(id) = arguments.get("id").and_then(Value::as_str).and_then(|text| Uuid::parse_str(text.trim()).ok()) else {
+                return Ok(ToolReply::invalid(&format!("{tool} needs id, a task id from list_tasks.")));
+            };
+            let owner = caller.owner().await?;
+            let Some(task) = owned(state, owner, &[id]).await?.into_iter().next() else {
+                return Ok(ToolReply::text("Nothing was changed. None of the person's tasks has that id. Look it up with list_tasks.", true));
+            };
+
+            if task.status != TaskStatus::Proposed {
+                return Ok(ToolReply::text(&format!("Nothing was changed. \"{}\" is {}, and only proposed tasks are approved or declined.", task.title, crate::store::enum_text(&task.status)), true));
+            }
+
+            if let Err(refusal) = approval::approved(&caller, tool, &json!({"task": task.title})).await? {
+                return Ok(ToolReply::text(&refusal, true));
+            }
+
+            let user = AuthUser::of(state, owner).await?;
+            let moved = if tool == "approve_task" { tasks::approve(State(state.clone()), user, Path(id)).await } else { tasks::decline(State(state.clone()), user, Path(id)).await };
+
+            match moved {
+                Ok(Json(task)) => ToolReply::text(&format!("\"{}\" is now {}.", task.title, crate::store::enum_text(&task.status)), false),
+                Err(error) => ToolReply::text(&format!("Nothing was changed. {}", error.message()), true),
+            }
+        }
+        "close_tasks" => {
+            let ids: Vec<Uuid> = arguments.get("ids").and_then(Value::as_array).into_iter().flatten().filter_map(|value| value.as_str().and_then(|text| Uuid::parse_str(text.trim()).ok())).collect();
+
+            if ids.is_empty() {
+                return Ok(ToolReply::invalid("close_tasks needs ids, a list of task ids from list_tasks."));
+            }
+
+            let owner = caller.owner().await?;
+            let closable: Vec<Task> = owned(state, owner, &ids).await?.into_iter().filter(|task| matches!(task.status, TaskStatus::Question | TaskStatus::Proposed | TaskStatus::Open | TaskStatus::Claimed)).collect();
+
+            if closable.is_empty() {
+                return Ok(ToolReply::text("Nothing was closed. None of those ids is a question, proposed, open or started task of the person's. Look them up with list_tasks.", true));
+            }
+
+            let titles: Vec<&str> = closable.iter().map(|task| task.title.as_str()).collect();
+            let card = json!({"close": titles, "reason": arguments.get("reason").and_then(Value::as_str).unwrap_or_default()});
+
+            if let Err(refusal) = approval::approved(&caller, tool, &card).await? {
+                return Ok(ToolReply::text(&refusal, true));
+            }
+
+            let wanted: Vec<Uuid> = closable.iter().map(|task| task.id).collect();
+            let closed = tasks::close_owned(state, owner, &wanted).await?;
+            let skipped = ids.len() - closed.len();
+
+            ToolReply::text(&format!("Closed {} {}.{}", closed.len(), if closed.len() == 1 { "task" } else { "tasks" }, if skipped > 0 { format!(" {skipped} could not be closed: they are unknown, already finished or not the person's.") } else { String::new() }), false)
+        }
         _ => {
             let prompt = arguments.get("prompt").and_then(Value::as_str).map(str::trim).unwrap_or_default();
 
@@ -122,4 +229,23 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             }
         }
     })
+}
+
+async fn owned(state: &crate::state::AppState, owner: Uuid, ids: &[Uuid]) -> ApiResult<Vec<Task>> {
+    let Json(all) = tasks::list(State(state.clone()), AuthUser::of(state, owner).await?).await?;
+
+    Ok(all.into_iter().filter(|task| ids.contains(&task.id)).collect())
+}
+
+fn listed(task: &Task, now: chrono::DateTime<chrono::Utc>) -> String {
+    let days = (now - task.created_at).num_days();
+    let age = match days {
+        0 => "today".to_string(),
+        1 => "1 day old".to_string(),
+        days => format!("{days} days old"),
+    };
+    let source = task.source_title.as_deref().map(|title| format!(", from \"{title}\"")).unwrap_or_default();
+    let waiting = if task.waits_on > 0 { format!(", waits on {}", task.waits_on) } else { String::new() };
+
+    format!("{} [{}] {} ({age}{source}{waiting})", task.id, crate::store::enum_text(&task.status), task.title.replace('\n', " "))
 }
