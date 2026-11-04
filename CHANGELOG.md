@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.24.0
+
+- The default mode in Settings, Agents offers the modes each agent last reported, under its own names. Auto for Claude Code is its real auto mode and Accept edits is a choice of its own, and Codex defaults are applied with the ids Codex reports. Saved Codex defaults move to the new ids.
+- An assistant working in a workspace has the Mode control of any workspace conversation.
+- Each walkthrough step has a reviewed toggle, and Approve in a step marks it reviewed and opens the next one. Sections show as reviewed once all their steps are, the header counts reviewed steps, and reviewed state is kept with the walkthrough on every device. Steps are no longer marked viewed on their own.
+- Check your understanding shows each question as a card with radio options, its feedback under the options, a Back to step link and a primary Check. The step list stacks above the step in a narrow panel.
+- Agents can read another conversation in the same group, a connected group or a connected conversation with read_conversation.
+
 ## v0.23.1
 
 - Tab copies a prepared squash or merge message into an empty commit field so it can be edited.
