@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.25.0
+
+- Agents can list the task board with list_tasks, showing each task's column, age and source, and approve, decline or close tasks with approve_task, decline_task and close_tasks. Each change asks on an Approve or Deny card in the conversation, and closing several tasks asks once for the whole batch.
+- Tasks have a Closed state. A closed task leaves the board.
+- Agents can register a project with create_project and change its group or test command with update_project, each after an Approve or Deny card.
+- API tokens with conversation read access can read the task board.
+- Swiping the phone sidebar open closes the keyboard.
+
 ## v0.24.4
 
 - The pull request panel renders markdown in its summary and comments.
