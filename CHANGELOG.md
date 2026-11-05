@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.25.1
+
+- Cmd+V, Ctrl+V and Shift+Insert paste into the terminal on desktop and the web.
+- Agents and terminals start with the folder's direnv environment when direnv is installed and the folder's .envrc is allowed.
+
 ## v0.25.0
 
 - Agents can list the task board with list_tasks, showing each task's column, age and source, and approve, decline or close tasks with approve_task, decline_task and close_tasks. Each change asks on an Approve or Deny card in the conversation, and closing several tasks asks once for the whole batch.
