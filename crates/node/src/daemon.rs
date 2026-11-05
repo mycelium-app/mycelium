@@ -675,7 +675,7 @@ impl Daemon {
             let _ = self.out.send(NodeToControl::SessionClosed { conversation_id: *idle_id });
         }
 
-        let agent_command = (self.options.agent_commands)(agent);
+        let mut agent_command = (self.options.agent_commands)(agent);
 
         let (env, folder, requested_account) = if self.pods.is_some() {
             let mut env = agent_env(agent);
@@ -759,6 +759,8 @@ impl Daemon {
 
                 return;
             }
+
+            agent_command = [crate::direnv::exec_prefix(&folder), agent_command].concat();
             (env, folder, requested_account)
         };
 

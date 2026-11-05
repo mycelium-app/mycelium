@@ -7,6 +7,7 @@ pub mod browser_control;
 pub mod changes;
 pub mod codex_app_server;
 pub mod config;
+pub mod direnv;
 pub mod daemon;
 pub mod environment;
 pub mod files;

@@ -264,7 +264,7 @@ impl TerminalManager {
                 tmux.pty_command(&["attach-session", "-t", &session_target(terminal_id)])
             }
             None => {
-                let mut builder = CommandBuilder::new(&self.shell);
+                let mut builder = CommandBuilder::from_argv(self.shell_in(cwd).into_iter().map(Into::into).collect());
                 builder.cwd(cwd);
                 builder.env("TERM", "xterm-256color");
                 scrub(&mut builder);
@@ -317,6 +317,10 @@ impl TerminalManager {
         Ok(())
     }
 
+    fn shell_in(&self, cwd: &str) -> Vec<String> {
+        [crate::direnv::exec_prefix(Path::new(cwd)), vec![self.shell.clone()]].concat()
+    }
+
     fn find_tmux(directory: &Path) -> Option<Tmux> {
         let program = find_in_path("tmux", &std::env::var_os("PATH").unwrap_or_default());
         let Some(program) = program else {
@@ -338,6 +342,7 @@ impl TerminalManager {
         let name = terminal_id.to_string();
         let target = format!("{}:", session_target(terminal_id));
         let size = (cols.to_string(), rows.to_string());
+        let shell = self.shell_in(cwd);
         let history = TMUX_HISTORY_LINES.to_string();
         let conversation = conversation_id.to_string();
         let status = tmux
@@ -347,7 +352,11 @@ impl TerminalManager {
                 "set-option", "-g", "default-terminal", "xterm-256color", ";",
                 "set-option", "-s", "escape-time", "0", ";",
                 "set-option", "-s", "-a", "terminal-overrides", ",*:smcup@:rmcup@", ";",
-                "new-session", "-d", "-s", &name, "-x", &size.0, "-y", &size.1, "-c", cwd, &self.shell, ";",
+                "new-session", "-d", "-s", &name, "-x", &size.0, "-y", &size.1, "-c", cwd,
+            ])
+            .args(&shell)
+            .args([
+                ";",
                 "set-option", "-t", &target, "status", "off", ";",
                 "set-option", "-t", &target, "prefix", "None", ";",
                 "set-option", "-t", &target, TMUX_CONVERSATION_OPTION, &conversation,
