@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.26.1
+
+- The environment live view reconnects with a fresh ticket after its connection drops, instead of staying black.
+- Publishes the v0.26.0 changes, whose build did not finish.
+
 ## v0.26.0
 
 - Assistants can have an icon, an uploaded image or their first letter, on a colour, chosen from Change icon in their settings.
