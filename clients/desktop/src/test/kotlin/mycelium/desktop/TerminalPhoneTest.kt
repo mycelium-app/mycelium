@@ -40,6 +40,7 @@ import mycelium.ui.ConversationScreen
 import mycelium.ui.LocalTouch
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.TerminalPanel
+import mycelium.ui.TerminalShortcut
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -198,5 +199,24 @@ class TerminalPhoneTest {
         compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("Type into terminal").fetchSemanticsNodes().isNotEmpty() }
 
         compose.onAllNodes(hasSetTextAction() and hasContentDescription("Type into terminal").not()).assertCountEquals(0)
+    }
+
+    @Test
+    fun theTerminalShortcutOpensTheTerminalWithNothingFocused() {
+        val store = store()
+
+        runBlocking { store.refresh(); store.open("c1") }
+        compose.setContent {
+            MyceliumTheme(true) {
+                val state by store.state.collectAsState()
+
+                ConversationScreen(store, state, "c1", onArchived = {}, panels = false)
+            }
+        }
+        compose.waitUntil(5_000) { compose.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
+
+        compose.runOnIdle { TerminalShortcut.press() }
+
+        compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("Terminal for midden. Press Shift and Tab to leave it.").fetchSemanticsNodes().isNotEmpty() }
     }
 }

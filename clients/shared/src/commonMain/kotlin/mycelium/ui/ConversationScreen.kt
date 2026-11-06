@@ -47,12 +47,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -524,18 +520,16 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
         val terminalAvailable = !chat && !conversation.scratch
 
+        LaunchedEffect(id, terminalAvailable) {
+            if (terminalAvailable) {
+                TerminalShortcut.presses.collect { toggleTerminal() }
+            }
+        }
+
         Row(
             Modifier
                 .fillMaxSize()
-                .onPreviewKeyEvent { event ->
-                    val toggling = terminalAvailable && event.type == KeyEventType.KeyDown && event.isCtrlPressed && event.key == Key.Grave
-
-                    if (toggling) {
-                        toggleTerminal()
-                    }
-
-                    toggling
-                }
+                .onPreviewKeyEvent { event -> terminalAvailable && TerminalShortcut.handle(event) }
                 .onSizeChanged { areaWidth = with(density) { it.width.toDp() } },
         ) {
             Column(

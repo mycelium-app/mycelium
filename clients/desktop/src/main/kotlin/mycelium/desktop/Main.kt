@@ -22,6 +22,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import mycelium.ui.TerminalShortcut
 import mycelium.App
 import mycelium.AudioPlayer
 import mycelium.AudioRecorder
@@ -443,6 +444,7 @@ fun main() = application {
         onCloseRequest = ::exitApplication,
         title = "Mycelium",
         state = rememberWindowState(size = DpSize(1280.dp, 800.dp)),
+        onPreviewKeyEvent = TerminalShortcut::handle,
     ) {
         val density = LocalDensity.current
 
