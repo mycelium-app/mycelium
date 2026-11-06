@@ -87,6 +87,7 @@ import mycelium.state.parsePasted
 import mycelium.state.MarkdownListItem
 import mycelium.state.parseUiBlock
 import mycelium.state.pinnedCards
+import mycelium.state.pinnedWorkflows
 import mycelium.state.agentName
 import mycelium.state.clockTime
 import mycelium.state.quietFor
@@ -171,7 +172,7 @@ fun ThreadView(
         }.filter { it.sameAs == null }
     }
     val lastFailure = remember(items) { items.indexOfLast { it is ThreadItem.Failure } }
-    val workflowCards = LocalConversationWorkflows.current?.workflows?.filter { it.kind == WorkflowKinds.Mycelium }.orEmpty()
+    val workflowCards = pinnedWorkflows(LocalConversationWorkflows.current?.workflows?.filter { it.kind == WorkflowKinds.Mycelium }.orEmpty(), dismissedPins, now)
 
 
     suspend fun showTopOf(target: Int) {
@@ -212,7 +213,7 @@ fun ThreadView(
                         item(key = "mycelium-workflows") {
                             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
                                 for (workflow in workflowCards) {
-                                    MyceliumWorkflowCard(workflow)
+                                    MyceliumWorkflowCard(workflow, onUnpin = { onUnpin(workflowPinKey(workflow.id)) })
                                 }
                             }
                         }

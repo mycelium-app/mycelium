@@ -9,6 +9,9 @@ import mycelium.state.WorkflowAgent
 import mycelium.state.WorkflowProgress
 import mycelium.state.applyWorkflowJournal
 import mycelium.state.pinnedCards
+import mycelium.state.pinnedWorkflows
+import mycelium.api.Workflow
+import mycelium.api.WorkflowPlan
 import mycelium.state.workflowPinKey
 import mycelium.state.workflowStats
 import mycelium.state.workflowTokens
@@ -123,5 +126,28 @@ class PinsTest {
         assertEquals("12.3k toks · 4 turns · 2m 05s", workflowStats(agents.single()))
         assertEquals("12.3k toks · 4 turns · 2m 05s", workflowStats(WorkflowProgress("run", agents).totals))
         assertEquals("12.3k toks", workflowTokens(WorkflowProgress("run", agents)))
+    }
+
+    private fun workflow(id: String, status: String, endedAt: String? = null) =
+        Workflow(id = id, title = "Investigate stuck transcriptions", status = status, plan = WorkflowPlan(), steps = emptyList(), round = 1, endedAt = endedAt)
+
+    @Test
+    fun aRunningWorkflowStaysPinnedAndAnEndedOneLeavesTwoMinutesAfterItEnds() {
+        val now = Instant.parse("2026-11-06T12:00:00Z")
+        val shown = pinnedWorkflows(
+            listOf(workflow("running", "running"), workflow("just-failed", "failed", "2026-11-06T11:59:00Z"), workflow("failed-earlier", "failed", "2026-11-06T11:50:00Z"), workflow("done-earlier", "done", "2026-11-06T11:00:00Z")),
+            emptySet(),
+            now,
+        )
+
+        assertEquals(listOf("running", "just-failed"), shown.map { it.id })
+    }
+
+    @Test
+    fun anUnpinnedWorkflowLeavesWhetherItIsRunningOrEnded() {
+        val now = Instant.parse("2026-11-06T12:00:00Z")
+        val shown = pinnedWorkflows(listOf(workflow("running", "running"), workflow("just-failed", "failed", "2026-11-06T11:59:30Z")), setOf(workflowPinKey("running"), workflowPinKey("just-failed")), now)
+
+        assertEquals(emptyList(), shown)
     }
 }

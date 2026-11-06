@@ -1,5 +1,6 @@
 package mycelium.state
 
+import mycelium.api.Workflow
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Instant
@@ -12,6 +13,13 @@ private val BetweenWorkflowStages = 2.minutes
 data class PinnedCard(val key: String, val label: String, val ui: UiNode? = null, val workflow: WorkflowProgress? = null)
 
 fun workflowPinKey(runId: String): String = "workflow:$runId"
+
+fun pinnedWorkflows(workflows: List<Workflow>, dismissed: Set<String>, now: Instant = Clock.System.now()): List<Workflow> =
+    workflows.filter { workflow ->
+        val endedFor = workflow.endedAt?.let(::instantOrNull)?.let { now - it }
+
+        workflowPinKey(workflow.id) !in dismissed && (!workflow.ended() || (endedFor != null && endedFor < BetweenWorkflowStages))
+    }
 
 fun pinnedCards(items: List<ThreadItem>, dismissed: Set<String>, now: Instant = Clock.System.now()): List<PinnedCard> {
     val pinned = LinkedHashMap<String, PinnedCard>()

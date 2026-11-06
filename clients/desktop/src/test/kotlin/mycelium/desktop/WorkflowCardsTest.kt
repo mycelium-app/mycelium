@@ -4,6 +4,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -127,7 +131,7 @@ class WorkflowCardsTest {
 
     @Test
     fun anEndedWorkflowHasNoStopButton() {
-        show(emptyList(), listOf(releaseCheck.copy(status = "done")))
+        show(emptyList(), listOf(releaseCheck.copy(status = "done", endedAt = Clock.System.now().toString())))
 
         rule.onNodeWithText("Finished").assertIsDisplayed()
         assertEquals(0, rule.onAllNodesWithText("Stop").fetchSemanticsNodes().size)
@@ -155,5 +159,24 @@ class WorkflowCardsTest {
 
         rule.onNodeWithText("Stop workflow").performClick()
         assertEquals(listOf("stop"), stopped.toList())
+    }
+
+    @Test
+    fun unpinningAWorkflowCardTakesItOffTheThread() {
+        rule.setContent {
+            var dismissed by remember { mutableStateOf(emptySet<String>()) }
+
+            MyceliumTheme(true) {
+                CompositionLocalProvider(LocalConversationWorkflows provides ConversationWorkflows(listOf(releaseCheck.copy(status = "failed", endedAt = Clock.System.now().toString())), { opened += it }, { id, request -> controls += id to request })) {
+                    Box(Modifier.width(900.dp).height(700.dp)) {
+                        ThreadView(emptyList(), onAnswer = { _, _ -> }, onStopWorkflow = {}, dismissedPins = dismissed, onUnpin = { dismissed = dismissed + it })
+                    }
+                }
+            }
+        }
+
+        rule.onNodeWithContentDescription("Unpin Release check").performClick()
+
+        rule.onNodeWithText("Release check").assertDoesNotExist()
     }
 }
