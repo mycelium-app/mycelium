@@ -553,9 +553,15 @@ private fun LiveStage(store: Store, environment: Environment, platform: Platform
 
     val connection = remember(platform) { platform.loadConnection() }
     var url by remember(environment.conversationId, environment.startedAt) { mutableStateOf<String?>(null) }
+    var reconnects by remember(environment.conversationId, environment.startedAt) { mutableStateOf(0) }
 
-    LaunchedEffect(environment.conversationId, environment.startedAt) {
+    LaunchedEffect(environment.conversationId, environment.startedAt, reconnects) {
         val baseUrl = connection?.baseUrl ?: return@LaunchedEffect
+
+        if (reconnects > 0) {
+            delay(LiveViewReconnectMillis * minOf(reconnects, LiveViewReconnectSteps))
+        }
+
         val ticket = catching { store.api.environmentStreamTicket(environment.conversationId) }.getOrNull() ?: return@LaunchedEffect
 
         url = environmentViewUrl(baseUrl, environment.conversationId, ticket)
@@ -576,11 +582,17 @@ private fun LiveStage(store: Store, environment: Environment, platform: Platform
         val viewUrl = url
 
         if (viewUrl != null) {
-            platform.LiveView(viewUrl, !person, Modifier.fillMaxSize()) {
-                if (!person) {
-                    store.takeOverEnvironment(environment.conversationId)
-                }
-            }
+            platform.LiveView(
+                viewUrl,
+                !person,
+                Modifier.fillMaxSize(),
+                onPointer = {
+                    if (!person) {
+                        store.takeOverEnvironment(environment.conversationId)
+                    }
+                },
+                onDisconnected = { reconnects++ },
+            )
         }
 
         val target = environment.target
@@ -656,3 +668,6 @@ internal fun environmentAppIcon(kind: EnvironmentAppKind?): MyIcon = when (kind)
     EnvironmentAppKind.Terminal -> MyIcon.Terminal
     EnvironmentAppKind.Mail, EnvironmentAppKind.Other, null -> MyIcon.AppWindow
 }
+
+private const val LiveViewReconnectMillis = 1_000L
+private const val LiveViewReconnectSteps = 5

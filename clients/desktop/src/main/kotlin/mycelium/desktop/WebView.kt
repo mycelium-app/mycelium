@@ -27,6 +27,9 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import com.jetbrains.cef.JCefAppConfig
 import mycelium.PageReading
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.cef.browser.CefMessageRouter
 import org.cef.callback.CefQueryCallback
 import org.cef.handler.CefMessageRouterHandlerAdapter
@@ -97,7 +100,7 @@ val jcefAvailable: Boolean by lazy {
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: PageReading? = null, viewOnly: Boolean? = null, onPointer: (() -> Unit)? = null) {
+fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: PageReading? = null, viewOnly: Boolean? = null, onPointer: (() -> Unit)? = null, onDisconnected: (() -> Unit)? = null) {
     var ready by remember { mutableStateOf(CefApp.getState() == CefApp.CefAppState.INITIALIZED) }
 
     LaunchedEffect(Unit) {
@@ -115,13 +118,16 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: Pag
     val host = remember { OffscreenBrowser() }
     val currentReading by rememberUpdatedState(reading)
     val currentOnPointer by rememberUpdatedState(onPointer)
+    val currentOnDisconnected by rememberUpdatedState(onDisconnected)
     val reader = remember { PageReader { currentReading } }
+    val statuses = remember { LiveViewStatus { currentOnDisconnected } }
     var browserCreated by remember { mutableStateOf(false) }
     val client = remember {
         Jcef.createClient().also {
             it.addLoadHandler(host.loaded)
             it.addContextMenuHandler(host.contextMenu)
             it.addMessageRouter(reader.router)
+            it.addMessageRouter(statuses.router)
             it.addLifeSpanHandler(object : CefLifeSpanHandlerAdapter() {
                 override fun onAfterCreated(browser: CefBrowser) {
                     SwingUtilities.invokeLater { browserCreated = true }
@@ -139,6 +145,7 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: Pag
         onDispose {
             host.contextMenu.close()
             reader.router.dispose()
+            statuses.router.dispose()
             browser?.close(true)
             client.dispose()
         }
@@ -264,6 +271,31 @@ private fun OffscreenBrowser.follow(coordinates: LayoutCoordinates, density: Dou
 private const val ReadIntervalMillis = 3000L
 private const val BoundsPollMillis = 50L
 private val ControlResendMillis = listOf(300L, 700L, 1500L, 3000L)
+
+private class LiveViewStatus(private val onDisconnected: () -> (() -> Unit)?) {
+    val router: CefMessageRouter = CefMessageRouter.create().also { router ->
+        router.addHandler(
+            object : CefMessageRouterHandlerAdapter() {
+                override fun onQuery(browser: CefBrowser, frame: org.cef.browser.CefFrame, queryId: Long, request: String, persistent: Boolean, callback: CefQueryCallback): Boolean {
+                    val disconnected = onDisconnected() ?: return false
+
+                    if (!isDisconnectedStatus(request)) {
+                        return false
+                    }
+
+                    callback.success("")
+                    SwingUtilities.invokeLater { disconnected() }
+
+                    return true
+                }
+            },
+            false,
+        )
+    }
+}
+
+internal fun isDisconnectedStatus(request: String): Boolean =
+    runCatching { Json.parseToJsonElement(request).jsonObject }.getOrNull()?.let { it["type"]?.jsonPrimitive?.content == "status" && it["state"]?.jsonPrimitive?.content == "disconnected" } == true
 
 private class PageReader(private val reading: () -> PageReading?) {
     val router: CefMessageRouter = CefMessageRouter.create().also { router ->

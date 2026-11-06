@@ -29,6 +29,10 @@ rfb.clipViewport = false;
 rfb.viewOnly = query.get('view') !== '0';
 
 function tell(message) {
+    if (window.cefQuery && message.type === 'status') {
+        window.cefQuery({ request: JSON.stringify(message), onSuccess() {}, onFailure() {} });
+    }
+
     window.parent.postMessage(message, location.origin);
 }
 

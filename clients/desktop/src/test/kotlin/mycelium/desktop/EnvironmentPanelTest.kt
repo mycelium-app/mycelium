@@ -62,6 +62,7 @@ private fun environmentJson(state: String = "running", controller: String = "age
 
 private class EnvironmentPlatform(override val showsLiveView: Boolean = false) : Platform {
     var liveUrl: String? = null
+    var disconnect: () -> Unit = {}
     var liveViewOnly: Boolean? = null
 
     override val originUrl: String? = null
@@ -77,7 +78,8 @@ private class EnvironmentPlatform(override val showsLiveView: Boolean = false) :
     override fun localDateTime(epochMillis: Long): String? = "2026-10-28T14:32:00"
 
     @Composable
-    override fun LiveView(url: String, viewOnly: Boolean, modifier: Modifier, onPointer: () -> Unit) {
+    override fun LiveView(url: String, viewOnly: Boolean, modifier: Modifier, onPointer: () -> Unit, onDisconnected: () -> Unit) {
+        disconnect = onDisconnected
         liveUrl = url
         liveViewOnly = viewOnly
         Box(modifier)
@@ -92,6 +94,7 @@ class EnvironmentPanelTest {
     val scopes = TestScopes()
 
     private val requests = CopyOnWriteArrayList<String>()
+    private var tickets = 0
     private var expanded by mutableStateOf(false)
 
     private fun show(
@@ -104,7 +107,9 @@ class EnvironmentPanelTest {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             if (request.url.encodedPath.endsWith("/stream-ticket")) {
-                return@MockEngine respond("""{"ticket":"token"}""", HttpStatusCode.OK, json)
+                tickets++
+
+                return@MockEngine respond("""{"ticket":"token-$tickets"}""".replace("token-1", "token"), HttpStatusCode.OK, json)
             }
 
             requests += "${request.method.value} ${request.url.encodedPath}"
@@ -189,6 +194,18 @@ class EnvironmentPanelTest {
         rule.onNodeWithContentDescription("Live view of the environment on atlas-box. The agent's pointer is at Click, Password.").assertExists()
         assertEquals(true, platform.liveViewOnly)
         assertEquals("https://mycelium.test/novnc/embed.html?path=%2Fapi%2Fv1%2Fconversations%2Fc1%2Fenvironment%2Fstream&ticket=token", platform.liveUrl)
+    }
+
+    @Test
+    fun aLiveViewThatDisconnectsReconnectsWithAFreshTicket() {
+        val platform = EnvironmentPlatform(showsLiveView = true)
+
+        show(environmentJson(), platform = platform)
+        rule.waitUntil(5_000) { platform.liveUrl?.endsWith("ticket=token") == true }
+
+        rule.runOnIdle { platform.disconnect() }
+
+        rule.waitUntil(5_000) { platform.liveUrl?.endsWith("ticket=token-2") == true }
     }
 
     @Test

@@ -78,7 +78,7 @@ interface Platform {
     val showsLiveView: Boolean get() = false
 
     @Composable
-    fun LiveView(url: String, viewOnly: Boolean, modifier: Modifier, onPointer: () -> Unit) {
+    fun LiveView(url: String, viewOnly: Boolean, modifier: Modifier, onPointer: () -> Unit, onDisconnected: () -> Unit) {
         Column(modifier.fillMaxSize(), Arrangement.Center, Alignment.CenterHorizontally) {
             Label("The live view is available in the desktop app.")
         }

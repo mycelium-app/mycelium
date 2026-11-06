@@ -293,8 +293,8 @@ private object DesktopPlatform : Platform {
     override val showsLiveView: Boolean get() = jcefAvailable
 
     @Composable
-    override fun LiveView(url: String, viewOnly: Boolean, modifier: Modifier, onPointer: () -> Unit) {
-        JcefWebContent(url, null, modifier, viewOnly = viewOnly, onPointer = onPointer)
+    override fun LiveView(url: String, viewOnly: Boolean, modifier: Modifier, onPointer: () -> Unit, onDisconnected: () -> Unit) {
+        JcefWebContent(url, null, modifier, viewOnly = viewOnly, onPointer = onPointer, onDisconnected = onDisconnected)
     }
 
     override fun chime() {
