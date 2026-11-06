@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.26.0
+
+- Assistants can have an icon, an uploaded image or their first letter, on a colour, chosen from Change icon in their settings.
+- With All groups chosen, sidebar assistant rows start with their group's name, as conversation rows start with their project's.
+- A subagent's model can be named by its id or display name. A model the agent does not offer is refused before the approval card, with the models it does offer, and list_places names each agent's models.
+- Workflow cards under a conversation can be unpinned, and a finished, failed or stopped workflow leaves two minutes after it ends.
+
 ## v0.25.1
 
 - Cmd+V, Ctrl+V and Shift+Insert paste into the terminal on desktop and the web.
