@@ -7,8 +7,8 @@ use uuid::Uuid;
 pub fn definitions() -> Value {
     json!([
         {"name":"start_workflow","description":"Propose a native workflow or subagent; the person approves it on a card first and nothing starts before. Steps may name node and account by name or id (see list_places). Steps use ordinary conversations across agents and nodes. Dependencies fan out automatically; gate steps wait for the person. Prompts reference {{step_key.output}} and {{previous}}. Nested workflow steps contain another plan. Use max_rounds (1 to 20) and optional stop_when text for bounded debate loops.","inputSchema":{"type":"object","properties":{"plan":{"type":"object"}},"required":["plan"]}},
-        {"name":"start_subagent","description":"Start a native subagent as an ordinary conversation, independently of the current agent harness. Supply a step with title, prompt, node_id, agent (claude or codex), cwd, optional model, difficulty, account, project_id and branch. Or provider_id and model for a chat-model subagent. Name node and account by name or id (see list_places). The person approves the card first: nothing starts until they do. Read its conversation and result with get_workflow.","inputSchema":{"type":"object","properties":{"step":{"type":"object"}},"required":["step"]}},
-        {"name":"list_places","description":"List the person's nodes with whether each is online, their agents, signed-in accounts, chat models and projects with their folders. Use it to name a node, agent and account for start_subagent or start_workflow. It only reads and needs no approval.","inputSchema":{"type":"object","properties":{}}},
+        {"name":"start_subagent","description":"Start a native subagent as an ordinary conversation, independently of the current agent harness. Supply a step with title, prompt, node_id, agent (claude or codex), cwd, optional model (as list_places names it), difficulty, account, project_id and branch. Or provider_id and model for a chat-model subagent. Name node and account by name or id (see list_places). The person approves the card first: nothing starts until they do. Read its conversation and result with get_workflow.","inputSchema":{"type":"object","properties":{"step":{"type":"object"}},"required":["step"]}},
+        {"name":"list_places","description":"List the person's nodes with whether each is online, their agents with the models each last offered, signed-in accounts, chat models and projects with their folders. Use it to name a node, agent, model and account for start_subagent or start_workflow. It only reads and needs no approval.","inputSchema":{"type":"object","properties":{}}},
         {"name":"get_workflow","description":"Read a native workflow, its step conversations, outputs and gates.","inputSchema":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}},
     ])
 }
@@ -26,6 +26,14 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             let logins = sqlx::query_as::<_, (Uuid, String, String)>("select node_id, agent, account from logins where node_id = any($1) and state = 'signed_in' and account is not null order by account").bind(&ids).fetch_all(&state.pool).await?;
             let projects = sqlx::query_as::<_, (Uuid, Uuid, String, String)>("select id, node_id, name, path from projects where owner = $1 order by name").bind(owner).fetch_all(&state.pool).await?;
             let providers = sqlx::query_as::<_, (Uuid, String, Vec<String>)>("select id, name, models from model_providers where owner = $1 order by name").bind(owner).fetch_all(&state.pool).await?;
+            let mut agent_models = std::collections::HashMap::new();
+
+            for (node_id, agent) in &agents {
+                let offered = crate::prompts::offered_models(state, owner, *node_id, agent).await?;
+                let models: Vec<Value> = offered.iter().filter_map(|entry| Some(json!({"model": entry.get("modelId")?, "name": entry.get("name")}))).collect();
+
+                agent_models.entry(*node_id).or_insert_with(serde_json::Map::new).insert(agent.clone(), json!(models));
+            }
 
             let nodes: Vec<Value> = nodes
                 .iter()
@@ -33,7 +41,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                     let accounts: Vec<Value> = logins.iter().filter(|login| login.0 == *node_id).map(|(_, agent, account)| json!({"agent": agent, "account": account})).collect();
                     let folders: Vec<Value> = projects.iter().filter(|project| project.1 == *node_id).map(|(project_id, _, name, path)| json!({"project_id": project_id, "name": name, "path": path})).collect();
 
-                    json!({"id": node_id, "name": name, "online": state.hub.is_online(*node_id), "agents": agents.iter().filter(|agent| agent.0 == *node_id).map(|agent| agent.1.clone()).collect::<Vec<_>>(), "signed_in_accounts": accounts, "projects": folders})
+                    json!({"id": node_id, "name": name, "online": state.hub.is_online(*node_id), "agents": agents.iter().filter(|agent| agent.0 == *node_id).map(|agent| agent.1.clone()).collect::<Vec<_>>(), "agent_models": agent_models.get(node_id).cloned().unwrap_or_default(), "signed_in_accounts": accounts, "projects": folders})
                 })
                 .collect();
             let places = json!({"nodes": nodes, "chat_models": providers.iter().map(|(provider_id, name, models)| json!({"provider_id": provider_id, "provider": name, "models": models})).collect::<Vec<_>>()});

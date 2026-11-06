@@ -145,6 +145,19 @@ pub async fn propose(state: &AppState, owner: Uuid, conversation_id: Uuid, kind:
                 }
                 None => {}
             }
+
+            if let Some(model) = step.get("model").and_then(Value::as_str).map(String::from) {
+                let offered = crate::prompts::offered_models(state, owner, chosen, &agent).await?;
+
+                if !offered.is_empty() {
+                    match crate::prompts::resolve_model(&offered, &model) {
+                        Ok(id) => {
+                            step.insert("model".into(), json!(id));
+                        }
+                        Err(listed) => return Ok(Err(format!("Nothing was proposed. {agent} on {} does not offer the model {model}. It offers: {listed}. Leave model out to use the agent's default.", ordered[0].1))),
+                    }
+                }
+            }
         }
 
         if !step_choices.is_empty() {

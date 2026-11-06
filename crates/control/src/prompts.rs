@@ -667,6 +667,50 @@ pub async fn set_config(state: &AppState, owner: Uuid, id: Uuid, request: Config
     Ok(())
 }
 
+pub fn resolve_model(available: &[Value], requested: &str) -> Result<String, String> {
+    let wanted = requested.trim().to_lowercase();
+    let entries: Vec<(&str, String)> = available.iter().filter_map(|entry| Some((entry.get("modelId")?.as_str()?, entry.get("name").and_then(Value::as_str).unwrap_or_default().to_lowercase()))).collect();
+    let exact = entries.iter().find(|(id, name)| id.to_lowercase() == wanted || *name == wanted);
+    let partial: Vec<&(&str, String)> = entries.iter().filter(|(id, name)| id.to_lowercase().contains(&wanted) || name.contains(&wanted)).collect();
+
+    match (exact, partial.as_slice()) {
+        (Some((id, _)), _) => Ok(id.to_string()),
+        (None, [(id, _)]) => Ok(id.to_string()),
+        _ => Err(offered_list(available)),
+    }
+}
+
+fn offered_list(available: &[Value]) -> String {
+    let listed: Vec<String> = available
+        .iter()
+        .filter_map(|entry| {
+            let id = entry.get("modelId")?.as_str()?;
+
+            Some(match entry.get("name").and_then(Value::as_str) {
+                Some(name) if name != id => format!("{id} ({name})"),
+                _ => id.to_string(),
+            })
+        })
+        .collect();
+
+    if listed.is_empty() { "none reported yet".to_string() } else { listed.join(", ") }
+}
+
+pub async fn offered_models(state: &AppState, owner: Uuid, node_id: Uuid, agent: &str) -> ApiResult<Vec<Value>> {
+    let models: Option<Value> = sqlx::query_scalar(
+        "select options->'models'->'availableModels' from conversations
+         where owner = $1 and node_id = $2 and agent = $3 and jsonb_typeof(options->'models'->'availableModels') = 'array' and jsonb_array_length(options->'models'->'availableModels') > 0
+         order by updated_at desc limit 1",
+    )
+    .bind(owner)
+    .bind(node_id)
+    .bind(agent)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    Ok(models.and_then(|models| models.as_array().cloned()).unwrap_or_default())
+}
+
 pub async fn apply_model(state: &AppState, owner: Uuid, conversation: Uuid, model: Option<&str>, difficulty: Option<&str>) -> ApiResult<()> {
     let options: Option<Value> = sqlx::query_scalar("select options from conversations where id=$1").bind(conversation).fetch_one(&state.pool).await?;
     let config_options = options.as_ref().and_then(|options| options.get("config_options")).and_then(Value::as_array);
@@ -680,13 +724,14 @@ pub async fn apply_model(state: &AppState, owner: Uuid, conversation: Uuid, mode
         .and_then(|option| option.get("id"))
         .and_then(Value::as_str);
 
-    if let Some(model) = model {
-        let available = options.as_ref().and_then(|options| options.get("models")).and_then(|models| models.get("availableModels")).and_then(Value::as_array);
-
-        if !available.is_some_and(|models| models.iter().any(|entry| entry.get("modelId").and_then(Value::as_str) == Some(model))) {
-            return Err(ApiError::bad_request("workflow_model_unavailable", "The requested model is not offered by this agent. Choose one of its available models."));
-        }
-    }
+    let available = options.as_ref().and_then(|options| options.get("models")).and_then(|models| models.get("availableModels")).and_then(Value::as_array).cloned().unwrap_or_default();
+    let model = match model {
+        Some(requested) => Some(resolve_model(&available, requested).map_err(|offered| {
+            ApiError::bad_request("workflow_model_unavailable", format!("The requested model is not offered by this agent. Choose one of its available models: {offered}."))
+        })?),
+        None => None,
+    };
+    let model = model.as_deref();
 
     if let Some(difficulty) = difficulty {
         let option = config_options.and_then(|options| options.iter().find(|option| option.get("id").and_then(Value::as_str) == effort));

@@ -239,3 +239,57 @@ async fn list_places_reports_online_nodes_and_signed_in_accounts() {
     assert_eq!((laptop["online"].clone(), desktop["online"].clone()), (json!(true), json!(false)));
     assert_eq!(laptop["signed_in_accounts"], json!([{"agent": "claude", "account": "a@example.com"}]));
 }
+
+async fn offer_models(server: &Server, conversation: Uuid) {
+    let models = json!({"models": {"currentModelId": "opus", "availableModels": [{"modelId": "opus", "name": "Opus 5.5"}, {"modelId": "sonnet", "name": "Sonnet 5.5"}]}});
+    sqlx::query("update conversations set options = $2 where id = $1").bind(conversation).bind(models).execute(&server.pool).await.unwrap();
+}
+
+fn subagent_on(model: &str) -> Value {
+    let mut step = subagent("laptop");
+    step["step"]["model"] = json!(model);
+
+    step
+}
+
+#[tokio::test]
+async fn a_subagent_model_named_by_its_display_name_is_proposed_with_the_agents_model_id() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = caller(&server, &mut link).await;
+    offer_models(&server, conversation).await;
+
+    let result = call(&server, &link, conversation, "start_subagent", subagent_on("Opus 5.5")).await;
+
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(proposals(&server).await[0]["steps"][0]["model"], "opus");
+}
+
+#[tokio::test]
+async fn a_subagent_model_the_agent_does_not_offer_or_that_matches_two_is_refused_before_any_card_with_the_models_it_offers() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = caller(&server, &mut link).await;
+    offer_models(&server, conversation).await;
+
+    for model in ["claude-fable-5-1", "5.5"] {
+        let result = call(&server, &link, conversation, "start_subagent", subagent_on(model)).await;
+
+        assert_eq!(result["isError"], true, "{result}");
+        assert!(text(&result).contains("It offers: opus (Opus 5.5), sonnet (Sonnet 5.5)"), "{}", text(&result));
+    }
+
+    assert!(proposals(&server).await.is_empty());
+}
+
+#[tokio::test]
+async fn list_places_names_the_models_each_agent_last_offered_on_a_node() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = caller(&server, &mut link).await;
+    offer_models(&server, conversation).await;
+
+    let places: Value = serde_json::from_str(&text(&call(&server, &link, conversation, "list_places", json!({})).await)).unwrap();
+
+    assert_eq!(places["nodes"][0]["agent_models"]["claude"], json!([{"model": "opus", "name": "Opus 5.5"}, {"model": "sonnet", "name": "Sonnet 5.5"}]));
+}
