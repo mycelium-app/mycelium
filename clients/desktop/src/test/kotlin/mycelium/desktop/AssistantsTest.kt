@@ -59,6 +59,8 @@ class AssistantsTest {
 
     private val archivedAssistants = mutableListOf<String>()
 
+    private var groups = "[]"
+
     private fun shell(assistants: MutableList<String>, route: Route = Route.Empty, experiments: String = EnabledExperiments) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
@@ -73,7 +75,8 @@ class AssistantsTest {
                 path.endsWith("/assistants") && request.url.parameters["archived"] == "true" -> archivedAssistants.joinToString(prefix = "[", postfix = "]")
                 path.endsWith("/assistants") -> assistants.joinToString(prefix = "[", postfix = "]")
                 path.contains("/assistants/") && request.method == HttpMethod.Patch -> assistantJson(path.substringAfterLast("/a-"), pinned = true).also { changed -> assistants.replaceAll { if (it.contains(path.substringAfterLast("/"))) changed else it } }
-                path.endsWith("/groups") || path.endsWith("/projects") || path.endsWith("/nodes") || path.endsWith("/conversations") -> "[]"
+                path.endsWith("/groups") -> groups
+                path.endsWith("/projects") || path.endsWith("/nodes") || path.endsWith("/conversations") -> "[]"
                 else -> "{}"
             }
 
@@ -152,5 +155,21 @@ class AssistantsTest {
 
         rule.waitUntil(5_000) { requests.any { it.first.startsWith("PATCH") } }
         assertEquals("""{"archived":false}""", requests.last { it.first.startsWith("PATCH") }.second)
+    }
+
+    @Test
+    fun withAllGroupsChosenASidebarAssistantStartsWithItsGroupNameAndWithOneGroupChosenItDoesNot() {
+        groups = """[{"id":"g1","name":"Work","created_at":"2026-10-22T10:00:00Z"}]"""
+        shell(mutableListOf(assistantJson("Archivist").replace("\"preferences\"", "\"group_id\":\"g1\",\"colour\":\"violet\",\"preferences\""), assistantJson("Inbox").replace("\"preferences\"", "\"icon\":\"bolt\",\"colour\":\"amber\",\"preferences\"")))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Work Archivist, Idle").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(1, rule.onAllNodesWithContentDescription("Inbox, Idle").fetchSemanticsNodes().size)
+        rule.captureScreen("assistant-sidebar-groups")
+
+        rule.onNodeWithText("All groups").performClick()
+        rule.onNodeWithText("Work").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Archivist, Idle").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, rule.onAllNodesWithContentDescription("Work Archivist, Idle").fetchSemanticsNodes().size)
     }
 }

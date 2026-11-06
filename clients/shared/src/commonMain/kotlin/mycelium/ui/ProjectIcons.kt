@@ -1,6 +1,10 @@
 package mycelium.ui
 
 import androidx.compose.foundation.Image
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -102,11 +106,7 @@ fun projectIconNamed(name: String?): ProjectIconSpec? = ProjectIconSet.firstOrNu
 fun ProjectIcon(project: Project?, size: Dp = Tokens.Size.IconSm, modifier: Modifier = Modifier) {
     val sha256 = project?.avatarSha256
     val named = projectIconNamed(project?.icon)
-    val loadBytes = LocalAttachmentBytes.current
-    val avatar by produceState<Painter?>(null, sha256) {
-        value = sha256?.let { loadBytes(it) }?.let { bytes -> runCatching { BitmapPainter(bytes.decodeToImageBitmap()) }.getOrNull() }
-    }
-    val drawn = avatar
+    val drawn = rememberAvatar(sha256)
 
     if (sha256 != null && drawn != null) {
         Image(drawn, contentDescription = null, modifier.size(size).clip(ControlShape), contentScale = ContentScale.Crop)
@@ -125,11 +125,38 @@ fun ProjectIcon(project: Project?, size: Dp = Tokens.Size.IconSm, modifier: Modi
 }
 
 @Composable
+fun rememberAvatar(sha256: String?): Painter? {
+    val loadBytes = LocalAttachmentBytes.current
+    val avatar by produceState<Painter?>(null, sha256) {
+        value = sha256?.let { loadBytes(it) }?.let { bytes -> runCatching { BitmapPainter(bytes.decodeToImageBitmap()) }.getOrNull() }
+    }
+
+    return avatar
+}
+
+@Composable
 fun ProjectIconDialog(store: Store, projects: List<Project>, name: String, onDismiss: () -> Unit) {
+    IconDialog("Project icon for $name", "Upload logo", projects.firstOrNull()?.icon, onDismiss) { icon, logo, _ ->
+        for (project in projects) {
+            if (logo != null) {
+                store.uploadProjectAvatar(project.id, logo.mediaType, logo.bytes)
+            } else if (project.icon != icon || project.avatarSha256 != null) {
+                store.setProjectIcon(project.id, icon)
+            }
+        }
+    }
+}
+
+class IconColour(val chosen: String?)
+
+@Composable
+fun IconDialog(title: String, uploadLabel: String, icon: String?, onDismiss: () -> Unit, keepsImage: Boolean = false, colour: IconColour? = null, onSave: suspend (icon: String?, logo: PickedFile?, colour: String?) -> Unit) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
-    var choice by remember { mutableStateOf(projects.firstOrNull()?.icon) }
+    var choice by remember { mutableStateOf(icon) }
     var logo by remember { mutableStateOf<PickedFile?>(null) }
+    var keeping by remember { mutableStateOf(keepsImage) }
+    var chosenColour by remember { mutableStateOf(colour?.chosen) }
     var query by remember { mutableStateOf("") }
     val action = rememberAction()
     val shown = ProjectIconSet.filter { it.name.contains(query.trim().replace(' ', '-'), ignoreCase = true) }
@@ -144,6 +171,7 @@ fun ProjectIconDialog(store: Store, projects: List<Project>, name: String, onDis
         if (refused == null) {
             logo = named
             choice = null
+            keeping = false
         }
     }
 
@@ -153,36 +181,27 @@ fun ProjectIconDialog(store: Store, projects: List<Project>, name: String, onDis
         }
 
         action {
-            val chosenLogo = logo
-
-            for (project in projects) {
-                if (chosenLogo != null) {
-                    store.uploadProjectAvatar(project.id, chosenLogo.mediaType, chosenLogo.bytes)
-                } else if (project.icon != choice || project.avatarSha256 != null) {
-                    store.setProjectIcon(project.id, choice)
-                }
-            }
-
+            onSave(if (keeping) KeepImage else choice, logo, chosenColour)
             onDismiss()
         }
     }
 
     Dialog(onDismiss) {
-        Label("Project icon for $name", Modifier.semantics { heading() }, Tokens.Type.Title)
+        Label(title, Modifier.semantics { heading() }, Tokens.Type.Title)
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-            MyButton({ platform?.pickFiles(::pickLogo) }, text = "Upload logo", icon = MyIcon.Image, variant = ButtonVariant.Outline)
-            Label(logo?.name ?: "PNG, JPEG or WebP", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+            MyButton({ platform?.pickFiles(::pickLogo) }, text = uploadLabel, icon = MyIcon.Image, variant = ButtonVariant.Outline)
+            Label(logo?.name ?: if (keeping) "Current image" else "PNG, JPEG or WebP", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
         }
 
         TextInput(query, { query = it }, label = "Search icons", placeholder = "Search icons", showLabel = false, modifier = Modifier.fillMaxWidth())
 
         Column(Modifier.fillMaxWidth().heightIn(max = IconGridHeight).verticalScroll(rememberScrollState())) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                for (icon in shown) {
-                    val selected = logo == null && icon.name == choice
+                for (spec in shown) {
+                    val selected = logo == null && !keeping && spec.name == choice
 
-                    IconChoice(icon, selected, onClick = { choice = icon.name; logo = null; action.failure = null })
+                    IconChoice(spec, selected, onClick = { choice = spec.name; logo = null; keeping = false; action.failure = null })
                 }
             }
 
@@ -191,13 +210,56 @@ fun ProjectIconDialog(store: Store, projects: List<Project>, name: String, onDis
             }
         }
 
+        if (colour != null) {
+            ColourChoices(chosenColour, onPick = { chosenColour = it })
+        }
+
         action.failure?.let { ErrorBanner(it, onDismiss = { action.failure = null }) }
 
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-            MyButton({ choice = null; logo = null; action.failure = null }, text = "No icon", muted = true, selected = choice == null && logo == null)
+            MyButton({ choice = null; logo = null; keeping = false; action.failure = null }, text = "No icon", muted = true, selected = choice == null && logo == null && !keeping)
             MyButton(onDismiss, text = "Cancel", muted = true)
             MyButton(::save, text = "Save", variant = ButtonVariant.Outline)
         }
+    }
+}
+
+const val KeepImage = "keep-image"
+
+@Composable
+private fun ColourChoices(chosen: String?, onPick: (String?) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+        Label("Colour", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+
+        Row(Modifier.semantics { contentDescription = "Colour" }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+            SwatchChoice("No colour", chosen == null, onClick = { onPick(null) }) {
+                Box(Modifier.size(Tokens.Size.IconMd).border(Tokens.Size.Hairline, MyTheme.colors.borderControl, CircleShape))
+            }
+
+            for (accent in NodeColours) {
+                val name = accent.name.lowercase()
+
+                SwatchChoice(name, chosen == name, onClick = { onPick(name) }) {
+                    Box(Modifier.size(Tokens.Size.IconMd).background(namedColour(name) ?: MyTheme.colors.textMuted, CircleShape))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SwatchChoice(label: String, selected: Boolean, onClick: () -> Unit, swatch: @Composable () -> Unit) {
+    val colors = MyTheme.colors
+
+    Box(
+        Modifier
+            .size(touchMin(Tokens.Size.ControlLg))
+            .border(Tokens.Size.Hairline, if (selected) colors.text else Color.Transparent, ControlShape)
+            .pressable(onClick, role = Role.RadioButton, description = label, shape = ControlShape, selected = selected, stateDescription = if (selected) "Selected" else null)
+            .semantics { this.selected = selected },
+        contentAlignment = Alignment.Center,
+    ) {
+        swatch()
     }
 }
 

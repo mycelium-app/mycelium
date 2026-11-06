@@ -1,6 +1,15 @@
 package mycelium.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,11 +62,29 @@ private val StateChoices = listOf(Choice(AllStates, "All states"), Choice("worki
 private val GroupByChoices = listOf(Choice(GroupByNone, "No grouping"), Choice(GroupByGroup, "Group"), Choice(GroupByState, "State"))
 
 @Composable
-internal fun AssistantAvatar(name: String, size: androidx.compose.ui.unit.Dp = Tokens.Size.Avatar) {
-    Box(Modifier.size(size).clip(CircleShape).background(MyTheme.colors.bgSelected).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
-        Label(name.trim().take(1).uppercase(), style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
+internal fun AssistantAvatar(assistant: Assistant, size: androidx.compose.ui.unit.Dp = Tokens.Size.Avatar) {
+    val colors = MyTheme.colors
+    val tint = namedColour(assistant.colour)
+    val foreground = if (tint != null) colors.bgContent else colors.textMuted
+    val sha256 = assistant.avatarSha256
+    val named = projectIconNamed(assistant.icon)
+    val drawn = rememberAvatar(sha256)
+
+    Box(Modifier.size(size).clip(CircleShape).background(tint ?: colors.bgSelected).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
+        if (sha256 != null && drawn != null) {
+            Image(drawn, contentDescription = null, Modifier.size(size), contentScale = ContentScale.Crop)
+        } else if (sha256 == null && named != null) {
+            StrokedPaths(named.paths.asList(), foreground, size * AvatarIconScale)
+        } else {
+            val fontSize = with(LocalDensity.current) { (size * AvatarLetterScale).toSp() }
+
+            Label(assistant.name.trim().take(1).uppercase(), style = Tokens.Type.MetaStrong.copy(fontSize = fontSize, lineHeight = fontSize), color = foreground)
+        }
     }
 }
+
+private const val AvatarIconScale = 0.6f
+private const val AvatarLetterScale = 0.6f
 
 @Composable
 internal fun AssistantStateMark(state: String) {
@@ -102,7 +129,7 @@ internal fun AssistantMenuItems(store: Store, state: AppState, assistant: Assist
     MenuItem("Archive", onClick = { close(); store.act { store.patchAssistant(assistant, PatchAssistantRequest(archived = true)) } }, leading = MyIcon.Archive)
 }
 
-internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, assistants: List<Assistant>, route: Route, onRoute: (Route) -> Unit) {
+internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, assistants: List<Assistant>, route: Route, onRoute: (Route) -> Unit, showGroup: Boolean) {
     item(key = "assistants-label") {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Label("Assistants", Modifier.weight(1f).padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1).semantics { heading() }, Tokens.Type.Meta, MyTheme.colors.textMuted)
@@ -112,19 +139,34 @@ internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, 
 
     items(assistants, key = { "assistant-${it.id}" }) { assistant ->
         val menu = rememberRowMenuState()
+        val groupName = assistant.groupId?.takeIf { showGroup }?.let { state.groups[it]?.name }
+        val shownName = listOfNotNull(groupName, assistant.name).joinToString(" ")
 
         Box(Modifier.fillMaxWidth().rowContextMenu(menu), contentAlignment = Alignment.CenterStart) {
             Row(
                 Modifier
                     .fillMaxWidth()
                     .heightIn(min = rowHeight())
-                    .pressable({ onRoute(Route.Assistant(assistant.id)) }, description = "${assistant.name}, ${assistantStateName(assistant.state)}", selected = route == Route.Assistant(assistant.id) || menu.open, shape = BlockShape)
+                    .pressable({ onRoute(Route.Assistant(assistant.id)) }, description = "$shownName, ${assistantStateName(assistant.state)}", selected = route == Route.Assistant(assistant.id) || menu.open, shape = BlockShape)
                     .padding(horizontal = Tokens.Space.S2),
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                AssistantAvatar(assistant.name)
-                Label(assistant.name, Modifier.weight(1f), maxLines = 1)
+                AssistantAvatar(assistant)
+                BasicText(
+                    buildAnnotatedString {
+                        if (groupName != null) {
+                            withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(groupName) }
+                            append(" ")
+                        }
+
+                        append(assistant.name)
+                    },
+                    Modifier.weight(1f),
+                    style = Tokens.Type.Ui.themed().copy(color = MyTheme.colors.text),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
 
                 when (assistant.state) {
                     "working" -> Icon(MyIcon.Working, MyTheme.colors.statusWorking, Tokens.Size.IconSm)
@@ -227,7 +269,7 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
                                     horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    AssistantAvatar(assistant.name)
+                                    AssistantAvatar(assistant)
                                     Label(assistant.name, maxLines = 1)
 
                                     if (assistant.builtinKey != null) {

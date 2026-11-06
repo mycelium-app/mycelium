@@ -127,7 +127,7 @@ async fn link_conversations(state: &AppState, owner: Uuid, project: &ProjectRow)
     Ok(())
 }
 
-fn valid_icon(icon: &str) -> bool {
+pub(crate) fn valid_icon(icon: &str) -> bool {
     icon.len() <= MAX_ICON_CHARACTERS && icon.chars().all(|character| character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-')
 }
 
@@ -303,7 +303,16 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
 
 pub async fn set_avatar(state: &AppState, owner: Uuid, id: Uuid, media_type: &str, body: &[u8]) -> ApiResult<Project> {
     find_owned(state, id, owner).await?;
+    check_avatar(media_type, body)?;
 
+    let row = store_avatar(state, owner, id, media_type, body, false).await?.ok_or_else(|| ApiError::not_found("That project"))?;
+
+    publish_project(state, owner, id).await?;
+
+    Ok(row.to_proto())
+}
+
+pub(crate) fn check_avatar(media_type: &str, body: &[u8]) -> ApiResult<()> {
     if !AVATAR_MEDIA_TYPES.contains(&media_type) {
         return Err(ApiError::bad_request("avatar_not_image", "The logo must be a PNG, JPEG or WebP image. Choose another file."));
     }
@@ -316,11 +325,7 @@ pub async fn set_avatar(state: &AppState, owner: Uuid, id: Uuid, media_type: &st
         return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "avatar_too_large", "The logo is larger than 256 KB. Choose a smaller image."));
     }
 
-    let row = store_avatar(state, owner, id, media_type, body, false).await?.ok_or_else(|| ApiError::not_found("That project"))?;
-
-    publish_project(state, owner, id).await?;
-
-    Ok(row.to_proto())
+    Ok(())
 }
 
 pub async fn upload_avatar(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, headers: HeaderMap, body: Bytes) -> ApiResult<Json<Project>> {

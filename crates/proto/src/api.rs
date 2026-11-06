@@ -2509,6 +2509,12 @@ pub struct Assistant {
     pub wakes: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub builtin_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colour: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_sha256: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -2543,6 +2549,14 @@ pub struct PatchAssistantRequest {
     pub archived: Option<bool>,
     #[serde(default)]
     pub preferences: Option<AssistantPreferences>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub clear_icon: bool,
+    #[serde(default)]
+    pub colour: Option<String>,
+    #[serde(default)]
+    pub clear_colour: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

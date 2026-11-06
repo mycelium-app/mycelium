@@ -41,6 +41,9 @@ data class Assistant(
     val backup: AssistantBackup? = null,
     val wakes: String? = null,
     @SerialName("builtin_key") val builtinKey: String? = null,
+    val icon: String? = null,
+    val colour: String? = null,
+    @SerialName("avatar_sha256") val avatarSha256: String? = null,
     @SerialName("created_at") val createdAt: String,
 )
 
@@ -149,4 +152,8 @@ data class PatchAssistantRequest(
     val pinned: Boolean? = null,
     val archived: Boolean? = null,
     val preferences: AssistantPreferences? = null,
+    val icon: String? = null,
+    @SerialName("clear_icon") val clearIcon: Boolean = false,
+    val colour: String? = null,
+    @SerialName("clear_colour") val clearColour: Boolean = false,
 )

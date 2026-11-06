@@ -14,7 +14,7 @@ use axum::body::Bytes;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use base64::Engine;
-use mycelium_proto::api::{ModelChoice, Assistant, AssistantBackup, AssistantFile, AssistantPreferences, AssistantSecret, AssistantSecretState, AssistantState, PutAssistantSecretRequest, CreateAssistantRequest, CreateChatRequest, CreateConversationRequest, PatchAssistantRequest, PromptRequest};
+use mycelium_proto::api::{ModelChoice, Assistant, AssistantBackup, AssistantFile, AssistantPreferences, AssistantSecret, AssistantSecretState, AssistantState, PutAssistantSecretRequest, CreateAssistantRequest, CreateChatRequest, CreateConversationRequest, PatchAssistantRequest, PromptRequest, NODE_COLOURS};
 use mycelium_proto::conversation::{AgentId, Conversation};
 use mycelium_proto::link::{ControlToNode, FolderFile};
 use mycelium_proto::stream::StreamMessage;
@@ -35,7 +35,7 @@ const FOLDER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const SECRET_NAME_LIMIT: usize = 100;
 const MODEL_ERROR_MINUTES: i64 = 10;
 const FALL_BACK_CONDITIONS: [&str; 4] = ["usage_limit", "signed_out", "offline", "model_error"];
-const ASSISTANT_COLUMNS: &str = "a.id, a.name, a.description, a.group_id, a.preferences, a.builtin_key, a.conversation_id, a.backup, a.pinned_at, a.archived_at, a.created_at,
+const ASSISTANT_COLUMNS: &str = "a.id, a.name, a.description, a.group_id, a.preferences, a.builtin_key, a.conversation_id, a.backup, a.pinned_at, a.archived_at, a.icon, a.colour, a.avatar_sha256, a.created_at,
     c.status as current_status,
     (select max(updated_at) from conversations where assistant_id = a.id) as last_active_at,
     (select count(*) from conversations where assistant_id = a.id) as session_count,
@@ -54,6 +54,9 @@ struct AssistantRow {
     backup: Option<Jsonb<AssistantBackup>>,
     pinned_at: Option<chrono::DateTime<chrono::Utc>>,
     archived_at: Option<chrono::DateTime<chrono::Utc>>,
+    icon: Option<String>,
+    colour: Option<String>,
+    avatar_sha256: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
     current_status: Option<String>,
     last_active_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -95,6 +98,9 @@ impl AssistantRow {
             backup: self.backup.map(|backup| backup.0),
             wakes: self.wake_cron.as_deref().map(|crons| crons.split('|').map(crate::schedules::describe_cron).collect::<Vec<_>>().join(", ")),
             builtin_key: self.builtin_key,
+            icon: self.icon,
+            colour: self.colour,
+            avatar_sha256: self.avatar_sha256,
             created_at: self.created_at,
         }
     }
@@ -349,6 +355,16 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
         validate_preferences(&state, user.id, preferences).await?;
     }
 
+    let icon = request.icon.as_deref().map(str::trim).filter(|icon| !icon.is_empty());
+
+    if icon.is_some_and(|icon| !crate::projects::valid_icon(icon)) {
+        return Err(ApiError::bad_request("icon_invalid", "Choose an icon from the list."));
+    }
+
+    if let Some(colour) = request.colour.as_deref().filter(|colour| !NODE_COLOURS.contains(colour)) {
+        return Err(ApiError::bad_request("unknown_colour", format!("{colour} is not a colour Mycelium offers. Choose one of {}.", NODE_COLOURS.join(", "))));
+    }
+
     let description = request.description.as_deref().map(str::trim);
     let updated = sqlx::query(
         "update assistants set name = coalesce($3, name),
@@ -357,6 +373,9 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
              pinned_at = case when $7::boolean is null then pinned_at when $7 then coalesce(pinned_at, now()) else null end,
              archived_at = case when $8::boolean is null then archived_at when $8 then coalesce(archived_at, now()) else null end,
              preferences = coalesce($9, preferences),
+             icon = case when $10 then null else coalesce($11, icon) end,
+             avatar_sha256 = case when $10 or $11::text is not null then null else avatar_sha256 end,
+             colour = case when $12 then null else coalesce($13, colour) end,
              updated_at = now()
          where id = $1 and owner = $2",
     )
@@ -369,6 +388,10 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .bind(request.pinned)
     .bind(request.archived)
     .bind(request.preferences.as_ref().map(Jsonb))
+    .bind(request.clear_icon)
+    .bind(icon)
+    .bind(request.clear_colour)
+    .bind(request.colour.as_deref())
     .execute(&state.pool)
     .await;
 
@@ -398,6 +421,17 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     }
 
     Ok(Json(assistant))
+}
+
+pub async fn upload_avatar(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, headers: axum::http::HeaderMap, body: Bytes) -> ApiResult<Json<Assistant>> {
+    find_owned(&state, id, user.id).await?;
+    let media_type = crate::attachments::media_type_of(&headers);
+    crate::projects::check_avatar(&media_type, &body)?;
+    let (sha256, _, _) = crate::attachments::store(&state, user.id, &body, &media_type).await?;
+
+    sqlx::query("update assistants set avatar_sha256 = $3, icon = null, updated_at = now() where id = $1 and owner = $2").bind(id).bind(user.id).bind(&sha256).execute(&state.pool).await?;
+
+    Ok(Json(publish(&state, user.id, id).await?))
 }
 
 pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PromptRequest>) -> ApiResult<Json<Conversation>> {

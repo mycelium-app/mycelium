@@ -460,6 +460,7 @@ const NOT_YET_COVERED: &[(&str, &str)] = &[
     ("GET", "/api/v1/assistants/builtin/voice"),
     ("POST", "/api/v1/assistants/{id}/instructions/reset"),
     ("GET", "/api/v1/assistants/{id}"),
+    ("POST", "/api/v1/assistants/{id}/avatar"),
     ("GET", "/api/v1/assistants/{id}/actions"),
     ("PUT", "/api/v1/assistants/{id}/actions/{action_id}"),
     ("DELETE", "/api/v1/assistants/{id}/actions/{action_id}"),

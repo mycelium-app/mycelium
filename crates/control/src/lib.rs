@@ -393,6 +393,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/assistants/builtin/voice", get(voice::voice_assistant))
         .route("/api/v1/assistants/{id}/instructions/reset", post(voice::reset_instructions))
         .route("/api/v1/assistants/{id}", get(assistants::get).patch(assistants::patch))
+        .route("/api/v1/assistants/{id}/avatar", post(assistants::upload_avatar).layer(DefaultBodyLimit::max(projects::MAX_AVATAR_BYTES + 1024)))
         .route("/api/v1/assistants/{id}/actions", get(assistant_actions::list).post(assistant_actions::create))
         .route("/api/v1/assistants/{id}/actions/{action_id}", put(assistant_actions::update).delete(assistant_actions::delete))
         .route("/api/v1/assistants/{id}/actions/{action_id}/run", post(assistant_actions::run_handler))

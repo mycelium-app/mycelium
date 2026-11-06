@@ -518,9 +518,11 @@ class Store(
         return assistant
     }
 
-    suspend fun patchAssistant(assistant: mycelium.api.Assistant, request: mycelium.api.PatchAssistantRequest): mycelium.api.Assistant {
-        val changed = api.patchAssistant(assistant.id, request)
+    suspend fun patchAssistant(assistant: mycelium.api.Assistant, request: mycelium.api.PatchAssistantRequest): mycelium.api.Assistant = keepAssistant(api.patchAssistant(assistant.id, request))
 
+    suspend fun uploadAssistantAvatar(assistant: mycelium.api.Assistant, mediaType: String, bytes: ByteArray): mycelium.api.Assistant = keepAssistant(api.uploadAssistantAvatar(assistant.id, mediaType, bytes))
+
+    private fun keepAssistant(changed: mycelium.api.Assistant): mycelium.api.Assistant {
         mutableState.update { it.copy(assistants = it.assistants + (changed.id to changed)) }
 
         return changed

@@ -1,5 +1,6 @@
 package mycelium.desktop
 
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -234,5 +235,22 @@ class AssistantSettingsTest {
 
         rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/assistants/a1/backup" } }
         assertEquals("""{"forge_id":"f1","repository":"samexample/standup"}""", requests.last { it.first == "PUT /api/v1/assistants/a1/backup" }.second)
+    }
+
+    @Test
+    fun anIconAndAColourChosenInTheIconDialogAreSaved() {
+        shell()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Change icon").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Change icon").performClick()
+        rule.onNodeWithContentDescription("book").performClick()
+        rule.onNodeWithContentDescription("violet").performClick()
+        rule.captureScreen("assistant-icon-dialog")
+        rule.onAllNodesWithText("Save").onLast().performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "PATCH /api/v1/assistants/a1" } }
+        val sent = requests.last { it.first == "PATCH /api/v1/assistants/a1" }.second
+
+        assertEquals(true, sent.contains("\"icon\":\"book\"") && sent.contains("\"colour\":\"violet\""), sent)
     }
 }

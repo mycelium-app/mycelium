@@ -74,7 +74,7 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String, 
         Bar {
             OpenListButton()
             BackButton(current?.name ?: "the assistant", onBack)
-            current?.let { AssistantAvatar(it.name) }
+            current?.let { AssistantAvatar(it) }
             BarTitle("${current?.name ?: "Assistant"} settings")
 
             if (current?.builtinKey != null) {
@@ -152,6 +152,7 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
     var group by remember(assistant.id) { mutableStateOf(assistant.groupId ?: NoGroup) }
     var nameError by remember(assistant.id) { mutableStateOf<String?>(null) }
     var confirmingArchive by remember(assistant.id) { mutableStateOf(false) }
+    var choosingIcon by remember(assistant.id) { mutableStateOf(false) }
     val runner = rememberAction(assistant.id)
     val builtIn = assistant.builtinKey != null
     val isVoice = assistant.builtinKey == VoiceAssistantKey
@@ -178,6 +179,33 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
         runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
+
+        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+            Label("Icon", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                AssistantAvatar(assistant, Tokens.Size.ControlLg)
+                MyButton({ choosingIcon = true }, text = "Change icon", variant = ButtonVariant.Outline)
+            }
+        }
+
+        if (choosingIcon) {
+            IconDialog("Assistant icon for ${assistant.name}", "Upload image", assistant.icon, onDismiss = { choosingIcon = false }, keepsImage = assistant.avatarSha256 != null, colour = IconColour(assistant.colour)) { icon, image, colour ->
+                val request = PatchAssistantRequest(
+                    icon = icon.takeUnless { it == KeepImage || image != null },
+                    clearIcon = icon == null && image == null,
+                    colour = colour,
+                    clearColour = colour == null,
+                )
+                var changed = store.patchAssistant(assistant, request)
+
+                if (image != null) {
+                    changed = store.uploadAssistantAvatar(changed, image.mediaType, image.bytes)
+                }
+
+                onChanged(changed)
+            }
+        }
 
         if (isVoice) {
             Label("${assistant.name} is built in. It cannot be renamed or archived.", color = colors.textMuted)

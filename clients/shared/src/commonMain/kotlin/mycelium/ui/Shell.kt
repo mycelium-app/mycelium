@@ -812,7 +812,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
 
         LazyColumn(Modifier.weight(1f).fillMaxWidth().scrollbar(list), list, contentPadding = PaddingValues(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S2)) {
             if (!everythingClosed) {
-                sidebarAssistantItems(store, state, sidebarAssistants(state.assistants.values, scope), route, onRoute)
+                sidebarAssistantItems(store, state, sidebarAssistants(state.assistants.values, scope), route, onRoute, showGroup = groupChoiceOf(scope) == AllGroups)
             }
 
             if (mode == ChatsMode) {
@@ -1232,11 +1232,13 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
 val NodeColours = Accent.entries.filter { it != Accent.System && it != Accent.Neutral }
 
 @Composable
-fun nodeColour(node: NodeSummary): Color {
-    val accent = NodeColours.firstOrNull { it.name.lowercase() == node.colour } ?: NodeColours[node.name.hashCode().mod(NodeColours.size)]
+fun nodeColour(node: NodeSummary): Color = namedColour(node.colour) ?: accentColour(NodeColours[node.name.hashCode().mod(NodeColours.size)])
 
-    return if (LocalAppearance.current.dark) accent.dark else accent.light
-}
+@Composable
+fun namedColour(name: String?): Color? = NodeColours.firstOrNull { it.name.lowercase() == name }?.let { accentColour(it) }
+
+@Composable
+private fun accentColour(accent: Accent): Color = if (LocalAppearance.current.dark) accent.dark else accent.light
 
 private const val SidebarWidthPreference = "sidebar-width"
 

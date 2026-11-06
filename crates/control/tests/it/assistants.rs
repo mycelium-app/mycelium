@@ -923,3 +923,39 @@ async fn a_spoken_prompt_marks_the_message_as_spoken_and_a_typed_one_does_not() 
     let spoken_at = events.iter().find(|event| event["kind"] == "user_message").map(|event| event["payload"]["spoken_at"].clone()).unwrap();
     assert!(spoken_at.is_string());
 }
+
+#[tokio::test]
+async fn an_assistant_takes_an_icon_or_an_uploaded_image_and_a_colour_and_can_clear_them() {
+    let server = Server::start().await;
+    let created = create(&server.user, json!({"name": "Archivist"})).await;
+    let path = format!("/api/v1/assistants/{}", created["id"].as_str().unwrap());
+
+    let (status, iconed) = server.user.json(server.user.patch(&path).json(&json!({"icon": "book", "colour": "violet"}))).await;
+    assert_eq!(status, 200, "{iconed}");
+    assert_eq!((iconed["icon"].clone(), iconed["colour"].clone()), (json!("book"), json!("violet")));
+
+    let png = vec![137u8, 80, 78, 71, 13, 10, 26, 10];
+    let (status, uploaded) = server.user.json(server.user.post(&format!("{path}/avatar")).header("content-type", "image/png").body(png)).await;
+    assert_eq!(status, 200, "{uploaded}");
+    assert!(uploaded["avatar_sha256"].is_string(), "{uploaded}");
+    assert_eq!((uploaded["icon"].clone(), uploaded["colour"].clone()), (Value::Null, json!("violet")));
+
+    let (_, cleared) = server.user.json(server.user.patch(&path).json(&json!({"clear_icon": true, "clear_colour": true}))).await;
+    assert_eq!((cleared["icon"].clone(), cleared["colour"].clone(), cleared["avatar_sha256"].clone()), (Value::Null, Value::Null, Value::Null));
+}
+
+#[tokio::test]
+async fn an_unknown_assistant_icon_or_colour_or_a_file_that_is_not_an_image_is_refused() {
+    let server = Server::start().await;
+    let created = create(&server.user, json!({"name": "Archivist"})).await;
+    let path = format!("/api/v1/assistants/{}", created["id"].as_str().unwrap());
+
+    let (status, refused) = server.user.json(server.user.patch(&path).json(&json!({"icon": "Not An Icon"}))).await;
+    assert_eq!((status, refused["error"].clone()), (400, json!("icon_invalid")));
+
+    let (status, refused) = server.user.json(server.user.patch(&path).json(&json!({"colour": "teal"}))).await;
+    assert_eq!((status, refused["error"].clone()), (400, json!("unknown_colour")));
+
+    let (status, refused) = server.user.json(server.user.post(&format!("{path}/avatar")).header("content-type", "text/plain").body("hello")).await;
+    assert_eq!((status, refused["error"].clone()), (400, json!("avatar_not_image")));
+}

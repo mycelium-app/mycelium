@@ -493,6 +493,15 @@ class MyceliumApi(
     suspend fun patchAssistant(id: String, request: PatchAssistantRequest): Assistant =
         call("/assistants/$id") { client.patch(it) { authorise(); json(request) } }.body()
 
+    suspend fun uploadAssistantAvatar(id: String, mediaType: String, bytes: ByteArray): Assistant =
+        call("/assistants/$id/avatar") {
+            client.post(it) {
+                authorise()
+                contentType(ContentType.parse(mediaType))
+                setBody(bytes)
+            }
+        }.body()
+
     suspend fun assistantFiles(id: String): List<AssistantFile> = call("/assistants/$id/files") { client.get(it) { authorise() } }.body()
 
     suspend fun assistantFile(id: String, path: String): String = call("/assistants/$id/files/${filePath(path)}") { client.get(it) { authorise() } }.body()
