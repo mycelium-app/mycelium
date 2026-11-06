@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.26.2
+
+- Ctrl+` shows or hides the terminal in the desktop app whatever has keyboard focus in the window.
+
 ## v0.26.1
 
 - The environment live view reconnects with a fresh ticket after its connection drops, instead of staying black.
