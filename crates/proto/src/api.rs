@@ -3205,6 +3205,8 @@ pub struct BrowserTask {
 pub struct EnvironmentTarget {
     pub x: u32,
     pub y: u32,
+    pub label: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InboxPost {
@@ -3225,8 +3227,6 @@ pub struct InboxFeed {
     pub error: Option<String>,
     #[serde(default)]
     pub stale_since: Option<chrono::DateTime<chrono::Utc>>,
-}
-    pub label: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
