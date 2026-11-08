@@ -56,9 +56,13 @@ fn fake_agent() -> PathBuf {
 
 async fn create_database() -> Option<String> {
     let Ok(admin) = std::env::var("MYCELIUM_TEST_DATABASE_URL") else {
-        eprintln!("SKIPPED: set MYCELIUM_TEST_DATABASE_URL to a Postgres admin URL, for example postgres://postgres:pw@127.0.0.1:5432/postgres, to run this test.");
+        if std::env::var("MYCELIUM_TEST_SKIP_DATABASE").is_ok_and(|skip| skip == "1") {
+            eprintln!("SKIPPED: MYCELIUM_TEST_SKIP_DATABASE is set.");
 
-        return None;
+            return None;
+        }
+
+        panic!("MYCELIUM_TEST_DATABASE_URL is not set, so this test cannot run. Start the test database with `mise run test-db`, then run it with `mise run test-rust`, or set MYCELIUM_TEST_DATABASE_URL=postgres://postgres:pw@127.0.0.1:55499/postgres. To skip it on purpose, set MYCELIUM_TEST_SKIP_DATABASE=1.");
     };
     let name = format!("test_{}", Uuid::new_v4().simple());
     let mut connection = PgConnection::connect(&admin).await.unwrap();

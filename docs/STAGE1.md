@@ -846,7 +846,8 @@ with the design system's tokens and sizes, in dark and light:
 - Unit tests next to the code for parsing, ordering and state transitions.
 - Control plane integration tests against a real Postgres (`docker run postgres:17-alpine`), driven
   through HTTP.
-- Tests that need Postgres skip with a printed `SKIPPED` line when `MYCELIUM_TEST_DATABASE_URL` is unset.
+- Tests that need Postgres fail when `MYCELIUM_TEST_DATABASE_URL` is unset, saying to start the test
+  database with `mise run test-db`. Setting `MYCELIUM_TEST_SKIP_DATABASE=1` skips them on purpose.
 - An end-to-end test: control plane, a node, and a fake ACP agent (`crates/node/tests/fake-acp`, a
   small script speaking `initialize`, `session/new`, `session/prompt`, `session/update`,
   `session/request_permission` and `session/cancel`), driven through the HTTP API: join, start a
