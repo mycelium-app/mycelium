@@ -489,11 +489,12 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             };
 
             match message_proposals::propose(state, conversation_id, target, message, reason).await? {
-                Ok(proposal) => {
-                    let message = if proposal.state == mycelium_proto::api::MessageProposalState::Sent {
-                        format!("Sent to {} (message {}).", proposal.target_title, proposal.id)
-                    } else {
-                        format!("Waiting for the person to approve sending this to {} (proposal {}).", proposal.target_title, proposal.id)
+                Ok((proposal, delivery)) => {
+                    let message = match delivery {
+                        Some(crate::prompts::Sent::Delivered) => format!("Sent to {} (message {}).", proposal.target_title, proposal.id),
+                        Some(crate::prompts::Sent::QueuedWhileBusy) => format!("Queued for {} (message {}). It is in the middle of a turn, so the message goes when that turn ends.", proposal.target_title, proposal.id),
+                        Some(crate::prompts::Sent::QueuedForOfflineNode) => format!("Queued for {} (message {}). Its node is offline, so the message goes when the node reconnects.", proposal.target_title, proposal.id),
+                        None => format!("Waiting for the person to approve sending this to {} (proposal {}).", proposal.target_title, proposal.id),
                     };
 
                     ToolReply::text(&message, false)

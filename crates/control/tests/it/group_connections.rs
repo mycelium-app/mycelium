@@ -302,7 +302,7 @@ async fn a_started_conversation_can_reply_to_its_starter_without_approval() {
 
     let replied = call(&fleet.server, &fleet.link, new_chat, "send_to_conversation", json!({"conversation": fleet.yucca_chat.to_string(), "message": "Column added", "reason": "You asked for it"})).await;
 
-    assert!(text(&replied).starts_with("Sent to Plan the release"), "{replied}");
+    assert!(text(&replied).starts_with("Queued for Plan the release"), "{replied}");
     assert_eq!(queue(&fleet.server, fleet.yucca_chat).await.len(), 1);
 }
 

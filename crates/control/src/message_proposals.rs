@@ -94,7 +94,7 @@ pub async fn resolve(state: &AppState, owner: Uuid, target: &str) -> ApiResult<R
     })
 }
 
-pub async fn propose(state: &AppState, conversation_id: Uuid, target: &str, message: &str, reason: &str) -> ApiResult<Result<MessageProposal, String>> {
+pub async fn propose(state: &AppState, conversation_id: Uuid, target: &str, message: &str, reason: &str) -> ApiResult<Result<(MessageProposal, Option<prompts::Sent>), String>> {
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     let target_id = match resolve(state, owner, target).await? {
         Ok(target_id) => target_id,
@@ -117,12 +117,12 @@ pub async fn propose(state: &AppState, conversation_id: Uuid, target: &str, mess
     let proposal = publish(state, owner, find_owned(state, id, owner).await?);
 
     if crate::conversation_connections::active(state, owner, conversation_id, target_id).await? || crate::group_connections::connected(state, owner, conversation_id, target_id).await? {
-        let sent = approve_for(state, owner, id).await?;
+        let (sent, delivery) = approve_and_send(state, owner, id).await?;
 
-        return Ok(Ok(sent));
+        return Ok(Ok((sent, Some(delivery))));
     }
 
-    Ok(Ok(proposal))
+    Ok(Ok((proposal, None)))
 }
 
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<MessageProposal>>> {
@@ -139,6 +139,12 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 }
 
 pub async fn approve_for(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<MessageProposal> {
+    let (proposal, _) = approve_and_send(state, owner, id).await?;
+
+    Ok(proposal)
+}
+
+async fn approve_and_send(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<(MessageProposal, prompts::Sent)> {
     let found = find_owned(state, id, owner).await?;
 
     if found.state != "proposed" {
@@ -159,13 +165,16 @@ pub async fn approve_for(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<M
     let text = format!("From {source}:\n\n{}", found.message);
     let queued = prompts::send(state, owner, found.target_id, PromptRequest { text, ..Default::default() }).await;
 
-    if let Err(cause) = queued {
-        sqlx::query("update message_proposals set state = 'proposed', decided_at = null where id = $1").bind(id).execute(&state.pool).await?;
+    let sent = match queued {
+        Ok(sent) => sent,
+        Err(cause) => {
+            sqlx::query("update message_proposals set state = 'proposed', decided_at = null where id = $1").bind(id).execute(&state.pool).await?;
 
-        return Err(cause);
-    }
+            return Err(cause);
+        }
+    };
 
-    Ok(publish(state, owner, find_owned(state, id, owner).await?))
+    Ok((publish(state, owner, find_owned(state, id, owner).await?), sent))
 }
 
 pub async fn decline(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<MessageProposal>> {

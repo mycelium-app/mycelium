@@ -167,12 +167,13 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
 
 pub enum Sent {
     Delivered,
+    QueuedWhileBusy,
     QueuedForOfflineNode,
 }
 
 pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PromptRequest>) -> ApiResult<Response> {
     match send(&state, user.id, id, request).await? {
-        Sent::Delivered => Ok(StatusCode::NO_CONTENT.into_response()),
+        Sent::Delivered | Sent::QueuedWhileBusy => Ok(StatusCode::NO_CONTENT.into_response()),
         Sent::QueuedForOfflineNode => Ok((StatusCode::ACCEPTED, Json(json!({"queued": true, "message": NODE_NOT_CONNECTED}))).into_response()),
     }
 }
@@ -226,6 +227,12 @@ pub async fn send_from(state: &AppState, owner: Uuid, id: Uuid, request: PromptR
 
     if !state.hub.is_online(row.node_id) {
         return Ok(Sent::QueuedForOfflineNode);
+    }
+
+    let held = sqlx::query_scalar::<_, bool>("select exists (select 1 from queued_prompts where conversation_id = $1 and not editing)").bind(id).fetch_one(&state.pool).await?;
+
+    if held {
+        return Ok(Sent::QueuedWhileBusy);
     }
 
     Ok(Sent::Delivered)

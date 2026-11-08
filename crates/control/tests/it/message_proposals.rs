@@ -250,10 +250,10 @@ async fn connecting_conversations_allows_messages_in_both_directions_until_revok
     assert_eq!(status, 201, "{connection}");
 
     let sent = propose(&server, &link, source, &target.to_string()).await;
-    assert!(text(&sent).starts_with("Sent to Fix billing export"), "{sent}");
+    assert!(text(&sent).starts_with("Queued for Fix billing export"), "{sent}");
     assert_eq!(queue(&server, target).await[0]["text"], "From Plan the release:\n\nThe schema is ready");
     let reply = propose(&server, &link, target, &source.to_string()).await;
-    assert!(text(&reply).starts_with("Sent to Plan the release"), "{reply}");
+    assert!(text(&reply).starts_with("Queued for Plan the release"), "{reply}");
     assert_eq!(queue(&server, source).await.len(), 1);
 
     let id = connection["id"].as_str().unwrap();
@@ -297,5 +297,22 @@ async fn approving_a_message_and_connecting_only_sends_it_once() {
     assert_eq!(queue(&server, target).await.len(), 1);
     let (_, connections) = server.user.json(server.user.get("/api/v1/conversation-connections")).await;
     assert_eq!(connections.as_array().unwrap().len(), 1);
-    assert!(text(&propose(&server, &link, source, &target.to_string()).await).starts_with("Sent to"));
+    assert!(text(&propose(&server, &link, source, &target.to_string()).await).starts_with("Queued for"), "the target is in the middle of a turn");
+}
+
+#[tokio::test]
+async fn a_message_to_a_conversation_in_the_middle_of_a_turn_is_reported_as_queued() {
+    let server = crate::watches::fast().await;
+    let mut link = server.online_node("laptop").await;
+    let sender = crate::watches::begun(&server, &mut link, "Plan the release").await;
+    let busy = crate::watches::begun(&server, &mut link, "Build the release").await;
+    crate::watches::connect(&server, sender, busy).await;
+
+    let reply = call(&server, &link, sender, "send_to_conversation", json!({"conversation": busy.to_string(), "message": "Use v0.29.0", "reason": "The number changed"})).await;
+    let said = text(&reply);
+    crate::watches::end_turn(&mut link, busy, 1).await;
+    let delivered = crate::watches::told(&server, busy, 1).await;
+
+    assert!(said.starts_with("Queued for") && said.contains("goes when that turn ends"), "{said}");
+    assert!(delivered.contains("Use v0.29.0"), "{delivered}");
 }
