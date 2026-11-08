@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.29.0
+
+- A conversation started by another conversation is managed by it. Managed conversations sit in a Managed by assistant section below Working, collapsed by default, and never notify the person: their events go to the manager. Conversations started that way before this version count as managed.
+- flag_for_person brings a managed conversation to the person with a reason: it returns to its usual section showing the reason, and notifies. The flag clears when the person writes in it, and Take over in the conversation menu ends management. Archiving the manager returns its conversations to their usual sections.
+- An approved or declined assistant change no longer stays above the composer. Applied changes are listed under Changes agents made in the assistant's settings, each with Undo.
+- Pinned sidebar assistants show a pin, and the sidebar lists up to 12 assistants.
+- An assistant's instructions approved while it works in a folder survive the copy back and reach the folder.
+- send_to_conversation says a message was queued, not sent, when the target is in the middle of a turn or its node is offline.
+- Integration tests fail, saying how to start the test database, when MYCELIUM_TEST_DATABASE_URL is unset.
+
 ## v0.28.1
 
 - Republishes v0.28.0, whose desktop and web build failed.
