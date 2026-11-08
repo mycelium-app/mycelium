@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.27.0
+
+- Add account on FreeAgent reuses the existing account's OAuth app, so it goes straight to naming and signing in. Use another app enters new credentials.
+- FreeAgent accounts are titled with their company's name from FreeAgent, and an account set up without a name takes the company's name.
+- FreeAgent has an api tool for any v2 endpoint. GET runs at once, writes follow the account's approvals, all_pages returns every row, and requests wait out rate limits.
+- A file argument can ask for base64 with "encoding": "base64", for attachments such as PDFs.
+- Any integration tool takes save_to, which writes the whole answer into the conversation folder. Nodes need this version.
+- Opening the project picker puts the cursor in its search.
+
 ## v0.26.2
 
 - Ctrl+` shows or hides the terminal in the desktop app whatever has keyboard focus in the window.
