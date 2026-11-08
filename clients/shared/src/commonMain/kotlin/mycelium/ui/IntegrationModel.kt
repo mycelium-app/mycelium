@@ -60,6 +60,7 @@ val BuiltInCatalogue = listOf(
     CatalogueEntry("actual", "Actual Budget", "actual", IntegrationCategory.Finance, "Read accounts, categories, transactions in a range and a month's budget. Needs an Actual HTTP API.", "Adding a transaction asks first.", listOf("list_accounts", "list_categories", "get_transactions", "get_budget_month", "add_transaction"), "actual"),
     CatalogueEntry("coolify", "Coolify", "coolify", IntegrationCategory.Developer, "Create apps and databases, deploy them, and read their status and logs on your Coolify instance, or use any other part of its API. Adds Apps to the sidebar.", "Creating apps and databases, deploying, stopping and deleting apps, changing their environment, and any API call that is not a read, ask first.", listOf("list_apps", "get_app", "list_deployments", "get_logs", "create_app", "create_database", "api", "deploy", "stop", "start", "delete_app", "set_env", "delete_env"), icon = MyIcon.AppWindow),
     CatalogueEntry("tandoor", "Tandoor", "tandoor", IntegrationCategory.Food, "Search and read recipes, meal plans and the shopping list.", "Adding recipes, planning meals and changing the shopping list ask first.", listOf("search_recipes", "get_recipe", "list_meal_plans", "get_shopping_list", "create_recipe", "plan_meal", "add_to_shopping_list", "check_off_item"), icon = MyIcon.ChefHat),
+    CatalogueEntry("murmur", "Murmur", "murmur", IntegrationCategory.Developer, "Show the updates, shipped notes and blockers your agents post in the Inbox feed.", "Reading only.", listOf("list_updates")),
     CatalogueEntry("litellm", "LiteLLM", "litellm", IntegrationCategory.AiGateway, "Use the MCP tools your gateway publishes, with your gateway key.", "Tools that change things ask first.", listOf("mcp")),
 )
 
@@ -94,6 +95,7 @@ fun accountState(server: ChatToolServer): AccountState = when {
 private fun catalogueKey(server: ChatToolServer): String? = when {
     server.forgeId != null -> null
     server.settings?.get("app")?.jsonPrimitive?.content == "outline" -> "outline"
+    server.settings?.get("app")?.jsonPrimitive?.content == "murmur" -> "murmur"
     server.kind in setOf("email", "caldav", "zulip", "stoat", "lastfm", "litellm", "discord", "paperless", "freeagent", "actual", "coolify", "tandoor") -> server.kind
     else -> null
 }

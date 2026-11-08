@@ -1,6 +1,9 @@
 package mycelium.desktop
 
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -21,10 +24,14 @@ import mycelium.Dictation
 import mycelium.DictationProblem
 import mycelium.Platform
 import mycelium.api.Me
+import mycelium.api.Event
 import mycelium.api.MyceliumApi
+import kotlinx.serialization.json.Json
 import mycelium.state.Store
 import mycelium.state.VoicePhase
 import mycelium.state.VoiceProblem
+import mycelium.state.AppState
+import mycelium.state.VoiceDid
 import mycelium.state.VoiceState
 import mycelium.state.VoiceTurn
 import mycelium.ui.MyceliumTheme
@@ -32,6 +39,7 @@ import mycelium.ui.Route
 import mycelium.ui.Shell
 import mycelium.ui.VoiceCard
 import mycelium.ui.VoiceCardActions
+import mycelium.ui.VoiceDockContent
 import org.junit.Rule
 
 private const val VoiceOn = """{"voice_enabled":true,"speech_to_text_provider":null,"text_to_speech_provider":null}"""
@@ -70,7 +78,7 @@ class VoiceTest {
 
     private val requests = CopyOnWriteArrayList<Pair<String, String>>()
 
-    private fun open(privacy: String, dictation: Dictation = HeardDictation()) {
+    private fun open(privacy: String, dictation: Dictation = HeardDictation()): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -89,6 +97,8 @@ class VoiceTest {
 
         runBlocking { store.refresh() }
         rule.setContent { MyceliumTheme(true) { Shell(store, platform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Empty) } }
+
+        return store
     }
 
     private fun card(state: VoiceState) {
@@ -207,5 +217,61 @@ class VoiceTest {
         card(VoiceState(open = true, phase = VoicePhase.Ended, turn = VoiceTurn(said = "what is next", reply = "Review the draft.", conversationId = "c-voice")))
 
         rule.onNodeWithText("Talk again").assertExists()
+    }
+
+    private fun dock(state: VoiceState, onSay: (String) -> Unit = {}, onOpen: (String) -> Unit = {}) {
+        rule.setContent { MyceliumTheme(true) { VoiceDockContent(state, NoActions, onSay, onOpen) } }
+    }
+
+    @Test
+    fun theDockKeepsEarlierTurnsAndWhatVoiceDid() {
+        dock(VoiceState(open = true, phase = VoicePhase.Ended, earlier = listOf(VoiceTurn(said = "Yes, one line", did = listOf(VoiceDid("Answered in Release: Yes, one line", "c1")))), turn = VoiceTurn(said = "Approve", reply = "That one runs a command, so it needs your tap.")))
+
+        rule.onNodeWithText("Yes, one line").assertExists()
+        rule.onNodeWithText("Answered in Release: Yes, one line").assertExists()
+        rule.onNodeWithText("Approve").assertExists()
+        rule.onNodeWithText("That one runs a command, so it needs your tap.").assertExists()
+    }
+
+    @Test
+    fun typingInTheDockAndSubmittingSaysIt() {
+        val said = CopyOnWriteArrayList<String>()
+        dock(VoiceState(open = true, phase = VoicePhase.Idle), onSay = { said += it })
+
+        rule.onNode(hasSetTextAction()).performTextInput("Decline")
+        rule.onNode(hasSetTextAction()).performImeAction()
+
+        assertTrue(said.single() == "Decline")
+    }
+
+    @Test
+    fun aLineOfWhatVoiceDidOpensThatConversation() {
+        val opened = CopyOnWriteArrayList<String>()
+        dock(VoiceState(open = true, phase = VoicePhase.Ended, turn = VoiceTurn(said = "yes", did = listOf(VoiceDid("Answered in Release: yes", "c1")))), onOpen = { opened += it })
+
+        rule.onNodeWithText("Answered in Release: yes").performClick()
+
+        assertTrue(opened.single() == "c1")
+    }
+
+    @Test
+    fun typingToVoiceSendsItAsAPromptAndARecordedToolBecomesALineOfWhatVoiceDid() {
+        val store = open(VoiceOn)
+
+        rule.runOnIdle { store.voice.say("Approve") }
+        rule.waitUntil(5_000) { requests.any { it.first.endsWith("/assistants/a-voice/prompt") } }
+        rule.waitUntil(5_000) { store.voice.state.value.turn.conversationId == "c-voice" }
+
+        val events = listOf(
+            Event("c-voice", 1, "user_message", Json.parseToJsonElement("""{"text":"Approve"}""")),
+            Event("c-voice", 2, "acp_update", Json.parseToJsonElement("""{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"t1","title":"mcp__mycelium__resolve_needs_you","kind":"other","status":"completed","rawInput":{"key":"c1/flag","action":"approve"},"content":[{"type":"content","content":{"type":"text","text":"Answered in Release: Approve\nNothing else is waiting."}}]}}""")),
+            Event("c-voice", 3, "acp_update", Json.parseToJsonElement("""{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Done."}}}""")),
+            Event("c-voice", 4, "turn_end", Json.parseToJsonElement("""{}""")),
+        )
+        store.voice.observe(AppState(events = mapOf("c-voice" to events)))
+
+        assertTrue(store.voice.state.value.turn.did == listOf(VoiceDid("Answered in Release: Approve", "c1")))
+        assertTrue(store.voice.state.value.phase == VoicePhase.Ended)
+        assertTrue(requests.first { it.first.endsWith("/prompt") }.second.contains("\"text\":\"Approve\""))
     }
 }

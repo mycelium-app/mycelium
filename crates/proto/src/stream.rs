@@ -91,6 +91,9 @@ pub enum StreamMessage {
     OpenScreen {
         route: String,
     },
+    NeedsYouFocus {
+        key: String,
+    },
     IntegrationsChanged,
     WatchesChanged {
         conversation_id: Uuid,

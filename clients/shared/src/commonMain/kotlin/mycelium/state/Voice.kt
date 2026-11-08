@@ -1,5 +1,6 @@
 package mycelium.state
 
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -70,7 +71,9 @@ data class VoiceDevice(
     val readAloud: String = ReadAloudProvider,
 )
 
-data class VoiceTurn(val said: String = "", val tool: String? = null, val reply: String = "", val conversationId: String? = null, val readingFailed: Boolean = false)
+data class VoiceDid(val text: String, val conversationId: String)
+
+data class VoiceTurn(val said: String = "", val tool: String? = null, val reply: String = "", val conversationId: String? = null, val readingFailed: Boolean = false, val did: List<VoiceDid> = emptyList())
 
 data class VoiceState(
     val privacy: PrivacySettings = PrivacySettings(),
@@ -80,10 +83,24 @@ data class VoiceState(
     val heard: String = "",
     val level: Float = 0f,
     val turn: VoiceTurn = VoiceTurn(),
+    val earlier: List<VoiceTurn> = emptyList(),
     val voices: List<String> = emptyList(),
     val device: VoiceDevice = VoiceDevice(),
     val waitingForWakePhrase: Boolean = false,
 )
+
+private fun VoiceState.withTurnKept(): List<VoiceTurn> = if (turn.said.isBlank()) earlier else earlier + turn
+
+private fun voiceDid(call: ThreadItem.ToolCall): VoiceDid? {
+    if (call.status != ToolStatus.Done || !call.title.contains("resolve_needs_you")) {
+        return null
+    }
+
+    val key = (call.input?.get("key") as? JsonPrimitive)?.content ?: return null
+    val text = call.output?.lineSequence()?.firstOrNull()?.takeIf { it.isNotBlank() } ?: return null
+
+    return VoiceDid(text, key.substringBefore('/'))
+}
 
 fun wakePhraseName(phrase: String): String = if (phrase == WakePhraseOk) "OK Mycelium" else "Hey Mycelium"
 
@@ -282,7 +299,7 @@ class VoiceStore(private val api: MyceliumApi, private val scope: CoroutineScope
         }
 
         dictation = route
-        mutableState.update { it.copy(open = true, phase = VoicePhase.Listening, heard = "", level = 0f, turn = VoiceTurn()) }
+        mutableState.update { it.copy(open = true, phase = VoicePhase.Listening, heard = "", level = 0f, earlier = it.withTurnKept(), turn = VoiceTurn()) }
         route.start({ words -> mutableState.update { it.copy(heard = "${it.heard} $words".trim()) } }, { problem -> stopped(problem) })
         watchLevel(route)
     }
@@ -362,8 +379,20 @@ class VoiceStore(private val api: MyceliumApi, private val scope: CoroutineScope
         }
     }
 
+    fun say(text: String) {
+        val said = text.trim()
+
+        if (said.isEmpty() || mutableState.value.phase == VoicePhase.Thinking) {
+            return
+        }
+
+        cancelListening()
+        stopSpeaking()
+        send(said)
+    }
+
     private fun send(said: String) {
-        mutableState.update { it.copy(phase = VoicePhase.Thinking, level = 0f, turn = VoiceTurn(said = said)) }
+        mutableState.update { it.copy(open = true, phase = VoicePhase.Thinking, level = 0f, earlier = it.withTurnKept(), turn = VoiceTurn(said = said)) }
         scope.launch {
             try {
                 val assistant = api.voiceAssistant()
@@ -396,9 +425,10 @@ class VoiceStore(private val api: MyceliumApi, private val scope: CoroutineScope
 
         val after = items.drop(asked + 1)
         val reply = after.filterIsInstance<ThreadItem.AgentMessage>().joinToString("\n\n") { it.text.trim() }
-        val tool = after.filterIsInstance<ThreadItem.ToolCall>().lastOrNull { it.status == ToolStatus.Running }?.title
+        val calls = after.filterIsInstance<ThreadItem.ToolCall>()
+        val tool = calls.lastOrNull { it.status == ToolStatus.Running }?.title
 
-        mutableState.update { it.copy(turn = it.turn.copy(reply = reply, tool = tool)) }
+        mutableState.update { it.copy(turn = it.turn.copy(reply = reply, tool = tool, did = calls.mapNotNull(::voiceDid))) }
 
         if (!turnIsOpen(events) && reply.isNotBlank()) {
             finish(reply)
@@ -481,6 +511,6 @@ class VoiceStore(private val api: MyceliumApi, private val scope: CoroutineScope
         meter?.cancel()
         stopRecording()
         stopSpeaking()
-        mutableState.update { it.copy(open = false, phase = VoicePhase.Idle, heard = "", level = 0f) }
+        mutableState.update { it.copy(open = false, phase = VoicePhase.Idle, heard = "", level = 0f, earlier = emptyList()) }
     }
 }

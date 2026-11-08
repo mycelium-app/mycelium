@@ -3,6 +3,7 @@ package mycelium.desktop
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ImageComposeScene
@@ -11,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import kotlin.time.Clock
 import kotlin.time.Instant
 import kotlin.time.Duration.Companion.days
@@ -19,6 +21,12 @@ import kotlin.time.Duration.Companion.minutes
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.builtins.ListSerializer
 import mycelium.Platform
+import mycelium.state.VoiceDid
+import mycelium.state.VoicePhase
+import mycelium.state.VoiceState
+import mycelium.state.VoiceTurn
+import mycelium.ui.VoiceCardActions
+import mycelium.ui.VoiceDockContent
 import mycelium.api.ChatToolServer
 import mycelium.api.Me
 import mycelium.api.MyceliumJson
@@ -249,6 +257,11 @@ private val Calls = list(
     """{"id":"c4","server_id":"e1","server_name":"Email a","tool":"search_messages","kind":"read","surface":"chat","provider":"Anthropic","decision":"allowed","at":"${ago(days = 1)}"}""",
 )
 
+private val InboxFeedJson = """{"configured":true,"posts":[
+{"id":"f1","author":"Archivist","kind":"shipped","message":"The restore flow copy is live on staging.example.com.","project":"harbour","url":"https://example.com/restore","created_at":"${ago(minutes = 2)}"},
+{"id":"f2","author":"Scribe","kind":"update","message":"Drafted the release notes for v0.3.7. One line is still open.","project":"atlas","url":null,"created_at":"${ago(minutes = 11)}"},
+{"id":"f3","author":"Courier","kind":"blocked","message":"ci-2 ran out of disk during the integration run. It will not retry until the runner is cleaned.","project":"ledger","url":null,"created_at":"${ago(minutes = 24)}"}]}"""
+
 private val Extra = linkedMapOf(
     "/experiments" to EnabledExperiments,
     "/extensions" to """{"generated_ui":true,"rich_markdown":true,"mycelium_tools":true}""",
@@ -266,6 +279,7 @@ private val Extra = linkedMapOf(
     "/forges" to Forges,
     "/repositories" to Repositories,
     "/tasks" to Tasks,
+    "/inbox/feed" to InboxFeedJson,
     "/schedules" to Schedules,
     "/schedule-runs" to ScheduleRuns,
     "/workflows" to Workflows,
@@ -301,6 +315,15 @@ private fun click(scene: ImageComposeScene, x: Float, y: Float) {
     scene.sendPointerEvent(PointerEventType.Release, Offset(x, y))
     scene.render(132_000_000L)
 }
+
+private val VoiceDockFixture = VoiceState(
+    open = true,
+    phase = VoicePhase.Listening,
+    earlier = listOf(
+        VoiceTurn(said = "Yes, one line under Fixes", did = listOf(VoiceDid("Answered in atlas, Release v0.3.7 checklist: Yes, one line under Fixes", "c1"))),
+        VoiceTurn(said = "Approve", reply = "The harbour migration runs a command, so it needs your tap. I have outlined it."),
+    ),
+)
 
 private const val OpenWednesdayMorning = "2026-10-21T10:30"
 
@@ -389,6 +412,11 @@ class AllScreensRenderTest {
     fun shellScreens() {
         shell("shell-empty", Route.Empty, open = null)
         shell("inbox", Route.Inbox, open = null)
+        snap("inbox-voice-dock") {
+            Box(Modifier.width(860.dp).background(MyTheme.colors.bgContent)) {
+                VoiceDockContent(VoiceDockFixture, VoiceCardActions({}, {}, {}, {}, {}, {}, {}, {}, {}, null, {}), {}, {})
+            }
+        }
         shell("conversation", Route.Chat(Main))
         shell("new-conversation", Route.New, open = null)
         shell("new-chat", Route.NewChat, open = null)

@@ -184,7 +184,11 @@ async fn approve_and_send(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<
 }
 
 pub async fn decline(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<MessageProposal>> {
-    let found = find_owned(&state, id, user.id).await?;
+    Ok(Json(decline_for(&state, user.id, id).await?))
+}
+
+pub async fn decline_for(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<MessageProposal> {
+    let found = find_owned(state, id, owner).await?;
 
     if found.state != "proposed" {
         return Err(ApiError::conflict("proposal_not_proposed", "This proposal has already been decided."));
@@ -194,10 +198,10 @@ pub async fn decline(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 
     if let Some(conversation_id) = found.conversation_id {
         let text = format!("I declined sending your message to {}. Do not send it to that conversation another way.", label(found.target_id, &found.target_title));
-        prompts::tell_agent(&state, user.id, conversation_id, text).await;
+        prompts::tell_agent(state, owner, conversation_id, text).await;
     }
 
-    Ok(Json(publish(&state, user.id, find_owned(&state, id, user.id).await?)))
+    Ok(publish(state, owner, find_owned(state, id, owner).await?))
 }
 
 pub async fn approve_and_connect(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<MessageProposal>> {

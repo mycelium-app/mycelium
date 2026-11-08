@@ -881,24 +881,8 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
             UsageCard(chatAccountFirst(agentAccounts(state.nodes.values), current?.agent, current?.let { state.nodes[it.nodeId]?.name }, current?.account), Modifier.padding(Tokens.Space.S1_5), providerUsage, current?.providerId, onOpenHistory = { onRoute(Route.UsageHistory) }, onUseReset = { account, key -> useBankedReset(store, account, key) })
         }
 
-        if (voice.open && voice.privacy.voiceEnabled) {
-            VoiceCard(
-                voice,
-                VoiceCardActions(
-                    onStopListening = store.voice::stopListening,
-                    onCancel = store.voice::cancelListening,
-                    onStopTurn = store.voice::stopTurn,
-                    onStopSpeaking = store.voice::stopSpeaking,
-                    onTalkAgain = store.voice::startListening,
-                    onTryAgain = store.voice::startListening,
-                    onTypeInstead = store.voice::typeInstead,
-                    onOpenConversation = store.voice::openThread,
-                    onOpenProviders = { store.voice.close(); store.openScreen("settings/providers") },
-                    onOpenAndroidSettings = platform.takeIf { it.opensMicrophoneSettings }?.let { opener -> { opener.openMicrophoneSettings() } },
-                    onClose = store.voice::close,
-                ),
-                Modifier.padding(Tokens.Space.S1_5),
-            )
+        if (route != Route.Inbox) {
+            OpenVoiceCard(store, platform, Modifier.padding(Tokens.Space.S1_5))
         }
 
         Hairline()

@@ -3205,6 +3205,27 @@ pub struct BrowserTask {
 pub struct EnvironmentTarget {
     pub x: u32,
     pub y: u32,
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InboxPost {
+    pub id: String,
+    pub author: String,
+    pub kind: String,
+    pub message: String,
+    pub project: Option<String>,
+    pub url: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InboxFeed {
+    pub configured: bool,
+    pub posts: Vec<InboxPost>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub stale_since: Option<chrono::DateTime<chrono::Utc>>,
+}
     pub label: String,
 }
 

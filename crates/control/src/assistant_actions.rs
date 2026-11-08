@@ -622,3 +622,9 @@ pub async fn is_wellness_conversation(state: &AppState, conversation_id: Uuid) -
 
     Ok(wellness)
 }
+
+pub async fn is_voice_conversation(state: &AppState, conversation_id: Uuid) -> ApiResult<bool> {
+    let voice = sqlx::query_scalar::<_, bool>("select exists (select 1 from conversations c join assistants a on a.id = c.assistant_id where c.id = $1 and a.builtin_key = $2)").bind(conversation_id).bind(crate::voice::VOICE).fetch_one(&state.pool).await?;
+
+    Ok(voice)
+}

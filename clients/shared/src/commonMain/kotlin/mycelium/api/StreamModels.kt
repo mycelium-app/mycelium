@@ -80,6 +80,8 @@ sealed interface StreamMessage {
 
     data class ScreenOpened(val route: String) : StreamMessage
 
+    data class NeedsYouFocused(val key: String) : StreamMessage
+
     data class NodeResourcesSampled(val nodeId: String, val sample: ResourceSample) : StreamMessage
 
     data class LoginOutput(val loginId: String, val data: String) : StreamMessage
@@ -154,6 +156,7 @@ fun parseStreamMessage(text: String): StreamMessage? {
         "forge_changed" -> StreamMessage.ForgeChanged
         "wellness_changed" -> StreamMessage.WellnessChanged
         "open_screen" -> StreamMessage.ScreenOpened(element.requireString("route"))
+        "needs_you_focus" -> StreamMessage.NeedsYouFocused(element.requireString("key"))
         "node_resources" -> StreamMessage.NodeResourcesSampled(
             element.requireString("node_id"),
             MyceliumJson.decodeFromJsonElement(ResourceSample.serializer(), element.getValue("sample")),

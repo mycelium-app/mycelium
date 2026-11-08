@@ -1,6 +1,7 @@
 package mycelium.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -19,11 +20,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -39,6 +42,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,12 +51,14 @@ import androidx.compose.ui.unit.dp
 import kotlin.time.Clock
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import mycelium.api.InboxFeed
 import mycelium.state.AppState
 import mycelium.state.Store
 import mycelium.state.ThreadItem
 import mycelium.api.ConversationStatus
 import mycelium.state.agentAccounts
 import mycelium.state.ago
+import mycelium.state.usageClockTime
 import mycelium.state.compactWindowUsage
 import mycelium.state.formatCount
 import mycelium.state.formatTokens
@@ -65,7 +71,9 @@ private val StatsWidth = 260.dp
 private val FeedWidth = 320.dp
 private val GaugeWidth = 120.dp
 private val GaugeStroke = 8.dp
+private val FocusOutline = 2.dp
 private const val PollMillis = 15_000L
+private const val FeedPollMillis = 30_000L
 private const val ResolvedLingerMillis = 4_000L
 private const val RecentMessages = 3
 
@@ -88,6 +96,7 @@ data class FeedPost(
     val conversationId: String? = null,
     val projectName: String? = null,
     val conversationTitle: String? = null,
+    val url: String? = null,
 )
 
 private data class InboxStats(val rate: TokenRate?, val now: kotlin.time.Instant)
@@ -102,7 +111,20 @@ fun InboxScreen(store: Store, state: AppState, onOpenConversation: (String) -> U
     var showingStats by remember { mutableStateOf(false) }
     var tab by remember { mutableStateOf(NeedsYouTab) }
     val scope = rememberCoroutineScope()
-    val feed = remember { emptyList<FeedPost>() }
+    var feed by remember { mutableStateOf(InboxFeed(configured = false)) }
+    val platform = LocalPlatform.current
+    val voice by store.voice.state.collectAsState()
+    val posts = feed.posts.map { post ->
+        val kind = when (post.kind) {
+            "shipped" -> FeedPostKind.Shipped
+            "blocked" -> FeedPostKind.Blocked
+            else -> FeedPostKind.Update
+        }
+
+        FeedPost(post.author, post.author.take(1).uppercase(), kind, ago(post.createdAt), post.message, projectName = post.project, url = post.url)
+    }
+    val staleTime = feed.staleSince?.let { usageClockTime(it, { millis -> platform?.localDateTime(millis) }) }
+    val notice = feed.error?.let { error -> if (staleTime == null) error else "$error Showing posts from $staleTime." }
 
     LaunchedEffect(items) {
         val present = items.map { it.key }.toSet()
@@ -119,6 +141,14 @@ fun InboxScreen(store: Store, state: AppState, onOpenConversation: (String) -> U
 
         lingering.keys.removeAll(present)
         previous = items
+    }
+
+    LaunchedEffect(store) {
+        while (true) {
+            attempt { feed = store.api.inboxFeed() }
+
+            delay(FeedPollMillis)
+        }
     }
 
     LaunchedEffect(store) {
@@ -141,8 +171,8 @@ fun InboxScreen(store: Store, state: AppState, onOpenConversation: (String) -> U
     }
 
     val shown = (items + lingering.values.filter { lingered -> items.none { it.key == lingered.key } }).sortedByDescending { it.waitingSince }
-    val needsYou: @Composable (Modifier, Boolean) -> Unit = { modifier, headed -> NeedsYouColumn(store, state, shown, onOpenConversation, onOpenWorkflow, modifier, headed) }
-    val feedColumn: @Composable (Modifier) -> Unit = { modifier -> FeedColumn(feed, onOpenConversation, modifier) }
+    val needsYou: @Composable (Modifier, Boolean) -> Unit = { modifier, headed -> NeedsYouColumn(store, state, shown, state.needsYouFocus, voice.open && voice.privacy.voiceEnabled, onOpenConversation, onOpenWorkflow, modifier, headed) }
+    val feedColumn: @Composable (Modifier) -> Unit = { modifier -> FeedColumn(posts, notice, { scope.launch { attempt { feed = store.api.inboxFeed(refresh = true) } } }, onOpenConversation, modifier) }
     val statsColumn: @Composable (Modifier) -> Unit = { modifier -> StatsColumn(store, state, stats, onOpenConversation, onOpenUsageHistory, modifier) }
 
     Column(Modifier.fillMaxSize()) {
@@ -200,36 +230,55 @@ private fun ColumnHeading(text: String) {
 }
 
 @Composable
-private fun NeedsYouColumn(store: Store, state: AppState, items: List<InboxItem>, onOpenConversation: (String) -> Unit, onOpenWorkflow: (String) -> Unit, modifier: Modifier, headed: Boolean) {
+private fun NeedsYouColumn(store: Store, state: AppState, items: List<InboxItem>, focusedKey: String?, voiceDocked: Boolean, onOpenConversation: (String) -> Unit, onOpenWorkflow: (String) -> Unit, modifier: Modifier, headed: Boolean) {
+    val listState = rememberLazyListState()
+    val outlinedKey = focusedKey?.takeIf { key -> items.any { it.key == key } } ?: items.firstOrNull()?.key?.takeIf { voiceDocked }
+
+    LaunchedEffect(outlinedKey, items) {
+        val index = items.indexOfFirst { it.key == outlinedKey }
+
+        if (index >= 0) {
+            listState.scrollToItem(index)
+        }
+    }
+
     Column(modifier) {
         if (headed) {
             ColumnHeading("Needs you")
         }
 
-
-        if (items.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(Tokens.Space.S4), contentAlignment = Alignment.Center) {
-                Label("Nothing needs you", style = Tokens.Type.Title, color = MyTheme.colors.textMuted, maxLines = 1)
-            }
-        } else {
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(items, key = { it.key }) { item ->
-                    Hairline()
-                    InboxItemRow(store, state, item, onOpenConversation, onOpenWorkflow)
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (items.isEmpty()) {
+                Box(Modifier.fillMaxSize().padding(Tokens.Space.S4), contentAlignment = Alignment.Center) {
+                    Label("Nothing needs you", style = Tokens.Type.Title, color = MyTheme.colors.textMuted, maxLines = 1)
+                }
+            } else {
+                LazyColumn(Modifier.fillMaxSize(), listState) {
+                    items(items, key = { it.key }) { item ->
+                        Hairline()
+                        InboxItemRow(store, state, item, item.key == outlinedKey, onOpenConversation, onOpenWorkflow)
+                    }
                 }
             }
+        }
+
+        if (voiceDocked) {
+            Hairline()
+            VoiceDock(store, LocalPlatform.current, onOpenConversation)
         }
     }
 }
 
 @Composable
-private fun InboxItemRow(store: Store, state: AppState, item: InboxItem, onOpenConversation: (String) -> Unit, onOpenWorkflow: (String) -> Unit) {
+private fun InboxItemRow(store: Store, state: AppState, item: InboxItem, focused: Boolean, onOpenConversation: (String) -> Unit, onOpenWorkflow: (String) -> Unit) {
     val colors = MyTheme.colors
     var expanded by remember { mutableStateOf(false) }
     val conversation = item.conversation
     val recent = item.thread.filter { it is ThreadItem.UserMessage || it is ThreadItem.AgentMessage }.takeLast(RecentMessages)
 
-    Column(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+    val outline = if (focused) Modifier.border(FocusOutline, colors.accent, BlockShape) else Modifier
+
+    Column(Modifier.fillMaxWidth().then(outline).semantics { selected = focused }.padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             if (item.assistant != null) {
                 AssistantAvatar(item.assistant)
@@ -313,9 +362,13 @@ private fun FlagCard(text: String, onReply: (String) -> Unit) {
 }
 
 @Composable
-private fun FeedColumn(posts: List<FeedPost>, onOpenConversation: (String) -> Unit, modifier: Modifier) {
+private fun FeedColumn(posts: List<FeedPost>, notice: String?, onRetry: () -> Unit, onOpenConversation: (String) -> Unit, modifier: Modifier) {
     Column(modifier) {
         ColumnHeading("Feed")
+
+        if (notice != null) {
+            FeedNotice(notice, onRetry)
+        }
 
         if (posts.isEmpty()) {
             Label("No posts yet", Modifier.padding(horizontal = Tokens.Space.S4), Tokens.Type.Ui, MyTheme.colors.textMuted)
@@ -328,6 +381,21 @@ private fun FeedColumn(posts: List<FeedPost>, onOpenConversation: (String) -> Un
 }
 
 @Composable
+private fun FeedNotice(text: String, onRetry: () -> Unit) {
+    val colors = MyTheme.colors
+
+    Row(
+        Modifier.fillMaxWidth().padding(start = Tokens.Space.S3, end = Tokens.Space.S3, bottom = Tokens.Space.S1).border(Tokens.Size.Hairline, colors.border, BlockShape).padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1_5),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(MyIcon.Alert, colors.statusAttention, Tokens.Size.IconSm)
+        Label(text, Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted)
+        MyButton(onRetry, text = "Retry", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+    }
+}
+
+@Composable
 private fun FeedPostRow(post: FeedPost, onOpenConversation: (String) -> Unit) {
     val colors = MyTheme.colors
     val (icon, tint) = when (post.kind) {
@@ -335,6 +403,7 @@ private fun FeedPostRow(post: FeedPost, onOpenConversation: (String) -> Unit) {
         FeedPostKind.Shipped -> MyIcon.Check to colors.statusDone
         FeedPostKind.Blocked -> MyIcon.Failed to colors.statusFailed
     }
+    val platform = LocalPlatform.current
 
     Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S4), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
         Box(Modifier.size(Tokens.Size.Avatar), contentAlignment = Alignment.Center) {
@@ -350,6 +419,10 @@ private fun FeedPostRow(post: FeedPost, onOpenConversation: (String) -> Unit) {
             }
 
             Label(post.text)
+
+            if (post.url != null) {
+                Label(post.url, Modifier.pressable({ platform?.openUrl(post.url) }, description = "Open ${post.url}", shape = ControlShape), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+            }
 
             if (post.conversationId != null) {
                 val place = listOfNotNull(post.projectName, post.conversationTitle).joinToString(", ")

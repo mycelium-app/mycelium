@@ -9,6 +9,7 @@ mod decide;
 mod earlier_turns;
 mod environment;
 mod goal_and_usage;
+mod inbox;
 mod instructions;
 mod integration_tools;
 mod learning;
@@ -72,6 +73,7 @@ enum Area {
     Environment,
     BrowserTask,
     Terminals,
+    Inbox,
 }
 
 fn area_of(tool: &str) -> Option<Area> {
@@ -98,6 +100,7 @@ fn area_of(tool: &str) -> Option<Area> {
         "environment_start" | "environment_screenshot" | "environment_click" | "environment_type" | "environment_scroll" | "environment_key" | "environment_launch" => Some(Area::Environment),
         "browser_task" => Some(Area::BrowserTask),
         "terminal_list" | "terminal_read" | "terminal_type" => Some(Area::Terminals),
+        "list_needs_you" | "resolve_needs_you" | "focus_needs_you" => Some(Area::Inbox),
         name if name.contains("__") => Some(Area::ServerTools),
         _ => None,
     }
@@ -128,6 +131,7 @@ async fn call_area(area: Area, call: ToolCall<'_>) -> ApiResult<ToolReply> {
         Area::Environment => environment::call(call).await,
         Area::BrowserTask => browser_task::call(call).await,
         Area::Terminals => terminals::call(call).await,
+        Area::Inbox => inbox::call(call).await,
     }
 }
 
@@ -167,6 +171,7 @@ pub fn tool_definitions() -> Value {
         environment::definitions(),
         browser_task::definitions(),
         terminals::definitions(),
+        inbox::definitions(),
     ];
 
     Value::Array(areas.into_iter().flat_map(|definitions| definitions.as_array().cloned().unwrap_or_default()).collect())
@@ -245,6 +250,15 @@ pub async fn respond(state: &AppState, node_id: Uuid, conversation_id: Option<Uu
                 tools.retain(|tool| tool["name"].as_str() != Some("note_learned"));
             }
 
+            let voice = match caller.conversation_id().await? {
+                Some(conversation_id) => crate::assistant_actions::is_voice_conversation(state, conversation_id).await?,
+                None => false,
+            };
+
+            if !voice {
+                tools.retain(|tool| !tool["name"].as_str().is_some_and(|name| inbox::TOOLS.contains(&name)));
+            }
+
             tools.extend(integration_tools::listed(&caller).await?);
 
             reply(&id, json!({"tools": tools}))
@@ -275,7 +289,7 @@ pub async fn respond(state: &AppState, node_id: Uuid, conversation_id: Option<Uu
                         ToolReply::Invalid(message) => failure(&id, INVALID_PARAMS, &message),
                     }
                 }
-                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use list_places, assistant_list, assistant_create, assistant_update, assistant_propose_action, recall, remember, propose_task, ask_question, propose_schedule, walkthrough, save_reflection, propose_exercise, note_learned, save_exercise_review, read_earlier_turns, get_instructions, propose_instructions_edit, find_conversations, read_conversation, send_to_conversation, request_api_access, decide, request_ssh_access, create_artifact, update_artifact, design_set_artboard, design_remove_item, read_artifact or read_artifact_feedback."),
+                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use list_places, assistant_list, assistant_create, assistant_update, assistant_propose_action, recall, remember, propose_task, ask_question, propose_schedule, walkthrough, save_reflection, propose_exercise, note_learned, save_exercise_review, list_needs_you, resolve_needs_you, focus_needs_you, read_earlier_turns, get_instructions, propose_instructions_edit, find_conversations, read_conversation, send_to_conversation, request_api_access, decide, request_ssh_access, create_artifact, update_artifact, design_set_artboard, design_remove_item, read_artifact or read_artifact_feedback."),
             }
         }
         _ => failure(&id, METHOD_NOT_FOUND, "Method not found."),

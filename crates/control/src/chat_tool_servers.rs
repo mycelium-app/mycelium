@@ -33,7 +33,7 @@ pub struct KnownApp {
     pub api: Option<ApiSurface>,
 }
 
-pub const KNOWN_APPS: [KnownApp; 2] = [KnownApp {
+pub const KNOWN_APPS: [KnownApp; 3] = [KnownApp {
     id: "outline",
     stored_kind: "mcp",
     stored_in_settings: true,
@@ -52,6 +52,16 @@ pub const KNOWN_APPS: [KnownApp; 2] = [KnownApp {
     default_path: "/mcp/",
     keeps_path: |path| !matches!(path, "" | "/"),
     key_header: "x-litellm-api-key",
+    api: None,
+}, KnownApp {
+    id: "murmur",
+    stored_kind: "mcp",
+    stored_in_settings: true,
+    key_prompt: "Enter your Murmur API key.",
+    refused: "Murmur refused that API key. Check it was copied whole and has not been revoked.",
+    default_path: "/mcp",
+    keeps_path: |path| path.trim_end_matches('/').ends_with("/mcp"),
+    key_header: DEFAULT_KEY_HEADER,
     api: None,
 }];
 

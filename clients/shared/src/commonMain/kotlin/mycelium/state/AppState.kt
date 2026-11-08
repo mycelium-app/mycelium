@@ -102,6 +102,7 @@ data class AppState(
     val terminalOutput: Map<String, TerminalFeed> = emptyMap(),
     val exitedTerminals: Set<String> = emptySet(),
     val environments: Map<String, mycelium.api.Environment> = emptyMap(),
+    val needsYouFocus: String? = null,
     val environmentActions: Map<String, List<mycelium.api.EnvironmentAction>> = emptyMap(),
     val lastEnvironmentNodeId: String? = null,
     val recentEnvironmentApps: Map<String, List<String>> = emptyMap(),
@@ -229,6 +230,8 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.IntegrationsChanged -> state.copy(integrationsRevision = state.integrationsRevision + 1)
     is StreamMessage.WatchesChanged -> state.copy(watchesRevision = state.watchesRevision + (message.conversationId to (state.watchesRevision[message.conversationId] ?: 0) + 1))
     is StreamMessage.ForgeChanged -> state.copy(forgeRevision = state.forgeRevision + 1)
+
+    is StreamMessage.NeedsYouFocused -> state.copy(needsYouFocus = message.key)
 
     is StreamMessage.WellnessChanged -> state
 
