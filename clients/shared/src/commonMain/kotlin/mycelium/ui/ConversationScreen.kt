@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.semantics
 import mycelium.ProviderDictation
 import mycelium.api.Conversation
+import mycelium.api.Watch
 import mycelium.api.CreateProjectRequest
 import mycelium.api.Project
 import mycelium.api.ApiException
@@ -117,6 +118,11 @@ import mycelium.state.statusSectionName
 fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenNode: (String) -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}, onOpenWorkflow: ((String) -> Unit)? = null, panels: Boolean = true, header: HeaderSlots? = null, onManageActions: () -> Unit = {}) {
     val api = store.api
     var fetched by remember(id) { mutableStateOf<Conversation?>(null) }
+    var watches by remember(id) { mutableStateOf<List<Watch>>(emptyList()) }
+
+    LaunchedEffect(id, state.watchesRevision[id]) {
+        store.act { watches = api.watches(id) }
+    }
     val platform = LocalPlatform.current
     var nodeSheetOpen by remember { mutableStateOf(false) }
     var moveOpen by remember { mutableStateOf(false) }
@@ -657,6 +663,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 )
 
                 conversation.snoozedUntil?.let { until -> SnoozedLine(until, onWake = { store.snooze(conversation, null) }) }
+                WatchLines(watches, onOpen = onOpenConversation, onStop = { watch -> store.act { api.deleteWatch(watch.id) } })
 
                 CompositionLocalProvider(LocalResponseActions provides responses, LocalPausedWorkflow provides PausedWorkflow(conversation.agent, limitActions)) {
                     ThreadView(

@@ -150,6 +150,8 @@ const COVERED: &[(&str, &str, &str)] = &[
     ("POST", "/api/v1/apps/{uuid}/stop", "coolify__stop"),
     ("GET", "/api/v1/app-deployments/{uuid}", "coolify__list_deployments"),
     ("POST", "/api/v1/tasks/{id}/close", "close_tasks"),
+    ("GET", "/api/v1/conversations/{id}/watches", "list_watches"),
+    ("DELETE", "/api/v1/watches/{id}", "unwatch"),
 ];
 
 const EXCEPTIONS: &[(&str, &str, &str)] = &[

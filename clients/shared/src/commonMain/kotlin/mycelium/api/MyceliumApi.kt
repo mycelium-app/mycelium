@@ -1193,6 +1193,12 @@ class MyceliumApi(
 
     suspend fun queue(id: String): List<QueuedPrompt> = call("/conversations/$id/queue") { client.get(it) { authorise() } }.body()
 
+    suspend fun watches(id: String): List<Watch> = call("/conversations/$id/watches") { client.get(it) { authorise() } }.body()
+
+    suspend fun deleteWatch(id: String) {
+        call("/watches/$id") { client.delete(it) { authorise() } }
+    }
+
     suspend fun editQueued(id: String, queueId: String, request: PatchQueueRequest) {
         call("/conversations/$id/queue/$queueId") { client.patch(it) { authorise(); json(request) } }
     }

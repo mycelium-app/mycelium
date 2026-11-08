@@ -83,6 +83,7 @@ data class AppState(
     val removedMemories: Set<String> = emptySet(),
     val memoryRevision: Int = 0,
     val integrationsRevision: Int = 0,
+    val watchesRevision: Map<String, Int> = emptyMap(),
     val forgeRevision: Int = 0,
     val chatToolServers: List<mycelium.api.ChatToolServer> = emptyList(),
     val apps: List<mycelium.api.AppSummary>? = null,
@@ -226,6 +227,7 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.NodeChanged -> state.copy(nodes = state.nodes + (message.node.id to message.node))
 
     is StreamMessage.IntegrationsChanged -> state.copy(integrationsRevision = state.integrationsRevision + 1)
+    is StreamMessage.WatchesChanged -> state.copy(watchesRevision = state.watchesRevision + (message.conversationId to (state.watchesRevision[message.conversationId] ?: 0) + 1))
     is StreamMessage.ForgeChanged -> state.copy(forgeRevision = state.forgeRevision + 1)
 
     is StreamMessage.WellnessChanged -> state

@@ -268,3 +268,15 @@ data class QueuedPrompt(
     val attachments: List<Attachment> = emptyList(),
     val editing: Boolean = false,
 )
+
+@Serializable
+data class Watch(
+    val id: String,
+    val kind: String,
+    @SerialName("conversation_id") val conversationId: String? = null,
+    val title: String? = null,
+    val repository: String? = null,
+    val reference: String? = null,
+    val note: String? = null,
+    @SerialName("due_at") val dueAt: String? = null,
+)

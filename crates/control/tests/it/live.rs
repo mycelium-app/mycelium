@@ -179,6 +179,7 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/tasks/{id}/done",
     "POST /api/v1/tasks/{id}/close",
     "DELETE /api/v1/tasks/{id}",
+    "DELETE /api/v1/watches/{id}",
     "POST /api/v1/schedules",
     "PATCH /api/v1/schedules/{id}",
     "PUT /api/v1/me/time-zone",

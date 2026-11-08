@@ -1,6 +1,10 @@
+use crate::auth::AuthUser;
 use crate::boot::run_while_ready;
 use crate::error::ApiResult;
 use crate::state::AppState;
+use axum::Json;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -201,4 +205,16 @@ pub async fn listed(state: &AppState, owner: Uuid, watcher: Uuid) -> ApiResult<V
         .into_iter()
         .map(|(id, kind, target, title, repository, reference, note, due_at, only_waiting)| json!({"id": id, "kind": kind, "conversation_id": target, "title": title, "repository": repository, "reference": reference, "note": note, "due_at": due_at, "only_waiting": only_waiting}))
         .collect())
+}
+
+pub async fn list(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<Value>>> {
+    crate::store::find_owned(&state.pool, id, user.id).await?;
+
+    Ok(Json(listed(&state, user.id, id).await?))
+}
+
+pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+    end(&state, user.id, id).await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }

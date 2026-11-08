@@ -203,3 +203,20 @@ async fn a_wake_up_set_before_a_restart_is_delivered_by_the_restarted_control_pl
     assert_eq!(set["isError"], false, "{set}");
     assert!(queued.iter().any(|text| text.contains("Check the release run finished")), "{queued:?}");
 }
+
+#[tokio::test]
+async fn the_person_sees_a_conversations_watches_and_can_end_one() {
+    let server = fast().await;
+    let mut link = server.online_node("laptop").await;
+    let watcher = begun(&server, &mut link, "Plan the release").await;
+    tool(&server, &link, watcher, "wake_at", json!({"in_minutes": 60, "note": "Post the release notes"})).await;
+
+    let (_, listed) = server.user.json(server.user.get(&format!("/api/v1/conversations/{watcher}/watches"))).await;
+    let watch = listed[0]["id"].as_str().unwrap().to_string();
+    let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/watches/{watch}"))).await;
+    let (_, after) = server.user.json(server.user.get(&format!("/api/v1/conversations/{watcher}/watches"))).await;
+
+    assert_eq!((listed[0]["kind"].clone(), listed[0]["note"].clone()), (json!("timer"), json!("Post the release notes")));
+    assert_eq!(status, 204);
+    assert_eq!(after, json!([]));
+}
