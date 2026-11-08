@@ -6,19 +6,24 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-pub const ADVERT: &str = "Any text argument can be {\"file\": \"<path in the conversation folder>\"} instead of the text: Mycelium reads the file and sends its exact contents, up to 25 MB. This needs a conversation on a node.";
+pub const ADVERT: &str = "Any text argument can be {\"file\": \"<path in the conversation folder>\"} instead of the text: Mycelium reads the file and sends its exact contents, up to 25 MB. Add \"encoding\": \"base64\" to send a binary file, such as a PDF, as base64. This needs a conversation on a node.";
 
 const LIMIT_BYTES: u64 = 25 * 1024 * 1024;
 
-fn file_of(value: &Value) -> Option<&str> {
-    let object = value.as_object().filter(|object| object.len() == 1)?;
+fn file_of(value: &Value) -> Option<(&str, bool)> {
+    let object = value.as_object()?;
+    let base64 = object.get("encoding").and_then(Value::as_str) == Some("base64");
 
-    object.get("file")?.as_str()
+    if object.len() != 1 + usize::from(base64) {
+        return None;
+    }
+
+    Some((object.get("file")?.as_str()?, base64))
 }
 
-fn files_in(value: &Value, found: &mut Vec<String>) {
-    if let Some(path) = file_of(value) {
-        found.push(path.to_string());
+fn files_in(value: &Value, found: &mut Vec<(String, bool)>) {
+    if let Some((path, base64)) = file_of(value) {
+        found.push((path.to_string(), base64));
 
         return;
     }
@@ -37,8 +42,8 @@ pub fn any_in(arguments: &Value) -> bool {
     !found.is_empty()
 }
 
-fn replaced(value: &Value, contents: &HashMap<String, String>) -> Value {
-    if let Some(content) = file_of(value).and_then(|path| contents.get(path)) {
+fn replaced(value: &Value, contents: &HashMap<(String, bool), String>) -> Value {
+    if let Some(content) = file_of(value).and_then(|(path, base64)| contents.get(&(path.to_string(), base64))) {
         return Value::String(content.clone());
     }
 
@@ -67,8 +72,8 @@ pub async fn substitute(state: &AppState, owner: Uuid, conversation: Option<Uuid
     let found = crate::store::find_owned(&state.pool, conversation_id, owner).await.map_err(|error| error.message().to_string())?;
     let mut contents = HashMap::new();
 
-    for path in paths {
-        if contents.contains_key(&path) {
+    for (path, base64) in paths {
+        if contents.contains_key(&(path.clone(), base64)) {
             continue;
         }
 
@@ -81,7 +86,7 @@ pub async fn substitute(state: &AppState, owner: Uuid, conversation: Option<Uuid
 
         let encoded = answer["data"].as_str().unwrap_or_default().to_string();
 
-        let content = if takes_bytes(tool) {
+        let content = if base64 || takes_bytes(tool) {
             encoded
         } else {
             let bytes = base64::engine::general_purpose::STANDARD.decode(&encoded).map_err(|_| format!("{path} could not be read."))?;
@@ -89,7 +94,7 @@ pub async fn substitute(state: &AppState, owner: Uuid, conversation: Option<Uuid
             String::from_utf8(bytes).map_err(|_| format!("{path} is not text, and {tool} takes text. Use a tool that takes attachments, or the integration's API."))?
         };
 
-        contents.insert(path, content);
+        contents.insert((path, base64), content);
     }
 
     Ok(replaced(&arguments, &contents))
@@ -107,7 +112,7 @@ mod tests {
 
         files_in(&arguments, &mut found);
 
-        assert_eq!(found, vec!["b.txt".to_string(), "notes/a.md".to_string()]);
+        assert_eq!(found, vec![("b.txt".to_string(), false), ("notes/a.md".to_string(), false)]);
     }
 
     #[test]
@@ -119,9 +124,19 @@ mod tests {
     #[test]
     fn each_file_argument_is_replaced_by_its_content_and_the_rest_is_untouched() {
         let arguments = json!({"title": "Notes", "text": {"file": "notes/a.md"}, "options": {"file": "x", "other": 1}});
-        let contents = HashMap::from([("notes/a.md".to_string(), "# Exact\n".to_string())]);
+        let contents = HashMap::from([(("notes/a.md".to_string(), false), "# Exact\n".to_string())]);
 
         assert_eq!(replaced(&arguments, &contents), json!({"title": "Notes", "text": "# Exact\n", "options": {"file": "x", "other": 1}}));
+    }
+
+    #[test]
+    fn a_file_argument_asking_for_base64_is_found_and_other_extra_fields_are_not_file_arguments() {
+        let arguments = json!({"attachment": {"data": {"file": "scan.pdf", "encoding": "base64"}, "file_name": "scan.pdf"}, "other": {"file": "x", "encoding": "hex"}});
+        let mut found = Vec::new();
+
+        files_in(&arguments, &mut found);
+
+        assert_eq!(found, vec![("scan.pdf".to_string(), true)]);
     }
 
     #[test]
