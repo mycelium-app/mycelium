@@ -59,7 +59,7 @@ pub async fn connected(state: &AppState, owner: Uuid, from: Uuid, to: Uuid) -> A
     };
 
     if source == target {
-        return Ok(false);
+        return Ok(true);
     }
 
     active(state, owner, source, target).await

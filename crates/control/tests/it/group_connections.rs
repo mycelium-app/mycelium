@@ -153,6 +153,29 @@ async fn a_message_between_unconnected_or_revoked_groups_waits_for_approval() {
 }
 
 #[tokio::test]
+async fn a_message_to_a_conversation_in_the_same_group_is_sent_without_approval() {
+    let mut fleet = fleet().await;
+    let neighbour = working_conversation(&fleet.server, &mut fleet.link, "Rotate the keys", "/work/yucca/infra").await;
+
+    let sent = propose(&fleet.server, &fleet.link, fleet.yucca_chat, neighbour).await;
+
+    assert!(text(&sent).starts_with("Sent to Rotate the keys") || text(&sent).starts_with("Queued for Rotate the keys"), "{sent}");
+    assert_eq!(queue(&fleet.server, neighbour).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_message_between_two_conversations_in_no_group_waits_for_approval() {
+    let mut fleet = fleet().await;
+    let loose = working_conversation(&fleet.server, &mut fleet.link, "Loose chat", "/elsewhere").await;
+    let other = working_conversation(&fleet.server, &mut fleet.link, "Other loose chat", "/elsewhere/too").await;
+
+    propose(&fleet.server, &fleet.link, loose, other).await;
+
+    assert_eq!(queue(&fleet.server, other).await.len(), 0);
+    assert!(proposals(&fleet.server).await.iter().all(|proposal| proposal["state"] == "proposed"));
+}
+
+#[tokio::test]
 async fn a_message_from_a_conversation_with_no_group_waits_for_approval() {
     let mut fleet = fleet().await;
     connect(&fleet.server, fleet.yucca, fleet.immich).await;

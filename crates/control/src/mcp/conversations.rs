@@ -74,7 +74,7 @@ pub fn definitions() -> Value {
         },
         {
             "name": "send_to_conversation",
-            "description": "Propose a message to send to another of the person's conversations. An approved connection, or a connection between the two conversations' groups, allows immediate delivery; otherwise the message waits for the person to approve it in a card in this conversation. Messages are prefixed with the source conversation title. Find the target with find_conversations.",
+            "description": "Propose a message to send to another of the person's conversations. A conversation in the same group, an approved connection, or a connection between the two conversations' groups allows immediate delivery; otherwise the message waits for the person to approve it in a card in this conversation. Messages are prefixed with the source conversation title. Find the target with find_conversations.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -158,13 +158,11 @@ pub fn definitions() -> Value {
 }
 
 async fn refusal(state: &crate::state::AppState, owner: Uuid, from: Uuid, to: Uuid, label: &str) -> ApiResult<Option<String>> {
-    let (own_group, target_group) = (group_connections::group_of(state, from).await?, group_connections::group_of(state, to).await?);
-    let same_group = own_group.is_some() && own_group == target_group;
-
-    if same_group || conversation_connections::active(state, owner, from, to).await? || group_connections::connected(state, owner, from, to).await? {
+    if conversation_connections::active(state, owner, from, to).await? || group_connections::connected(state, owner, from, to).await? {
         return Ok(None);
     }
 
+    let (own_group, target_group) = (group_connections::group_of(state, from).await?, group_connections::group_of(state, to).await?);
     let group_name = |group: Option<Uuid>| async move {
         match group {
             Some(group) => sqlx::query_scalar::<_, String>("select name from groups where id = $1").bind(group).fetch_optional(&state.pool).await,
