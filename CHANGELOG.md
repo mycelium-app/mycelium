@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.28.1
+
+- Republishes v0.28.0, whose desktop and web build failed.
+
 ## v0.28.0
 
 - A conversation started with start_conversation or start_subagent tells the one that started it when its turn ends and it has finished, failed or is waiting on the person. watch_conversation does the same for other conversations it can read, and unwatch and list_watches manage watches.
