@@ -32,13 +32,37 @@ pub async fn prompt_for(link: &mut NodeLink, conversation: Uuid) -> String {
     }
 }
 
+pub async fn messages(server: &Server, conversation: Uuid) -> Vec<String> {
+    sqlx::query_scalar::<_, String>("select payload->>'text' from events where conversation_id = $1 and kind = 'user_message' order by seq").bind(conversation).fetch_all(&server.pool).await.unwrap()
+}
+
+pub async fn told(server: &Server, conversation: Uuid, nth: usize) -> String {
+    for _ in 0..100 {
+        let delivered = messages(server, conversation).await;
+
+        if let Some(text) = delivered.get(nth) {
+            return text.clone();
+        }
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    panic!("message {nth} never reached {conversation}: {:?}", messages(server, conversation).await);
+}
+
+pub async fn still(server: &Server, conversation: Uuid, count: usize) -> bool {
+    tokio::time::sleep(Duration::from_millis(700)).await;
+
+    messages(server, conversation).await.len() == count
+}
+
 pub async fn quiet_for(link: &mut NodeLink, conversation: Uuid) -> bool {
     let waited = tokio::time::timeout(Duration::from_millis(700), prompt_for(link, conversation)).await;
 
     waited.is_err()
 }
 
-async fn connect(server: &Server, a: Uuid, b: Uuid) {
+pub async fn connect(server: &Server, a: Uuid, b: Uuid) {
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(a).fetch_one(&server.pool).await.unwrap();
     sqlx::query("insert into conversation_connections (owner, source_id, target_id) values ($1, least($2::uuid, $3::uuid), greatest($2::uuid, $3::uuid))").bind(owner).bind(a).bind(b).execute(&server.pool).await.unwrap();
 }
@@ -64,12 +88,12 @@ async fn a_watched_conversation_tells_its_watcher_once_when_its_turn_ends() {
 
     let watched = tool(&server, &link, watcher, "watch_conversation", json!({"conversation": target.to_string()})).await;
     end_turn(&mut link, target, 1).await;
-    let told = prompt_for(&mut link, watcher).await;
+    let told = told(&server, watcher, 1).await;
     link.send(NodeToControl::TurnEnd { conversation_id: target, seq: 1, stop_reason: "end_turn".into(), usage: None }).await;
 
     assert_eq!(watched["isError"], false, "{watched}");
     assert!(told.contains("finished its turn"), "{told}");
-    assert!(quiet_for(&mut link, watcher).await, "the same turn end must not notify twice");
+    assert!(still(&server, watcher, 2).await, "the same turn end must not notify twice");
 }
 
 #[tokio::test]
@@ -84,7 +108,7 @@ async fn a_turn_that_ends_with_an_open_question_is_waiting_on_the_person() {
 
     let asked = tool(&server, &link, target, "ask_question", json!({"question": "Which version number?"})).await;
     end_turn(&mut link, target, 1).await;
-    let told = prompt_for(&mut link, watcher).await;
+    let told = told(&server, watcher, 1).await;
 
     assert_eq!(asked["isError"], false, "{asked}");
     assert!(told.contains("is waiting on the person"), "{told}");
@@ -102,7 +126,7 @@ async fn a_failed_session_tells_its_watcher_it_failed() {
     tool(&server, &link, watcher, "watch_conversation", json!({"conversation": target.to_string()})).await;
 
     link.send(NodeToControl::SessionFailed { conversation_id: target, seq: 1, message: "The agent stopped".into() }).await;
-    let told = prompt_for(&mut link, watcher).await;
+    let told = told(&server, watcher, 1).await;
 
     assert!(told.contains("failed"), "{told}");
 }
@@ -122,7 +146,7 @@ async fn notifications_that_arrive_while_the_watcher_works_come_as_one_turn() {
     end_turn(&mut link, first, 1).await;
     end_turn(&mut link, second, 1).await;
     end_turn(&mut link, watcher, 1).await;
-    let told = prompt_for(&mut link, watcher).await;
+    let told = told(&server, watcher, 1).await;
 
     assert!(told.contains(&first.to_string()) && told.contains(&second.to_string()), "{told}");
 }
@@ -139,10 +163,10 @@ async fn a_turn_started_by_a_notification_does_not_notify_so_two_watchers_cannot
     tool(&server, &link, b, "watch_conversation", json!({"conversation": a.to_string()})).await;
 
     end_turn(&mut link, b, 1).await;
-    prompt_for(&mut link, a).await;
-    end_turn(&mut link, a, 2).await;
+    told(&server, a, 1).await;
+    end_turn(&mut link, a, 3).await;
 
-    assert!(quiet_for(&mut link, b).await, "a's turn came from a notification, so b must not hear of it");
+    assert!(still(&server, b, 1).await, "a's turn came from a notification, so b must not hear of it");
 }
 
 #[tokio::test]
@@ -174,7 +198,7 @@ async fn unwatch_stops_the_notifications() {
     end_turn(&mut link, target, 1).await;
 
     assert_eq!(stopped["isError"], false, "{stopped}");
-    assert!(quiet_for(&mut link, watcher).await);
+    assert!(still(&server, watcher, 1).await);
 }
 
 #[tokio::test]
