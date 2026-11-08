@@ -306,6 +306,91 @@ async fn a_started_conversation_can_reply_to_its_starter_without_approval() {
     assert_eq!(queue(&fleet.server, fleet.yucca_chat).await.len(), 1);
 }
 
+async fn started_chat(fleet: &mut Fleet) -> Uuid {
+    connect(&fleet.server, fleet.yucca, fleet.immich).await;
+    project_in(fleet, "billing", Some(fleet.immich)).await;
+    let started = text(&call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_conversation", start_arguments("Immich", "billing")).await);
+    fleet.link.expect_start_session().await;
+
+    started.split('(').nth(1).unwrap().split(')').next().unwrap().parse().unwrap()
+}
+
+async fn conversation(server: &Server, id: Uuid) -> Value {
+    let (_, conversations) = server.user.json(server.user.get("/api/v1/conversations")).await;
+
+    conversations.as_array().unwrap().iter().find(|conversation| conversation["id"] == id.to_string()).unwrap().clone()
+}
+
+#[tokio::test]
+async fn a_started_conversation_is_managed_by_its_starter_and_the_starter_is_not() {
+    let mut fleet = fleet().await;
+
+    let new_chat = started_chat(&mut fleet).await;
+
+    assert_eq!(conversation(&fleet.server, new_chat).await["managed_by"], json!(fleet.yucca_chat.to_string()));
+    assert_eq!(conversation(&fleet.server, fleet.yucca_chat).await.get("managed_by"), None);
+}
+
+#[tokio::test]
+async fn the_manager_flags_a_managed_conversation_and_the_flag_clears_when_the_person_writes_in_it() {
+    let mut fleet = fleet().await;
+    let new_chat = started_chat(&mut fleet).await;
+
+    let flagged = call(&fleet.server, &fleet.link, fleet.yucca_chat, "flag_for_person", json!({"conversation": new_chat.to_string(), "reason": "Choose the export format"})).await;
+
+    assert_eq!(text(&flagged), format!("Flagged Billing follow-up ({new_chat}) for the person."));
+    let shown = conversation(&fleet.server, new_chat).await;
+    assert_eq!(shown["flag_reason"], "Choose the export format");
+    assert!(shown["flagged_at"].is_string());
+
+    fleet.server.user.json(fleet.server.user.post(&format!("/api/v1/conversations/{new_chat}/prompt")).json(&json!({"text": "Use CSV"}))).await;
+
+    let attended = conversation(&fleet.server, new_chat).await;
+    assert_eq!((attended.get("flagged_at"), attended.get("flag_reason")), (None, None));
+    assert_eq!(attended["managed_by"], json!(fleet.yucca_chat.to_string()));
+}
+
+#[tokio::test]
+async fn a_managed_conversation_can_flag_itself_but_another_conversation_cannot_flag_it() {
+    let mut fleet = fleet().await;
+    let new_chat = started_chat(&mut fleet).await;
+
+    let refused = call(&fleet.server, &fleet.link, fleet.immich_chat, "flag_for_person", json!({"conversation": new_chat.to_string(), "reason": "Look at this"})).await;
+    let unmanaged = call(&fleet.server, &fleet.link, fleet.yucca_chat, "flag_for_person", json!({"reason": "Look at me"})).await;
+    let itself = call(&fleet.server, &fleet.link, new_chat, "flag_for_person", json!({"reason": "I need the export format"})).await;
+
+    assert_eq!((refused["isError"].clone(), unmanaged["isError"].clone(), itself["isError"].clone()), (json!(true), json!(true), json!(false)));
+    assert_eq!(conversation(&fleet.server, new_chat).await["flag_reason"], "I need the export format");
+}
+
+#[tokio::test]
+async fn taking_over_a_managed_conversation_brings_it_back_to_the_person() {
+    let mut fleet = fleet().await;
+    let new_chat = started_chat(&mut fleet).await;
+
+    let (status, taken) = fleet.server.user.json(fleet.server.user.patch(&format!("/api/v1/conversations/{new_chat}")).json(&json!({"take_over": true}))).await;
+
+    assert_eq!(status, 200, "{taken}");
+    assert_eq!(conversation(&fleet.server, new_chat).await.get("managed_by"), None);
+}
+
+#[tokio::test]
+async fn conversations_started_before_management_are_managed_by_their_starter_after_the_migration() {
+    let mut fleet = fleet().await;
+    let new_chat = started_chat(&mut fleet).await;
+    fleet.link.start_session(new_chat, "acp-new").await;
+    fleet.link.expect_prompt().await;
+    let unrelated = fleet.immich_chat;
+    sqlx::query("alter table conversations drop column managed_by, drop column flagged_at, drop column flag_reason").execute(&fleet.server.pool).await.unwrap();
+
+    sqlx::raw_sql(include_str!("../../migrations/0163_managed_conversations.sql")).execute(&fleet.server.pool).await.unwrap();
+
+    let managed: Vec<(Uuid, Option<Uuid>)> = sqlx::query_as("select id, managed_by from conversations where id = any($1) order by id").bind(vec![new_chat, fleet.yucca_chat, unrelated]).fetch_all(&fleet.server.pool).await.unwrap();
+    let mut expected = vec![(new_chat, Some(fleet.yucca_chat)), (fleet.yucca_chat, None), (unrelated, None)];
+    expected.sort();
+    assert_eq!(managed, expected);
+}
+
 async fn answered(server: &Server, link: &mut NodeLink, conversation: Uuid, answer: &str) {
     link.send(mycelium_proto::link::NodeToControl::AcpUpdate { conversation_id: conversation, seq: 3, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": answer}}}) }).await;
     link.send(mycelium_proto::link::NodeToControl::TurnEnd { conversation_id: conversation, seq: 4, stop_reason: "end_turn".into(), usage: None }).await;

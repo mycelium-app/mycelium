@@ -172,7 +172,14 @@ pub enum Sent {
 }
 
 pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PromptRequest>) -> ApiResult<Response> {
-    match send(&state, user.id, id, request).await? {
+    let sent = send(&state, user.id, id, request).await?;
+    let attended = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set flagged_at = null, flag_reason = null where id = $1 and owner = $2 and flagged_at is not null returning {CONVERSATION_COLUMNS}"))).bind(id).bind(user.id).fetch_optional(&state.pool).await?;
+
+    if let Some(attended) = attended {
+        state.publish(Some(user.id), StreamMessage::Conversation(attended.to_proto()?));
+    }
+
+    match sent {
         Sent::Delivered | Sent::QueuedWhileBusy => Ok(StatusCode::NO_CONTENT.into_response()),
         Sent::QueuedForOfflineNode => Ok((StatusCode::ACCEPTED, Json(json!({"queued": true, "message": NODE_NOT_CONNECTED}))).into_response()),
     }

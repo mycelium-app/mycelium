@@ -146,6 +146,12 @@ pub struct Conversation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snoozed_until: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_by: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flagged_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flag_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pull_request_label: Option<String>,

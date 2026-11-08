@@ -4,7 +4,8 @@ use crate::error::ApiResult;
 use crate::forge_watches::{self, Target};
 use crate::group_connections;
 use crate::message_proposals;
-use crate::store::CONVERSATION_GROUP_SQL;
+use crate::store::{CONVERSATION_COLUMNS, CONVERSATION_GROUP_SQL, ConversationRow};
+use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -29,7 +30,7 @@ pub fn definitions() -> Value {
         },
         {
             "name": "start_conversation",
-            "description": "Start a new conversation in a project of another group and give it a first message. The person must have connected your group to that group in Settings, Agent connections; starting in your own group needs no connection. The new conversation is connected to this one, so it can reply with send_to_conversation, and this one is told each time its turn ends and it has finished, failed or is waiting on the person. Name the project, or a folder together with its node.",
+            "description": "Start a new conversation in a project of another group and give it a first message. The person must have connected your group to that group in Settings, Agent connections; starting in your own group needs no connection. The new conversation is connected to this one, so it can reply with send_to_conversation, and this one is told each time its turn ends and it has finished, failed or is waiting on the person. This conversation manages it: it stays out of the person's way under Managed by assistant, with no notifications, until you bring it to them with flag_for_person or they take it over. Name the project, or a folder together with its node.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -43,6 +44,18 @@ pub fn definitions() -> Value {
                     "reason": {"type": "string", "description": "A short reason, shown in this conversation's transcript."},
                 },
                 "required": ["group", "prompt", "reason"],
+            },
+        },
+        {
+            "name": "flag_for_person",
+            "description": "Bring a conversation this one manages to the person, when it needs them: it leaves Managed by assistant, shows in its normal place with your reason and notifies them. A managed conversation can also flag itself. The flag clears when the person writes in it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "conversation": {"type": "string", "description": "The id or exact title of the managed conversation. Leave it out to flag this conversation."},
+                    "reason": {"type": "string", "description": "What the person needs to do, written so it makes sense on its own."},
+                },
+                "required": ["reason"],
             },
         },
         {
@@ -309,9 +322,43 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
 
             conversation_connections::connect(state, owner, conversation_id, started.id).await?;
             crate::watches::watch_conversation(state, owner, conversation_id, started.id, false).await?;
+            let managed = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set managed_by = $2 where id = $1 returning {CONVERSATION_COLUMNS}"))).bind(started.id).bind(conversation_id).fetch_one(&state.pool).await?;
+            state.publish(Some(owner), StreamMessage::Conversation(managed.to_proto()?));
             let node_name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(started.node_id).fetch_one(&state.pool).await?;
 
             ToolReply::text(&format!("Started {} ({}) in {target_name} on {node_name}. The reason was: {reason}", message_proposals::label(started.id, &started.title), started.id), false)
+        }
+        "flag_for_person" => {
+            let Some(reason) = arguments.get("reason").and_then(Value::as_str).map(str::trim).filter(|reason| !reason.is_empty()) else {
+                return Ok(ToolReply::invalid("flag_for_person needs reason, a string."));
+            };
+            let Some((conversation_id, _)) = caller.conversation().await? else {
+                return Ok(ToolReply::text("Nothing was flagged. A flag comes from a conversation, and this call did not come from one.", true));
+            };
+            let owner = caller.owner().await?;
+            let target_id = match arguments.get("conversation").and_then(Value::as_str).map(str::trim).filter(|target| !target.is_empty()) {
+                Some(target) => match message_proposals::resolve(state, owner, target).await? {
+                    Ok(target_id) => target_id,
+                    Err(reason) => return Ok(ToolReply::text(&format!("Nothing was flagged. {reason}"), true)),
+                },
+                None => conversation_id,
+            };
+            let flagged = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
+                "update conversations set flagged_at = now(), flag_reason = $3 where id = $1 and owner = $4 and managed_by is not null and (managed_by = $2 or id = $2) returning {CONVERSATION_COLUMNS}"
+            )))
+            .bind(target_id)
+            .bind(conversation_id)
+            .bind(reason)
+            .bind(owner)
+            .fetch_optional(&state.pool)
+            .await?;
+            let Some(flagged) = flagged else {
+                return Ok(ToolReply::text("Nothing was flagged. Only a conversation this one manages, or this conversation when it is managed, can be flagged. Anything else is already in front of the person.", true));
+            };
+            let label = message_proposals::label(flagged.id, &flagged.title);
+            state.publish(Some(owner), StreamMessage::Conversation(flagged.to_proto()?));
+
+            ToolReply::text(&format!("Flagged {label} ({}) for the person.", flagged.id), false)
         }
         "read_conversation" => {
             let Some(target) = arguments.get("conversation").and_then(Value::as_str).map(str::trim).filter(|target| !target.is_empty()) else {
