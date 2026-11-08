@@ -118,9 +118,13 @@ fn locator(credentials: &Credentials, path: &str, entered: &str) -> String {
     format!("{}/v2/{path}/{id}", base(&credentials.address))
 }
 
+pub(crate) fn client_id(settings: &Value) -> &str {
+    settings["client_id"].as_str().unwrap_or_default()
+}
+
 fn tokens_request(http: &reqwest::Client, credentials: &Credentials, body: &[(&str, &str)]) -> reqwest::RequestBuilder {
     http.post(format!("{}/v2/token_endpoint", base(&credentials.address)))
-        .basic_auth(&credentials.account, Some(&credentials.secret))
+        .basic_auth(client_id(&credentials.settings), Some(&credentials.secret))
         .header("content-type", "application/x-www-form-urlencoded")
         .body(url::form_urlencoded::Serializer::new(String::new()).extend_pairs(body).finish())
         .timeout(TIMEOUT)
@@ -315,6 +319,10 @@ pub async fn call(state: &AppState, owner: Uuid, server: &ServerRow, credentials
         }
     }
 
+    if server.account.is_none() && remember_company(state, server, &token).await.is_some() {
+        state.publish(Some(owner), StreamMessage::IntegrationsChanged);
+    }
+
     let mut outcome = run(&state.http, &token, credentials, tool, arguments).await;
 
     if matches!(outcome, Err((_, true))) {
@@ -330,7 +338,7 @@ pub async fn call(state: &AppState, owner: Uuid, server: &ServerRow, credentials
     }
 }
 
-async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<ServerRow> {
+pub(crate) async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<ServerRow> {
     let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("select {SERVER_COLUMNS} from chat_tool_servers where id = $1 and owner = $2 and kind = 'freeagent'"))).bind(id).bind(owner).fetch_optional(&state.pool).await?;
 
     row.ok_or_else(|| ApiError::not_found("That FreeAgent integration"))
@@ -345,7 +353,7 @@ pub async fn start_sign_in(State(state): State<AppState>, user: AuthUser, Path(i
     let sign_in = new_token();
     let mut authorise = url::Url::parse(&format!("{}/v2/approve_app", base(&row.url))).map_err(ApiError::internal)?;
 
-    authorise.query_pairs_mut().append_pair("client_id", row.account.as_deref().unwrap_or_default()).append_pair("response_type", "code").append_pair("redirect_uri", &redirect_address(&state)).append_pair("state", &sign_in);
+    authorise.query_pairs_mut().append_pair("client_id", client_id(&row.settings)).append_pair("response_type", "code").append_pair("redirect_uri", &redirect_address(&state)).append_pair("state", &sign_in);
     state.hub.track_freeagent(sign_in, PendingFreeAgent { owner: user.id, server: id, created: std::time::Instant::now() });
 
     Ok(Json(FreeAgentSignIn { authorize_url: authorise.to_string() }))
@@ -379,10 +387,40 @@ pub async fn callback(State(state): State<AppState>, Query(query): Query<Callbac
         return page(StatusCode::INTERNAL_SERVER_ERROR, "Mycelium could not save the sign-in. Try again.");
     }
 
+    let name = name_after_company(&state, pending.owner, &row, &tokens.access).await.unwrap_or_else(|| row.name.clone());
+
     state.hub.tools_changed(pending.owner);
     state.publish(Some(pending.owner), StreamMessage::IntegrationsChanged);
 
-    page(StatusCode::OK, &format!("{} is signed in to FreeAgent. You can close this tab and return to Mycelium.", row.name))
+    page(StatusCode::OK, &format!("{name} is signed in to FreeAgent. You can close this tab and return to Mycelium."))
+}
+
+async fn remember_company(state: &AppState, row: &ServerRow, token: &str) -> Option<String> {
+    let (status, body) = send(request(&state.http, token, reqwest::Method::GET, &format!("{}/v2/company", base(&row.url)))).await.ok()?;
+    let company = body["company"]["name"].as_str().map(str::trim).filter(|name| status.is_success() && !name.is_empty())?.to_string();
+
+    sqlx::query("update chat_tool_servers set account = $2 where id = $1").bind(row.id).bind(&company).execute(&state.pool).await.ok()?;
+
+    Some(company)
+}
+
+async fn name_after_company(state: &AppState, owner: Uuid, row: &ServerRow, token: &str) -> Option<String> {
+    let company = remember_company(state, row, token).await?;
+
+    if row.settings.0.get(crate::chat_tool_servers::NAMED_BY_COMPANY) != Some(&Value::Bool(true)) {
+        return None;
+    }
+
+    let name = crate::chat_tool_servers::free_name(state, owner, &company, Some(row.id)).await.ok()?;
+    let mut settings = row.settings.0.clone();
+
+    if let Some(settings) = settings.as_object_mut() {
+        settings.remove(crate::chat_tool_servers::NAMED_BY_COMPANY);
+    }
+
+    sqlx::query("update chat_tool_servers set name = $2, settings = $3 where id = $1").bind(row.id).bind(&name).bind(crate::secrets::SealedSettings(settings)).execute(&state.pool).await.ok()?;
+
+    Some(name)
 }
 
 pub async fn sign_out(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {

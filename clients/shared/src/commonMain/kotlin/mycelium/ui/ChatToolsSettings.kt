@@ -60,7 +60,7 @@ private sealed interface IntegrationsView {
     data class Activity(val key: String?) : IntegrationsView
 }
 
-private data class SetupRequest(val kind: String, val address: String?)
+private data class SetupRequest(val kind: String, val address: String?, val app: ChatToolServer? = null)
 
 private fun flowId(kind: String): String = when (kind) {
     OutlineType -> "outline"
@@ -225,7 +225,7 @@ fun ChatToolsSettings(store: Store) {
                             { view = IntegrationsView.Home },
                             {
                                 val kind = formKind(entryFor(integration) ?: AnyMcpEntry)
-                                flow = SetupRequest(kind, integration.accounts.first().url.takeIf { kind !in setOf(LastFmType, EmailType, DiscordType, FreeAgentType) })
+                                flow = SetupRequest(kind, integration.accounts.first().url.takeIf { kind !in setOf(LastFmType, EmailType, DiscordType, FreeAgentType) }, integration.accounts.first().takeIf { kind == FreeAgentType })
                             },
                             ::replace,
                             { removed -> servers = servers.filter { it.id != removed.id } },
@@ -292,6 +292,7 @@ fun ChatToolsSettings(store: Store) {
                 flow = null
             },
             { flow = null },
+            request.app,
         )
     }
 

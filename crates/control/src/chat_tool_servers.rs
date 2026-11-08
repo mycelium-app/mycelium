@@ -240,6 +240,20 @@ pub async fn list_owned(state: &AppState, owner: Uuid) -> ApiResult<Vec<ServerRo
     Ok(rows)
 }
 
+pub const NAMED_BY_COMPANY: &str = "named_by_company";
+
+pub async fn free_name(state: &AppState, owner: Uuid, base: &str, except: Option<Uuid>) -> ApiResult<String> {
+    for number in 1..100 {
+        let candidate = if number == 1 { base.to_string() } else { format!("{base} {number}") };
+
+        if check_name(state, owner, &candidate, except).await.is_ok() {
+            return Ok(candidate);
+        }
+    }
+
+    Err(ApiError::conflict("name_taken", "Enter a name for this account. Every name Mycelium tried is taken."))
+}
+
 pub async fn check_name(state: &AppState, owner: Uuid, name: &str, except: Option<Uuid>) -> ApiResult<()> {
     if name.is_empty() || slug(name).is_empty() {
         return Err(ApiError::bad_request("name_required", "Enter a name for this server, using letters or numbers."));
@@ -287,7 +301,20 @@ pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
 }
 
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateChatToolServerRequest>) -> ApiResult<(StatusCode, Json<ChatToolServer>)> {
-    let name = request.name.trim();
+    let mut request = request;
+
+    if let Some(source) = request.app_from {
+        let app = crate::freeagent::find_owned(&state, source, user.id).await?;
+
+        request.kind = Some("freeagent".to_string());
+        request.url = app.url.clone();
+        request.account = Some(crate::freeagent::client_id(&app.settings).to_string());
+        request.bearer_token = Some(app.credentials().secret);
+    }
+
+    let named_by_company = request.kind.as_deref() == Some("freeagent") && request.name.trim().is_empty();
+    let name = if named_by_company { free_name(&state, user.id, "FreeAgent", None).await? } else { request.name.trim().to_string() };
+    let name = name.as_str();
     let token = request.bearer_token.as_deref().map(str::trim).filter(|token| !token.is_empty());
     let entered = request.url.trim();
 
@@ -341,6 +368,10 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
                 settings = Value::Object(Default::default());
             }
 
+            if let (true, Some(settings)) = (named_by_company, settings.as_object_mut()) {
+                settings.insert(NAMED_BY_COMPANY.to_string(), Value::Bool(true));
+            }
+
             let credentials = Credentials { address: address.clone(), account: account.unwrap_or_default().to_string(), secret: secret.to_string(), settings: settings.clone(), session: None };
 
             let discovered = integration.verify(&state.http, &credentials).await.map_err(|reason| ApiError::bad_request("tool_server_failed", reason))?;
@@ -365,7 +396,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         .bind(name)
         .bind(kind)
         .bind(&address)
-        .bind(account)
+        .bind(account.filter(|_| integration.is_none_or(Integration::keeps_account)))
         .bind(token.map(Sealed::from))
         .bind(sqlx::types::Json(tools))
         .bind(SealedSettings(settings))

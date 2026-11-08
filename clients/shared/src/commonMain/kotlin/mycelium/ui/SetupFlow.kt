@@ -1,10 +1,13 @@
 package mycelium.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,6 +47,7 @@ private val LastFmSteps = listOf("API key", "Test", "Sign in")
 private val FormSteps = listOf("Address", "Credential", "Name")
 private val CredentialSteps = listOf("Credential", "Name")
 private val FreeAgentSteps = listOf("Credential", "Name", "Sign in")
+private val FreeAgentAppSteps = listOf("App", "Name", "Sign in")
 
 private const val Tls = "TLS"
 private const val StartTls = "STARTTLS"
@@ -94,6 +98,7 @@ fun SetupFlow(
     onFinished: (ChatToolServer) -> Unit,
     onSigningIn: () -> Unit,
     onDismiss: () -> Unit,
+    app: ChatToolServer? = null,
 ) {
     if (kind == CoolifyKind || kind == TandoorKind) {
         AppsSetupFlow(store, kind, knownAddress, takenNames, onAdded, onFinished, onDismiss)
@@ -106,10 +111,12 @@ fun SetupFlow(
     val lastFm = kind == "lastfm"
     val caldav = kind == "caldav"
     val freeAgent = kind == "freeagent"
+    var reusingApp by remember { mutableStateOf(freeAgent && app != null) }
     val form = kind in setOf("zulip", "email", "stoat", "discord", "freeagent", "actual", "paperless")
     val mcp = !lastFm && !caldav && !form
     val steps = when {
         lastFm -> LastFmSteps
+        freeAgent && reusingApp -> FreeAgentAppSteps
         freeAgent -> FreeAgentSteps
         kind == "discord" -> CredentialSteps
         form -> FormSteps
@@ -129,7 +136,7 @@ fun SetupFlow(
         "paperless" -> "Paperless-ngx"
         else -> "MCP server"
     }
-    var step by remember { mutableStateOf(if (knownAddress != null) 1 else 0) }
+    var step by remember { mutableStateOf(if (knownAddress != null || reusingApp) 1 else 0) }
     var address by remember { mutableStateOf(knownAddress.orEmpty()) }
     var oauthOffered by remember { mutableStateOf(false) }
     var method by remember { mutableStateOf(Token) }
@@ -192,6 +199,7 @@ fun SetupFlow(
     }
 
     fun nameFailure(): String? = when {
+        freeAgent && name.isBlank() -> null
         name.isBlank() -> "Enter a name for this account. It becomes the prefix of its tools."
         integrationSlug(name) in takenNames -> "Enter a different name. Another integration already has this one."
         else -> null
@@ -228,7 +236,11 @@ fun SetupFlow(
         "zulip" -> CreateChatToolServerRequest(name.trim(), address.trim(), token.trim().ifEmpty { null }, kind = "zulip", account = username.trim().ifEmpty { null })
         "email" -> CreateChatToolServerRequest(name.trim(), "", token.trim().ifEmpty { null }, kind = "email", account = username.trim().ifEmpty { null }, settings = emailSettings())
         "discord" -> CreateChatToolServerRequest(name.trim(), "", token.trim().ifEmpty { null }, kind = "discord", account = username.trim().ifEmpty { null })
-        "freeagent" -> CreateChatToolServerRequest(name.trim(), if (environment == Sandbox) FreeAgentSandboxAddress else "", token.trim().ifEmpty { null }, kind = "freeagent", account = username.trim().ifEmpty { null })
+        "freeagent" -> if (reusingApp && app != null) {
+            CreateChatToolServerRequest(name.trim(), "", kind = "freeagent", appFrom = app.id)
+        } else {
+            CreateChatToolServerRequest(name.trim(), if (environment == Sandbox) FreeAgentSandboxAddress else "", token.trim().ifEmpty { null }, kind = "freeagent", account = username.trim().ifEmpty { null })
+        }
         "actual" -> CreateChatToolServerRequest(
             name.trim(),
             address.trim(),
@@ -289,10 +301,12 @@ fun SetupFlow(
                     return
                 }
 
-                name = name.ifBlank { product }
+                if (!freeAgent) {
+                    name = name.ifBlank { product }
 
-                if (integrationSlug(name) in takenNames) {
-                    name = "$product ${username.trim().ifEmpty { defaultIntegrationName(address, product) }}".trim()
+                    if (integrationSlug(name) in takenNames) {
+                        name = "$product ${username.trim().ifEmpty { defaultIntegrationName(address, product) }}".trim()
+                    }
                 }
 
                 step += 1
@@ -636,7 +650,22 @@ fun SetupFlow(
                 }
             }
 
-            "Name" -> {
+            "Name" -> if (freeAgent) {
+                if (reusingApp && app != null) {
+                    Row(
+                        Modifier.fillMaxWidth().background(colors.bgPanel, BlockShape).border(Tokens.Size.Hairline, colors.border, BlockShape).padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
+                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(MyIcon.Key, colors.textMuted, Tokens.Size.IconSm)
+                        Label("Uses the FreeAgent app from ${accountTitle(app)}, on ${if (app.url.contains("sandbox")) Sandbox else Production}.", Modifier.weight(1f), Tokens.Type.Meta)
+                        MyButton({ reusingApp = false; step = 0; runner.failure = null }, text = "Use another app", size = ButtonSize.Sm, muted = true)
+                    }
+                }
+
+                TextInput(name, { name = it }, label = "Name", placeholder = "Named after the company you sign in to", error = runner.failure, onSubmit = ::connect)
+                Label("Leave it empty to use the company's name from FreeAgent.", style = Tokens.Type.Meta, color = colors.textMuted)
+            } else {
                 TextInput(name, { name = it }, label = "Name", error = runner.failure, onSubmit = ::connect)
                 Label("Agents see its tools as ${integrationSlug(name).ifEmpty { "name" }}__tool_name. The name must be unique.", style = Tokens.Type.Meta, color = colors.textMuted)
             }
@@ -675,7 +704,7 @@ fun SetupFlow(
             if (title == "Sign in") {
                 MyButton(onDismiss, text = "Done", variant = ButtonVariant.Outline)
             } else {
-                if (step > (if (knownAddress != null) 1 else 0) && !(lastFm && step == 1) && !(freeAgent && created != null)) {
+                if (step > (if (knownAddress != null || reusingApp) 1 else 0) && !(lastFm && step == 1) && !(freeAgent && created != null)) {
                     MyButton(::back, text = "Back", muted = true)
                 } else {
                     MyButton({ if (typed && created == null) confirmingClose = true else onDismiss() }, text = "Cancel", muted = true)

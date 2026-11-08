@@ -4,7 +4,7 @@ use mycelium_proto::api::{ApprovalPreset, IntegrationStatus, ToolKind};
 use crate::{actual, caldav, coolify, discord, email, freeagent, lastfm, paperless, stoat, tandoor, zulip};
 use crate::state::AppState;
 use uuid::Uuid;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Integration {
@@ -42,6 +42,10 @@ impl Integration {
             true => ToolKind::Write,
             false => ToolKind::Read,
         }
+    }
+
+    pub fn keeps_account(self) -> bool {
+        self != Integration::FreeAgent
     }
 
     pub fn default_preset(self) -> ApprovalPreset {
@@ -163,7 +167,7 @@ impl Integration {
             Integration::LastFm => lastfm::verify(http, credentials).await.map(|_| Value::Null),
             Integration::CalDav => caldav::verify(http, credentials).await,
             Integration::Discord => discord::verify(http, credentials).await.map(|_| Value::Null),
-            Integration::FreeAgent => freeagent::verify(http, credentials).await.map(|_| Value::Null),
+            Integration::FreeAgent => freeagent::verify(http, credentials).await.map(|_| json!({"client_id": credentials.account})),
             Integration::Actual => actual::verify(http, credentials).await.map(|_| Value::Null),
             Integration::Paperless => paperless::verify(http, credentials).await.map(|_| Value::Null),
             Integration::Coolify => coolify::verify(http, credentials).await,

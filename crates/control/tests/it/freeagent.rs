@@ -76,6 +76,13 @@ async fn create_invoice(State(fake): State<Arc<FakeFreeAgent>>, Json(body): Json
     (StatusCode::CREATED, [("location", "https://api.freeagent.com/v2/invoices/9")], Json(json!({"invoice": {"status": "Draft"}}))).into_response()
 }
 
+async fn company(State(fake): State<Arc<FakeFreeAgent>>, headers: HeaderMap) -> Response {
+    match signed_request(&fake, &headers) {
+        true => Json(json!({"company": {"name": "Harbour Studio Ltd", "type": "UkLimitedCompany"}})).into_response(),
+        false => unauthorised(),
+    }
+}
+
 async fn me() -> Json<Value> {
     Json(json!({"user": {"url": "https://api.freeagent.com/v2/users/1"}}))
 }
@@ -94,6 +101,7 @@ async fn fake_freeagent() -> (String, Arc<FakeFreeAgent>) {
         .route("/v2/invoices/{id}", get(invoice))
         .route("/v2/invoices", post(create_invoice))
         .route("/v2/users/me", get(me))
+        .route("/v2/company", get(company))
         .route("/v2/expenses", post(create_expense))
         .with_state(fake.clone());
 
@@ -205,4 +213,55 @@ async fn a_draft_invoice_and_an_expense_ask_first_and_are_created_with_freeagent
     assert_eq!(created[0].1["invoice"]["payment_terms_in_days"], 30);
     assert_eq!(created[0].1["invoice"]["invoice_items"][0]["quantity"], "2");
     assert_eq!((created[1].1["expense"]["user"].clone(), created[1].1["expense"]["category"].clone()), (json!("https://api.freeagent.com/v2/users/1"), json!(format!("{base}/v2/categories/285"))));
+}
+
+async fn listed(server: &Server, id: &str) -> Value {
+    let (_, listed) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
+
+    listed.as_array().unwrap().iter().find(|row| row["id"] == id).unwrap().clone()
+}
+
+#[tokio::test]
+async fn a_second_account_reuses_the_first_accounts_app_and_is_named_after_its_company() {
+    let server = Server::start().await;
+    let (base, _) = fake_freeagent().await;
+    let (_, first) = add_freeagent(&server, &base).await;
+
+    let (status, second) = server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "", "url": "", "app_from": first["id"]}))).await;
+    let id = second["id"].as_str().unwrap();
+    let signed_in = sign_in(&server, id, "code-1").await;
+
+    assert_eq!((status, signed_in), (201, 200), "{second}");
+    let row = listed(&server, id).await;
+    assert_eq!((row["name"].clone(), row["account"].clone()), (json!("Harbour Studio Ltd"), json!("Harbour Studio Ltd")));
+}
+
+#[tokio::test]
+async fn an_account_given_a_name_keeps_it_and_shows_its_company_when_it_signs_in() {
+    let server = Server::start().await;
+    let (base, _) = fake_freeagent().await;
+    let (_, added) = add_freeagent(&server, &base).await;
+    let id = added["id"].as_str().unwrap();
+
+    let before = listed(&server, id).await;
+    sign_in(&server, id, "code-1").await;
+    let after = listed(&server, id).await;
+
+    assert_eq!(before["account"], Value::Null, "the OAuth client id is not the account's identity");
+    assert_eq!((after["name"].clone(), after["account"].clone()), (json!("FreeAgent"), json!("Harbour Studio Ltd")));
+}
+
+#[tokio::test]
+async fn an_account_signed_in_before_the_company_was_stored_learns_it_on_its_next_call() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, _) = fake_freeagent().await;
+    let (_, added) = add_freeagent(&server, &base).await;
+    let id = added["id"].as_str().unwrap();
+    sign_in(&server, id, "code-1").await;
+    sqlx::query("update chat_tool_servers set account = null where id = $1::uuid").bind(id).execute(&server.pool).await.unwrap();
+
+    call(&server, &node.token, "list_contacts", json!({})).await;
+
+    assert_eq!(listed(&server, id).await["account"], "Harbour Studio Ltd");
 }

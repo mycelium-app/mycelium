@@ -14,6 +14,8 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import java.util.concurrent.CopyOnWriteArrayList
+import mycelium.api.MyceliumJson
+import mycelium.api.ChatToolServer
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
 import mycelium.ui.MyceliumTheme
@@ -34,7 +36,7 @@ class NewIntegrationsTest {
     private val requests = CopyOnWriteArrayList<Pair<String, String>>()
     private var finished = false
 
-    private fun open(kind: String) {
+    private fun open(kind: String, app: ChatToolServer? = null) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -48,7 +50,7 @@ class NewIntegrationsTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
 
-        rule.setContent { MyceliumTheme(true) { SetupFlow(store, kind, null, emptySet(), {}, { finished = true }, {}, {}) } }
+        rule.setContent { MyceliumTheme(true) { SetupFlow(store, kind, null, emptySet(), {}, { finished = true }, {}, {}, app) } }
     }
 
     private fun type(label: String, text: String) = rule.onNodeWithContentDescription(label).performTextInput(text)
@@ -120,5 +122,28 @@ class NewIntegrationsTest {
         assertTrue(created().contains("\"url\":\"https://api.sandbox.freeagent.com\"") && created().contains("\"account\":\"id-1\""), created())
         rule.onNodeWithText("Sign in to FreeAgent").performClick()
         rule.waitUntil(5_000) { requests.any { it.first.endsWith("/n1/freeagent-sign-in") } }
+    }
+
+    private val harbour = MyceliumJson.decodeFromString(ChatToolServer.serializer(), """{"id":"h1","name":"FreeAgent","kind":"freeagent","url":"https://api.freeagent.com","account":"Harbour Studio Ltd","enabled":true,"status":"connected","tools":[],"created_at":"2026-10-27T09:00:00Z","policy":{"preset":"ask_writes"}}""")
+
+    @Test
+    fun anotherFreeAgentAccountUsesTheSameAppAndCanBeLeftToTakeItsCompanysName() {
+        open("freeagent", harbour)
+
+        rule.onNodeWithText("Uses the FreeAgent app from Harbour Studio Ltd, on Production.").assertExists()
+        rule.captureScreen("freeagent-same-app")
+        rule.onNodeWithText("Add integration").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Sign in to FreeAgent").fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(created().contains("\"app_from\":\"h1\"") && !created().contains("bearer_token") && created().contains("\"name\":\"\""), created())
+    }
+
+    @Test
+    fun useAnotherAppAsksForTheAppsCredentials() {
+        open("freeagent", harbour)
+
+        rule.onNodeWithText("Use another app").performClick()
+
+        waitForLabel("FreeAgent OAuth identifier")
     }
 }

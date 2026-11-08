@@ -960,6 +960,8 @@ pub struct CreateChatToolServerRequest {
     pub policy: Option<IntegrationPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub groups: Option<Vec<Uuid>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_from: Option<Uuid>,
 }
 
 fn mcp_kind() -> String {
