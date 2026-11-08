@@ -40,9 +40,9 @@ private class RememberingPlatform : Platform {
     }
 }
 
-private fun row(id: String, title: String, project: String?, status: String = "working", extra: String = "") =
+private fun row(id: String, title: String, project: String?, status: String = "working", extra: String = "", archivedAt: String? = null) =
     """{"id":"$id","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/$id","title":"$title","status":"$status","acp_session_id":"s","mode":null,"model":null,"project_id":${project?.let { "\"$it\"" }},$extra
-"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null,"pinned_at":null}"""
+"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":${archivedAt?.let { "\"$it\"" }},"pinned_at":null}"""
 
 private const val SidebarNodes = """[{"id":"n1","name":"laptop","hostname":"laptop","os":"linux","arch":"x86_64","version":"0.10.0","online":true,"draining":false,"agents":[],"logins":[]}]"""
 
@@ -104,5 +104,39 @@ class SidebarProjectsTest {
 
         assertEquals(1, shown("feature/login"))
         assertEquals(1, shown("PR #12"))
+    }
+
+    @Test
+    fun a_managed_conversation_sits_folded_under_managed_by_assistant_and_not_under_its_status() {
+        show("${row("m1", "Plan the release", "p1")},${row("c1", "Release notes", "p1", status = "review", extra = "\"managed_by\":\"m1\",")}")
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Plan the release", substring = true).fetchSemanticsNodes().isNotEmpty() }
+
+        assertEquals(0, shown("Ready to review"))
+        assertEquals(0, shown("Release notes"))
+
+        rule.onNodeWithContentDescription("Managed by assistant, collapsed").performClick()
+
+        assertEquals(1, shown("Release notes"))
+        assertEquals(0, shown("Ready to review"))
+        rule.captureScreen("sidebar-managed-by-assistant")
+    }
+
+    @Test
+    fun a_flagged_conversation_comes_back_under_its_status_with_the_reason() {
+        show("${row("m1", "Plan the release", "p1")},${row("c1", "Release notes", "p1", status = "review", extra = "\"managed_by\":\"m1\",\"flagged_at\":\"2026-10-22T10:05:00Z\",\"flag_reason\":\"Choose the export format\",")}")
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Release notes", substring = true).fetchSemanticsNodes().isNotEmpty() }
+
+        assertEquals(1, shown("Ready to review"))
+        assertEquals(1, shown("Choose the export format"))
+        assertEquals(0, shown("Managed by assistant"))
+    }
+
+    @Test
+    fun archiving_the_manager_returns_its_conversations_to_their_status() {
+        show("${row("m1", "Plan the release", "p1", archivedAt = "2026-10-22T11:00:00Z")},${row("c1", "Release notes", "p1", status = "failed", extra = "\"managed_by\":\"m1\",")}")
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Release notes", substring = true).fetchSemanticsNodes().isNotEmpty() }
+
+        assertEquals(1, shown("Failed"))
+        assertEquals(0, shown("Managed by assistant"))
     }
 }

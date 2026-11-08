@@ -182,4 +182,40 @@ class AgentFinishedTest {
 
         assertEquals(emptyList(), platform.calls)
     }
+
+    @Test
+    fun aManagedConversationFinishingDoesNotNotifyThePerson() = runTest {
+        val platform = RecordingPlatform()
+        val store = storeWith(platform, backgroundScope)
+        store.receive(StreamMessage.ConversationChanged(conversation("m1", ConversationStatus.Working)))
+
+        store.receive(StreamMessage.ConversationChanged(conversation("c1", ConversationStatus.Working).copy(managedBy = "m1")))
+        store.receive(StreamMessage.ConversationChanged(conversation("c1", ConversationStatus.Input).copy(managedBy = "m1")))
+
+        assertEquals(emptyList(), platform.calls)
+    }
+
+    @Test
+    fun flaggingAManagedConversationNotifiesThePersonWithTheReason() = runTest {
+        val platform = RecordingPlatform()
+        val store = storeWith(platform, backgroundScope)
+        store.receive(StreamMessage.ConversationChanged(conversation("m1", ConversationStatus.Working)))
+        store.receive(StreamMessage.ConversationChanged(conversation("c1", ConversationStatus.Done).copy(managedBy = "m1")))
+
+        store.receive(StreamMessage.ConversationChanged(conversation("c1", ConversationStatus.Done).copy(managedBy = "m1", flaggedAt = "2026-10-23T10:05:00Z", flagReason = "Choose the export format")))
+
+        assertEquals(listOf("notify Fix login c1 | Choose the export format | c1", "chime"), platform.calls)
+    }
+
+    @Test
+    fun aConversationWhoseManagerIsArchivedNotifiesAgain() = runTest {
+        val platform = RecordingPlatform()
+        val store = storeWith(platform, backgroundScope)
+        store.receive(StreamMessage.ConversationChanged(conversation("m1", ConversationStatus.Done).copy(archivedAt = "2026-10-23T10:01:00Z")))
+
+        store.receive(StreamMessage.ConversationChanged(conversation("c1", ConversationStatus.Working).copy(managedBy = "m1")))
+        store.receive(StreamMessage.ConversationChanged(conversation("c1", ConversationStatus.Done).copy(managedBy = "m1")))
+
+        assertEquals(listOf("notify Fix login c1 | Done | c1", "chime"), platform.calls)
+    }
 }

@@ -576,6 +576,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     onRename = { title -> store.rename(conversation, title) },
                     onPin = { store.pin(conversation, conversation.pinnedAt == null) },
                     onSnooze = { until -> store.snooze(conversation, until) },
+                    manager = conversation.managedBy?.let { state.conversations[it] }?.takeIf { it.archivedAt == null },
+                    onTakeOver = { store.takeOver(conversation) },
                     onCloseSession = { store.closeSession(conversation) },
                     onArchive = {
                         val archiving = conversation.archivedAt == null
@@ -873,6 +875,8 @@ private fun ConversationHeader(
     onRename: (String) -> Unit,
     onPin: () -> Unit,
     onSnooze: (String?) -> Unit,
+    manager: Conversation?,
+    onTakeOver: () -> Unit,
     onCloseSession: () -> Unit,
     onArchive: () -> Unit,
     onDelete: () -> Unit,
@@ -1042,6 +1046,10 @@ private fun ConversationHeader(
 
                     MenuItem(if (conversation.pinnedAt == null) "Pin" else "Unpin", onClick = { menuOpen = false; onPin() }, leading = MyIcon.Pin)
                     MenuItem(if (conversation.snoozedUntil == null) "Snooze" else "Wake now", onClick = { menuOpen = false; if (conversation.snoozedUntil == null) snoozeMenuOpen = true else onSnooze(null) }, leading = MyIcon.Clock)
+
+                    if (manager != null) {
+                        MenuItem("Take over", onClick = { menuOpen = false; onTakeOver() }, hint = "from ${manager.title.ifBlank { manager.id }}", leading = MyIcon.Hand)
+                    }
 
                     if (!chat && !conversation.scratch) {
                         MenuItem(if (terminalShown) "Hide terminal" else "Show terminal", onClick = { menuOpen = false; onTerminal() }, hint = "Ctrl+`", leading = MyIcon.Terminal)

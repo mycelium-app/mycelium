@@ -317,11 +317,14 @@ class Store(
 
         val updated = message.conversation
         val previous = before.conversations[updated.id] ?: return
-        val outcome = finishedWording(updated.status)
+        val flagged = previous.flaggedAt == null && updated.flaggedAt != null
 
         val queued = !before.queues[updated.id].isNullOrEmpty()
 
-        if (previous.status != ConversationStatus.Working || outcome == null || updated.sideKind != null || queued) {
+        val finished = finishedWording(updated.status).takeIf { previous.status == ConversationStatus.Working && updated.sideKind == null && !queued && !isManaged(updated, before.conversations) }
+        val outcome = if (flagged) updated.flagReason else finished
+
+        if (outcome == null) {
             return
         }
 
@@ -1361,6 +1364,13 @@ class Store(
         act {
             val request = if (until == null) PatchConversationRequest(clearSnooze = true) else PatchConversationRequest(snoozedUntil = until)
             val updated = api.patchConversation(conversation.id, request)
+            mutableState.update { it.copy(conversations = it.conversations + (updated.id to updated)) }
+        }
+    }
+
+    fun takeOver(conversation: Conversation) {
+        act {
+            val updated = api.patchConversation(conversation.id, PatchConversationRequest(takeOver = true))
             mutableState.update { it.copy(conversations = it.conversations + (updated.id to updated)) }
         }
     }

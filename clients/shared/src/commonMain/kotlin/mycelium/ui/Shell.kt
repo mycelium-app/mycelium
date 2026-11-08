@@ -139,6 +139,8 @@ import mycelium.state.needsInputIn
 import mycelium.state.pinnedChats
 import mycelium.state.pinnedConversations
 import mycelium.state.snoozedConversations
+import mycelium.state.managedConversations
+import mycelium.state.statusRank
 import mycelium.state.projectName
 import mycelium.state.resetBefore
 import mycelium.state.sidebarAssistants
@@ -681,6 +683,7 @@ private const val ChatsMode = "Chats"
 private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Route, onRoute: (Route) -> Unit, groupFilter: GroupFilterChoice, hours: HoursView, onOpenOutOfHours: (String?) -> Unit, modifier: Modifier = Modifier, onHide: (() -> Unit)? = null) {
     val colors = MyTheme.colors
     var settledOpen by remember { mutableStateOf(platform.loadPreference(SettledOpenPreference) == true.toString()) }
+    var managedOpen by remember { mutableStateOf(platform.loadPreference(ManagedOpenPreference) == true.toString()) }
     val scope = groupScope(groupFilter.value, hours.closedGroupIds)
     val closedNotice = closedNotice(hours, groupFilter.value, 0, platform)
     val closedLine = sidebarClosedLine(hours, groupFilter.value, platform)
@@ -690,6 +693,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
     val pinned = pinnedConversations(workspaceConversations, scope)
     val sections = sidebarSections(workspaceConversations, scope)
     val snoozed = snoozedConversations(workspaceConversations, scope)
+    val managed = managedConversations(workspaceConversations, scope)
     val openChats = if (appClosed) emptyList() else state.conversations.values.filterNot { hours.closed(it.groupId) }
     val pinnedChatRows = pinnedChats(openChats)
     val chats = chatSections(openChats)
@@ -842,11 +846,20 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
 
                 conversationRows(PinnedName, pinned, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = true)
 
-                for (section in sections) {
+                val (beforeManaged, afterManaged) = sections.partition { statusRank(it.status) <= statusRank(ConversationStatus.Working) }
+
+                for (section in beforeManaged + listOf(null) + afterManaged) {
+                    if (section == null) {
+                        managedRows(managed, managedOpen, { managedOpen = !managedOpen; platform.savePreference(ManagedOpenPreference, managedOpen.toString()) }, state, store, route, onRoute, collapsed, { collapsed = it })
+                        continue
+                    }
+
                     val settled = section.status == ConversationStatus.Done
 
                     item(key = "section-${section.status}") {
-                        SectionHeading(section, open = settledOpen.takeIf { settled }, onToggle = { settledOpen = !settledOpen; platform.savePreference(SettledOpenPreference, settledOpen.toString()) })
+                        SectionHeading(section.name, open = settledOpen.takeIf { settled }, count = section.rows.size.takeIf { settled }, onToggle = { settledOpen = !settledOpen; platform.savePreference(SettledOpenPreference, settledOpen.toString()) }) {
+                            StatusGlyph(section.status, Tokens.Size.IconMd)
+                        }
                     }
 
                     if (!settled || settledOpen) {
@@ -1020,6 +1033,32 @@ private fun LazyListScope.conversationRows(
     }
 }
 
+private fun LazyListScope.managedRows(
+    managed: List<Conversation>,
+    open: Boolean,
+    onToggle: () -> Unit,
+    state: AppState,
+    store: Store,
+    route: Route,
+    onRoute: (Route) -> Unit,
+    collapsed: Set<String>,
+    onCollapsed: (Set<String>) -> Unit,
+) {
+    if (managed.isEmpty()) {
+        return
+    }
+
+    item(key = "section-managed") {
+        SectionHeading(ManagedName, open = open, onToggle = onToggle) {
+            Icon(MyIcon.Agent, MyTheme.colors.textMuted, Tokens.Size.IconMd)
+        }
+    }
+
+    if (open) {
+        conversationRows(null, managed, state, store, route, onRoute, collapsed, onCollapsed, withNode = true)
+    }
+}
+
 @Composable
 private fun SidebarLink(text: String, icon: MyIcon, selected: Boolean, tint: Color? = null, onClick: () -> Unit) {
     val colors = MyTheme.colors
@@ -1039,8 +1078,9 @@ private fun SidebarLink(text: String, icon: MyIcon, selected: Boolean, tint: Col
 }
 
 @Composable
-private fun SectionHeading(section: SidebarSection, open: Boolean?, onToggle: () -> Unit) {
-    val folding = if (open == null) Modifier else Modifier.pressable(onToggle, description = "${section.name}, ${section.rows.size} conversations, ${if (open) "expanded" else "collapsed"}", shape = BlockShape)
+private fun SectionHeading(name: String, open: Boolean?, onToggle: () -> Unit, count: Int? = null, glyph: @Composable () -> Unit) {
+    val counted = count?.let { "$name ($it)" } ?: name
+    val folding = if (open == null) Modifier else Modifier.pressable(onToggle, description = "${count?.let { "$name, $it conversations" } ?: name}, ${if (open) "expanded" else "collapsed"}", shape = BlockShape)
 
     Row(
         Modifier
@@ -1052,8 +1092,8 @@ private fun SectionHeading(section: SidebarSection, open: Boolean?, onToggle: ()
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        StatusGlyph(section.status, Tokens.Size.IconMd)
-        Label(if (open == null) section.name else "${section.name} (${section.rows.size})", Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong, MyTheme.colors.textMuted, maxLines = 1)
+        glyph()
+        Label(counted, Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong, MyTheme.colors.textMuted, maxLines = 1)
 
         if (open != null) {
             Icon(if (open) MyIcon.ChevronDown else MyIcon.ChevronRight, MyTheme.colors.textMuted, Tokens.Size.IconSm)
@@ -1112,7 +1152,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                     onClick,
                     selected = selected || menu.open,
                     shape = BlockShape,
-                    description = "$shownTitle, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.isSubagent) ", subagent" else ", side chat" }.orEmpty()}${if (!row.isChat && place.isNotEmpty()) ", " + listOfNotNull(row.branch?.let { "branch $it" }, pullRequestText).joinToString(", ") else ""}",
+                    description = "$shownTitle, $statusName${row.flagReason?.let { ", $it" }.orEmpty()}, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.isSubagent) ", subagent" else ", side chat" }.orEmpty()}${if (!row.isChat && place.isNotEmpty()) ", " + listOfNotNull(row.branch?.let { "branch $it" }, pullRequestText).joinToString(", ") else ""}",
                 )
                 .padding(start = Tokens.Space.S2 + (if (row.isChat && sideChats == 0) 0.dp else Tokens.Space.S3) + indent, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
@@ -1159,6 +1199,13 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
 
                 if (pausedUntil != null) {
                     Label(pausedUntil, style = Tokens.Type.Meta, color = colors.statusAttention, maxLines = 1)
+                }
+
+                if (row.flagReason != null) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(MyIcon.Agent, colors.textMuted, Tokens.Size.IconSm)
+                        Label(row.flagReason, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                    }
                 }
 
                 if (!row.isChat && place.isNotEmpty()) {
@@ -1254,6 +1301,8 @@ private val FooterLabelsWidth = 360.dp
 private const val GroupFilterPreference = "conversation-group-filter"
 
 private const val SettledOpenPreference = "settled-open"
+private const val ManagedOpenPreference = "managed-open"
+const val ManagedName = "Managed by assistant"
 
 val LocalGroupFilter = staticCompositionLocalOf { AllGroups }
 

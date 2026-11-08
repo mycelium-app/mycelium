@@ -343,8 +343,17 @@ private fun topLevel(conversations: Collection<Conversation>, filter: String): L
     return active.filter { it.parentId == null || it.parentId !in activeIds }
 }
 
-fun needsInputIn(conversations: Collection<Conversation>, filter: String): Int =
-    topLevel(conversations, filter).count { it.status == ConversationStatus.Input }
+fun isManaged(conversation: Conversation, conversations: Map<String, Conversation>): Boolean {
+    val manager = conversation.managedBy?.let(conversations::get) ?: return false
+
+    return conversation.flaggedAt == null && manager.archivedAt == null
+}
+
+fun needsInputIn(conversations: Collection<Conversation>, filter: String): Int {
+    val byId = conversations.associateBy { it.id }
+
+    return topLevel(conversations, filter).count { it.status == ConversationStatus.Input && !isManaged(it, byId) }
+}
 
 fun pinnedConversations(conversations: Collection<Conversation>, filter: String = AllGroups): List<Conversation> =
     topLevel(conversations, filter).filter { it.pinnedAt != null }.sortedBy { it.pinnedAt }
@@ -352,9 +361,17 @@ fun pinnedConversations(conversations: Collection<Conversation>, filter: String 
 fun snoozedConversations(conversations: Collection<Conversation>, filter: String = AllGroups): List<Conversation> =
     topLevel(conversations, filter).filter { it.pinnedAt == null && it.snoozedUntil != null }.sortedBy { it.snoozedUntil }
 
+fun managedConversations(conversations: Collection<Conversation>, filter: String = AllGroups): List<Conversation> {
+    val byId = conversations.associateBy { it.id }
+
+    return topLevel(conversations, filter).filter { it.pinnedAt == null && it.snoozedUntil == null && isManaged(it, byId) }.sortedByDescending { it.updatedAt }
+}
+
 fun sidebarSections(conversations: Collection<Conversation>, filter: String = AllGroups): List<SidebarSection> {
+    val byId = conversations.associateBy { it.id }
+
     return topLevel(conversations, filter)
-        .filter { it.pinnedAt == null && it.snoozedUntil == null }
+        .filter { it.pinnedAt == null && it.snoozedUntil == null && !isManaged(it, byId) }
         .groupBy { if (it.resumeAt != null) ConversationStatus.Working else it.status }
         .map { (status, rows) -> SidebarSection(status, if (status == ConversationStatus.Done) SettledName else statusSectionName(status), rows.sortedByDescending { it.updatedAt }) }
         .sortedBy { statusRank(it.status) }
