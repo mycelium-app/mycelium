@@ -437,6 +437,39 @@ async fn a_workspace_turn_copies_storage_down_and_changes_back() {
 }
 
 #[tokio::test]
+async fn instructions_changed_during_a_workspace_turn_survive_the_copy_back_and_reach_the_folder() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let assistant = harness_assistant(&server, json!([link.id])).await;
+    let id = assistant["id"].as_str().unwrap();
+    let started = prompt(&server.user, id, "Open the war room").await;
+    let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
+    next_matching(&mut link, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
+    link.start_session(conversation, "acp-1").await;
+    link.expect_prompt().await;
+
+    let (status, changed) = server.user.json(server.user.patch(&format!("/api/v1/assistants/{id}")).json(&json!({"instructions": "Run the war room, calmly."}))).await;
+    assert_eq!(status, 200, "{changed}");
+    link.send(NodeToControl::TurnEnd { conversation_id: conversation, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
+    let request_id = next_matching(&mut link, |message| match message {
+        ControlToNode::ReadFolder { request_id, .. } => Some(*request_id),
+        _ => None,
+    })
+    .await;
+    let untouched = vec![FolderFile { path: "AGENTS.md".into(), data_base64: encoded("Run the war room.") }];
+    link.send(NodeToControl::FolderFiles { request_id, files: untouched, truncated: false, error: None }).await;
+    let written = next_matching(&mut link, |message| match message {
+        ControlToNode::WriteFolder { files, replace: false, .. } => Some(files.clone()),
+        _ => None,
+    })
+    .await;
+    let (_, fetched) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}"))).await;
+
+    assert_eq!(fetched["instructions"], "Run the war room, calmly.");
+    assert_eq!(written.iter().map(|file| (file.path.as_str(), file.data_base64.clone())).collect::<Vec<_>>(), vec![("AGENTS.md", encoded("Run the war room, calmly."))]);
+}
+
+#[tokio::test]
 async fn use_workspace_moves_the_thread_to_the_first_online_node() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

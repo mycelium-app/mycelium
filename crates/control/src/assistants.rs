@@ -863,6 +863,8 @@ pub async fn copy_down(state: &AppState, node_id: Uuid, assistant_id: Uuid) -> A
         }
     }
 
+    sqlx::query("update assistant_files set folder_sha256 = sha256 where assistant_id = $1").bind(assistant_id).execute(&state.pool).await?;
+
     Ok(())
 }
 
@@ -920,25 +922,45 @@ pub async fn copy_up(state: &AppState, owner: Uuid, node_id: Uuid, assistant_id:
         return Ok(());
     }
 
-    let stored = sqlx::query_as::<_, (String, String)>("select path, sha256 from assistant_files where assistant_id = $1").bind(assistant_id).fetch_all(&state.pool).await?;
+    let stored = sqlx::query_as::<_, (String, String, Option<String>)>("select path, sha256, folder_sha256 from assistant_files where assistant_id = $1").bind(assistant_id).fetch_all(&state.pool).await?;
     let mut kept = Vec::new();
 
     for file in answer.files {
         let Ok(content) = base64::engine::general_purpose::STANDARD.decode(&file.data_base64) else {
             continue;
         };
-        let unchanged = stored.iter().any(|(path, digest)| *path == file.path && *digest == hex_digest(&content));
+        let digest = hex_digest(&content);
+        let untouched = stored.iter().any(|(path, current, given)| *path == file.path && (*current == digest || given.as_deref() == Some(digest.as_str())));
 
         kept.push(file.path.clone());
 
-        if !unchanged && valid_path(&file.path).is_ok() && let Err(error) = store_file(state, assistant_id, &file.path, &content).await {
-            tracing::warn!("could not keep {} from assistant {assistant_id}: {}", file.path, error.message());
+        if untouched || valid_path(&file.path).is_err() {
+            continue;
+        }
+
+        match store_file(state, assistant_id, &file.path, &content).await {
+            Ok(()) => {
+                sqlx::query("update assistant_files set folder_sha256 = sha256 where assistant_id = $1 and path = $2").bind(assistant_id).bind(&file.path).execute(&state.pool).await?;
+            }
+            Err(error) => tracing::warn!("could not keep {} from assistant {assistant_id}: {}", file.path, error.message()),
         }
     }
 
     if !answer.truncated {
-        for (path, _) in stored.iter().filter(|(path, _)| !kept.contains(path)) {
+        let removed_by_the_agent = stored.iter().filter(|(path, current, given)| !kept.contains(path) && given.as_deref() == Some(current.as_str()));
+
+        for (path, _, _) in removed_by_the_agent {
             sqlx::query("delete from assistant_files where assistant_id = $1 and path = $2").bind(assistant_id).bind(path).execute(&state.pool).await?;
+        }
+    }
+
+    let newer = sqlx::query_as::<_, (String, Vec<u8>)>("select path, content from assistant_files where assistant_id = $1 and folder_sha256 is distinct from sha256 order by path").bind(assistant_id).fetch_all(&state.pool).await?;
+
+    if !newer.is_empty() {
+        let files = newer.into_iter().map(|(path, content)| FolderFile { path, data_base64: base64::engine::general_purpose::STANDARD.encode(content) }).collect();
+
+        if state.hub.send(node_id, ControlToNode::WriteFolder { root: folder_of(assistant_id), files, replace: false }) {
+            sqlx::query("update assistant_files set folder_sha256 = sha256 where assistant_id = $1").bind(assistant_id).execute(&state.pool).await?;
         }
     }
 
