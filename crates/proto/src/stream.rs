@@ -92,6 +92,9 @@ pub enum StreamMessage {
         route: String,
     },
     IntegrationsChanged,
+    WatchesChanged {
+        conversation_id: Uuid,
+    },
     ForgeChanged,
     WellnessChanged,
     Device {

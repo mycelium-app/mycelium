@@ -339,11 +339,12 @@ pub async fn publish_queue(state: &AppState, owner: Uuid, conversation_id: Uuid)
     Ok(())
 }
 
-pub async fn enqueue(tx: &mut sqlx::PgConnection, conversation_id: Uuid, text: &str, attachments: &[Attachment]) -> sqlx::Result<()> {
-    sqlx::query("insert into queued_prompts (conversation_id, position, text, attachments) select $1, coalesce(max(position), 0) + 1, $2, $3 from queued_prompts where conversation_id = $1")
+pub async fn enqueue(tx: &mut sqlx::PgConnection, conversation_id: Uuid, text: &str, attachments: &[Attachment], origin: Option<&str>) -> sqlx::Result<()> {
+    sqlx::query("insert into queued_prompts (conversation_id, position, text, attachments, origin) select $1, coalesce(max(position), 0) + 1, $2, $3, $4 from queued_prompts where conversation_id = $1")
         .bind(conversation_id)
         .bind(text)
         .bind(sqlx::types::Json(attachments))
+        .bind(origin)
         .execute(tx)
         .await?;
 
@@ -364,7 +365,7 @@ pub async fn merge_queue(tx: &mut sqlx::PgConnection, conversation_id: Uuid) -> 
         let text = rows.iter().map(|(_, text, _)| text.as_str()).filter(|text| !text.is_empty()).collect::<Vec<_>>().join("\n\n");
         let attachments: Vec<Attachment> = rows.iter().flat_map(|(_, _, attachments)| attachments.0.clone()).collect();
 
-        sqlx::query("update queued_prompts set text = $2, attachments = $3, origin = (select origin from queued_prompts where conversation_id = $4 and origin is not null order by position limit 1) where id = $1")
+        sqlx::query("update queued_prompts set text = $2, attachments = $3, origin = case when exists (select 1 from queued_prompts where conversation_id = $4 and not editing and origin is null) and exists (select 1 from queued_prompts where conversation_id = $4 and not editing and origin = 'event') then null else (select origin from queued_prompts where conversation_id = $4 and origin is not null order by position limit 1) end where id = $1")
             .bind(first_id)
             .bind(text)
             .bind(sqlx::types::Json(attachments))

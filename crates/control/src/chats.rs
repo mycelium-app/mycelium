@@ -186,7 +186,7 @@ pub async fn send(state: &AppState, owner: Uuid, id: Uuid, text: &str, attachmen
     if crate::routing::before_chat_turn(state, owner, id).await? {
         let mut queue = state.pool.begin().await?;
 
-        enqueue(&mut queue, id, text, &attachments).await?;
+        enqueue(&mut queue, id, text, &attachments, None).await?;
         queue.commit().await?;
         crate::prompts::pump(state, id, false).await?;
 
@@ -265,7 +265,7 @@ pub async fn send_or_queue(state: &AppState, owner: Uuid, id: Uuid, text: &str) 
         return Ok(());
     }
 
-    enqueue(&mut tx, id, text, &[]).await?;
+    enqueue(&mut tx, id, text, &[], None).await?;
     tx.commit().await?;
 
     publish_queue(state, owner, id).await

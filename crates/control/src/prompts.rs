@@ -48,7 +48,7 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
     let mut tx = state.pool.begin().await?;
     let locked = sqlx::query_as::<_, LockedTurn>(sqlx::AssertSqlSafe(format!(
         "select owner, node_id, archived_at is not null as archived,
-                (acp_session_id is not null or exists (select 1 from events where conversation_id = conversations.id and kind = 'continued')) and (status in ('review', 'done') or (status = 'working' and {TURN_HAS_ENDED})) as idle, agent, cwd, acp_session_id, account from conversations where id = $1 for update",
+                (acp_session_id is not null or exists (select 1 from events where conversation_id = conversations.id and kind = 'continued')) and (status in ('review', 'done') or (status in ('working', 'input') and {TURN_HAS_ENDED})) as idle, agent, cwd, acp_session_id, account from conversations where id = $1 for update",
     )))
     .bind(conversation_id)
     .fetch_optional(&mut *tx)
@@ -105,6 +105,10 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
 
     let from_goal = origin.as_deref() == Some(crate::goals::GOAL_ORIGIN);
     let mut message = json!({"text": text, "prompt_id": prompt_id, "attachments": attachments});
+
+    if origin.as_deref() == Some(crate::watches::EVENT_ORIGIN) {
+        message["origin"] = json!(crate::watches::EVENT_ORIGIN);
+    }
 
     if from_goal {
         message["origin"] = json!(crate::goals::GOAL_ORIGIN);
@@ -174,6 +178,10 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 }
 
 pub async fn send(state: &AppState, owner: Uuid, id: Uuid, request: PromptRequest) -> ApiResult<Sent> {
+    send_from(state, owner, id, request, None).await
+}
+
+pub async fn send_from(state: &AppState, owner: Uuid, id: Uuid, request: PromptRequest, origin: Option<&str>) -> ApiResult<Sent> {
     let text = request.text.trim();
 
     if text.is_empty() && request.attachments.is_empty() {
@@ -210,7 +218,7 @@ pub async fn send(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
         state.publish(Some(owner), StreamMessage::Conversation(restored.to_proto()?));
     }
 
-    enqueue(&mut tx, id, text, &attachments).await?;
+    enqueue(&mut tx, id, text, &attachments, origin).await?;
     tx.commit().await?;
 
     pump(state, id, false).await?;
@@ -267,7 +275,7 @@ pub async fn continue_unless_queued(state: &AppState, owner: Uuid, id: Uuid, tex
     }
 
     let mut connection = state.pool.acquire().await?;
-    enqueue(&mut connection, id, text, &[]).await?;
+    enqueue(&mut connection, id, text, &[], None).await?;
     pump(state, id, false).await?;
     publish_queue(state, owner, id).await
 }

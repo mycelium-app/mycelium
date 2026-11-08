@@ -558,6 +558,7 @@ async fn link_native(
             Some(owner),
             mycelium_proto::stream::StreamMessage::Conversation(linked.to_proto()?),
         );
+        crate::watches::watch_conversation(state, owner, parent, conversation, true).await?;
 
         let connect = sqlx::query_scalar::<_, bool>("select exists (select 1 from start_proposals where workflow_id = $1 and connect)").bind(workflow).fetch_one(&state.pool).await?;
 

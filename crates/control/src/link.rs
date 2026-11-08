@@ -207,7 +207,13 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
                 None => payload = json!({"request_id": request_id, "request": request}),
             }
 
-            record(state, node_id, conversation_id, Some(seq), EventKind::PermissionRequest, payload, Some(ConversationStatus::Input)).await.map(|_| ())
+            let recorded = record(state, node_id, conversation_id, Some(seq), EventKind::PermissionRequest, payload, Some(ConversationStatus::Input)).await?;
+
+            if recorded && let Err(error) = crate::watches::conversation_ended(state, conversation_id, crate::watches::Ending::Waiting).await {
+                tracing::warn!("could not tell the watchers of {conversation_id} that it waits on the person: {}", error.message());
+            }
+
+            Ok(())
         }
         NodeToControl::TurnEnd { conversation_id, seq, stop_reason, usage } => turn_end(state, node_id, conversation_id, seq, stop_reason, usage).await,
         NodeToControl::SessionClosed { conversation_id } => {
@@ -498,6 +504,10 @@ async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid
 
     let payload = limit.map_or_else(|| json!({"message": message}), |limit| limit.payload);
     let recorded = record(state, node_id, conversation_id, seq, EventKind::Error, payload, Some(ConversationStatus::Failed)).await?;
+
+    if recorded && let Err(error) = crate::watches::conversation_ended(state, conversation_id, crate::watches::Ending::Failed).await {
+        tracing::warn!("could not tell the watchers of {conversation_id} that it failed: {}", error.message());
+    }
 
     let mut switched = false;
 
@@ -1029,7 +1039,12 @@ async fn settle_background_work(state: &AppState, conversation_id: Uuid, from: C
 
 async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i64, stop_reason: String, usage: Option<Value>) -> ApiResult<()> {
     let keeps_working = stop_reason != "cancelled" && has_agents_out(state, conversation_id).await?;
-    let status = if keeps_working { ConversationStatus::Working } else { ConversationStatus::Review };
+    let asked = !keeps_working && sqlx::query_scalar::<_, bool>("select exists (select 1 from tasks where source_id = $1 and status = 'question')").bind(conversation_id).fetch_one(&state.pool).await?;
+    let status = match (keeps_working, asked) {
+        (true, _) => ConversationStatus::Working,
+        (false, true) => ConversationStatus::Input,
+        (false, false) => ConversationStatus::Review,
+    };
     let inserted = record(state, node_id, conversation_id, Some(seq), EventKind::TurnEnd, json!({"stop_reason": stop_reason}), Some(status)).await?;
 
     if !inserted {
@@ -1068,6 +1083,14 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
 
     if let Err(error) = crate::goals::turn_ended(state, conversation_id, &stop_reason).await {
         tracing::warn!("goal handling after a turn failed for {conversation_id}: {}", error.message());
+    }
+
+    if !keeps_working && stop_reason != "cancelled" {
+        let ending = if asked { crate::watches::Ending::Waiting } else { crate::watches::Ending::Done };
+
+        if let Err(error) = crate::watches::conversation_ended(state, conversation_id, ending).await {
+            tracing::warn!("could not tell the watchers of {conversation_id} that its turn ended: {}", error.message());
+        }
     }
 
     let send_now = state.hub.take_send_now(conversation_id);

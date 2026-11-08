@@ -79,5 +79,6 @@ mod usage_limits;
 mod versions;
 mod voice;
 mod walkthroughs;
+mod watches;
 mod wellness;
 mod zulip;

@@ -64,6 +64,7 @@ mod mcp_tokens;
 mod memories;
 mod message_proposals;
 mod conversation_connections;
+mod watches;
 mod group_connections;
 mod decision_chat;
 mod decision_providers;
@@ -167,6 +168,7 @@ pub async fn run(config: Config, listener: TcpListener) -> Result<()> {
     tokio::spawn(activity_sweep::sweep_regularly(state.clone()));
     tokio::spawn(goals::nudge_regularly(state.clone()));
     tokio::spawn(conversations::wake_regularly(state.clone()));
+    tokio::spawn(watches::deliver_regularly(state.clone()));
     tokio::spawn(forge_sync::sync_regularly(state.clone()));
     tokio::spawn(wellness::announce_boundaries(state.clone()));
     axum::serve(listener, router(state).into_make_service_with_connect_info::<SocketAddr>()).await?;
