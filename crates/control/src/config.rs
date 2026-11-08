@@ -6,6 +6,7 @@ use std::time::Duration;
 pub const DEVICE_CODE_LIFETIME: Duration = Duration::from_secs(600);
 pub const VERSION_CHECK_INTERVAL: Duration = Duration::from_secs(3600);
 pub const SCHEDULER_TICK: Duration = Duration::from_secs(15);
+pub const FORGE_WATCH_INTERVAL: Duration = Duration::from_secs(60);
 pub const STEER_TIMEOUT: Duration = Duration::from_secs(5);
 pub const DATABASE_POOL_SIZE: u32 = 10;
 pub const DATABASE_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -82,6 +83,8 @@ pub struct Config {
     pub releases_url: String,
     pub version_check_interval: Duration,
     pub scheduler_tick: Duration,
+    pub forge_watch_interval: Duration,
+    pub github_api_url: String,
     pub forge_cache_ttl: Duration,
     pub steer_timeout: Duration,
     pub database_pool_size: u32,
@@ -161,6 +164,8 @@ impl Config {
             releases_url: optional(lookup, "MYCELIUM_RELEASES_URL").unwrap_or_else(|| "https://github.com/mycelium-app/mycelium/releases/download".into()),
             version_check_interval: VERSION_CHECK_INTERVAL,
             scheduler_tick: SCHEDULER_TICK,
+            forge_watch_interval: FORGE_WATCH_INTERVAL,
+            github_api_url: optional(lookup, "MYCELIUM_GITHUB_API_URL").unwrap_or_else(|| "https://api.github.com".into()).trim_end_matches('/').to_string(),
             forge_cache_ttl: crate::forge_cache::FORGE_CACHE_TTL,
             steer_timeout: STEER_TIMEOUT,
             database_pool_size: optional(lookup, "MYCELIUM_DATABASE_POOL_SIZE").map(|size| size.trim().parse()).transpose()?.unwrap_or(DATABASE_POOL_SIZE),

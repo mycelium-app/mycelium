@@ -173,6 +173,7 @@ const EXCEPTIONS: &[(&str, &str, &str)] = &[
     ("GET", "/integrations/freeagent/callback", "OAuth callback"),
     ("POST", "/api/v1/forges", "connecting a forge takes the person's token"),
     ("GET", "/api/v1/forges/{id}/avatar", "image for the client"),
+    ("POST", "/api/v1/forges/{id}/webhook", "receiver for the forge, authenticated by the forge's own secret"),
     ("POST", "/api/v1/decision-providers", "takes the person's endpoint key"),
     ("POST", "/api/v1/decision-providers/test", "setup form test"),
     ("POST", "/api/v1/model-providers", "takes the person's API key"),

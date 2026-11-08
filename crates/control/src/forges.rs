@@ -136,11 +136,74 @@ pub struct ForgeApi {
     token: String,
     cache: Option<Arc<ForgeCache>>,
     refresh: bool,
+    api_root: Option<String>,
+}
+
+pub struct Run {
+    pub id: String,
+    pub title: String,
+    pub reference: String,
+    pub sha: String,
+    pub finished: bool,
+    pub conclusion: String,
+    pub url: String,
+}
+
+pub enum RunQuery<'a> {
+    Id(&'a str),
+    Reference { reference: &'a str, sha: Option<&'a str> },
+}
+
+impl Run {
+    pub fn from_github(item: &Value) -> Option<Run> {
+        let id = item["id"].as_i64()?.to_string();
+        let name = item["name"].as_str().or(item["display_title"].as_str()).unwrap_or("workflow");
+
+        Some(Run {
+            id,
+            title: format!("workflow run \"{name}\""),
+            reference: item["head_branch"].as_str().unwrap_or_default().to_string(),
+            sha: item["head_sha"].as_str().unwrap_or_default().to_string(),
+            finished: item["status"].as_str() == Some("completed"),
+            conclusion: item["conclusion"].as_str().unwrap_or_default().to_string(),
+            url: item["html_url"].as_str().unwrap_or_default().to_string(),
+        })
+    }
+
+    pub fn from_gitlab(item: &Value) -> Option<Run> {
+        let id = item["id"].as_i64()?.to_string();
+        let (finished, conclusion) = match item["status"].as_str()? {
+            "success" => (true, "success"),
+            "failed" => (true, "failure"),
+            "canceled" => (true, "cancelled"),
+            "skipped" => (true, "skipped"),
+            _ => (false, ""),
+        };
+
+        Some(Run {
+            title: format!("pipeline {id}"),
+            id,
+            reference: item["ref"].as_str().unwrap_or_default().to_string(),
+            sha: item["sha"].as_str().unwrap_or_default().to_string(),
+            finished,
+            conclusion: conclusion.to_string(),
+            url: item["web_url"].as_str().unwrap_or_default().to_string(),
+        })
+    }
+
+    pub fn outcome(&self) -> String {
+        match self.conclusion.as_str() {
+            "success" => "succeeded".to_string(),
+            "failure" => "failed".to_string(),
+            "cancelled" => "was cancelled".to_string(),
+            other => format!("finished with {other}"),
+        }
+    }
 }
 
 impl ForgeApi {
     pub fn new(id: Uuid, kind: ForgeKind, base_url: String, token: String) -> ForgeApi {
-        ForgeApi { id, kind, base_url, token, cache: None, refresh: false }
+        ForgeApi { id, kind, base_url, token, cache: None, refresh: false, api_root: None }
     }
 
     pub fn cached(mut self, cache: &Arc<ForgeCache>) -> ForgeApi {
@@ -161,11 +224,19 @@ impl ForgeApi {
         }
     }
 
+    pub fn public_github(api_root: &str) -> ForgeApi {
+        ForgeApi { api_root: Some(api_root.to_string()), ..ForgeApi::new(Uuid::nil(), ForgeKind::Github, "https://github.com".to_string(), String::new()) }
+    }
+
     pub fn from_row(row: &ForgeRow) -> ApiResult<ForgeApi> {
         Ok(ForgeApi::new(row.id, parse_kind(&row.kind)?, row.base_url.clone(), row.token.to_string()))
     }
 
     fn api_url(&self) -> String {
+        if let Some(api_root) = &self.api_root {
+            return api_root.clone();
+        }
+
         match self.kind {
             ForgeKind::Github if self.base_url == "https://github.com" => "https://api.github.com".to_string(),
             ForgeKind::Github => format!("{}/api/v3", self.base_url),
@@ -178,6 +249,7 @@ impl ForgeApi {
         let request = request.timeout(FORGE_TIMEOUT).header("user-agent", "mycelium");
 
         match self.kind {
+            ForgeKind::Github if self.token.is_empty() => request.header("accept", "application/vnd.github+json").header("x-github-api-version", "2022-11-28"),
             ForgeKind::Github => request.bearer_auth(&self.token).header("accept", "application/vnd.github+json").header("x-github-api-version", "2022-11-28"),
             ForgeKind::Forgejo => request.header("authorization", format!("token {}", self.token)),
             ForgeKind::Gitlab => request.header("private-token", &self.token),
@@ -897,6 +969,60 @@ impl ForgeApi {
         if !status.is_success() {
             return Err(ForgeError::Failed(status.as_u16()));
         }
+
+        Ok(())
+    }
+
+    pub async fn runs(&self, http: &reqwest::Client, repository: &str, query: RunQuery<'_>) -> Result<Vec<Run>, ForgeError> {
+        match (self.kind, query) {
+            (ForgeKind::Github, RunQuery::Id(id)) => {
+                let run = self.fetch(http, &format!("/repos/{repository}/actions/runs/{}", encode_path(id))).await?;
+
+                Ok(Run::from_github(&run).into_iter().collect())
+            }
+            (ForgeKind::Github, RunQuery::Reference { reference, sha }) => {
+                let sha = sha.map(|sha| format!("&head_sha={}", encode_path(sha))).unwrap_or_default();
+                let found = self.fetch(http, &format!("/repos/{repository}/actions/runs?per_page=20&branch={}{sha}", encode_path(reference))).await?;
+
+                Ok(found["workflow_runs"].as_array().map(|runs| runs.iter().filter_map(Run::from_github).collect()).unwrap_or_default())
+            }
+            (ForgeKind::Gitlab, RunQuery::Id(id)) => {
+                let pipeline = self.fetch(http, &format!("/projects/{}/pipelines/{}", encode_path(repository), encode_path(id))).await?;
+
+                Ok(Run::from_gitlab(&pipeline).into_iter().collect())
+            }
+            (ForgeKind::Gitlab, RunQuery::Reference { reference, sha }) => {
+                let sha = sha.map(|sha| format!("&sha={}", encode_path(sha))).unwrap_or_default();
+                let found = self.fetch(http, &format!("/projects/{}/pipelines?per_page=20&ref={}{sha}", encode_path(repository), encode_path(reference))).await?;
+
+                Ok(found.as_array().map(|pipelines| pipelines.iter().filter_map(Run::from_gitlab).collect()).unwrap_or_default())
+            }
+            (ForgeKind::Forgejo, _) => Err(ForgeError::Failed(StatusCode::NOT_IMPLEMENTED.as_u16())),
+        }
+    }
+
+    pub async fn release_url(&self, http: &reqwest::Client, repository: &str, tag: &str) -> Result<Option<String>, ForgeError> {
+        let found = match self.kind {
+            ForgeKind::Github => self.fetch(http, &format!("/repos/{repository}/releases/tags/{}", encode_path(tag))).await,
+            ForgeKind::Gitlab => self.fetch(http, &format!("/projects/{}/releases/{}", encode_path(repository), encode_path(tag))).await,
+            ForgeKind::Forgejo => Err(ForgeError::Failed(StatusCode::NOT_IMPLEMENTED.as_u16())),
+        };
+
+        match found {
+            Ok(release) => Ok(Some(release["html_url"].as_str().or(release["_links"]["self"].as_str()).map(String::from).unwrap_or_else(|| format!("{}/{repository}/-/releases/{tag}", self.base_url)))),
+            Err(ForgeError::Failed(404)) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub async fn create_webhook(&self, http: &reqwest::Client, repository: &str, receiver: &str, secret: &str) -> Result<(), ForgeError> {
+        let (path, body) = match self.kind {
+            ForgeKind::Github => (format!("/repos/{repository}/hooks"), serde_json::json!({"name": "web", "active": true, "events": ["workflow_run", "release"], "config": {"url": receiver, "content_type": "json", "secret": secret}})),
+            ForgeKind::Gitlab => (format!("/projects/{}/hooks", encode_path(repository)), serde_json::json!({"url": receiver, "token": secret, "pipeline_events": true, "releases_events": true})),
+            ForgeKind::Forgejo => return Err(ForgeError::Failed(StatusCode::NOT_IMPLEMENTED.as_u16())),
+        };
+
+        self.send_change(http, reqwest::Method::POST, path, body).await?;
 
         Ok(())
     }

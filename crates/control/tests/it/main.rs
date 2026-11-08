@@ -27,6 +27,7 @@ mod environments;
 mod experiments;
 mod file_arguments;
 mod forge_cache;
+mod forge_watches;
 mod forges;
 mod freeagent;
 mod git;

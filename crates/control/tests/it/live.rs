@@ -266,6 +266,7 @@ const SILENT_ROUTES: &[&str] = &[
     "DELETE /api/v1/groups/{id}/open",
     "POST /api/v1/nodes/{id}/ssh-tokens",
     "POST /api/v1/forges/{id}/mcp",
+    "POST /api/v1/forges/{id}/webhook",
     "POST /api/v1/conversations/{id}/environment/stream-ticket",
     "PUT /api/v1/conversations/{id}/terminal-layout",
 ];

@@ -188,7 +188,7 @@ async fn tick(state: &AppState) -> ApiResult<()> {
         state.publish(Some(owner), StreamMessage::WatchesChanged { conversation_id: watcher });
     }
 
-    Ok(())
+    crate::forge_watches::poll(state).await
 }
 
 pub async fn listed(state: &AppState, owner: Uuid, watcher: Uuid) -> ApiResult<Vec<Value>> {

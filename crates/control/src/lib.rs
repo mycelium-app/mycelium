@@ -43,6 +43,7 @@ mod experiments;
 mod file_arguments;
 mod forge_cache;
 mod forge_sync;
+mod forge_watches;
 mod forges;
 mod imports;
 mod learned;
@@ -121,7 +122,7 @@ mod tandoor;
 mod zulip;
 
 pub use forge_cache::FORGE_CACHE_TTL;
-pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, OidcConfig, SCHEDULER_TICK, STEER_TIMEOUT, STREAM_RECHECK_INTERVAL, VERSION_CHECK_INTERVAL};
+pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, FORGE_WATCH_INTERVAL, OidcConfig, SCHEDULER_TICK, STEER_TIMEOUT, STREAM_RECHECK_INTERVAL, VERSION_CHECK_INTERVAL};
 
 use anyhow::Result;
 use axum::Router;
@@ -338,6 +339,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/forges", get(forges::list).post(forges::connect))
         .route("/api/v1/forges/{id}", delete(forges::disconnect))
         .route("/api/v1/forges/{id}/mcp", post(forges::link_mcp))
+        .route("/api/v1/forges/{id}/webhook", post(forge_watches::webhook))
         .route("/api/v1/forges/{id}/avatar", get(forges::avatar))
         .route("/api/v1/repositories", get(forges::repositories))
         .route("/api/v1/projects", get(projects::list).post(projects::create))

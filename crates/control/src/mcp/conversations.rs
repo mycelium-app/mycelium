@@ -1,6 +1,7 @@
 use super::call::{ToolCall, ToolReply};
 use crate::conversation_connections;
 use crate::error::ApiResult;
+use crate::forge_watches::{self, Target};
 use crate::group_connections;
 use crate::message_proposals;
 use crate::store::CONVERSATION_GROUP_SQL;
@@ -80,6 +81,35 @@ pub fn definitions() -> Value {
                     "conversation": {"type": "string", "description": "The id of the conversation to watch, or its exact title."},
                 },
                 "required": ["conversation"],
+            },
+        },
+        {
+            "name": "watch_pipeline",
+            "description": "Watch a pipeline: a message arrives here, and wakes this conversation if it is idle, when a GitHub Actions workflow run or a GitLab pipeline finishes, with its result, name and link. Name the project, or the forge together with the repository (owner/name for GitHub, the project path for GitLab; github.com for a public GitHub repository). Give ref, a branch or tag, and optionally sha, or pipeline, a run or pipeline id. Without sha it follows the latest run of that ref. The watch ends after the message. Stop earlier with unwatch.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": {"type": "string", "description": "The name or id of a project linked to a repository."},
+                    "forge": {"type": "string", "description": "The id or kind of a connected forge, or github.com. Needs repository."},
+                    "repository": {"type": "string", "description": "The repository on that forge."},
+                    "ref": {"type": "string", "description": "The branch or tag whose latest run to watch."},
+                    "sha": {"type": "string", "description": "Only the run for this commit, in full or the start of it."},
+                    "pipeline": {"type": "string", "description": "The id of the run or pipeline to watch, instead of ref."},
+                },
+            },
+        },
+        {
+            "name": "watch_release",
+            "description": "Watch a release: a message arrives here, and wakes this conversation if it is idle, once every run for a tag has finished, with their results and the link to the release if there is one. Name the project, or the forge together with the repository (owner/name for GitHub, the project path for GitLab; github.com for a public GitHub repository). The watch ends after the message. Stop earlier with unwatch.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": {"type": "string", "description": "The name or id of a project linked to a repository."},
+                    "forge": {"type": "string", "description": "The id or kind of a connected forge, or github.com. Needs repository."},
+                    "repository": {"type": "string", "description": "The repository on that forge."},
+                    "tag": {"type": "string", "description": "The release tag, such as v1.2.0."},
+                },
+                "required": ["tag"],
             },
         },
         {
@@ -356,6 +386,33 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             let watch = crate::watches::watch_conversation(state, owner, conversation_id, target_id, false).await?;
 
             ToolReply::text(&format!("Watching {label} ({target_id}) as watch {watch}. A message arrives here each time its turn ends and it has finished, failed or is waiting on the person."), false)
+        }
+        "watch_pipeline" | "watch_release" => {
+            let field = |name: &str| arguments.get(name).and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty());
+            let target = if tool == "watch_release" {
+                field("tag").map(|tag| Target::Tag(tag.to_string()))
+            } else {
+                match (field("pipeline"), field("ref")) {
+                    (Some(pipeline), _) => Some(Target::Run(pipeline.to_string())),
+                    (None, Some(reference)) => Some(Target::Reference { reference: reference.to_string(), sha: field("sha").map(String::from) }),
+                    (None, None) => None,
+                }
+            };
+            let Some(target) = target else {
+                return Ok(ToolReply::invalid(&format!("{tool} needs {}, a string.", if tool == "watch_release" { "tag" } else { "ref or pipeline" })));
+            };
+            let Some((conversation_id, _)) = caller.conversation().await? else {
+                return Ok(ToolReply::text("Nothing is watched. A watch belongs to a conversation, and this call did not come from one.", true));
+            };
+            let owner = caller.owner().await?;
+            let place = match forge_watches::resolve_place(state, owner, field("project"), field("forge"), field("repository")).await? {
+                Ok(place) => place,
+                Err(reason) => return Ok(ToolReply::text(&format!("Nothing is watched. {reason}"), true)),
+            };
+            let label = target.label();
+            let (watch, how) = forge_watches::start(state, owner, conversation_id, tool.trim_start_matches("watch_"), place, target).await?;
+
+            ToolReply::text(&format!("Watching {label} as watch {watch}. {how} A message arrives here when it has finished. Stop with unwatch."), false)
         }
         "wake_at" => {
             let Some((conversation_id, _)) = caller.conversation().await? else {

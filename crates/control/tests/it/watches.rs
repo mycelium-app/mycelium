@@ -4,11 +4,11 @@ use serde_json::{Value, json};
 use std::time::Duration;
 use uuid::Uuid;
 
-async fn fast() -> Server {
+pub async fn fast() -> Server {
     Server::start_with(|config| config.scheduler_tick = Duration::from_millis(50)).await
 }
 
-async fn begun(server: &Server, link: &mut NodeLink, prompt: &str) -> Uuid {
+pub async fn begun(server: &Server, link: &mut NodeLink, prompt: &str) -> Uuid {
     let conversation = server.create_conversation(link.id, Some(prompt)).await;
     link.expect_start_session().await;
     link.start_session(conversation.id, &format!("acp-{}", conversation.id)).await;
@@ -17,12 +17,12 @@ async fn begun(server: &Server, link: &mut NodeLink, prompt: &str) -> Uuid {
     conversation.id
 }
 
-async fn end_turn(link: &mut NodeLink, conversation_id: Uuid, seq: i64) {
+pub async fn end_turn(link: &mut NodeLink, conversation_id: Uuid, seq: i64) {
     link.send(NodeToControl::TurnEnd { conversation_id, seq, stop_reason: "end_turn".into(), usage: None }).await;
     link.barrier(conversation_id, seq + 1).await;
 }
 
-async fn prompt_for(link: &mut NodeLink, conversation: Uuid) -> String {
+pub async fn prompt_for(link: &mut NodeLink, conversation: Uuid) -> String {
     loop {
         if let ControlToNode::Prompt { conversation_id, text, .. } = link.next().await
             && conversation_id == conversation
@@ -32,7 +32,7 @@ async fn prompt_for(link: &mut NodeLink, conversation: Uuid) -> String {
     }
 }
 
-async fn quiet_for(link: &mut NodeLink, conversation: Uuid) -> bool {
+pub async fn quiet_for(link: &mut NodeLink, conversation: Uuid) -> bool {
     let waited = tokio::time::timeout(Duration::from_millis(700), prompt_for(link, conversation)).await;
 
     waited.is_err()
@@ -43,13 +43,13 @@ async fn connect(server: &Server, a: Uuid, b: Uuid) {
     sqlx::query("insert into conversation_connections (owner, source_id, target_id) values ($1, least($2::uuid, $3::uuid), greatest($2::uuid, $3::uuid))").bind(owner).bind(a).bind(b).execute(&server.pool).await.unwrap();
 }
 
-async fn tool(server: &Server, link: &NodeLink, conversation: Uuid, name: &str, arguments: Value) -> Value {
+pub async fn tool(server: &Server, link: &NodeLink, conversation: Uuid, name: &str, arguments: Value) -> Value {
     let reply = server.agent_mcp(&link.token, conversation, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": arguments}})).await;
 
     reply["result"].clone()
 }
 
-fn text(result: &Value) -> String {
+pub fn text(result: &Value) -> String {
     result["content"][0]["text"].as_str().unwrap_or_default().to_string()
 }
 

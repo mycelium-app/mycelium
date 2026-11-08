@@ -383,6 +383,8 @@ impl Server {
             releases_url: "http://127.0.0.1:1".into(),
             version_check_interval: mycelium_control::VERSION_CHECK_INTERVAL,
             scheduler_tick: mycelium_control::SCHEDULER_TICK,
+            forge_watch_interval: mycelium_control::FORGE_WATCH_INTERVAL,
+            github_api_url: "http://127.0.0.1:1".into(),
             forge_cache_ttl: mycelium_control::FORGE_CACHE_TTL,
             steer_timeout: mycelium_control::STEER_TIMEOUT,
             database_pool_size: 30,
