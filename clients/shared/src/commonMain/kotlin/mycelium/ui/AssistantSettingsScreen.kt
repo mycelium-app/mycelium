@@ -65,6 +65,7 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String, 
 
     LaunchedEffect(assistantId) {
         store.load { store.refreshGroups() }
+        store.act { store.refreshAssistantChanges() }
         runner { loaded = store.api.assistant(assistantId) }
     }
 
@@ -252,6 +253,20 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
             },
             onCancel = ::reset,
         )
+
+        val applied = state.assistantChanges.values.filter { it.assistantId == assistant.id && it.kind != "create" && it.state == "applied" }.sortedByDescending { it.createdAt }
+
+        if (applied.isNotEmpty()) {
+            Hairline()
+
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                Label("Changes agents made", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+
+                for (change in applied) {
+                    AssistantChangeCard(store, state, change)
+                }
+            }
+        }
 
         if (isVoice) {
             Hairline()

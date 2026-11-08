@@ -10,7 +10,7 @@ const val ArchivedState = "archived"
 const val GroupByGroup = "group"
 const val GroupByState = "state"
 const val GroupByNone = "none"
-const val SidebarAssistantLimit = 5
+const val SidebarAssistantLimit = 12
 
 data class AssistantSection(val title: String?, val rows: List<Assistant>)
 

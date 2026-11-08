@@ -33,6 +33,7 @@ import mycelium.ui.Shell
 import org.junit.Rule
 import java.io.File
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 private const val Thread = "77777777-7777-7777-7777-777777777777"
@@ -61,10 +62,10 @@ private const val WellnessActions = """[
 {"id":"w3","assistant_id":"wl","name":"Review an exercise","prompt":"Review {exercise}.","inputs":[{"name":"exercise","kind":"text","required":true}],"pinned":false,"position":2,"builtin_key":"exercise_review"}
 ]"""
 
-private const val Proposals = """[{"id":"pp1","assistant_id":"as1","conversation_id":"$Thread","name":"Weekly digest","prompt":"List what changed this week, grouped by folder.","inputs":[{"name":"week","kind":"text","required":false}],"reason":"You asked for a weekly summary three times this month.","state":"waiting","created_at":"2026-10-27T09:00:00Z"}]"""
+private const val Proposals = """[{"id":"pp1","assistant_id":"as1","conversation_id":"$Thread","name":"Weekly digest","prompt":"List what changed this week, grouped by folder.","inputs":[{"name":"week","kind":"text","required":false}],"reason":"You asked for a weekly summary three times this month.","state":"proposed","created_at":"2026-10-27T09:00:00Z"}]"""
 
 private const val Changes = """[
-{"id":"ch1","conversation_id":"$Thread","kind":"create","name":"Reviewer","description":"Reads merge requests and leaves comments.","group_id":"g1","instructions":"Review each merge request for correctness first, then style.","state":"waiting","created_at":"2026-10-27T09:00:00Z"},
+{"id":"ch1","conversation_id":"$Thread","kind":"create","name":"Reviewer","description":"Reads merge requests and leaves comments.","group_id":"g1","instructions":"Review each merge request for correctness first, then style.","state":"proposed","created_at":"2026-10-27T09:00:00Z"},
 {"id":"ch2","conversation_id":"$Thread","kind":"update","assistant_id":"as1","name":"Archivist","description":"Keeps the notes folder tidy.","state":"applied","created_at":"2026-10-27T09:01:00Z"}
 ]"""
 
@@ -266,6 +267,24 @@ class AssistantRenderTest {
         show(Route.Assistant("as1"))
         waitFor("Proposed an assistant")
         snap("7.16-assistant-changes")
+    }
+
+    @Test
+    fun onlyAChangeWaitingForADecisionSitsAboveTheComposer() {
+        show(Route.Assistant("as1"))
+        waitFor("Proposed an assistant")
+
+        assertEquals(0, rule.onAllNodesWithText("Updated Archivist").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun anAppliedChangeCanStillBeUndoneFromTheAssistantsSettings() {
+        show(Route.AssistantSettings("as1"))
+        waitFor("Changes agents made")
+
+        rule.onNodeWithText("Updated Archivist").assertExists()
+        rule.onNodeWithText("Undo").assertExists()
+        snap("7.3-changes-agents-made")
     }
 
     @Test

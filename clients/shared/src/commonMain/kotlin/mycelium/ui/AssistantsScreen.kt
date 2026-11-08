@@ -147,7 +147,7 @@ internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, 
                 Modifier
                     .fillMaxWidth()
                     .heightIn(min = rowHeight())
-                    .pressable({ onRoute(Route.Assistant(assistant.id)) }, description = "$shownName, ${assistantStateName(assistant.state)}", selected = route == Route.Assistant(assistant.id) || menu.open, shape = BlockShape)
+                    .pressable({ onRoute(Route.Assistant(assistant.id)) }, description = "$shownName, ${assistantStateName(assistant.state)}${if (assistant.pinnedAt != null) ", pinned" else ""}", selected = route == Route.Assistant(assistant.id) || menu.open, shape = BlockShape)
                     .padding(horizontal = Tokens.Space.S2),
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                 verticalAlignment = Alignment.CenterVertically,
@@ -172,6 +172,10 @@ internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, 
                     "working" -> Icon(MyIcon.Working, MyTheme.colors.statusWorking, Tokens.Size.IconSm)
                     "input" -> Icon(MyIcon.Alert, MyTheme.colors.statusAttention, Tokens.Size.IconSm)
                     else -> assistant.lastActiveAt?.let { Label(ago(it), style = Tokens.Type.Meta, color = MyTheme.colors.textFaint, maxLines = 1) }
+                }
+
+                if (assistant.pinnedAt != null) {
+                    Icon(MyIcon.Pin, MyTheme.colors.textMuted, Tokens.Size.IconSm)
                 }
             }
 

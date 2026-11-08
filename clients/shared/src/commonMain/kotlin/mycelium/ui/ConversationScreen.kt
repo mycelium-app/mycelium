@@ -688,8 +688,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 }
 
                 state.schedules.values.filter { it.proposed && it.conversationId == id }.forEach { ProposedScheduleCard(store, it, state) }
-                state.actionProposals.values.filter { it.conversationId == id }.sortedBy { it.createdAt }.forEach { ProposedActionCard(store, state, it) }
-                state.assistantChanges.values.filter { it.conversationId == id }.sortedBy { it.createdAt }.forEach { AssistantChangeCard(store, state, it, onOpenSettings = onManageActions) }
+                state.actionProposals.values.filter { it.conversationId == id && it.state == "proposed" }.sortedBy { it.createdAt }.forEach { ProposedActionCard(store, state, it) }
+                state.assistantChanges.values.filter { it.conversationId == id && it.state == "proposed" }.sortedBy { it.createdAt }.forEach { AssistantChangeCard(store, state, it, onOpenSettings = onManageActions) }
 
                 val parentId = conversation.parentId
 

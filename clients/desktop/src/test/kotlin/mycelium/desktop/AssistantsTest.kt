@@ -94,7 +94,7 @@ class AssistantsTest {
     fun turningOnTheExperimentListsAssistantsInTheSidebarIdleOnesTooAndShowAllOpensThePage() {
         shell(mutableListOf(assistantJson("Stand-up", pinned = true), assistantJson("War room")))
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Stand-up, Idle").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Stand-up, Idle, pinned").fetchSemanticsNodes().isNotEmpty() }
         assertEquals(1, rule.onAllNodesWithContentDescription("War room, Idle").fetchSemanticsNodes().size)
 
         rule.onNodeWithContentDescription("Show all assistants").performClick()
@@ -136,7 +136,7 @@ class AssistantsTest {
         rule.onNodeWithContentDescription("More for Stand-up").performClick()
         rule.onNodeWithText("Pin").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Stand-up, Idle").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Stand-up, Idle, pinned").fetchSemanticsNodes().isNotEmpty() }
         assertEquals("""{"pinned":true}""", requests.last { it.first.startsWith("PATCH") }.second)
     }
 
@@ -171,5 +171,17 @@ class AssistantsTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Archivist, Idle").fetchSemanticsNodes().isNotEmpty() }
         assertEquals(0, rule.onAllNodesWithContentDescription("Work Archivist, Idle").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun aPinnedAssistantIsAnnouncedAsPinnedAndSevenAssistantsAllShow() {
+        val names = listOf("Archivist", "Inbox", "Stand-up", "War room", "Wellness", "Voice", "Release captain")
+        shell(names.mapIndexed { index, name -> assistantJson(name, pinned = index == 0) }.toMutableList())
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Archivist, Idle, pinned").fetchSemanticsNodes().isNotEmpty() }
+        rule.captureScreen("sidebar-assistants-pinned")
+        for (name in names.drop(1)) {
+            assertEquals(1, rule.onAllNodesWithContentDescription("$name, Idle").fetchSemanticsNodes().size, name)
+        }
     }
 }
