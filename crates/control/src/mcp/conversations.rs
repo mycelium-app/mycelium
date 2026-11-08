@@ -457,10 +457,8 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             };
             let owner = caller.owner().await?;
             let by_id = given.parse::<Uuid>().ok();
-            let target = match message_proposals::resolve(state, owner, given).await? {
-                Ok(target) => Some(target),
-                Err(_) => None,
-            };
+            let resolved = message_proposals::resolve(state, owner, given).await?;
+            let target = resolved.ok();
             let watch = sqlx::query_scalar::<_, Uuid>("select id from watches where owner = $1 and watcher_id = $2 and ended_at is null and (id = $3 or target_id = $4) order by created_at limit 1")
                 .bind(owner)
                 .bind(conversation_id)
