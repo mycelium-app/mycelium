@@ -35,6 +35,11 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
     let mut decision = "auto";
     let mut answer = None;
     let filter = response_editor::take_filter(&mut arguments);
+    let save_to = crate::file_arguments::take_save_to(&mut arguments);
+
+    if save_to.is_some() && conversation.is_none() {
+        return Ok(ToolReply::text("save_to needs a conversation with a folder on a node, and this call did not come from one. Nothing was done.", true));
+    }
     let effective = server.effective(tool, &arguments);
     let asks = effective.ask && (server.integration().is_some() || effective.ask_source != crate::integration_policy::Source::Preset);
 
@@ -108,6 +113,13 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
     }
 
     chat_tools::record_call(state, owner, server, tool, conversation, "workspace", None, decision, is_error, review).await;
+
+    if let (Some(path), Some(conversation_id), false) = (save_to, conversation, is_error) {
+        return Ok(match crate::file_arguments::save(state, owner, conversation_id, &path, &text).await {
+            Ok(saved) => ToolReply::text(&saved, false),
+            Err(reason) => ToolReply::text(&format!("The call worked, but the answer could not be saved: {reason}"), true),
+        });
+    }
 
     Ok(ToolReply::text(&text, is_error))
 }

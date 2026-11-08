@@ -275,7 +275,7 @@ impl Toolbox {
             return Ok((expired_text(&server.name), true));
         }
 
-        if crate::file_arguments::any_in(input) {
+        if crate::file_arguments::any_in(input) || input.get(crate::file_arguments::SAVE_PROPERTY).is_some() {
             return Ok(("A chat has no folder to read files from, so a file argument cannot be used here. Give the text itself.".to_string(), true));
         }
 

@@ -431,6 +431,10 @@ pub enum GitCommand {
     ReadFile {
         path: String,
     },
+    WriteFile {
+        path: String,
+        data_base64: String,
+    },
     FindLogo,
 }
 

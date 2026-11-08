@@ -133,3 +133,45 @@ async fn a_file_over_the_size_limit_is_refused_and_nothing_is_sent() {
     assert!(reply["result"]["content"][0]["text"].as_str().unwrap().contains("larger than 25 MB"));
     assert!(calls.is_empty());
 }
+
+#[tokio::test]
+async fn a_file_argument_asking_for_base64_reaches_any_tool_as_base64() {
+    let bytes: Vec<u8> = vec![0x25, 0x50, 0x44, 0x46, 0x00, 0xff];
+    let (reply, calls, _) = call_with_file("create_document", json!({"title": "Scan", "text": {"file": "scan.pdf", "encoding": "base64"}}), bytes.clone(), bytes.len()).await;
+
+    assert_eq!(reply["result"]["isError"], false, "{reply}");
+    assert_eq!(calls[0].1["text"].as_str().unwrap(), base64::engine::general_purpose::STANDARD.encode(&bytes));
+}
+
+#[tokio::test]
+async fn save_to_writes_the_answer_into_the_conversation_folder_and_returns_where_it_went() {
+    let server = Server::start().await;
+    let remote = Arc::new(Remote::default());
+    let base = serve(Router::new().route("/mcp", post(mcp)).with_state(remote.clone())).await;
+    server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Docs", "kind": "outline", "url": base, "bearer_token": "key"}))).await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, Some("Export the documents")).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, &format!("acp-{}", conversation.id)).await;
+    link.expect_prompt().await;
+
+    let token = link.token.clone();
+    let request = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "docs__create_document", "arguments": {"title": "Notes", "save_to": "exports/answer.txt"}}});
+    let (reply, written) = tokio::join!(server.agent_mcp(&token, conversation.id, request), async {
+        let ControlToNode::Git { request_id, command, .. } = link.next().await else {
+            panic!("expected the node to be asked to write the answer");
+        };
+        let GitCommand::WriteFile { path, data_base64 } = command else {
+            panic!("expected WriteFile, got {command:?}");
+        };
+        let size = base64::engine::general_purpose::STANDARD.decode(&data_base64).unwrap().len();
+        link.send(NodeToControl::GitResult { request_id, ok: true, output: json!({"path": path, "size": size}), error: None }).await;
+
+        (path, String::from_utf8(base64::engine::general_purpose::STANDARD.decode(&data_base64).unwrap()).unwrap())
+    });
+    let calls = remote.calls.lock().unwrap().clone();
+
+    assert_eq!(written, ("exports/answer.txt".to_string(), "Created".to_string()));
+    assert_eq!(reply["result"]["content"][0]["text"], "Saved the answer, 7 bytes, to exports/answer.txt in the conversation folder.", "{reply}");
+    assert!(calls[0].1.get("save_to").is_none(), "{:?}", calls[0].1);
+}

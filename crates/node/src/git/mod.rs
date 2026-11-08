@@ -10,7 +10,7 @@ pub(crate) mod test_support;
 use crate::changes;
 use anyhow::{Result, anyhow, bail};
 use commits::{changed, commit, push, remote, undo_last_commit};
-use folder::{create_directory, directories, edit_file, read_file};
+use folder::{create_directory, directories, edit_file, read_file, write_file};
 use history::{branches, diff, graph, head, log, scope_diff, show, status, switch};
 use moves::{apply, move_plan, snapshot, undo};
 use mycelium_proto::link::GitCommand;
@@ -75,6 +75,7 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value> {
         GitCommand::Apply { branch, head, patch, bundle, credentials, approved_urls } => apply(cwd, &branch, &head, &patch, bundle.as_deref(), credentials.as_ref(), &approved_urls),
         GitCommand::Undo { branch, previous, branch_before } => undo(cwd, &branch, &previous, branch_before.as_deref()),
         GitCommand::ReadFile { path } => read_file(cwd, &path),
+        GitCommand::WriteFile { path, data_base64 } => write_file(cwd, &path, &data_base64),
         GitCommand::FindLogo => Ok(crate::logo::find(cwd)),
         GitCommand::Head => head(cwd),
         GitCommand::Clone { .. } | GitCommand::Register | GitCommand::CreateDirectory { .. } | GitCommand::Directories | GitCommand::AddWorktree { .. } | GitCommand::AddRemoteWorktree { .. } => bail!("This needs the node's projects folder, not a conversation's folder."),

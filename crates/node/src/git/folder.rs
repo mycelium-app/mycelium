@@ -83,6 +83,34 @@ pub(super) fn read_file(cwd: &Path, path: &str) -> Result<Value> {
     Ok(json!({"data": base64::engine::general_purpose::STANDARD.encode(bytes), "size": size}))
 }
 
+pub(super) fn write_file(cwd: &Path, path: &str, data_base64: &str) -> Result<Value> {
+    let root = cwd.canonicalize().map_err(|cause| anyhow!("The conversation's folder could not be read: {cause}."))?;
+    let relative = Path::new(path);
+    let plain = !path.trim().is_empty() && relative.components().all(|part| matches!(part, std::path::Component::Normal(name) if name != ".git"));
+
+    if !plain {
+        bail!("Give a path inside the conversation's folder, such as exports/explanations.json, without \"..\" or .git.");
+    }
+
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data_base64).map_err(|_| anyhow!("The data for {path} is not base64."))?;
+
+    if bytes.len() as u64 > MOST_READ_FILE_BYTES {
+        bail!("{path} would be larger than 20 MB. Ask for less, such as a shorter date range.");
+    }
+
+    let file = root.join(relative);
+    let parent = file.parent().unwrap_or(&root);
+    std::fs::create_dir_all(parent).map_err(|cause| anyhow!("{path} could not be written: {cause}."))?;
+
+    if !parent.canonicalize().is_ok_and(|parent| parent.starts_with(&root)) {
+        bail!("{path} is outside the conversation's folder. Give a path inside it.");
+    }
+
+    std::fs::write(&file, &bytes).map_err(|cause| anyhow!("{path} could not be written: {cause}."))?;
+
+    Ok(json!({"path": path, "size": bytes.len()}))
+}
+
 pub(super) fn edit_file(cwd: &Path, path: &str, content: Option<&str>, expected: Option<&str>) -> Result<Value> {
     let root = cwd.canonicalize()?;
     let file = root.join(path).canonicalize().map_err(|_| anyhow!("{path} was not found."))?;
@@ -232,6 +260,21 @@ mod tests {
         std::os::unix::fs::symlink(outside.path().join("private"), dir.path().join("link")).unwrap();
         assert!(edit_file(dir.path(), "link", Some("lost"), Some("private")).is_err());
         assert_eq!(std::fs::read_to_string(outside.path().join("private")).unwrap(), "private");
+    }
+
+    #[test]
+    fn write_file_creates_a_file_and_its_folders_inside_the_folder_and_refuses_paths_out_of_it() {
+        let dir = repository();
+        let data = base64::engine::general_purpose::STANDARD.encode("[1,2]");
+
+        let written = run(dir.path(), GitCommand::WriteFile { path: "exports/rows.json".into(), data_base64: data.clone() }).unwrap();
+        let escaped = run(dir.path(), GitCommand::WriteFile { path: "../rows.json".into(), data_base64: data.clone() }).unwrap_err().to_string();
+        let into_git = run(dir.path(), GitCommand::WriteFile { path: ".git/hooks/pre-commit".into(), data_base64: data }).unwrap_err().to_string();
+
+        assert_eq!(written["size"], 5);
+        assert_eq!(std::fs::read_to_string(dir.path().join("exports/rows.json")).unwrap(), "[1,2]");
+        assert!(escaped.contains("without \"..\""), "{escaped}");
+        assert!(into_git.contains(".git"), "{into_git}");
     }
 
     #[test]

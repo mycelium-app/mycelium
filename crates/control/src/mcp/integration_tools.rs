@@ -65,7 +65,7 @@ pub async fn listed(caller: &Caller<'_>) -> ApiResult<Vec<Value>> {
 }
 
 fn integration_tool_value(server_name: &str, name: &str, description: &str, input_schema: Value) -> Value {
-    json!({"name": format!("{}__{}", slug(server_name), name), "description": format!("{}: {} {}", server_name, description, crate::file_arguments::ADVERT), "inputSchema": response_editor::with_filter_property(input_schema)})
+    json!({"name": format!("{}__{}", slug(server_name), name), "description": format!("{}: {} {}", server_name, description, crate::file_arguments::ADVERT), "inputSchema": crate::file_arguments::with_save_property(response_editor::with_filter_property(input_schema))})
 }
 
 pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
