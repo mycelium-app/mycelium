@@ -8,7 +8,9 @@ use mycelium_proto::api::{ConversationConnection, CreateConversationConnectionRe
 use mycelium_proto::stream::StreamMessage;
 use uuid::Uuid;
 
-const COLUMNS: &str = "c.id, c.source_id, c.target_id, s.title as source_title, t.title as target_title, c.created_at, c.revoked_at";
+pub const EXPIRES_AFTER_DAYS: i64 = 7;
+const HELD: &str = "exists (select 1 from conversations managed where managed.id in (c.source_id, c.target_id) and managed.managed_by in (c.source_id, c.target_id) and managed.status in ('working', 'input'))";
+const COLUMNS: &str = "c.id, c.source_id, c.target_id, s.title as source_title, t.title as target_title, c.created_at, c.revoked_at, c.last_used_at";
 const JOINS: &str = "conversation_connections c join conversations s on s.id = c.source_id join conversations t on t.id = c.target_id";
 
 #[derive(sqlx::FromRow)]
@@ -20,6 +22,8 @@ struct ConnectionRow {
     target_title: String,
     created_at: chrono::DateTime<chrono::Utc>,
     revoked_at: Option<chrono::DateTime<chrono::Utc>>,
+    last_used_at: chrono::DateTime<chrono::Utc>,
+    held: bool,
 }
 
 impl ConnectionRow {
@@ -32,15 +36,32 @@ impl ConnectionRow {
             target_title: crate::message_proposals::label(self.target_id, &self.target_title),
             created_at: self.created_at,
             revoked_at: self.revoked_at,
+            expires_at: Some(self.last_used_at + chrono::Duration::days(EXPIRES_AFTER_DAYS)),
+            held: self.held,
         }
     }
 }
 
+fn live() -> String {
+    format!("c.revoked_at is null and (c.last_used_at > now() - make_interval(days => {EXPIRES_AFTER_DAYS}) or {HELD})")
+}
+
+fn selected() -> String {
+    format!("select {COLUMNS}, {HELD} as held from {JOINS}")
+}
+
 pub async fn active(state: &AppState, owner: Uuid, source: Uuid, target: Uuid) -> ApiResult<bool> {
-    let found = sqlx::query_scalar("select exists(select 1 from conversation_connections where owner = $1 and source_id = least($2, $3) and target_id = greatest($2, $3) and revoked_at is null)")
+    let found = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("select exists(select 1 from conversation_connections c where c.owner = $1 and c.source_id = least($2, $3) and c.target_id = greatest($2, $3) and {})", live())))
         .bind(owner).bind(source).bind(target).fetch_one(&state.pool).await?;
 
     Ok(found)
+}
+
+pub async fn renew(state: &AppState, owner: Uuid, source: Uuid, target: Uuid) -> ApiResult<()> {
+    sqlx::query(sqlx::AssertSqlSafe(format!("update conversation_connections c set last_used_at = now() where c.owner = $1 and c.source_id = least($2, $3) and c.target_id = greatest($2, $3) and {}", live())))
+        .bind(owner).bind(source).bind(target).execute(&state.pool).await?;
+
+    Ok(())
 }
 
 pub async fn connect(
@@ -77,10 +98,11 @@ pub async fn connect(
         }
     }
 
-    let id = sqlx::query_scalar::<_, Uuid>("insert into conversation_connections (owner, source_id, target_id) values ($1, least($2, $3), greatest($2, $3)) on conflict (owner, source_id, target_id) do update set revoked_at = null returning id")
+    let id = sqlx::query_scalar::<_, Uuid>("insert into conversation_connections (owner, source_id, target_id) values ($1, least($2, $3), greatest($2, $3)) on conflict (owner, source_id, target_id) do update set revoked_at = null, last_used_at = now() returning id")
         .bind(owner).bind(source).bind(target).fetch_one(&state.pool).await?;
     let row = sqlx::query_as::<_, ConnectionRow>(sqlx::AssertSqlSafe(format!(
-        "select {COLUMNS} from {JOINS} where c.id = $1 and c.owner = $2"
+        "{} where c.id = $1 and c.owner = $2",
+        selected()
     )))
     .bind(id)
     .bind(owner)
@@ -99,7 +121,7 @@ pub async fn list(
     State(state): State<AppState>,
     user: AuthUser,
 ) -> ApiResult<Json<Vec<ConversationConnection>>> {
-    let rows = sqlx::query_as::<_, ConnectionRow>(sqlx::AssertSqlSafe(format!("select {COLUMNS} from {JOINS} where c.owner = $1 and c.revoked_at is null order by c.created_at desc"))).bind(user.id).fetch_all(&state.pool).await?;
+    let rows = sqlx::query_as::<_, ConnectionRow>(sqlx::AssertSqlSafe(format!("{} where c.owner = $1 and {} order by c.created_at desc", selected(), live()))).bind(user.id).fetch_all(&state.pool).await?;
 
     Ok(Json(
         rows.into_iter().map(ConnectionRow::to_proto).collect(),
@@ -130,7 +152,8 @@ pub async fn revoke(
     }
 
     let row = sqlx::query_as::<_, ConnectionRow>(sqlx::AssertSqlSafe(format!(
-        "select {COLUMNS} from {JOINS} where c.id = $1 and c.owner = $2"
+        "{} where c.id = $1 and c.owner = $2",
+        selected()
     )))
     .bind(id)
     .bind(user.id)

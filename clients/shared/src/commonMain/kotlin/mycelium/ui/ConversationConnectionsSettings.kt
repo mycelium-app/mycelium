@@ -35,7 +35,7 @@ fun ConversationConnectionsSettings(store: Store) {
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
         Label("Agent connections", Modifier.semantics { heading() }, Tokens.Type.Title)
-        Label("Connected conversations may send messages to each other without approval for each message. Choose Send and connect on a message proposal to allow a connection.", color = MyTheme.colors.textMuted)
+        Label("Connected conversations may send messages to each other without approval for each message, until a week after the last one. Choose Send and connect on a message proposal to allow a connection.", color = MyTheme.colors.textMuted)
 
         if (connections.isEmpty()) {
             Label("No conversations are connected.", color = MyTheme.colors.textMuted)
@@ -46,6 +46,7 @@ fun ConversationConnectionsSettings(store: Store) {
                 state.conversations[connection.sourceId]?.title ?: connection.sourceTitle,
                 state.conversations[connection.targetId]?.title ?: connection.targetTitle,
                 "${connection.sourceTitle} and ${connection.targetTitle}",
+                note = if (connection.held) "Kept while the managed conversation is busy" else connection.expiresAt?.let(::expiryDate)?.let { "Expires $it" },
             ) { store.act { store.revokeConversationConnection(connection.id) } }
         }
 
@@ -110,11 +111,15 @@ private fun GroupConnectionsBlock(store: Store) {
 }
 
 @Composable
-private fun ConnectionRow(first: String, second: String, menuLabel: String, onRevoke: () -> Unit) {
+private fun ConnectionRow(first: String, second: String, menuLabel: String, note: String? = null, onRevoke: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
         Column(Modifier.weight(1f)) {
             Label(first)
             Label(second, color = MyTheme.colors.textMuted)
+
+            if (note != null) {
+                Label(note, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+            }
         }
 
         RowMenu(menuLabel) { close ->

@@ -37,7 +37,7 @@ class GroupConnectionsTest {
 
     private val calls = java.util.Collections.synchronizedList(mutableListOf<String>())
 
-    private fun show(experiments: String, groups: String = "[$Yucca,$Immich]", connections: String = "[]") {
+    private fun show(experiments: String, groups: String = "[$Yucca,$Immich]", connections: String = "[]", conversationConnections: String = "[]", shown: String = "No conversations are connected.") {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val body = String(request.body.toByteArray())
@@ -47,6 +47,7 @@ class GroupConnectionsTest {
             when {
                 path.endsWith("/experiments") -> respond(experiments, HttpStatusCode.OK, json)
                 path.endsWith("/groups") -> respond(groups, HttpStatusCode.OK, json)
+                path.endsWith("/conversation-connections") -> respond(conversationConnections, HttpStatusCode.OK, json)
                 path.endsWith("/group-connections") && request.method == HttpMethod.Post -> respond(Connected, HttpStatusCode.Created, json)
                 path.endsWith("/group-connections") -> respond(connections, HttpStatusCode.OK, json)
                 path.contains("/group-connections/") -> respond(Connected.replace("\"created_at\"", "\"revoked_at\":\"2026-10-25T10:00:00Z\",\"created_at\""), HttpStatusCode.OK, json)
@@ -56,7 +57,7 @@ class GroupConnectionsTest {
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refreshExperiments() }
         rule.setContent { MyceliumTheme(true) { ConversationConnectionsSettings(store) } }
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("No conversations are connected.").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText(shown).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -103,5 +104,17 @@ class GroupConnectionsTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Create a second group", substring = true).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Connect groups").assertDoesNotExist()
+    }
+
+    @Test
+    fun eachConversationConnectionSaysWhenItExpiresOrThatItIsKeptWhileBusy() {
+        val expiring = """{"id":"cc1","source_id":"c1","target_id":"c2","source_title":"Plan the release","target_title":"Fix billing export","created_at":"2026-11-01T10:00:00Z","expires_at":"2026-11-15T10:00:00Z","held":false}"""
+        val held = """{"id":"cc2","source_id":"c3","target_id":"c4","source_title":"Release captain","target_title":"Tag v0.4.0","created_at":"2026-11-01T10:00:00Z","expires_at":"2026-11-02T10:00:00Z","held":true}"""
+
+        show(EnabledExperiments, conversationConnections = "[$expiring,$held]", shown = "Fix billing export")
+
+        rule.onNodeWithText("Expires 15 Nov 2026").assertExists()
+        rule.onNodeWithText("Kept while the managed conversation is busy").assertExists()
+        rule.captureScreen("settings-agent-connections-expiry")
     }
 }

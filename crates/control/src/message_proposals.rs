@@ -165,6 +165,12 @@ async fn approve_and_send(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<
     let text = format!("From {source}:\n\n{}", found.message);
     let queued = prompts::send(state, owner, found.target_id, PromptRequest { text, ..Default::default() }).await;
 
+    if queued.is_ok()
+        && let Some(source_id) = found.conversation_id
+    {
+        crate::conversation_connections::renew(state, owner, source_id, found.target_id).await?;
+    }
+
     let sent = match queued {
         Ok(sent) => sent,
         Err(cause) => {

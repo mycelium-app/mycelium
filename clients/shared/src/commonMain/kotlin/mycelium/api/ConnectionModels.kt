@@ -12,6 +12,8 @@ data class ConversationConnection(
     @SerialName("target_title") val targetTitle: String,
     @SerialName("created_at") val createdAt: String,
     @SerialName("revoked_at") val revokedAt: String? = null,
+    @SerialName("expires_at") val expiresAt: String? = null,
+    val held: Boolean = false,
 )
 
 @Serializable

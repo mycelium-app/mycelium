@@ -414,6 +414,94 @@ async fn conversations_started_before_management_are_managed_by_their_starter_af
     assert_eq!(managed, expected);
 }
 
+async fn loose_pair(fleet: &mut Fleet) -> (Uuid, Uuid, String) {
+    let first = working_conversation(&fleet.server, &mut fleet.link, "Loose chat", "/elsewhere").await;
+    let second = working_conversation(&fleet.server, &mut fleet.link, "Other loose chat", "/elsewhere/too").await;
+    let (status, connection) = fleet.server.user.json(fleet.server.user.post("/api/v1/conversation-connections").json(&json!({"source_id": first, "target_id": second}))).await;
+    assert_eq!(status, 201, "{connection}");
+
+    (first, second, connection["id"].as_str().unwrap().to_string())
+}
+
+async fn last_used_days_ago(server: &Server, days: i32) {
+    sqlx::query("update conversation_connections set last_used_at = now() - make_interval(days => $1)").bind(days).execute(&server.pool).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_message_delivered_through_a_conversation_connection_renews_it() {
+    let mut fleet = fleet().await;
+    let (first, second, _) = loose_pair(&mut fleet).await;
+    last_used_days_ago(&fleet.server, 6).await;
+
+    propose(&fleet.server, &fleet.link, first, second).await;
+
+    assert_eq!(queue(&fleet.server, second).await.len(), 1);
+    let renewed: bool = sqlx::query_scalar("select last_used_at > now() - interval '1 minute' from conversation_connections").fetch_one(&fleet.server.pool).await.unwrap();
+    assert!(renewed);
+}
+
+#[tokio::test]
+async fn an_expired_conversation_connection_asks_again_and_connecting_from_the_card_makes_a_new_one() {
+    let mut fleet = fleet().await;
+    let (first, second, _) = loose_pair(&mut fleet).await;
+    last_used_days_ago(&fleet.server, 8).await;
+
+    propose(&fleet.server, &fleet.link, first, second).await;
+
+    assert_eq!(queue(&fleet.server, second).await.len(), 0);
+    let (_, listed) = fleet.server.user.json(fleet.server.user.get("/api/v1/conversation-connections")).await;
+    assert_eq!(listed.as_array().unwrap().len(), 0);
+    let id = proposals(&fleet.server).await[0]["id"].as_str().unwrap().to_string();
+    fleet.server.user.json(fleet.server.user.post(&format!("/api/v1/message-proposals/{id}/connect"))).await;
+    let (_, listed) = fleet.server.user.json(fleet.server.user.get("/api/v1/conversation-connections")).await;
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    propose(&fleet.server, &fleet.link, first, second).await;
+    assert_eq!(queue(&fleet.server, second).await.len(), 2);
+}
+
+#[tokio::test]
+async fn a_managing_link_is_kept_while_the_managed_chat_is_busy_and_expires_once_it_is_idle() {
+    let mut fleet = fleet().await;
+    let (manager, managed, _) = loose_pair(&mut fleet).await;
+    sqlx::query("update conversations set managed_by = $1, status = 'working' where id = $2").bind(manager).bind(managed).execute(&fleet.server.pool).await.unwrap();
+    last_used_days_ago(&fleet.server, 30).await;
+
+    let (_, listed) = fleet.server.user.json(fleet.server.user.get("/api/v1/conversation-connections")).await;
+    assert_eq!(listed[0]["held"], true);
+    propose(&fleet.server, &fleet.link, managed, manager).await;
+    assert_eq!(queue(&fleet.server, manager).await.len(), 1);
+
+    sqlx::query("update conversations set status = 'review' where id = $1").bind(managed).execute(&fleet.server.pool).await.unwrap();
+    last_used_days_ago(&fleet.server, 8).await;
+    propose(&fleet.server, &fleet.link, managed, manager).await;
+    assert_eq!(queue(&fleet.server, manager).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_conversation_connection_lists_when_it_expires() {
+    let mut fleet = fleet().await;
+    loose_pair(&mut fleet).await;
+    last_used_days_ago(&fleet.server, 2).await;
+
+    let (_, listed) = fleet.server.user.json(fleet.server.user.get("/api/v1/conversation-connections")).await;
+
+    let expires: chrono::DateTime<chrono::Utc> = listed[0]["expires_at"].as_str().unwrap().parse().unwrap();
+    let left = expires - chrono::Utc::now();
+    assert!(left > chrono::Duration::days(4) && left < chrono::Duration::days(5), "{listed}");
+    assert_eq!(listed[0]["held"], false);
+}
+
+#[tokio::test]
+async fn a_group_connection_never_expires() {
+    let fleet = fleet().await;
+    connect(&fleet.server, fleet.yucca, fleet.immich).await;
+    sqlx::query("update group_connections set created_at = now() - interval '400 days'").execute(&fleet.server.pool).await.unwrap();
+
+    propose(&fleet.server, &fleet.link, fleet.yucca_chat, fleet.immich_chat).await;
+
+    assert_eq!(queue(&fleet.server, fleet.immich_chat).await.len(), 1);
+}
+
 async fn answered(server: &Server, link: &mut NodeLink, conversation: Uuid, answer: &str) {
     link.send(mycelium_proto::link::NodeToControl::AcpUpdate { conversation_id: conversation, seq: 3, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": answer}}}) }).await;
     link.send(mycelium_proto::link::NodeToControl::TurnEnd { conversation_id: conversation, seq: 4, stop_reason: "end_turn".into(), usage: None }).await;

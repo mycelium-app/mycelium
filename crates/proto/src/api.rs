@@ -1235,6 +1235,10 @@ pub struct ConversationConnection {
     pub target_title: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub revoked_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub held: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
