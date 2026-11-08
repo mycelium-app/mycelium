@@ -235,7 +235,7 @@ impl ServerRow {
 
     pub fn effective(&self, tool: &str, input: &Value) -> Effective {
         let kind = match (self.integration(), tool) {
-            (Some(Integration::Coolify), "api") if coolify::api_reads(input) => ToolKind::Read,
+            (Some(Integration::Coolify | Integration::FreeAgent), "api") if coolify::api_reads(input) => ToolKind::Read,
             _ => self.tool_kind(tool),
         };
         let mut effective = integration_policy::effective(&self.policy.0, tool, kind);

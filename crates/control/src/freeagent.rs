@@ -15,7 +15,13 @@ use std::time::Duration;
 use uuid::Uuid;
 
 pub const PRODUCTION_ADDRESS: &str = "https://api.freeagent.com";
-const WRITES: [&str; 2] = ["create_draft_invoice", "create_expense"];
+const API: &str = "api";
+const API_METHODS: [&str; 4] = ["GET", "POST", "PUT", "DELETE"];
+const WRITES: [&str; 3] = ["create_draft_invoice", "create_expense", API];
+const MOST_PAGES: usize = 200;
+const MOST_RATE_LIMIT_RETRIES: u32 = 5;
+const DEFAULT_RETRY_AFTER_SECONDS: u64 = 5;
+const MOST_RETRY_AFTER_SECONDS: u64 = 60;
 const DEFAULT_PER_PAGE: u64 = 25;
 const MAX_PER_PAGE: u64 = 100;
 const DEFAULT_PAYMENT_TERMS_IN_DAYS: u64 = 30;
@@ -94,6 +100,19 @@ pub fn tools() -> Vec<StoredTool> {
             "gross_value": {"type": "number", "description": "The total including tax, in the company's currency. Negative is a payment to the person."},
             "description": {"type": "string"}
         }, "required": ["category", "dated_on", "gross_value"]}),
+        read_only: None,
+    });
+
+    tools.push(StoredTool {
+        name: API.to_string(),
+        description: "Call any FreeAgent API v2 endpoint, for everything the other tools do not cover: bank transaction explanations, categories, the company, profit and loss, journals, projects, timeslips, estimates, credit notes and the rest. See https://dev.freeagent.com/docs for them. Give a path under /v2, such as bank_transaction_explanations or accounting/profit_and_loss/summary, or a full FreeAgent url from an earlier answer. GET runs at once; POST, PUT and DELETE follow this account's approvals. With all_pages, a GET follows every page and returns all the rows. An attachment's data can be {\"file\": \"<path>\", \"encoding\": \"base64\"}. Waits and retries when FreeAgent limits the rate.".to_string(),
+        input_schema: json!({"type": "object", "properties": {
+            "method": {"type": "string", "enum": API_METHODS},
+            "path": {"type": "string", "description": "The endpoint under /v2, such as bank_transaction_explanations, or a full https://api.freeagent.com/v2 url."},
+            "query": {"type": "object", "description": "Query parameters, such as {\"bank_account\": \"...\", \"from_date\": \"2026-04-06\", \"view\": \"all\"}."},
+            "body": {"type": "object", "description": "The JSON body for POST and PUT, such as {\"bank_transaction_explanation\": {\"category\": \"...\"}}."},
+            "all_pages": {"type": "boolean", "description": "For a GET of a list, follow every page and return all the rows. Defaults to false."}
+        }, "required": ["method", "path"]}),
         read_only: None,
     });
 
@@ -179,16 +198,115 @@ fn request(http: &reqwest::Client, token: &str, method: reqwest::Method, url: &s
 }
 
 async fn send(builder: reqwest::RequestBuilder) -> Result<(reqwest::StatusCode, Value), String> {
-    let response = builder.send().await.map_err(|_| "Mycelium could not reach FreeAgent. Try again in a moment.".to_string())?;
+    let (status, body, _) = send_page(builder).await?;
+
+    Ok((status, body))
+}
+
+async fn send_page(builder: reqwest::RequestBuilder) -> Result<(reqwest::StatusCode, Value, Option<String>), String> {
+    let unreachable = || "Mycelium could not reach FreeAgent. Try again in a moment.".to_string();
+    let mut retries = 0;
+    let response = loop {
+        let attempt = builder.try_clone().ok_or_else(unreachable)?;
+        let response = attempt.send().await.map_err(|_| unreachable())?;
+
+        if response.status() != reqwest::StatusCode::TOO_MANY_REQUESTS || retries == MOST_RATE_LIMIT_RETRIES {
+            break response;
+        }
+
+        let wait = response.headers().get("retry-after").and_then(|value| value.to_str().ok()).and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_RETRY_AFTER_SECONDS);
+        tokio::time::sleep(Duration::from_secs(wait.min(MOST_RETRY_AFTER_SECONDS))).await;
+        retries += 1;
+    };
     let status = response.status();
     let location = response.headers().get("location").and_then(|value| value.to_str().ok()).map(str::to_string);
+    let next = response.headers().get("link").and_then(|value| value.to_str().ok()).and_then(next_page);
     let mut body: Value = response.json().await.unwrap_or(Value::Null);
 
     if let (Some(location), Some(body)) = (location, body.as_object_mut()) {
         body.insert("location".to_string(), json!(location));
     }
 
-    Ok((status, body))
+    Ok((status, body, next))
+}
+
+fn next_page(link: &str) -> Option<String> {
+    link.split(',').find(|part| part.contains("rel=\"next\"") || part.contains("rel='next'")).and_then(|part| part.split(';').next()).map(|target| target.trim().trim_start_matches('<').trim_end_matches('>').to_string())
+}
+
+fn api_address(credentials: &Credentials, path: &str) -> Option<String> {
+    let address = base(&credentials.address);
+    let route = path.trim().strip_prefix(address).unwrap_or(path.trim()).trim_start_matches('/');
+    let route = route.strip_prefix("v2/").unwrap_or(route);
+    let (resource, query) = route.split_once('?').unwrap_or((route, ""));
+    let plain = !resource.is_empty() && resource.split('/').all(|part| !part.is_empty() && part != ".." && part != ".") && !resource.contains(['\\', ':', '%', '@', '#']) && !query.contains('#');
+
+    plain.then(|| format!("{address}/v2/{route}"))
+}
+
+async fn api(http: &reqwest::Client, token: &str, credentials: &Credentials, arguments: &Value) -> Result<Value, (String, bool)> {
+    let method = arguments["method"].as_str().map(str::to_ascii_uppercase).filter(|method| API_METHODS.contains(&method.as_str())).and_then(|method| reqwest::Method::from_bytes(method.as_bytes()).ok());
+    let Some(method) = method else {
+        return Err((format!("Choose a method: {}.", API_METHODS.join(", ")), false));
+    };
+    let Some(address) = arguments["path"].as_str().and_then(|path| api_address(credentials, path)) else {
+        return Err(("Give a path under /v2, such as bank_transaction_explanations, or a FreeAgent url. Do not use \"..\".".to_string(), false));
+    };
+    let mut url = url::Url::parse(&address).map_err(|_| ("That path is not a FreeAgent address.".to_string(), false))?;
+    let all_pages = method == reqwest::Method::GET && arguments["all_pages"].as_bool() == Some(true);
+
+    if let Some(query) = arguments["query"].as_object() {
+        let mut pairs = url.query_pairs_mut();
+
+        for (key, value) in query {
+            pairs.append_pair(key, &value.as_str().map_or_else(|| value.to_string(), str::to_string));
+        }
+    }
+
+    if all_pages && !url.query_pairs().any(|(key, _)| key == "per_page") {
+        url.query_pairs_mut().append_pair("per_page", &MAX_PER_PAGE.to_string());
+    }
+
+    let unauthorised = |status: reqwest::StatusCode| status == reqwest::StatusCode::UNAUTHORIZED;
+    let mut builder = request(http, token, method.clone(), url.as_str());
+
+    if let Some(body) = arguments.get("body").filter(|body| !body.is_null() && method != reqwest::Method::GET) {
+        builder = builder.json(body);
+    }
+
+    let (status, body, mut next) = send_page(builder).await.map_err(|reason| (reason, false))?;
+
+    if !status.is_success() {
+        return Err((complaint(status, &body), unauthorised(status)));
+    }
+
+    if !all_pages {
+        return Ok(json!({"status": status.as_u16(), "body": body}));
+    }
+
+    let Some(field) = body.as_object().and_then(|fields| fields.iter().find(|(_, value)| value.is_array()).map(|(key, _)| key.clone())) else {
+        return Ok(json!({"status": status.as_u16(), "body": body}));
+    };
+    let mut rows = body[&field].as_array().cloned().unwrap_or_default();
+    let mut pages = 1;
+
+    while let Some(page) = next.take() {
+        if pages == MOST_PAGES {
+            return Err((format!("Stopped after {MOST_PAGES} pages ({} rows). Narrow the dates and ask again.", rows.len()), false));
+        }
+
+        let (status, body, following) = send_page(request(http, token, reqwest::Method::GET, &page)).await.map_err(|reason| (reason, false))?;
+
+        if !status.is_success() {
+            return Err((complaint(status, &body), unauthorised(status)));
+        }
+
+        rows.extend(body[&field].as_array().cloned().unwrap_or_default());
+        next = following;
+        pages += 1;
+    }
+
+    Ok(json!({"status": status.as_u16(), "pages": pages, "rows": rows.len(), "body": {field: rows}}))
 }
 
 fn complaint(status: reqwest::StatusCode, body: &Value) -> String {
@@ -251,6 +369,7 @@ async fn run(http: &reqwest::Client, token: &str, credentials: &Credentials, too
     }
 
     match tool {
+        API => api(http, token, credentials, arguments).await,
         "create_draft_invoice" => {
             let (Some(contact), Some(dated_on), Some(items)) = (arguments["contact"].as_str(), arguments["dated_on"].as_str(), arguments["items"].as_array().filter(|items| !items.is_empty())) else {
                 return Err(("Give the contact, the invoice date and at least one item.".to_string(), false));

@@ -16,6 +16,7 @@ struct FakeFreeAgent {
     valid_access: Mutex<String>,
     grants: Mutex<Vec<String>>,
     created: Mutex<Vec<(String, Value)>>,
+    limited: Mutex<u32>,
 }
 
 fn bearer(headers: &HeaderMap) -> String {
@@ -83,6 +84,31 @@ async fn company(State(fake): State<Arc<FakeFreeAgent>>, headers: HeaderMap) -> 
     }
 }
 
+async fn explanations(State(fake): State<Arc<FakeFreeAgent>>, headers: HeaderMap, axum::extract::Query(query): axum::extract::Query<std::collections::HashMap<String, String>>) -> Response {
+    if !signed_request(&fake, &headers) {
+        return unauthorised();
+    }
+
+    match query.get("page").map(String::as_str) {
+        Some("2") => Json(json!({"bank_transaction_explanations": [{"url": "e3"}]})).into_response(),
+        _ => ([("link", "<http://unused/v2/bank_transaction_explanations?page=1>; rel=\"first\", <PAGE_TWO>; rel=\"next\"".replace("PAGE_TWO", &format!("{}/v2/bank_transaction_explanations?page=2&per_page={}", headers.get("host").map(|host| format!("http://{}", host.to_str().unwrap())).unwrap_or_default(), query.get("per_page").cloned().unwrap_or_default())))], Json(json!({"bank_transaction_explanations": [{"url": "e1"}, {"url": "e2"}]}))).into_response(),
+    }
+}
+
+async fn update_explanation(State(fake): State<Arc<FakeFreeAgent>>, Path(id): Path<String>, Json(body): Json<Value>) -> Response {
+    let mut limited = fake.limited.lock().unwrap();
+
+    if *limited > 0 {
+        *limited -= 1;
+
+        return (StatusCode::TOO_MANY_REQUESTS, [("retry-after", "0")], Json(json!({"errors": [{"message": "Too many requests"}]}))).into_response();
+    }
+
+    fake.created.lock().unwrap().push((id, body.clone()));
+
+    Json(json!({"bank_transaction_explanation": body["bank_transaction_explanation"]})).into_response()
+}
+
 async fn me() -> Json<Value> {
     Json(json!({"user": {"url": "https://api.freeagent.com/v2/users/1"}}))
 }
@@ -94,7 +120,7 @@ async fn create_expense(State(fake): State<Arc<FakeFreeAgent>>, Json(body): Json
 }
 
 async fn fake_freeagent() -> (String, Arc<FakeFreeAgent>) {
-    let fake = Arc::new(FakeFreeAgent { valid_access: Mutex::new(String::new()), grants: Mutex::default(), created: Mutex::default() });
+    let fake = Arc::new(FakeFreeAgent { valid_access: Mutex::new(String::new()), grants: Mutex::default(), created: Mutex::default(), limited: Mutex::new(1) });
     let router = Router::new()
         .route("/v2/token_endpoint", post(token_endpoint))
         .route("/v2/contacts", get(contacts))
@@ -102,6 +128,8 @@ async fn fake_freeagent() -> (String, Arc<FakeFreeAgent>) {
         .route("/v2/invoices", post(create_invoice))
         .route("/v2/users/me", get(me))
         .route("/v2/company", get(company))
+        .route("/v2/bank_transaction_explanations", get(explanations))
+        .route("/v2/bank_transaction_explanations/{id}", axum::routing::put(update_explanation))
         .route("/v2/expenses", post(create_expense))
         .with_state(fake.clone());
 
@@ -129,7 +157,7 @@ async fn sign_in(server: &Server, id: &str, code: &str) -> u16 {
 
 async fn call(server: &Server, token: &str, tool: &str, arguments: Value) -> Value {
     let body = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": format!("freeagent__{tool}"), "arguments": arguments}});
-    let reply = if tool.starts_with("create_") {
+    let reply = if tool.starts_with("create_") || (tool == "api" && arguments["method"] != "GET") {
         server.approved_agent_mcp(token, body).await
     } else {
         let anonymous = server.anonymous();
@@ -264,4 +292,46 @@ async fn an_account_signed_in_before_the_company_was_stored_learns_it_on_its_nex
     call(&server, &node.token, "list_contacts", json!({})).await;
 
     assert_eq!(listed(&server, id).await["account"], "Harbour Studio Ltd");
+}
+
+#[tokio::test]
+async fn the_api_tool_reads_every_page_without_asking() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, _) = fake_freeagent().await;
+    let (_, added) = add_freeagent(&server, &base).await;
+    sign_in(&server, added["id"].as_str().unwrap(), "code-1").await;
+
+    let result = call(&server, &node.token, "api", json!({"method": "GET", "path": "bank_transaction_explanations", "query": {"bank_account": "1"}, "all_pages": true})).await;
+    let answer: Value = serde_json::from_str(&text(&result)).unwrap();
+
+    assert_eq!((answer["pages"].clone(), answer["rows"].clone()), (json!(2), json!(3)), "{answer}");
+    assert_eq!(answer["body"]["bank_transaction_explanations"][2]["url"], "e3");
+}
+
+#[tokio::test]
+async fn an_api_write_waits_out_a_rate_limit_and_goes_through() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, fake) = fake_freeagent().await;
+    let (_, added) = add_freeagent(&server, &base).await;
+    sign_in(&server, added["id"].as_str().unwrap(), "code-1").await;
+
+    let result = call(&server, &node.token, "api", json!({"method": "PUT", "path": format!("{base}/v2/bank_transaction_explanations/7"), "body": {"bank_transaction_explanation": {"marked_for_review": false}}})).await;
+
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(fake.created.lock().unwrap().last().unwrap().0, "7");
+}
+
+#[tokio::test]
+async fn the_api_tool_refuses_a_path_outside_v2() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, _) = fake_freeagent().await;
+    let (_, added) = add_freeagent(&server, &base).await;
+    sign_in(&server, added["id"].as_str().unwrap(), "code-1").await;
+
+    let result = call(&server, &node.token, "api", json!({"method": "GET", "path": "../token_endpoint"})).await;
+
+    assert_eq!(result["isError"], true, "{result}");
 }
