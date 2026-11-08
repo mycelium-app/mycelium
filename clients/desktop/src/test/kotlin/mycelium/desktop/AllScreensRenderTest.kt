@@ -12,11 +12,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.unit.Density
 import kotlin.time.Clock
+import kotlin.time.Instant
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.builtins.ListSerializer
+import mycelium.Platform
 import mycelium.api.ChatToolServer
 import mycelium.api.Me
 import mycelium.api.MyceliumJson
@@ -300,6 +302,12 @@ private fun click(scene: ImageComposeScene, x: Float, y: Float) {
     scene.render(132_000_000L)
 }
 
+private const val OpenWednesdayMorning = "2026-10-21T10:30"
+
+private val FixedClockPlatform = object : Platform by PlatformStub {
+    override fun localDateTime(epochMillis: Long) = OpenWednesdayMorning
+}
+
 @OptIn(InternalComposeUiApi::class)
 class AllScreensRenderTest {
     @get:Rule
@@ -309,7 +317,7 @@ class AllScreensRenderTest {
     private val appearance = Appearance(true, Accent.Neutral, Accent.entries.filter { it != Accent.System }, {})
 
     private fun store(extra: Map<String, String> = emptyMap(), open: String? = Main): Store {
-        val store = Store(fakeApi(Nodes, linkedMapOf<String, String>().also { merged -> merged.putAll(extra); Extra.forEach { (key, value) -> if (key !in merged) { merged[key] = value } } }), scopes.create())
+        val store = Store(fakeApi(Nodes, linkedMapOf<String, String>().also { merged -> merged.putAll(extra); Extra.forEach { (key, value) -> if (key !in merged) { merged[key] = value } } }), scopes.create(), FixedClockPlatform)
 
         runBlocking {
             store.refresh()
@@ -343,7 +351,7 @@ class AllScreensRenderTest {
     private fun snap(name: String, phone: Boolean = false, interact: (ImageComposeScene) -> Unit = {}, content: @Composable () -> Unit) {
         val scene = ImageComposeScene(if (phone) 412 else 1440, if (phone) 915 else 900, Density(1f)) {
             MyceliumTheme(true) {
-                CompositionLocalProvider(LocalTouch provides phone, LocalAppearance provides appearance, LocalPlatform provides PlatformStub, content = content)
+                CompositionLocalProvider(LocalTouch provides phone, LocalAppearance provides appearance, LocalPlatform provides FixedClockPlatform, content = content)
             }
         }
 
@@ -366,7 +374,15 @@ class AllScreensRenderTest {
     private fun shell(name: String, route: Route, phone: Boolean = false, extra: Map<String, String> = emptyMap(), open: String? = Main, interact: (ImageComposeScene) -> Unit = {}) {
         val store = store(extra, open)
 
-        snap(name, phone, interact) { Shell(store, PlatformStub, me, onSignOut = {}, initialRoute = route) }
+        snap(name, phone, interact) { Shell(store, FixedClockPlatform, me, onSignOut = {}, initialRoute = route) }
+    }
+
+    @Test
+    fun theRenderClockIsInsideOpeningHoursOnASaturdayNight() {
+        val view = store(open = null).hoursView(Instant.parse("2026-11-07T22:00:00Z"))
+
+        assertTrue(view.appOpen)
+        assertTrue(view.closedGroupIds.isEmpty())
     }
 
     @Test
