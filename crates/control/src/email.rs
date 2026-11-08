@@ -305,7 +305,7 @@ pub async fn verify(credentials: &Credentials) -> Result<(), String> {
 }
 
 fn failure(text: impl Into<String>) -> CallOutput {
-    CallOutput { text: text.into(), is_error: true }
+    CallOutput { text: text.into(), is_error: true, binary: None }
 }
 
 fn text<'a>(arguments: &'a Value, key: &str) -> Option<&'a str> {
@@ -626,7 +626,7 @@ pub async fn call(state: &AppState, owner: Uuid, source: &ServerRow, credentials
             Ok(accounts) => {
                 let accounts: Vec<Value> = accounts.into_iter().filter(|account| account.kind == "email" && account.enabled).map(|account| json!({"id": account.id, "name": account.name, "account": account.account})).collect();
 
-                CallOutput { text: json!(accounts).to_string(), is_error: false }
+                CallOutput { text: json!(accounts).to_string(), is_error: false, binary: None }
             }
             Err(_) => failure("Mycelium could not list your email accounts. Try again in a moment."),
         };
@@ -750,7 +750,7 @@ pub async fn call(state: &AppState, owner: Uuid, source: &ServerRow, credentials
     };
 
     match tokio::time::timeout(TIMEOUT, work).await {
-        Ok(Ok(value)) => CallOutput { text: value.to_string(), is_error: false },
+        Ok(Ok(value)) => CallOutput { text: value.to_string(), is_error: false, binary: None },
         Ok(Err(reason)) => failure(reason),
         Err(_) if destination_copied => failure("A complete copy is retained in the destination account, but source removal was not confirmed before the operation timed out. Check both folders before trying again."),
         Err(_) if matches!(tool, DELETE_MESSAGE | MOVE_MESSAGE) => failure("The mail operation timed out. Source removal was not confirmed. Check the source and destination folders before trying again."),

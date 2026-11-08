@@ -286,9 +286,9 @@ impl Toolbox {
                 let Some(integration) = server.integration() else {
                     return Ok((format!("{} is not a built-in integration Mycelium knows. Remove it and add it again.", tool.server), true));
                 };
-                let output = integration.call(state, owner, server, Some(conversation_id), &tool.original, input).await;
+                let output = integration.call(state, owner, server, Some(conversation_id), &tool.original, input, false).await;
 
-                Ok((output.text, output.is_error))
+                Ok(output.text_only())
             }
             Source::Remote { server } => {
                 let token = match bearer(state, server).await {

@@ -3,6 +3,7 @@ use crate::chat_tool_servers::{SERVER_COLUMNS, ServerRow, StoredTool};
 use crate::error::{ApiError, ApiResult};
 use crate::integrations::{CallOutput, Credentials};
 use crate::mcp_oauth::page;
+use crate::paging::{Page, all_rows};
 use crate::state::{AppState, PendingFreeAgent, new_token};
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -18,7 +19,6 @@ pub const PRODUCTION_ADDRESS: &str = "https://api.freeagent.com";
 const API: &str = "api";
 const API_METHODS: [&str; 4] = ["GET", "POST", "PUT", "DELETE"];
 const WRITES: [&str; 3] = ["create_draft_invoice", "create_expense", API];
-const MOST_PAGES: usize = 200;
 const MOST_RATE_LIMIT_RETRIES: u32 = 5;
 const DEFAULT_RETRY_AFTER_SECONDS: u64 = 5;
 const MOST_RETRY_AFTER_SECONDS: u64 = 60;
@@ -124,7 +124,7 @@ pub fn always_asks(tool: &str) -> bool {
 }
 
 fn failure(text: impl Into<String>) -> CallOutput {
-    CallOutput { text: text.into(), is_error: true }
+    CallOutput { text: text.into(), is_error: true, binary: None }
 }
 
 fn base(address: &str) -> &str {
@@ -274,7 +274,7 @@ async fn api(http: &reqwest::Client, token: &str, credentials: &Credentials, arg
         builder = builder.json(body);
     }
 
-    let (status, body, mut next) = send_page(builder).await.map_err(|reason| (reason, false))?;
+    let (status, body, next) = send_page(builder).await.map_err(|reason| (reason, false))?;
 
     if !status.is_success() {
         return Err((complaint(status, &body), unauthorised(status)));
@@ -287,24 +287,18 @@ async fn api(http: &reqwest::Client, token: &str, credentials: &Credentials, arg
     let Some(field) = body.as_object().and_then(|fields| fields.iter().find(|(_, value)| value.is_array()).map(|(key, _)| key.clone())) else {
         return Ok(json!({"status": status.as_u16(), "body": body}));
     };
-    let mut rows = body[&field].as_array().cloned().unwrap_or_default();
-    let mut pages = 1;
-
-    while let Some(page) = next.take() {
-        if pages == MOST_PAGES {
-            return Err((format!("Stopped after {MOST_PAGES} pages ({} rows). Narrow the dates and ask again.", rows.len()), false));
-        }
-
-        let (status, body, following) = send_page(request(http, token, reqwest::Method::GET, &page)).await.map_err(|reason| (reason, false))?;
+    let first = Page { rows: body[&field].as_array().cloned().unwrap_or_default(), next };
+    let field_name = &field;
+    let fetch = |address: String| async move {
+        let (status, body, next) = send_page(request(http, token, reqwest::Method::GET, &address)).await.map_err(|reason| (reason, false))?;
 
         if !status.is_success() {
             return Err((complaint(status, &body), unauthorised(status)));
         }
 
-        rows.extend(body[&field].as_array().cloned().unwrap_or_default());
-        next = following;
-        pages += 1;
-    }
+        Ok(Page { rows: body[field_name].as_array().cloned().unwrap_or_default(), next })
+    };
+    let (rows, pages) = all_rows(first, fetch, |reason| (reason, false)).await?;
 
     Ok(json!({"status": status.as_u16(), "pages": pages, "rows": rows.len(), "body": {field: rows}}))
 }
@@ -452,7 +446,7 @@ pub async fn call(state: &AppState, owner: Uuid, server: &ServerRow, credentials
     }
 
     match outcome {
-        Ok(value) => CallOutput { text: value.to_string(), is_error: false },
+        Ok(value) => CallOutput { text: value.to_string(), is_error: false, binary: None },
         Err((reason, _)) => failure(reason),
     }
 }

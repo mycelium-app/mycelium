@@ -117,6 +117,7 @@ mod freeagent;
 mod discord;
 mod actual;
 mod paperless;
+mod paging;
 mod stoat;
 mod tandoor;
 mod zulip;

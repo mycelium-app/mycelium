@@ -51,7 +51,7 @@ pub fn always_asks(tool: &str) -> bool {
 }
 
 fn failure(text: impl Into<String>) -> CallOutput {
-    CallOutput { text: text.into(), is_error: true }
+    CallOutput { text: text.into(), is_error: true, binary: None }
 }
 
 fn base(credentials: &Credentials) -> &str {
@@ -268,7 +268,7 @@ async fn run(http: &reqwest::Client, credentials: &Credentials, tool: &str, argu
 
 pub async fn call(http: &reqwest::Client, credentials: &Credentials, tool: &str, arguments: &Value) -> CallOutput {
     match run(http, credentials, tool, arguments).await {
-        Ok(value) => CallOutput { text: value.to_string(), is_error: false },
+        Ok(value) => CallOutput { text: value.to_string(), is_error: false, binary: None },
         Err(reason) => failure(reason),
     }
 }

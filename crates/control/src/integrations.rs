@@ -32,6 +32,16 @@ pub struct Credentials {
 pub struct CallOutput {
     pub text: String,
     pub is_error: bool,
+    pub binary: Option<Vec<u8>>,
+}
+
+impl CallOutput {
+    pub fn text_only(self) -> (String, bool) {
+        match self.binary {
+            Some(_) => (crate::file_arguments::NEEDS_SAVE_TO.to_string(), true),
+            None => (self.text, self.is_error),
+        }
+    }
 }
 
 const EXPIRES_SOON_DAYS: i64 = 14;
@@ -175,7 +185,7 @@ impl Integration {
         }
     }
 
-    pub async fn call(self, state: &AppState, owner: Uuid, server: &ServerRow, conversation: Option<Uuid>, tool: &str, arguments: &Value) -> CallOutput {
+    pub async fn call(self, state: &AppState, owner: Uuid, server: &ServerRow, conversation: Option<Uuid>, tool: &str, arguments: &Value, saving: bool) -> CallOutput {
         let credentials = server.credentials();
 
         match self {
@@ -187,7 +197,7 @@ impl Integration {
             Integration::Discord => discord::call(&state.http, &credentials, tool, arguments).await,
             Integration::FreeAgent => freeagent::call(state, owner, server, &credentials, tool, arguments).await,
             Integration::Actual => actual::call(&state.http, &credentials, tool, arguments).await,
-            Integration::Paperless => paperless::call(&state.http, &credentials, tool, arguments).await,
+            Integration::Paperless => paperless::call(&state.http, &credentials, tool, arguments, saving).await,
             Integration::Coolify => coolify::call(state, owner, server, &credentials, conversation, tool, arguments).await,
             Integration::Tandoor => tandoor::call(&state.http, &credentials, tool, arguments).await,
         }
@@ -235,7 +245,7 @@ impl ServerRow {
 
     pub fn effective(&self, tool: &str, input: &Value) -> Effective {
         let kind = match (self.integration(), tool) {
-            (Some(Integration::Coolify | Integration::FreeAgent), "api") if coolify::api_reads(input) => ToolKind::Read,
+            (Some(Integration::Coolify | Integration::FreeAgent | Integration::Paperless), "api") if coolify::api_reads(input) => ToolKind::Read,
             _ => self.tool_kind(tool),
         };
         let mut effective = integration_policy::effective(&self.policy.0, tool, kind);

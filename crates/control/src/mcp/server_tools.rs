@@ -75,10 +75,18 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
         Err(message) => return Ok(ToolReply::text(&message, true)),
     };
     let edits = conversation.is_some() && chat_tools::edits_response(answer.as_deref(), effective.edit);
+    let mut binary = None;
     let (mut text, is_error) = if let Some(integration) = server.integration() {
-        let output = integration.call(state, owner, server, conversation, tool, &arguments).await;
+        let output = integration.call(state, owner, server, conversation, tool, &arguments, save_to.is_some()).await;
 
-        (output.text, output.is_error)
+        match save_to {
+            Some(_) => {
+                binary = output.binary;
+
+                (output.text, output.is_error)
+            }
+            None => output.text_only(),
+        }
     } else {
         let token = match bearer(state, server).await {
             Ok(token) => token,
@@ -105,7 +113,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
     };
     let mut review = None;
 
-    if let (true, false, Some(conversation_id)) = (edits, is_error, conversation) {
+    if let (true, false, Some(conversation_id), None) = (edits, is_error, conversation, &binary) {
         let held = response_editor::held_from(tool, &server.name, server.account.as_deref(), filter, &text);
         let sent = response_editor::hold(state, owner, conversation_id, &Uuid::new_v4().to_string(), held, text).await?;
         text = sent.text;
@@ -115,7 +123,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
     chat_tools::record_call(state, owner, server, tool, conversation, "workspace", None, decision, is_error, review).await;
 
     if let (Some(path), Some(conversation_id), false) = (save_to, conversation, is_error) {
-        return Ok(match crate::file_arguments::save(state, owner, conversation_id, &path, &text).await {
+        return Ok(match crate::file_arguments::save(state, owner, conversation_id, &path, binary.as_deref().unwrap_or(text.as_bytes())).await {
             Ok(saved) => ToolReply::text(&saved, false),
             Err(reason) => ToolReply::text(&format!("The call worked, but the answer could not be saved: {reason}"), true),
         });

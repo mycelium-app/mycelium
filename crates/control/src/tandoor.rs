@@ -345,7 +345,7 @@ pub async fn call(http: &reqwest::Client, credentials: &Credentials, tool: &str,
     .await;
 
     match outcome {
-        Ok(value) => CallOutput { text: value.to_string(), is_error: false },
-        Err(failure) => CallOutput { text: failure.message(), is_error: true },
+        Ok(value) => CallOutput { text: value.to_string(), is_error: false, binary: None },
+        Err(failure) => CallOutput { text: failure.message(), is_error: true, binary: None },
     }
 }

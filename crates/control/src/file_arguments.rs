@@ -12,6 +12,8 @@ const LIMIT_BYTES: u64 = 25 * 1024 * 1024;
 
 pub const SAVE_PROPERTY: &str = "save_to";
 
+pub const NEEDS_SAVE_TO: &str = "This answer is a file, not text. Call it again with save_to set to a path in the conversation folder, and Mycelium will write the file there unchanged.";
+
 pub fn with_save_property(mut schema: Value) -> Value {
     if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
         properties.insert(SAVE_PROPERTY.to_string(), serde_json::json!({"type": "string", "description": "Optional path in the conversation folder. Mycelium writes the whole answer there, up to 20 MB, and returns only where it went and its size. Use it for answers too long to read here."}));
@@ -26,12 +28,12 @@ pub fn take_save_to(arguments: &mut Value) -> Option<String> {
     removed.as_str().map(str::trim).filter(|path| !path.is_empty()).map(String::from)
 }
 
-pub async fn save(state: &AppState, owner: Uuid, conversation: Uuid, path: &str, text: &str) -> Result<String, String> {
+pub async fn save(state: &AppState, owner: Uuid, conversation: Uuid, path: &str, contents: &[u8]) -> Result<String, String> {
     let found = crate::store::find_owned(&state.pool, conversation, owner).await.map_err(|error| error.message().to_string())?;
-    let data_base64 = base64::engine::general_purpose::STANDARD.encode(text);
+    let data_base64 = base64::engine::general_purpose::STANDARD.encode(contents);
     let answer = crate::git::relay(state, found.node_id, found.cwd.clone(), GitCommand::WriteFile { path: path.to_string(), data_base64 }).await.map_err(|error: ApiError| error.message().to_string())?;
 
-    Ok(format!("Saved the answer, {} bytes, to {path} in the conversation folder.", answer["size"].as_u64().unwrap_or(text.len() as u64)))
+    Ok(format!("Saved the answer, {} bytes, to {path} in the conversation folder.", answer["size"].as_u64().unwrap_or(contents.len() as u64)))
 }
 
 fn file_of(value: &Value) -> Option<(&str, bool)> {
