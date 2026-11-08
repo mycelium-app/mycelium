@@ -203,6 +203,8 @@ async fn a_release_watch_waits_for_every_run_of_the_tag_to_finish() {
 
     let watched = tool(&server, &link, watcher, "watch_release", json!({"forge": "github.com", "repository": "acme/app", "tag": "v1.0.0"})).await;
     let early = quiet_for(&mut link, watcher).await;
+    let (_, listed) = server.user.json(server.user.get(&format!("/api/v1/conversations/{watcher}/watches"))).await;
+    assert_eq!((listed[0]["repository"].clone(), listed[0]["reference"].clone()), (json!("acme/app"), json!("v1.0.0")), "the person sees the tag, not its encoding");
 
     *fake.runs.lock().unwrap() = vec![run(7, "v1.0.0", "completed", Some("success"))];
     *fake.release.lock().unwrap() = Some(json!({"html_url": "https://github.example.com/acme/app/releases/tag/v1.0.0"}));

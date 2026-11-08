@@ -203,7 +203,11 @@ pub async fn listed(state: &AppState, owner: Uuid, watcher: Uuid) -> ApiResult<V
 
     Ok(rows
         .into_iter()
-        .map(|(id, kind, target, title, repository, reference, note, due_at, only_waiting)| json!({"id": id, "kind": kind, "conversation_id": target, "title": title, "repository": repository, "reference": reference, "note": note, "due_at": due_at, "only_waiting": only_waiting}))
+        .map(|(id, kind, target, title, repository, reference, note, due_at, only_waiting)| {
+            let reference = reference.map(|reference| crate::forge_watches::Target::parse(&reference).map_or(reference, |target| target.label()));
+
+            json!({"id": id, "kind": kind, "conversation_id": target, "title": title, "repository": repository, "reference": reference, "note": note, "due_at": due_at, "only_waiting": only_waiting})
+        })
         .collect())
 }
 

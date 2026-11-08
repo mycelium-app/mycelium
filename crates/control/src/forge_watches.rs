@@ -54,7 +54,7 @@ impl Target {
         }
     }
 
-    fn parse(text: &str) -> Option<Target> {
+    pub fn parse(text: &str) -> Option<Target> {
         let (kind, rest) = text.split_once(':')?;
 
         match kind {
