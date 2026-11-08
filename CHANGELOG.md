@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.28.0
+
+- A conversation started with start_conversation or start_subagent tells the one that started it when its turn ends and it has finished, failed or is waiting on the person. watch_conversation does the same for other conversations it can read, and unwatch and list_watches manage watches.
+- watch_pipeline and watch_release tell a conversation when a GitHub Actions run or GitLab pipeline finishes, or when every run for a release tag has finished. Connected forges deliver through webhooks Mycelium registers; otherwise, and for public GitHub repositories, Mycelium checks every minute.
+- wake_at wakes a conversation once at a time with a note to itself, and survives restarts.
+- Notifications arrive as messages that wake an idle conversation. Several that arrive while it works come as one turn, each state change notifies once, and a turn started by a notification notifies nobody.
+- A turn that ends with an open question leaves the conversation in Needs input instead of looking finished.
+- A conversation shows its pending wake-ups and what it watches above the thread, each with Cancel or Stop.
+
 ## v0.27.0
 
 - Add account on FreeAgent reuses the existing account's OAuth app, so it goes straight to naming and signing in. Use another app enters new credentials.
