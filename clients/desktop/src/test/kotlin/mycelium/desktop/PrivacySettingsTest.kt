@@ -1,6 +1,7 @@
 package mycelium.desktop
 
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -65,8 +66,7 @@ class PrivacySettingsTest {
     @Test
     fun desktopSpeechToTextNamesYourProviderAndModel() {
         show(ProvidedPrivacy)
-        rule.waitUntil(5_000) { sent.any { it.first == "GET /api/v1/privacy" } }
-        rule.waitForIdle()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Speech, whisper-1").fetchSemanticsNodes().isNotEmpty() }
 
         rule.onNodeWithText("Speech, whisper-1").assertExists()
     }

@@ -28,18 +28,18 @@ private fun assistant(name: String, state: String = "idle", pinned: Boolean = fa
 
 class AssistantsStateTest {
     @Test
-    fun theSidebarShowsPinnedAndBusyAssistantsUpToFive() {
+    fun theSidebarShowsPinnedAndBusyAssistantsUpToTwelve() {
         val all = listOf(
             assistant("idle"),
             assistant("pinned", pinned = true, active = "2026-10-20T10:00:00Z"),
             assistant("working", state = "working", active = "2026-10-23T11:00:00Z"),
             assistant("input", state = "input", active = "2026-10-23T09:00:00Z"),
             assistant("archived", pinned = true, archived = true),
-        ) + (1..5).map { assistant("extra$it", state = "working", active = "2026-10-22T0$it:00:00Z") }
+        ) + (1..10).map { assistant("extra$it", state = "working", active = "2026-10-22T${it.toString().padStart(2, '0')}:00:00Z") }
 
         val shown = sidebarAssistants(all, AllGroups).map { it.name }
 
-        assertEquals(listOf("pinned", "working", "input", "extra5", "extra4"), shown)
+        assertEquals(listOf("pinned", "working", "input") + (10 downTo 2).map { "extra$it" }, shown)
     }
 
     @Test
