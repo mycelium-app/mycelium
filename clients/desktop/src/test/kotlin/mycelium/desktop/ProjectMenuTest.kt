@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -84,5 +85,12 @@ class ProjectMenuTest {
         open(onOneNode = true)
 
         assertEquals(0, rule.onAllNodesWithText("Laptop").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun openingTheMenuPutsTheCursorInTheSearch() {
+        open()
+
+        rule.onNodeWithContentDescription("Search projects").assertIsFocused()
     }
 }

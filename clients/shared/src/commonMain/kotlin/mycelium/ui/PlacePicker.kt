@@ -19,6 +19,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.runtime.setValue
 import mycelium.api.Forge
 import mycelium.api.NodeSummary
@@ -262,6 +263,8 @@ fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, select
     val searching = query.isNotBlank()
     val recentShown = recent.filter { it in matching }.takeIf { !searching }.orEmpty()
     val rest = matching.filter { it !in recentShown }
+    val touch = LocalTouch.current
+    val searchFocus = remember { FocusRequester() }
 
     MenuPopup(onDismiss = onDismiss) {
         MenuLabel(label)
@@ -276,7 +279,14 @@ fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, select
             Hairline(Modifier.padding(vertical = Tokens.Space.S1))
         }
 
-        TextInput(query, { query = it }, label = "Search projects", placeholder = if (severalNodes) "Name, path or node" else "Name or path", showLabel = false)
+        TextInput(query, { query = it }, label = "Search projects", placeholder = if (severalNodes) "Name, path or node" else "Name or path", showLabel = false, focusRequester = searchFocus)
+
+        LaunchedEffect(Unit) {
+            if (!touch) {
+                searchFocus.requestFocus()
+            }
+        }
+
         val scroll = rememberLazyListState()
 
         LazyColumn(Modifier.heightIn(max = 320.dp).scrollbar(scroll), state = scroll) {
