@@ -108,7 +108,6 @@ import mycelium.state.wakePhraseName
 import mycelium.api.NodeSummary
 import mycelium.api.PatchConversationRequest
 import mycelium.api.Project
-import mycelium.api.UseResetRequest
 import mycelium.state.AllGroups
 import mycelium.state.AppState
 import mycelium.state.BreakPhase
@@ -120,7 +119,6 @@ import mycelium.state.NoGroup
 import mycelium.state.PinnedName
 import mycelium.state.SidebarSection
 import mycelium.state.Store
-import mycelium.state.UnnamedAccount
 import mycelium.state.agentAccounts
 import mycelium.state.agentName
 import mycelium.state.appsLinkVisible
@@ -153,6 +151,8 @@ import mycelium.state.workingBehindClosedDoors
 
 sealed interface Route {
     data object Empty : Route
+
+    data object Inbox : Route
 
     data class Chat(val id: String) : Route
 
@@ -204,7 +204,7 @@ sealed interface Route {
 }
 
 @Composable
-fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initialRoute: Route = Route.Empty) {
+fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initialRoute: Route = Route.Inbox) {
     val wellness by store.wellness.state.collectAsState()
     val onBreak = (wellness.clock.phase == BreakPhase.OnBreak && wellness.breakEndsAt != null) || (wellness.clock.phase == BreakPhase.Noting && wellness.ended != null)
 
@@ -390,7 +390,7 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initialRoute: Route = Route.Empty) {
+fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initialRoute: Route = Route.Inbox) {
     val state by store.state.collectAsState()
     val hours = rememberHoursView(store)
     val groupFilter = rememberGroupFilter(platform, state, hours)
@@ -607,6 +607,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
                 if (closed != null) {
                     ClosedScreen(closed, onSelect = onChooseGroup, onOpenOutOfHours = { onOpenOutOfHours(closed.groupId) })
                 } else when (route) {
+                    Route.Inbox -> InboxScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenWorkflow = { onRoute(Route.Workflow(it)) }, onOpenUsageHistory = { onRoute(Route.UsageHistory) })
                     Route.Empty, Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenNodes = { onRoute(Route.Nodes) })
                     is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenNode = { onRoute(Route.Node(it)) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) }, onOpenWorkflow = { onRoute(Route.Workflow(it)) })
                     Route.NewChat -> NewChatScreen(store, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenSettings = { onRoute(Route.Settings) }, onOpenNodes = { onRoute(Route.Nodes) })
@@ -647,6 +648,7 @@ internal fun screenTarget(path: String): Pair<Route, SettingsSection?>? {
         "chat" -> argument?.let { Route.Chat(it) to null }
         "assistant" -> argument?.let { Route.Assistant(it) to null }
         "assistants" -> Route.Assistants to null
+        "inbox" -> Route.Inbox to null
         "new" -> Route.New to null
         "nodes" -> Route.Nodes to null
         "tasks" -> Route.Tasks to null
@@ -697,6 +699,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
     val openChats = if (appClosed) emptyList() else state.conversations.values.filterNot { hours.closed(it.groupId) }
     val pinnedChatRows = pinnedChats(openChats)
     val chats = chatSections(openChats)
+    val inbox = rememberInbox(store, state)
 
     LaunchedEffect(Unit) {
         store.load { store.refreshGroups() }
@@ -791,6 +794,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 SidebarLink("Wellness & Learning", MyIcon.Leaf, selected = route == Route.Wellness, tint = MyTheme.colors.leaf) { onRoute(Route.Wellness) }
             } else {
                 SidebarLink("New conversation", MyIcon.Plus, selected = route == Route.New) { onRoute(Route.New) }
+                SidebarLink("Inbox", MyIcon.Home, selected = route == Route.Inbox, badge = inbox.size) { onRoute(Route.Inbox) }
                 if (state.experiments.history) {
                     SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
                 }
@@ -874,7 +878,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         if (usageOpen) {
             val current = (route as? Route.Chat)?.let { state.conversations[it.id] }
 
-            UsageCard(chatAccountFirst(agentAccounts(state.nodes.values), current?.agent, current?.let { state.nodes[it.nodeId]?.name }, current?.account), Modifier.padding(Tokens.Space.S1_5), providerUsage, current?.providerId, onOpenHistory = { onRoute(Route.UsageHistory) }, onUseReset = { account, key -> store.api.useReset(UseResetRequest(account.agent, account.label.takeUnless { it == UnnamedAccount }, key)).outcome })
+            UsageCard(chatAccountFirst(agentAccounts(state.nodes.values), current?.agent, current?.let { state.nodes[it.nodeId]?.name }, current?.account), Modifier.padding(Tokens.Space.S1_5), providerUsage, current?.providerId, onOpenHistory = { onRoute(Route.UsageHistory) }, onUseReset = { account, key -> useBankedReset(store, account, key) })
         }
 
         if (voice.open && voice.privacy.voiceEnabled) {
@@ -1060,7 +1064,7 @@ private fun LazyListScope.managedRows(
 }
 
 @Composable
-private fun SidebarLink(text: String, icon: MyIcon, selected: Boolean, tint: Color? = null, onClick: () -> Unit) {
+private fun SidebarLink(text: String, icon: MyIcon, selected: Boolean, tint: Color? = null, badge: Int = 0, onClick: () -> Unit) {
     val colors = MyTheme.colors
 
     Row(
@@ -1073,7 +1077,11 @@ private fun SidebarLink(text: String, icon: MyIcon, selected: Boolean, tint: Col
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, tint ?: colors.textMuted, Tokens.Size.IconMd)
-        Label(text, maxLines = 1)
+        Label(text, Modifier.weight(1f), maxLines = 1)
+
+        if (badge > 0) {
+            CountBadge(badge, "$badge waiting")
+        }
     }
 }
 

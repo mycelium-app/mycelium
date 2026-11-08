@@ -35,7 +35,7 @@ data class ConversationWorkflows(
 val LocalConversationWorkflows = compositionLocalOf<ConversationWorkflows?> { null }
 
 @Composable
-internal fun MyceliumWorkflowCard(workflow: Workflow, onUnpin: () -> Unit) {
+internal fun MyceliumWorkflowCard(workflow: Workflow, onUnpin: (() -> Unit)? = null) {
     val pages = LocalConversationWorkflows.current ?: return
     val colors = MyTheme.colors
     val look = workflowStatusLook(workflow.status)
@@ -62,7 +62,9 @@ internal fun MyceliumWorkflowCard(workflow: Workflow, onUnpin: () -> Unit) {
                 MyButton({ stopping = true }, text = "Stop", icon = MyIcon.Stop, description = "Stop ${workflow.title}", size = ButtonSize.Sm, muted = true)
             }
 
-            MyButton(onUnpin, icon = MyIcon.Close, description = "Unpin ${workflow.title}", size = ButtonSize.Sm, muted = true)
+            if (onUnpin != null) {
+                MyButton(onUnpin, icon = MyIcon.Close, description = "Unpin ${workflow.title}", size = ButtonSize.Sm, muted = true)
+            }
         }
 
         Column(Modifier.padding(vertical = Tokens.Space.S1)) {

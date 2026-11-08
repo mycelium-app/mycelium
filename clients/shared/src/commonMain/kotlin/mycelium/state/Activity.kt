@@ -15,6 +15,8 @@ fun formatTokens(tokens: Long): String = when {
     else -> "${withOneDecimal((tokens / 100_000_000.0).roundToInt())}B"
 }
 
+fun formatCount(count: Long): String = count.toString().reversed().chunked(3).joinToString(",").reversed()
+
 fun formatCost(usd: Double?): String {
     if (usd == null) {
         return "Not reported"

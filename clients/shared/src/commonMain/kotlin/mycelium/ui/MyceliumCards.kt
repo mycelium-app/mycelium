@@ -94,48 +94,50 @@ val LocalArtifactOpener = compositionLocalOf<ArtifactOpener?> { null }
 fun artifactOpener(state: AppState, onOpenArtefact: (String) -> Unit) =
     ArtifactOpener(state.artifacts) { id -> onOpenArtefact(id) }
 
-@Composable
-private fun proposedMessage(parsed: MyceliumCall): MessageProposal? {
+internal fun proposedMessage(parsed: MyceliumCall, proposals: Map<String, MessageProposal>): MessageProposal? {
     val sending = parsed as? MyceliumCall.SendToConversation ?: return null
-
-    val proposals = LocalMessageProposals.current?.proposals ?: return null
 
     return sending.proposalId?.let { proposals[it] } ?: proposals.values.filter { it.message == sending.message && it.reason == sending.reason }.maxByOrNull { it.createdAt }
 }
 
 @Composable
-private fun proposedStart(parsed: MyceliumCall): StartProposal? {
-    val starting = parsed as? MyceliumCall.StartProposed ?: return null
+private fun proposedMessage(parsed: MyceliumCall): MessageProposal? = proposedMessage(parsed, LocalMessageProposals.current?.proposals.orEmpty())
 
-    val proposals = LocalStartProposals.current?.proposals ?: return null
+internal fun proposedStart(parsed: MyceliumCall, proposals: Map<String, StartProposal>): StartProposal? {
+    val starting = parsed as? MyceliumCall.StartProposed ?: return null
 
     return starting.proposalId?.let { proposals[it] } ?: proposals.values.filter { it.title == starting.title }.maxByOrNull { it.createdAt }
 }
 
 @Composable
-private fun requestedAccess(parsed: MyceliumCall): ApiAccessRequest? {
-    val asking = parsed as? MyceliumCall.RequestApiAccess ?: return null
+private fun proposedStart(parsed: MyceliumCall): StartProposal? = proposedStart(parsed, LocalStartProposals.current?.proposals.orEmpty())
 
-    val requests = LocalApiAccessRequests.current?.requests ?: return null
+internal fun requestedAccess(parsed: MyceliumCall, requests: Map<String, ApiAccessRequest>): ApiAccessRequest? {
+    val asking = parsed as? MyceliumCall.RequestApiAccess ?: return null
 
     return asking.requestId?.let { requests[it] } ?: requests.values.filter { it.reason == asking.reason }.maxByOrNull { it.createdAt }
 }
 
 @Composable
-private fun requestedSshAccess(parsed: MyceliumCall): SshAccessRequest? {
-    val asking = parsed as? MyceliumCall.RequestSshAccess ?: return null
+private fun requestedAccess(parsed: MyceliumCall): ApiAccessRequest? = requestedAccess(parsed, LocalApiAccessRequests.current?.requests.orEmpty())
 
-    val requests = LocalSshAccessRequests.current?.requests ?: return null
+internal fun requestedSshAccess(parsed: MyceliumCall, requests: Map<String, SshAccessRequest>): SshAccessRequest? {
+    val asking = parsed as? MyceliumCall.RequestSshAccess ?: return null
 
     return asking.requestId?.let { requests[it] } ?: requests.values.filter { it.reason == asking.reason && it.nodeName.equals(asking.node, ignoreCase = true) }.maxByOrNull { it.createdAt }
 }
 
 @Composable
-private fun askedTask(parsed: MyceliumCall): Task? {
+private fun requestedSshAccess(parsed: MyceliumCall): SshAccessRequest? = requestedSshAccess(parsed, LocalSshAccessRequests.current?.requests.orEmpty())
+
+internal fun askedTask(parsed: MyceliumCall, tasks: Map<String, Task>): Task? {
     val taskId = (parsed as? MyceliumCall.AskQuestion)?.taskId ?: return null
 
-    return LocalQuestionAnswers.current?.tasks?.get(taskId)
+    return tasks[taskId]
 }
+
+@Composable
+private fun askedTask(parsed: MyceliumCall): Task? = askedTask(parsed, LocalQuestionAnswers.current?.tasks.orEmpty())
 
 @Composable
 internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {

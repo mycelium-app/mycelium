@@ -372,6 +372,7 @@ class AllScreensRenderTest {
     @Test
     fun shellScreens() {
         shell("shell-empty", Route.Empty, open = null)
+        shell("inbox", Route.Inbox, open = null)
         shell("conversation", Route.Chat(Main))
         shell("new-conversation", Route.New, open = null)
         shell("new-chat", Route.NewChat, open = null)
@@ -444,6 +445,7 @@ class AllScreensRenderTest {
     @Test
     fun phoneScreens() {
         shell("empty", Route.Empty, phone = true, open = null)
+        shell("inbox", Route.Inbox, phone = true, open = null)
         shell("conversation", Route.Chat(Main), phone = true)
         shell("new-conversation", Route.New, phone = true, open = null)
         shell("new-chat", Route.NewChat, phone = true, open = null)

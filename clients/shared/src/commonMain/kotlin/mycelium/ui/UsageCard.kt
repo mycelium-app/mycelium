@@ -40,7 +40,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
+import mycelium.api.UseResetRequest
 import mycelium.state.AgentAccount
+import mycelium.state.Store
+import mycelium.state.UnnamedAccount
 import mycelium.state.ago
 import mycelium.state.bankedResetsSummary
 import mycelium.state.compactWindowUsage
@@ -134,7 +137,7 @@ private fun UsageLine(name: String, note: String?, value: String) {
 }
 
 @Composable
-private fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (suspend (AgentAccount, String) -> String)?) {
+internal fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (suspend (AgentAccount, String) -> String)?) {
     val platform = LocalPlatform.current
     val localDateTime: (Long) -> String? = { millis -> platform?.localDateTime(millis) }
     var now by remember { mutableStateOf(Clock.System.now()) }
@@ -229,6 +232,9 @@ private fun BankedResets(account: AgentAccount, banked: ResetCredits, localDateT
         }
     }
 }
+
+internal suspend fun useBankedReset(store: Store, account: AgentAccount, key: String): String =
+    store.api.useReset(UseResetRequest(account.agent, account.label.takeUnless { it == UnnamedAccount }, key)).outcome
 
 private fun resetOutcomeMessage(outcome: String): String = when (outcome) {
     "reset", "alreadyRedeemed" -> "Reset used."

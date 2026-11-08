@@ -20,6 +20,7 @@ private fun elsewhereLabel(route: Route): String = when (route) {
     Route.Projects -> "Projects"
     Route.Issues -> "Issues"
     Route.Archive -> "History"
+    Route.Inbox -> "Inbox"
     Route.Artifacts, is Route.Artefact -> "Artefacts"
     Route.Activity -> "Activity"
     Route.UsageHistory -> "Usage"

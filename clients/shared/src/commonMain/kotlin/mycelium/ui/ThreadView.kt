@@ -641,7 +641,7 @@ internal fun highlighted(language: String, code: String): AnnotatedString {
 }
 
 @Composable
-private fun inlineText(text: String, color: Color): AnnotatedString {
+internal fun inlineText(text: String, color: Color): AnnotatedString {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
 
