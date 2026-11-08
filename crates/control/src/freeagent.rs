@@ -298,7 +298,7 @@ async fn api(http: &reqwest::Client, token: &str, credentials: &Credentials, arg
 
         Ok(Page { rows: body[field_name].as_array().cloned().unwrap_or_default(), next })
     };
-    let (rows, pages) = all_rows(first, fetch, |reason| (reason, false)).await?;
+    let (rows, pages) = all_rows(first, url.query().unwrap_or_default(), fetch, |reason| (reason, false)).await?;
 
     Ok(json!({"status": status.as_u16(), "pages": pages, "rows": rows.len(), "body": {field: rows}}))
 }

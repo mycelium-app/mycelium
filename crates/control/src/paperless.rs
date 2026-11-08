@@ -251,7 +251,7 @@ async fn api(http: &reqwest::Client, credentials: &Credentials, arguments: &Valu
 
         page_of(credentials, &body)
     };
-    let (rows, pages) = all_rows(first, fetch_next, |reason| reason).await?;
+    let (rows, pages) = all_rows(first, url.query().unwrap_or_default(), fetch_next, |reason| reason).await?;
 
     Ok(Answer::Json(json!({"status": status.as_u16(), "pages": pages, "rows": rows.len(), "body": {"count": body["count"], "results": rows}})))
 }

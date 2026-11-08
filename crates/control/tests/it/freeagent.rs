@@ -17,6 +17,7 @@ struct FakeFreeAgent {
     grants: Mutex<Vec<String>>,
     created: Mutex<Vec<(String, Value)>>,
     limited: Mutex<u32>,
+    transaction_queries: Mutex<Vec<std::collections::HashMap<String, String>>>,
 }
 
 fn bearer(headers: &HeaderMap) -> String {
@@ -95,6 +96,22 @@ async fn explanations(State(fake): State<Arc<FakeFreeAgent>>, headers: HeaderMap
     }
 }
 
+async fn transactions(State(fake): State<Arc<FakeFreeAgent>>, headers: HeaderMap, axum::extract::Query(query): axum::extract::Query<std::collections::HashMap<String, String>>) -> Response {
+    if !signed_request(&fake, &headers) {
+        return unauthorised();
+    }
+
+    fake.transaction_queries.lock().unwrap().push(query.clone());
+    let page: u32 = query.get("page").and_then(|page| page.parse().ok()).unwrap_or(1);
+    let host = headers.get("host").map(|host| format!("http://{}", host.to_str().unwrap())).unwrap_or_default();
+    let rows = Json(json!({"bank_transactions": [{"url": format!("t{page}")}]}));
+
+    match page {
+        3 => rows.into_response(),
+        _ => ([("link", format!("<{host}/v2/bank_transactions?page={}&per_page=100>; rel=\"next\"", page + 1))], rows).into_response(),
+    }
+}
+
 async fn update_explanation(State(fake): State<Arc<FakeFreeAgent>>, Path(id): Path<String>, Json(body): Json<Value>) -> Response {
     let mut limited = fake.limited.lock().unwrap();
 
@@ -120,7 +137,7 @@ async fn create_expense(State(fake): State<Arc<FakeFreeAgent>>, Json(body): Json
 }
 
 async fn fake_freeagent() -> (String, Arc<FakeFreeAgent>) {
-    let fake = Arc::new(FakeFreeAgent { valid_access: Mutex::new(String::new()), grants: Mutex::default(), created: Mutex::default(), limited: Mutex::new(1) });
+    let fake = Arc::new(FakeFreeAgent { valid_access: Mutex::new(String::new()), grants: Mutex::default(), created: Mutex::default(), limited: Mutex::new(1), transaction_queries: Mutex::default() });
     let router = Router::new()
         .route("/v2/token_endpoint", post(token_endpoint))
         .route("/v2/contacts", get(contacts))
@@ -129,6 +146,7 @@ async fn fake_freeagent() -> (String, Arc<FakeFreeAgent>) {
         .route("/v2/users/me", get(me))
         .route("/v2/company", get(company))
         .route("/v2/bank_transaction_explanations", get(explanations))
+        .route("/v2/bank_transactions", get(transactions))
         .route("/v2/bank_transaction_explanations/{id}", axum::routing::put(update_explanation))
         .route("/v2/expenses", post(create_expense))
         .with_state(fake.clone());
@@ -307,6 +325,26 @@ async fn the_api_tool_reads_every_page_without_asking() {
 
     assert_eq!((answer["pages"].clone(), answer["rows"].clone()), (json!(2), json!(3)), "{answer}");
     assert_eq!(answer["body"]["bank_transaction_explanations"][2]["url"], "e3");
+}
+
+#[tokio::test]
+async fn every_page_of_a_filtered_api_read_keeps_the_filter_when_the_next_link_drops_it() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, fake) = fake_freeagent().await;
+    let (_, added) = add_freeagent(&server, &base).await;
+    sign_in(&server, added["id"].as_str().unwrap(), "code-1").await;
+
+    let result = call(&server, &node.token, "api", json!({"method": "GET", "path": "bank_transactions", "query": {"bank_account": "7", "from_date": "2026-04-06", "to_date": "2026-10-05"}, "all_pages": true})).await;
+    let answer: Value = serde_json::from_str(&text(&result)).unwrap();
+
+    assert_eq!((answer["pages"].clone(), answer["rows"].clone()), (json!(3), json!(3)), "{answer}");
+    let queries = fake.transaction_queries.lock().unwrap().clone();
+    assert_eq!(queries.len(), 3);
+    for query in &queries {
+        assert_eq!((query.get("bank_account").map(String::as_str), query.get("from_date").map(String::as_str), query.get("to_date").map(String::as_str)), (Some("7"), Some("2026-04-06"), Some("2026-10-05")), "{queries:?}");
+    }
+    assert_eq!(queries.iter().map(|query| query.get("page").map_or("1", String::as_str)).collect::<Vec<_>>(), ["1", "2", "3"]);
 }
 
 #[tokio::test]
