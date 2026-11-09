@@ -818,8 +818,11 @@ async fn backup_commits_changed_files_skips_gitignored_ones_and_follows_deletion
 
     server.user.json(server.user.delete(&format!("/api/v1/assistants/{id}/files/notes/a.md"))).await;
     common::eventually("the deletion to reach the repository", || async { (remote_paths(&repository) == [".gitignore", "AGENTS.md"]).then_some(()) }).await;
-    let (_, assistant) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}"))).await;
-    assert!(assistant["backup"]["last_at"].is_string() && assistant["backup"].get("error").is_none(), "{assistant}");
+    common::eventually("the backup to be recorded as finished without an error", || async {
+        let (_, assistant) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}"))).await;
+        (assistant["backup"]["last_at"].is_string() && assistant["backup"].get("error").is_none()).then_some(())
+    })
+    .await;
 }
 
 #[tokio::test]

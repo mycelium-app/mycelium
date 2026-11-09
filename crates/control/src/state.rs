@@ -238,7 +238,7 @@ pub struct Hub {
     stop_requests: PendingRequests<ProcessAnswer>,
     folder_requests: PendingRequests<FolderAnswer>,
     workspace_asks: Mutex<std::collections::HashSet<Uuid>>,
-    backups: Mutex<std::collections::HashSet<Uuid>>,
+    backups: Mutex<std::collections::HashMap<Uuid, bool>>,
     oauth_sign_ins: Mutex<HashMap<String, PendingOAuth>>,
     lastfm_sign_ins: Mutex<HashMap<String, PendingLastFm>>,
     freeagent_sign_ins: Mutex<HashMap<String, PendingFreeAgent>>,
@@ -431,12 +431,36 @@ impl Hub {
     }
 
     pub fn begin_backup(&self, assistant_id: Uuid) -> bool {
-        self.backups.lock().is_ok_and(|mut running| running.insert(assistant_id))
+        let Ok(mut running) = self.backups.lock() else {
+            return false;
+        };
+
+        match running.get_mut(&assistant_id) {
+            Some(again) => {
+                *again = true;
+                false
+            }
+            None => {
+                running.insert(assistant_id, false);
+                true
+            }
+        }
     }
 
-    pub fn end_backup(&self, assistant_id: Uuid) {
-        if let Ok(mut running) = self.backups.lock() {
-            running.remove(&assistant_id);
+    pub fn end_backup(&self, assistant_id: Uuid) -> bool {
+        let Ok(mut running) = self.backups.lock() else {
+            return false;
+        };
+
+        match running.get_mut(&assistant_id) {
+            Some(again) if *again => {
+                *again = false;
+                true
+            }
+            _ => {
+                running.remove(&assistant_id);
+                false
+            }
         }
     }
 
@@ -832,6 +856,19 @@ mod tests {
 
         assert_eq!(hub.append_terminal_output(terminal_id, b"abc"), Some(300_000));
         assert_eq!(hub.append_terminal_output(terminal_id, b"de"), Some(300_003));
+    }
+
+    #[test]
+    fn a_backup_requested_while_one_runs_makes_it_run_again_once() {
+        let hub = Hub::default();
+        let assistant = Uuid::new_v4();
+
+        assert!(hub.begin_backup(assistant));
+        assert!(!hub.begin_backup(assistant));
+        assert!(!hub.begin_backup(assistant));
+        assert!(hub.end_backup(assistant));
+        assert!(!hub.end_backup(assistant));
+        assert!(hub.begin_backup(assistant));
     }
 
     #[test]

@@ -118,35 +118,53 @@ async fn back_up(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
         return Ok(());
     }
 
-    let mut pushed = None;
-    let mut failure = None;
-
     loop {
-        let Some(backup) = stored_backup(state, owner, id).await? else {
-            break;
-        };
+        let mut pushed = None;
+        let mut failure = None;
 
-        match push(state, owner, id, &backup).await {
-            Ok(Some(commit)) => pushed = Some(commit),
-            Ok(None) => break,
-            Err(message) => {
-                failure = Some(message);
+        loop {
+            let Some(backup) = stored_backup(state, owner, id).await? else {
                 break;
+            };
+
+            match push(state, owner, id, &backup).await {
+                Ok(Some(commit)) => pushed = Some(commit),
+                Ok(None) => break,
+                Err(message) => {
+                    failure = Some(message);
+                    break;
+                }
             }
         }
+
+        let mut patch = serde_json::json!({"error": failure});
+
+        if let Some(commit) = pushed {
+            patch["last_at"] = serde_json::json!(chrono::Utc::now());
+            patch["last_commit"] = serde_json::json!(commit);
+        }
+
+        let saved = sqlx::query("update assistants set backup = jsonb_strip_nulls(backup || $2), updated_at = now() where id = $1 and backup is not null").bind(id).bind(Jsonb(patch)).execute(&state.pool).await;
+        let published = match saved {
+            Ok(_) => assistants::publish(state, owner, id).await.map(|_| ()),
+            Err(error) => Err(error.into()),
+        };
+        let again = state.hub.end_backup(id);
+
+        published?;
+
+        if failure.is_some() {
+            if again {
+                state.hub.end_backup(id);
+            }
+
+            break;
+        }
+
+        if !again {
+            break;
+        }
     }
-
-    state.hub.end_backup(id);
-
-    let mut patch = serde_json::json!({"error": failure});
-
-    if let Some(commit) = pushed {
-        patch["last_at"] = serde_json::json!(chrono::Utc::now());
-        patch["last_commit"] = serde_json::json!(commit);
-    }
-
-    sqlx::query("update assistants set backup = jsonb_strip_nulls(backup || $2), updated_at = now() where id = $1 and backup is not null").bind(id).bind(Jsonb(patch)).execute(&state.pool).await?;
-    assistants::publish(state, owner, id).await?;
 
     Ok(())
 }
