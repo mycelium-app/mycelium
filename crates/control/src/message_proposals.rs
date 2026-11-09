@@ -13,7 +13,7 @@ const LISTED: i64 = 100;
 
 fn proposal_columns() -> String {
     format!("p.id, p.conversation_id, p.target_id, t.title as target_title, coalesce(n.name, '') as target_node, pr.name as target_project, p.message, p.reason, p.state, p.created_at, p.decided_at,
-    s.title as source_title, t.archived_at is not null as target_archived,
+    s.title as source_title, t.archived_at is not null as target_archived, coalesce(t.managed_by = p.conversation_id, false) as source_manages_target,
     (select g.name from groups g where g.id = (select {CONVERSATION_GROUP_SQL} from conversations where id = p.conversation_id)) as source_group,
     (select g.name from groups g where g.id = (select {CONVERSATION_GROUP_SQL} from conversations where id = p.target_id)) as target_group")
 }
@@ -35,6 +35,7 @@ struct ProposalRow {
     decided_at: Option<chrono::DateTime<chrono::Utc>>,
     source_title: Option<String>,
     target_archived: bool,
+    source_manages_target: bool,
     source_group: Option<String>,
     target_group: Option<String>,
 }
@@ -83,10 +84,19 @@ fn publish(state: &AppState, owner: Uuid, row: ProposalRow) -> MessageProposal {
 }
 
 pub async fn resolve(state: &AppState, owner: Uuid, target: &str) -> ApiResult<Result<Uuid, String>> {
-    let candidates = sqlx::query_as::<_, (Uuid, bool)>("select id, archived_at is not null from conversations where owner = $1 and (id::text = lower($2) or title = $2) order by updated_at desc").bind(owner).bind(target).fetch_all(&state.pool).await?;
-    let live: Vec<Uuid> = candidates.iter().filter(|(_, archived)| !archived).map(|(id, _)| *id).collect();
+    resolve_for_sender(state, owner, target, None).await
+}
 
-    Ok(match (candidates.is_empty(), live.as_slice()) {
+async fn resolve_for_sender(state: &AppState, owner: Uuid, target: &str, sender: Option<Uuid>) -> ApiResult<Result<Uuid, String>> {
+    let candidates = sqlx::query_as::<_, (Uuid, bool, bool)>("select id, archived_at is not null, coalesce(managed_by = $3, false) from conversations where owner = $1 and (id::text = lower($2) or title = $2) order by updated_at desc").bind(owner).bind(target).bind(sender).fetch_all(&state.pool).await?;
+    let live: Vec<Uuid> = candidates.iter().filter(|(_, archived, _)| !archived).map(|(id, ..)| *id).collect();
+    let usable = if live.is_empty() {
+        candidates.iter().filter(|(_, archived, managed)| *archived && *managed).map(|(id, ..)| *id).collect()
+    } else {
+        live
+    };
+
+    Ok(match (candidates.is_empty(), usable.as_slice()) {
         (true, _) => Err(format!("None of the person's conversations is {target}. Look one up with find_conversations.")),
         (false, []) => Err(format!("The conversation {target} is archived.")),
         (false, [only]) => Ok(*only),
@@ -96,7 +106,7 @@ pub async fn resolve(state: &AppState, owner: Uuid, target: &str) -> ApiResult<R
 
 pub async fn propose(state: &AppState, conversation_id: Uuid, target: &str, message: &str, reason: &str) -> ApiResult<Result<(MessageProposal, Option<prompts::Sent>), String>> {
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
-    let target_id = match resolve(state, owner, target).await? {
+    let target_id = match resolve_for_sender(state, owner, target, Some(conversation_id)).await? {
         Ok(target_id) => target_id,
         Err(reason) => return Ok(Err(format!("Nothing was proposed. {reason}"))),
     };
@@ -151,7 +161,7 @@ async fn approve_and_send(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<
         return Err(ApiError::conflict("proposal_not_proposed", "This proposal has already been decided."));
     }
 
-    if found.target_archived {
+    if found.target_archived && !found.source_manages_target {
         return Err(ApiError::conflict("target_archived", "The conversation this was for has been archived. Decline it, or ask the agent to propose it again."));
     }
 
@@ -169,6 +179,10 @@ async fn approve_and_send(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<
         && let Some(source_id) = found.conversation_id
     {
         crate::conversation_connections::renew(state, owner, source_id, found.target_id).await?;
+
+        if found.target_archived {
+            crate::watches::watch_conversation(state, owner, source_id, found.target_id, false).await?;
+        }
     }
 
     let sent = match queued {

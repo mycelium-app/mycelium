@@ -62,7 +62,7 @@ pub fn definitions() -> Value {
         },
         {
             "name": "archive_conversation",
-            "description": "Archive a conversation this one manages once its work is done, to close up after yourself. It stays readable and searchable, and comes back when the person writes in it. A managed conversation is also archived on its own after three days with nothing going on. It needs the same access as read_conversation and refuses a conversation this one does not manage.",
+            "description": "Archive a conversation this one manages once its work is done, to close up after yourself. It stays readable and searchable, and comes back when the person writes in it or this conversation sends it a message. A managed conversation is also archived on its own after three days with nothing going on. It needs the same access as read_conversation and refuses a conversation this one does not manage.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -98,7 +98,7 @@ pub fn definitions() -> Value {
         },
         {
             "name": "send_to_conversation",
-            "description": "Propose a message to send to another of the person's conversations. A conversation in the same group, an approved connection, or a connection between the two conversations' groups allows immediate delivery; otherwise the message waits for the person to approve it in a card in this conversation. Messages are prefixed with the source conversation title. Find the target with find_conversations.",
+            "description": "Propose a message to send to another of the person's conversations. A conversation in the same group, an approved connection, or a connection between the two conversations' groups allows immediate delivery; otherwise the message waits for the person to approve it in a card in this conversation. Messages are prefixed with the source conversation title. A conversation this one manages comes back if it was archived, and this one watches it again. Find the target with find_conversations.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -441,7 +441,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
 
             crate::conversations::archive_for(state, owner, target_id).await?;
 
-            ToolReply::text(&format!("Archived {label} ({target_id}). It stays readable and comes back when the person writes in it."), false)
+            ToolReply::text(&format!("Archived {label} ({target_id}). It stays readable and comes back when the person writes in it or this conversation sends it a message."), false)
         }
         "read_conversation" => {
             let target = match readable_target(&caller, &arguments, "read_conversation", "read").await? {
