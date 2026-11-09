@@ -73,7 +73,7 @@ class SpeechSettingsTest {
             when {
                 request.method == HttpMethod.Put && path.contains("/speech/choices/") -> {
                     chosen += path.substringAfterLast('/') to String(request.body.toByteArray())
-                    privacy = privacyJson("house-dictation", "voice-natural")
+                    privacy = if (path.endsWith("/text_to_speech")) privacyJson("transcribe-large", "voice-natural") else privacyJson("house-dictation", "voice-natural")
                     respond(privacy, HttpStatusCode.OK, json)
                 }
 
@@ -127,8 +127,27 @@ class SpeechSettingsTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithText(NoSpeechToTextStatement).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Add a provider with a text-to-speech model to hear replies.").assertExists()
         rule.onNode(button("Choose a speech-to-text model from your providers")).assertDoesNotExist()
+        rule.onNode(button("Choose a text-to-speech model from your providers")).assertDoesNotExist()
         rule.onNode(button("Add a provider for speech to text")).performClick()
         rule.onNodeWithText("Needs an address that offers a speech-to-text model, such as whisper-1.").assertExists()
+    }
+
+    @Test
+    fun aProviderWithNoRecognisedTextToSpeechModelCanStillHaveAModelChosenForReadingAloud() {
+        privacy = privacyJson("transcribe-large", null)
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ModelProvidersSettings(store) } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Add a provider with a text-to-speech model to hear replies.").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(button("Choose a text-to-speech model from your providers")).performClick()
+        rule.onNodeWithContentDescription("Model: Model").performClick()
+        rule.onNodeWithText("Other models").assertExists()
+        rule.onNode(hasText("voice-natural")).performClick()
+        rule.onNodeWithText("Save").performClick()
+
+        rule.waitUntil(5_000) { chosen.isNotEmpty() }
+        assertEquals("text_to_speech" to """{"provider_id":"p1","model":"voice-natural"}""", chosen.single())
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("voice-natural").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test

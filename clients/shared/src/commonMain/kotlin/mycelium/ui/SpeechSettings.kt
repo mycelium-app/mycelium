@@ -120,7 +120,13 @@ fun SpeechSettings(store: Store, providers: List<ModelProvider>, onAddProvider: 
                                         }
                                     }
                                 } else {
-                                    Label(NoTextToSpeechStatement, style = Tokens.Type.Meta, color = colors.textMuted)
+                                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                                        Label(NoTextToSpeechStatement, style = Tokens.Type.Meta, color = colors.textMuted)
+
+                                        if (openAiCompatible.isNotEmpty()) {
+                                            MyButton({ changing = use.id }, text = "Choose a model", description = "Choose a text-to-speech model from your providers", size = ButtonSize.Sm, muted = true)
+                                        }
+                                    }
                                 }
                             }
 
