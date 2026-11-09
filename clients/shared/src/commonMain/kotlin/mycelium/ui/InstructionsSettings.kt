@@ -240,7 +240,7 @@ fun InstructionsSettings(store: Store, onOpenGroup: ((String) -> Unit)? = null) 
                 ExtensionSwitch("Rich Markdown", "Tells agents which Markdown Mycelium renders: task lists, callouts, footnotes, highlighted code. Added to Claude Code and Codex sessions and to chats.", held.richMarkdown) {
                     runner { extensions = store.api.saveExtensions(held.copy(richMarkdown = !held.richMarkdown)) }
                 }
-                ExtensionSwitch("Mycelium tools", "Tells agents they run inside Mycelium and when to use its recall, remember, walkthrough, propose_task and ask_question tools. Added to Claude Code and Codex sessions.", held.myceliumTools) {
+                ExtensionSwitch("Mycelium tools", "Tells agents they run inside Mycelium and when to use its recall, remember and walkthrough tools. Added to Claude Code and Codex sessions.", held.myceliumTools) {
                     runner { extensions = store.api.saveExtensions(held.copy(myceliumTools = !held.myceliumTools)) }
                 }
             }

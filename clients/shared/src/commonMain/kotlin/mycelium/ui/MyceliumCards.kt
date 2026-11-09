@@ -25,8 +25,6 @@ import mycelium.api.ArtifactKinds
 import mycelium.api.MessageProposal
 import mycelium.api.StartProposal
 import mycelium.api.StartProposalChoice
-import mycelium.api.Task
-import mycelium.api.TaskStatuses
 import mycelium.state.AppState
 import mycelium.state.MyceliumCall
 import mycelium.state.MyceliumTool
@@ -42,12 +40,6 @@ private const val CollapsedLimit = 3
 private const val ExcerptLines = 3
 private const val DefaultSshMinutes = 30
 private val SshMinuteChoices = listOf(15, 30, 60, 120, 240)
-
-class QuestionAnswers(val tasks: Map<String, Task>, val refresh: suspend () -> Unit, val answer: suspend (Task, String) -> Unit)
-
-val LocalQuestionAnswers = compositionLocalOf<QuestionAnswers?> { null }
-
-fun questionAnswers(store: Store, state: AppState) = QuestionAnswers(state.tasks, { store.refreshBoard() }, { task, text -> store.answerTask(task, text) })
 
 class MessageProposals(val proposals: Map<String, MessageProposal>, val refresh: suspend () -> Unit, val approve: suspend (MessageProposal) -> Unit, val decline: suspend (MessageProposal) -> Unit, val connect: suspend (MessageProposal) -> Unit, val connectGroups: suspend (MessageProposal) -> Unit)
 
@@ -130,15 +122,6 @@ internal fun requestedSshAccess(parsed: MyceliumCall, requests: Map<String, SshA
 @Composable
 private fun requestedSshAccess(parsed: MyceliumCall): SshAccessRequest? = requestedSshAccess(parsed, LocalSshAccessRequests.current?.requests.orEmpty())
 
-internal fun askedTask(parsed: MyceliumCall, tasks: Map<String, Task>): Task? {
-    val taskId = (parsed as? MyceliumCall.AskQuestion)?.taskId ?: return null
-
-    return tasks[taskId]
-}
-
-@Composable
-private fun askedTask(parsed: MyceliumCall): Task? = askedTask(parsed, LocalQuestionAnswers.current?.tasks.orEmpty())
-
 @Composable
 internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
     val colors = MyTheme.colors
@@ -152,8 +135,6 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
     }
     val icon = when (parsed) {
         is MyceliumCall.Recall, is MyceliumCall.Remember -> MyIcon.Memory
-        is MyceliumCall.ProposeTask -> MyIcon.Task
-        is MyceliumCall.AskQuestion -> MyIcon.Question
         is MyceliumCall.ProposeSchedule -> MyIcon.Calendar
         is MyceliumCall.Walkthrough -> MyIcon.List
         is MyceliumCall.ProposeInstructionsEdit -> MyIcon.File
@@ -172,10 +153,7 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
     val artifactAccess = LocalArtifactAccessControls.current?.state?.artifactAccessRequests?.values?.firstOrNull { it.id == (parsed as? MyceliumCall.RequestArtifactAccess)?.requestId }
     val access = requestedAccess(parsed)
     val sshAccess = requestedSshAccess(parsed)
-    val answered = askedTask(parsed)?.status == TaskStatuses.Done
     val waiting = when (parsed) {
-        is MyceliumCall.ProposeTask -> "Waiting for approval"
-        is MyceliumCall.AskQuestion -> "Waiting for your answer"
         is MyceliumCall.ProposeSchedule -> "Waiting for confirmation"
         is MyceliumCall.ProposeInstructionsEdit -> "Waiting for approval"
         is MyceliumCall.SendToConversation -> "Waiting for approval"
@@ -195,7 +173,6 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
                 failed -> StatusMark("Failed", Tone.Failed, MyIcon.Failed)
                 verb != null && call.awaitingApproval -> StatusMark("Waiting", Tone.Muted, MyIcon.Clock)
                 verb != null -> StatusMark("Running", Tone.Working, MyIcon.Working)
-                finished && answered -> StatusMark("Answered", Tone.Muted, MyIcon.Check)
                 finished && proposal?.state == "sent" -> StatusMark("Sent", Tone.Muted, MyIcon.Check)
                 finished && proposal?.state == "declined" -> StatusMark("Declined", Tone.Muted, MyIcon.Close)
                 finished && start?.state == "started" -> StatusMark("Started", Tone.Muted, MyIcon.Check)
@@ -233,8 +210,6 @@ private fun doneHeading(parsed: MyceliumCall, artifacts: Map<String, Artifact>):
     is MyceliumCall.OpenOutline -> "Opened an Outline document"
     is MyceliumCall.Recall -> "Searched memory for “${parsed.query}”"
     is MyceliumCall.Remember -> "Remembered"
-    is MyceliumCall.ProposeTask -> "Proposed a task"
-    is MyceliumCall.AskQuestion -> "Asked a question"
     is MyceliumCall.ProposeSchedule -> "Proposed a schedule"
     is MyceliumCall.ProposeInstructionsEdit -> "Proposed an edit to the ${parsed.layer ?: "agent"} instructions"
     is MyceliumCall.FindConversations -> if (parsed.query != null) "Searched conversations for “${parsed.query}”" else "Listed recent conversations"
@@ -269,37 +244,6 @@ private fun MyceliumBody(parsed: MyceliumCall) {
         is MyceliumCall.Remember -> {
             Label(parsed.text, style = Tokens.Type.Ui, maxLines = ExcerptLines)
             parsed.sharedWith?.let { Label("Shared with $it", style = Tokens.Type.Meta, color = colors.textMuted) }
-        }
-
-        is MyceliumCall.ProposeTask -> {
-            Label(parsed.title, style = Tokens.Type.UiStrong, maxLines = 2)
-            parsed.body?.let { Label(it, style = Tokens.Type.Ui, color = colors.textMuted, maxLines = ExcerptLines) }
-            parsed.project?.let { Tag(it) }
-        }
-
-        is MyceliumCall.AskQuestion -> {
-            val answers = LocalQuestionAnswers.current
-            val task = askedTask(parsed)
-
-            LaunchedEffect(parsed.taskId, task == null) {
-                if (answers != null && parsed.taskId != null && task == null) {
-                    answers.refresh()
-                }
-            }
-
-            Label(parsed.question, style = Tokens.Type.Ui, maxLines = ExcerptLines)
-
-            if (answers != null && task != null && task.status == TaskStatuses.Question) {
-                AnswerForm(task, send = { text -> answers.answer(task, text) }, spacing = Tokens.Space.S2)
-            } else if (task?.answer != null) {
-                Label("Answered: ${task.answer}", style = Tokens.Type.Ui, color = colors.textMuted)
-            } else if (parsed.options.isNotEmpty()) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
-                    for (option in parsed.options) {
-                        Tag(option)
-                    }
-                }
-            }
         }
 
         is MyceliumCall.ProposeSchedule -> {

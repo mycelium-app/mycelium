@@ -1016,6 +1016,20 @@ async fn after_update(state: &AppState, node_id: Uuid, conversation_id: Uuid, up
     Ok(())
 }
 
+pub(crate) async fn waiting_on_person(state: &AppState, conversation_id: Uuid) -> ApiResult<bool> {
+    let text = sqlx::query_scalar::<_, String>(
+        "select coalesce(string_agg(payload->'update'->'content'->>'text', '' order by seq), '') from events
+         where conversation_id = $1 and kind = 'acp_update' and payload->'update'->>'sessionUpdate' = 'agent_message_chunk'
+           and seq > coalesce((select max(seq) from events where conversation_id = $1 and (kind = 'user_message' or (kind = 'acp_update' and payload->'update'->>'sessionUpdate' in ('tool_call', 'tool_call_update')))), 0)",
+    )
+    .bind(conversation_id)
+    .fetch_one(&state.pool)
+    .await?;
+    let ending = text.trim_end_matches(|character: char| character.is_whitespace() || matches!(character, '*' | '_' | '`' | '"' | '\'' | ')' | '\u{201d}' | '\u{2019}'));
+
+    Ok(ending.ends_with('?'))
+}
+
 pub(crate) async fn has_agents_out(state: &AppState, conversation_id: Uuid) -> ApiResult<bool> {
     let out = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!("select {}", has_live_workflow_agent("$1")))).bind(conversation_id).fetch_one(&state.pool).await?;
 
@@ -1039,7 +1053,7 @@ async fn settle_background_work(state: &AppState, conversation_id: Uuid, from: C
 
 async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i64, stop_reason: String, usage: Option<Value>) -> ApiResult<()> {
     let keeps_working = stop_reason != "cancelled" && has_agents_out(state, conversation_id).await?;
-    let asked = !keeps_working && sqlx::query_scalar::<_, bool>("select exists (select 1 from tasks where source_id = $1 and status = 'question')").bind(conversation_id).fetch_one(&state.pool).await?;
+    let asked = !keeps_working && waiting_on_person(state, conversation_id).await?;
     let status = match (keeps_working, asked) {
         (true, _) => ConversationStatus::Working,
         (false, true) => ConversationStatus::Input,

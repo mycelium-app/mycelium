@@ -128,6 +128,7 @@ fun ThreadView(
     hasOlder: Boolean = false,
     loadingOlder: Boolean = false,
     onLoadOlder: () -> Unit = {},
+    waitingForAnswer: Boolean = false,
 ) {
     val state = rememberLazyListState()
     val loadOlder by rememberUpdatedState(onLoadOlder)
@@ -209,6 +210,12 @@ fun ThreadView(
                     ),
                     verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4),
                 ) {
+                    if (waitingForAnswer) {
+                        item(key = "waiting-for-answer") {
+                            WaitingForAnswerLine()
+                        }
+                    }
+
                     if (workflowCards.isNotEmpty()) {
                         item(key = "mycelium-workflows") {
                             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {

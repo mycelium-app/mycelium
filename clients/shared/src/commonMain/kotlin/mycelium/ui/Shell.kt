@@ -166,7 +166,6 @@ sealed interface Route {
 
     data class Node(val id: String) : Route
 
-    data object Tasks : Route
 
     data object Workflows : Route
 
@@ -584,7 +583,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
         attempt { store.refreshChatToolServers() }
     }
 
-    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalBrowserTasks provides browserTasks(store, state), LocalMessageProposals provides messageProposals(store, state), LocalStartProposals provides startProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactAccessControls provides ArtifactAccessControls(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides reviewInstructions, LocalGroupFilter provides groupFilter, LocalHoursView provides hours, LocalIdes provides ides, LocalAppsOpener provides { onRoute(Route.Apps) }, LocalAppOpener provides { uuid, deployment -> onRoute(Route.App(uuid, if (deployment != null) AppLogsTab else AppOverviewTab, deployment)) }, LocalAppViewer provides { uuid -> onRoute(Route.App(uuid, viewing = true)) }, LocalAppDeployments provides appDeployments) {
+    CompositionLocalProvider(LocalPlatform provides platform, LocalBrowserTasks provides browserTasks(store, state), LocalMessageProposals provides messageProposals(store, state), LocalStartProposals provides startProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactAccessControls provides ArtifactAccessControls(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides reviewInstructions, LocalGroupFilter provides groupFilter, LocalHoursView provides hours, LocalIdes provides ides, LocalAppsOpener provides { onRoute(Route.Apps) }, LocalAppOpener provides { uuid, deployment -> onRoute(Route.App(uuid, if (deployment != null) AppLogsTab else AppOverviewTab, deployment)) }, LocalAppViewer provides { uuid -> onRoute(Route.App(uuid, viewing = true)) }, LocalAppDeployments provides appDeployments) {
         val selected = routeGroup(route, state, groupFilter)
         val closed = closedNotice(hours, selected, workingBehindClosedDoors(state.conversations.values, hours, selected), platform).takeIf { route.opensBehindHours() }
         val notice = hoursNotice(hours, groupChoiceOf(groupFilter), platform)
@@ -614,7 +613,6 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
                     is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId, onOpenNodes = { onRoute(Route.Nodes) })
                     Route.Nodes -> NodesScreen(store, state, platform, onOpenNode = { onRoute(Route.Node(it)) })
                     is Route.Node -> NodePage(store, state, route.id, platform, onBack = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
-                    Route.Tasks -> TasksScreen(store, state, platform, onOpen = { onRoute(Route.Chat(it)) })
                     Route.Workflows -> WorkflowsScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenWorkflow = { onRoute(Route.Workflow(it)) })
                     is Route.Workflow -> WorkflowScreen(store, state, route.id, onBack = { onRoute(Route.Workflows) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenWorkflow = { onRoute(Route.Workflow(it)) }, onOpenProjects = { onRoute(Route.Projects) })
                     Route.Wellness -> WellnessScreen(store, platform, onOpenAssistant = { onRoute(Route.Assistant(it)) }, onOpenConversation = { onRoute(Route.Chat(it)) })
@@ -651,7 +649,6 @@ internal fun screenTarget(path: String): Pair<Route, SettingsSection?>? {
         "inbox" -> Route.Inbox to null
         "new" -> Route.New to null
         "nodes" -> Route.Nodes to null
-        "tasks" -> Route.Tasks to null
         "workflows" -> Route.Workflows to null
         "schedules" -> Route.Settings to SettingsSection.Schedules
         "wellness" -> Route.Wellness to null
@@ -806,7 +803,6 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 SidebarLink("Artefacts", MyIcon.Layers, selected = route == Route.Artifacts || route is Route.Artefact) { onRoute(Route.Artifacts) }
 
                 if (state.experiments.tasksAndWorkflows) {
-                    SidebarLink("Tasks", MyIcon.List, selected = route == Route.Tasks) { onRoute(Route.Tasks) }
                     SidebarLink("Workflows", MyIcon.Workflow, selected = route == Route.Workflows || route is Route.Workflow) { onRoute(Route.Workflows) }
                 }
 

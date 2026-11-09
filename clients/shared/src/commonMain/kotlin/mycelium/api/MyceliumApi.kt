@@ -475,7 +475,7 @@ class MyceliumApi(
         call("/repositories") {
             client.get(it) {
                 authorise()
-                if (refresh) parameter("refresh", true)
+                if (refresh) parameter("refresh", "true")
                 if (forge != null) parameter("forge", forge)
                 if (organisation != null) parameter("organisation", organisation)
                 if (query.isNotBlank()) parameter("q", query.trim())
@@ -827,30 +827,6 @@ class MyceliumApi(
         call("/projects/$id/checkout") { client.post(it) { authorise(); json(CheckoutProjectRequest(nodeId)) } }.body()
 
     suspend fun worktrees(): List<Worktree> = call("/worktrees") { client.get(it) { authorise() } }.body()
-
-    suspend fun tasks(): List<Task> = call("/tasks") { client.get(it) { authorise() } }.body()
-
-    suspend fun createTask(request: CreateTaskRequest): Task =
-        call("/tasks") { client.post(it) { authorise(); json(request) } }.body()
-
-    suspend fun startTask(id: String, conversationId: String? = null): Conversation =
-        call("/tasks/$id/start") { client.post(it) { authorise(); conversationId?.let { target -> json(StartTaskRequest(target)) } } }.body()
-
-    suspend fun approveTask(id: String): Task =
-        call("/tasks/$id/approve") { client.post(it) { authorise() } }.body()
-
-    suspend fun declineTask(id: String): Task =
-        call("/tasks/$id/decline") { client.post(it) { authorise() } }.body()
-
-    suspend fun answerTask(id: String, answer: String): Task =
-        call("/tasks/$id/answer") { client.post(it) { authorise(); json(AnswerTaskRequest(answer)) } }.body()
-
-    suspend fun finishTask(id: String): Task =
-        call("/tasks/$id/done") { client.post(it) { authorise() } }.body()
-
-    suspend fun deleteTask(id: String) {
-        call("/tasks/$id") { client.delete(it) { authorise() } }
-    }
 
     suspend fun artifacts(): List<Artifact> = call("/artifacts") { client.get(it) { authorise() } }.body()
 

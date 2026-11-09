@@ -419,9 +419,7 @@ pub async fn turn_ended(state: &AppState, conversation_id: Uuid, stop_reason: &s
         return end(state, owner, conversation_id, limit_state, &limit_reason).await;
     }
 
-    let question_open = sqlx::query_scalar::<_, bool>("select exists (select 1 from tasks where source_id = $1 and status = 'question')").bind(conversation_id).fetch_one(&state.pool).await?;
-
-    if question_open {
+    if crate::link::waiting_on_person(state, conversation_id).await? {
         return wait_for(state, owner, conversation_id, "question_waiting", None).await;
     }
 

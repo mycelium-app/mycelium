@@ -750,16 +750,12 @@ async fn nudge_now_is_refused_when_mycelium_is_not_waiting() {
 }
 
 #[tokio::test]
-async fn an_open_question_holds_the_goal_until_it_is_answered_and_then_the_loop_carries_on() {
+async fn a_turn_ending_in_a_question_holds_the_goal_until_it_is_answered_and_then_the_loop_carries_on() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let id = working_conversation(&server, &mut link).await;
     set_goal(&server, id, "Every test passes", 100_000).await;
-    let anonymous = server.anonymous();
-    let ask = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "ask_question", "arguments": {"question": "Which database?"}}});
-    anonymous.json(anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {}", link.token)).header("x-mycelium-conversation", id.to_string()).json(&ask)).await;
-
-    say(&mut link, id, 2, "Waiting for your answer.").await;
+    say(&mut link, id, 2, "Which database?").await;
     end_turn(&mut link, id, 3, 0).await;
     link.barrier(id, 4).await;
 
@@ -770,10 +766,9 @@ async fn an_open_question_holds_the_goal_until_it_is_answered_and_then_the_loop_
     let (status, body) = nudge_now(&server, id).await;
     assert_eq!((status, body["error"].as_str()), (409, Some("goal_not_waiting")));
 
-    let task: Uuid = sqlx::query_scalar("select id from tasks where source_id = $1 and status = 'question'").bind(id).fetch_one(&server.pool).await.unwrap();
-    let (status, answered) = server.user.json(server.user.post(&format!("/api/v1/tasks/{task}/answer")).json(&json!({"answer": "Postgres"}))).await;
-    assert_eq!(status, 200, "{answered}");
-    assert_eq!(link.expect_prompt().await.1, "Answer to your question \"Which database?\": Postgres");
+    let (status, answered) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "Postgres"}))).await;
+    assert_eq!(status, 204, "{answered}");
+    assert_eq!(link.expect_prompt().await.1, "Postgres");
 
     say(&mut link, id, 5, "Switched to Postgres.").await;
     end_turn(&mut link, id, 6, 0).await;

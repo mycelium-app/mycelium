@@ -97,7 +97,6 @@ mod start_proposals;
 mod state;
 mod store;
 mod stream;
-mod tasks;
 mod terminals;
 mod token_delivery;
 mod transcripts;
@@ -442,8 +441,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/start-proposals", get(start_proposals::list))
         .route("/api/v1/start-proposals/{id}/approve", post(start_proposals::approve))
         .route("/api/v1/start-proposals/{id}/connect", post(start_proposals::approve_and_connect))
-        .route("/api/v1/inbox/feed", get(inbox_feed::feed))
         .route("/api/v1/start-proposals/{id}/decline", post(start_proposals::decline))
+        .route("/api/v1/inbox/feed", get(inbox_feed::feed))
         .route("/api/v1/api-access-requests", get(api_access::list))
         .route("/api/v1/api-access-requests/{id}/approve", post(api_access::approve))
         .route("/api/v1/api-access-requests/{id}/decline", post(api_access::decline))
@@ -490,14 +489,6 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/agent-settings/account-mode", put(agent_settings::set_account_mode))
         .route("/api/v1/account-prices", get(subscription_prices::list).put(subscription_prices::set))
         .route("/api/v1/worktrees", get(worktrees::list))
-        .route("/api/v1/tasks", get(tasks::list).post(tasks::create))
-        .route("/api/v1/tasks/{id}", delete(tasks::delete))
-        .route("/api/v1/tasks/{id}/start", post(tasks::start))
-        .route("/api/v1/tasks/{id}/approve", post(tasks::approve))
-        .route("/api/v1/tasks/{id}/decline", post(tasks::decline))
-        .route("/api/v1/tasks/{id}/answer", post(tasks::answer))
-        .route("/api/v1/tasks/{id}/done", post(tasks::done))
-        .route("/api/v1/tasks/{id}/close", post(tasks::close))
         .route("/api/v1/schedules", get(schedules::list).post(schedules::create))
         .route("/api/v1/schedules/{id}", patch(schedules::patch).delete(schedules::delete))
         .route("/api/v1/schedules/{id}/run", post(schedules::run_now))

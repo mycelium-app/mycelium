@@ -47,6 +47,7 @@ private const val ActualType = "Actual Budget"
 private const val PaperlessType = "Paperless-ngx"
 private const val CoolifyType = "Coolify"
 private const val TandoorType = "Tandoor"
+private const val MurmurType = "Murmur"
 
 private sealed interface IntegrationsView {
     data object Home : IntegrationsView
@@ -76,6 +77,7 @@ private fun flowId(kind: String): String = when (kind) {
     PaperlessType -> "paperless"
     CoolifyType -> "coolify"
     TandoorType -> "tandoor"
+    MurmurType -> "murmur"
     else -> "mcp"
 }
 
@@ -93,6 +95,7 @@ private fun formKind(entry: CatalogueEntry): String = when (entry.kind) {
     "paperless" -> PaperlessType
     "coolify" -> CoolifyType
     "tandoor" -> TandoorType
+    "murmur" -> MurmurType
     else -> McpType
 }
 

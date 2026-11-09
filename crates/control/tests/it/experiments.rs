@@ -7,7 +7,7 @@ fn flags(voice: bool, kubernetes_nodes: bool) -> Value {
 }
 
 fn flags_with(voice: bool, kubernetes_nodes: bool, tasks_and_workflows: bool, history: bool) -> Value {
-    json!({"tasks": true, "workflows": true, "instructions": true, "details": true, "subagents": true, "walkthrough": true, "move_chats": true, "groups": true, "continue_elsewhere": true, "assistants": true, "memory_banks": true, "chat_across_groups": true, "voice": voice, "kubernetes_nodes": kubernetes_nodes, "tasks_and_workflows": tasks_and_workflows, "history": history})
+    json!({"workflows": true, "instructions": true, "details": true, "subagents": true, "walkthrough": true, "move_chats": true, "groups": true, "continue_elsewhere": true, "assistants": true, "memory_banks": true, "chat_across_groups": true, "voice": voice, "kubernetes_nodes": kubernetes_nodes, "tasks_and_workflows": tasks_and_workflows, "history": history})
 }
 
 async fn mcp(server: &Server, token: &str, method: &str, params: Value) -> (u16, Value) {
@@ -44,9 +44,9 @@ async fn tasks_workflows_and_history_are_off_until_switched_on() {
 async fn graduated_features_work_for_everyone_whatever_an_older_client_saves() {
     let server = Server::start().await;
     let id = Uuid::new_v4();
-    server.user.json(server.user.put("/api/v1/experiments").json(&json!({"tasks": false, "workflows": false, "instructions": false, "groups": false}))).await;
+    server.user.json(server.user.put("/api/v1/experiments").json(&json!({"workflows": false, "instructions": false, "groups": false}))).await;
 
-    for path in ["/api/v1/tasks".to_string(), "/api/v1/workflows".into(), "/api/v1/instructions".into(), "/api/v1/instruction-proposals".into(), "/api/v1/assistants".into(), "/api/v1/memory-banks".into(), "/api/v1/group-connections".into(), format!("/api/v1/groups/{id}/instructions")] {
+    for path in ["/api/v1/workflows".to_string(), "/api/v1/instructions".into(), "/api/v1/instruction-proposals".into(), "/api/v1/assistants".into(), "/api/v1/memory-banks".into(), "/api/v1/group-connections".into(), format!("/api/v1/groups/{id}/instructions")] {
         let (status, body) = server.user.json(server.user.get(&path)).await;
         assert_ne!(body["error"], "experiment_disabled", "{path}: {body}");
         assert_ne!(status, 403, "{path}: {body}");
@@ -60,7 +60,7 @@ async fn graduated_tools_are_listed_and_callable_for_everyone() {
     let (_, listed) = mcp(&server, &token, "tools/list", json!({})).await;
     let names: Vec<&str> = listed["result"]["tools"].as_array().unwrap().iter().filter_map(|tool| tool["name"].as_str()).collect();
 
-    for tool in ["propose_task", "ask_question", "start_workflow", "get_instructions", "propose_instructions_edit", "walkthrough", "start_conversation", "read_earlier_turns", "start_subagent", "get_workflow"] {
+    for tool in ["start_workflow", "get_instructions", "propose_instructions_edit", "walkthrough", "start_conversation", "read_earlier_turns", "start_subagent", "get_workflow"] {
         assert!(names.contains(&tool), "{tool}");
     }
 

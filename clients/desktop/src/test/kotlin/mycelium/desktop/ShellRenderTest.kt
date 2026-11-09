@@ -62,6 +62,6 @@ class ShellRenderTest {
         runBlocking { store.refreshArtifacts() }
 
         assertTrue(renderAt("artefacts", true, false) { ArtifactsScreen(store, store.state.value, Me("u1", "sam@example.com", "Sam"), OpeningPlatform()) }.length() > 3_000)
-        assertTrue(renderAt("load-failed", true, false) { Box(Modifier.fillMaxSize()) { LoadFailedState("tasks", {}, Modifier.fillMaxSize()) } }.length() > 1_000)
+        assertTrue(renderAt("load-failed", true, false) { Box(Modifier.fillMaxSize()) { LoadFailedState("artefacts", {}, Modifier.fillMaxSize()) } }.length() > 1_000)
     }
 }

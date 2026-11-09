@@ -134,6 +134,7 @@ fun SetupFlow(
         "freeagent" -> "FreeAgent"
         "actual" -> "Actual Budget"
         "paperless" -> "Paperless-ngx"
+        "murmur" -> "Murmur"
         else -> "MCP server"
     }
     var step by remember { mutableStateOf(if (knownAddress != null || reusingApp) 1 else 0) }
@@ -569,7 +570,7 @@ fun SetupFlow(
 
                 if (method == Token) {
                     if (!caldav) {
-                        TextInput(token, { token = it }, label = if (kind == "outline") "Outline API key" else "Token", mono = true, masked = true, onSubmit = ::next)
+                        TextInput(token, { token = it }, label = if (kind == "outline") "Outline API key" else if (kind == "murmur") "Murmur API key" else "Token", mono = true, masked = true, onSubmit = ::next)
                         Label("Sent as a bearer token. Stored on the control plane, never shown to agents.", style = Tokens.Type.Meta, color = colors.textMuted)
                     }
 

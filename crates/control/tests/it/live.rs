@@ -50,7 +50,6 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/conversations/{id}/goal/send",
     "POST /api/v1/conversations/{id}/goal/nudge",
     "POST /api/v1/conversations/{id}/goal/continue",
-    "POST /api/v1/tasks/{id}/start",
     "POST /api/v1/schedules/{id}/run",
     "POST /api/v1/schedules/{id}/confirm",
     "POST /api/v1/schedules/{id}/decline",
@@ -172,13 +171,6 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/chat-tool-servers/{id}/freeagent-sign-in",
     "DELETE /api/v1/chat-tool-servers/{id}/freeagent-sign-in",
     "DELETE /api/v1/chat-tool-servers/{id}",
-    "POST /api/v1/tasks",
-    "POST /api/v1/tasks/{id}/approve",
-    "POST /api/v1/tasks/{id}/decline",
-    "POST /api/v1/tasks/{id}/answer",
-    "POST /api/v1/tasks/{id}/done",
-    "POST /api/v1/tasks/{id}/close",
-    "DELETE /api/v1/tasks/{id}",
     "DELETE /api/v1/watches/{id}",
     "POST /api/v1/schedules",
     "PATCH /api/v1/schedules/{id}",
@@ -988,22 +980,6 @@ async fn creating_a_conversation_streams_it_and_its_first_queued_message() {
     conversation_where(&mut stream, conversation.id, |conversation| conversation.status == ConversationStatus::Working).await;
     let queue = queue_where(&mut stream, conversation.id, |queue| queue.len() == 1).await;
     assert_eq!(queue[0].text, "hello");
-
-    link.expect_start_session().await;
-}
-
-#[tokio::test]
-async fn starting_a_task_streams_its_conversation() {
-    let server = Server::start().await;
-    let mut link = server.online_node("laptop").await;
-    let mut stream = server.user.stream().await;
-    let (_, task) = server.user.json(server.user.post("/api/v1/tasks").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/work/app", "title": "Tidy"}))).await;
-
-    let (_, started) = server.user.json(server.user.post(&format!("/api/v1/tasks/{}/start", task["id"].as_str().unwrap()))).await;
-    let id: Uuid = started["id"].as_str().unwrap().parse().unwrap();
-
-    let streamed = conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Working).await;
-    assert_eq!(streamed.title, "Tidy");
 
     link.expect_start_session().await;
 }

@@ -90,19 +90,17 @@ class ExperimentGatesTest {
     }
 
     @Test
-    fun withEveryExperimentOffTheSidebarHidesTasksWorkflowsAndHistory() {
+    fun withEveryExperimentOffTheSidebarHidesWorkflowsAndHistory() {
         shell(AllOff)
 
-        assertEquals(0, rule.onAllNodesWithText("Tasks").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithText("Workflows").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithText("History").fetchSemanticsNodes().size)
     }
 
     @Test
-    fun turningOnTheTasksAndWorkflowsAndHistoryExperimentsShowsThemInTheSidebar() {
+    fun turningOnTheWorkflowsAndHistoryExperimentsShowsThemInTheSidebar() {
         shell("""{"tasks_and_workflows":true,"history":true}""")
 
-        assertEquals(1, rule.onAllNodesWithText("Tasks").fetchSemanticsNodes().size)
         assertEquals(1, rule.onAllNodesWithText("Workflows").fetchSemanticsNodes().size)
         assertEquals(1, rule.onAllNodesWithText("History").fetchSemanticsNodes().size)
     }

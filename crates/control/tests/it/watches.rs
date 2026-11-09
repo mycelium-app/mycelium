@@ -22,6 +22,11 @@ pub async fn end_turn(link: &mut NodeLink, conversation_id: Uuid, seq: i64) {
     link.barrier(conversation_id, seq + 1).await;
 }
 
+pub async fn say(link: &mut NodeLink, conversation_id: Uuid, seq: i64, text: &str) {
+    let update = json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}});
+    link.send(NodeToControl::AcpUpdate { conversation_id, seq, update }).await;
+}
+
 pub async fn prompt_for(link: &mut NodeLink, conversation: Uuid) -> String {
     loop {
         if let ControlToNode::Prompt { conversation_id, text, .. } = link.next().await
@@ -97,7 +102,7 @@ async fn a_watched_conversation_tells_its_watcher_once_when_its_turn_ends() {
 }
 
 #[tokio::test]
-async fn a_turn_that_ends_with_an_open_question_is_waiting_on_the_person() {
+async fn a_turn_that_ends_with_a_question_is_waiting_on_the_person() {
     let server = fast().await;
     let mut link = server.online_node("laptop").await;
     let watcher = begun(&server, &mut link, "Plan the release").await;
@@ -106,13 +111,51 @@ async fn a_turn_that_ends_with_an_open_question_is_waiting_on_the_person() {
     connect(&server, watcher, target).await;
     tool(&server, &link, watcher, "watch_conversation", json!({"conversation": target.to_string()})).await;
 
-    let asked = tool(&server, &link, target, "ask_question", json!({"question": "Which version number?"})).await;
-    end_turn(&mut link, target, 1).await;
+    say(&mut link, target, 1, "Which version number?").await;
+    end_turn(&mut link, target, 2).await;
     let told = told(&server, watcher, 1).await;
 
-    assert_eq!(asked["isError"], false, "{asked}");
     assert!(told.contains("is waiting on the person"), "{told}");
     assert_eq!(server.conversation(target).await["status"], "input");
+}
+
+#[tokio::test]
+async fn a_question_followed_by_closing_markdown_still_waits_on_the_person() {
+    let server = fast().await;
+    let mut link = server.online_node("laptop").await;
+    let target = begun(&server, &mut link, "Build the release").await;
+
+    say(&mut link, target, 1, "Should I tag **version 2?**\n").await;
+    end_turn(&mut link, target, 2).await;
+
+    assert_eq!(server.conversation(target).await["status"], "input");
+}
+
+#[tokio::test]
+async fn a_turn_that_ends_without_a_question_is_ready_for_review() {
+    let server = fast().await;
+    let mut link = server.online_node("laptop").await;
+    let target = begun(&server, &mut link, "Build the release").await;
+
+    say(&mut link, target, 1, "Which version? I chose 2.").await;
+    end_turn(&mut link, target, 2).await;
+
+    assert_eq!(server.conversation(target).await["status"], "review");
+}
+
+#[tokio::test]
+async fn a_question_asked_before_the_last_step_of_the_turn_does_not_wait_on_the_person() {
+    let server = fast().await;
+    let mut link = server.online_node("laptop").await;
+    let target = begun(&server, &mut link, "Build the release").await;
+    let tool_call = json!({"update": {"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Tag"}});
+
+    say(&mut link, target, 1, "Should I tag it?").await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: target, seq: 2, update: tool_call }).await;
+    say(&mut link, target, 3, "Tagged it.").await;
+    end_turn(&mut link, target, 4).await;
+
+    assert_eq!(server.conversation(target).await["status"], "review");
 }
 
 #[tokio::test]

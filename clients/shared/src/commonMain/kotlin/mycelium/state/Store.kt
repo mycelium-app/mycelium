@@ -45,7 +45,6 @@ import mycelium.api.InstructionProposal
 import mycelium.api.ConfirmScheduleRequest
 import mycelium.api.ContinueRequest
 import mycelium.api.CreateScheduleRequest
-import mycelium.api.CreateTaskRequest
 import mycelium.api.ApiAccessRequest
 import mycelium.api.SshAccessRequest
 import mycelium.api.MessageProposal
@@ -59,8 +58,6 @@ import mycelium.api.PatchScheduleRequest
 import mycelium.api.Schedule
 import mycelium.api.SetGoalRequest
 import mycelium.api.ScheduleRun
-import mycelium.api.Task
-import mycelium.api.TaskStatuses
 import mycelium.api.Project
 import mycelium.api.MyceliumApi
 import mycelium.api.StreamMessage
@@ -634,48 +631,6 @@ class Store(
         mutableState.update { it.copy(projects = it.projects + (project.id to project)) }
 
         return project
-    }
-
-    suspend fun refreshBoard() {
-        val projects = api.projects()
-        val worktrees = api.worktrees()
-        val tasks = api.tasks()
-
-        mutableState.update { it.copy(projects = projects.associateBy { p -> p.id }, worktrees = worktrees.associateBy { w -> w.id }, tasks = tasks.associateBy { t -> t.id }) }
-    }
-
-    suspend fun createTask(request: CreateTaskRequest): Task {
-        val task = api.createTask(request)
-
-        mutableState.update { it.copy(tasks = it.tasks + (task.id to task)) }
-
-        return task
-    }
-
-    suspend fun startTask(task: Task, conversationId: String? = null): Conversation {
-        val conversation = api.startTask(task.id, conversationId)
-
-        mutableState.update { it.copy(tasks = it.tasks + (task.id to task.copy(status = TaskStatuses.Claimed, conversationId = conversation.id)), conversations = it.conversations + (conversation.id to conversation)) }
-
-        return conversation
-    }
-
-    suspend fun approveTask(task: Task) = replaceTask(api.approveTask(task.id))
-
-    suspend fun declineTask(task: Task) = replaceTask(api.declineTask(task.id))
-
-    suspend fun answerTask(task: Task, answer: String) = replaceTask(api.answerTask(task.id, answer))
-
-    suspend fun finishTask(task: Task) = replaceTask(api.finishTask(task.id))
-
-    private fun replaceTask(task: Task) {
-        mutableState.update { it.copy(tasks = it.tasks + (task.id to task)) }
-    }
-
-    suspend fun deleteTask(task: Task) {
-        api.deleteTask(task.id)
-
-        mutableState.update { it.copy(tasks = it.tasks - task.id) }
     }
 
     suspend fun refreshInstructionProposals() {

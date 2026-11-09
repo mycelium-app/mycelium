@@ -7,8 +7,6 @@ import kotlinx.serialization.json.JsonPrimitive
 enum class MyceliumTool(val key: String, val label: String, val running: String) {
     Recall("recall", "Search memory", "Searching memory"),
     Remember("remember", "Remember", "Remembering"),
-    ProposeTask("propose_task", "Propose task", "Proposing a task"),
-    AskQuestion("ask_question", "Ask question", "Asking a question"),
     ProposeSchedule("propose_schedule", "Propose schedule", "Proposing a schedule"),
     Walkthrough("walkthrough", "Walkthrough", "Writing a walkthrough"),
     ProposeInstructionsEdit("propose_instructions_edit", "Propose instructions edit", "Proposing an instructions edit"),
@@ -36,14 +34,6 @@ sealed interface MyceliumCall {
 
     data class Remember(val text: String, val sharedWith: String?) : MyceliumCall {
         override val tool = MyceliumTool.Remember
-    }
-
-    data class ProposeTask(val title: String, val body: String?, val project: String?) : MyceliumCall {
-        override val tool = MyceliumTool.ProposeTask
-    }
-
-    data class AskQuestion(val question: String, val options: List<String>, val taskId: String? = null) : MyceliumCall {
-        override val tool = MyceliumTool.AskQuestion
     }
 
     data class ProposeSchedule(val prompt: String, val schedule: String?) : MyceliumCall {
@@ -112,7 +102,6 @@ private const val recallPreface = "Recalled memories are notes written by earlie
 private const val banksOpen = "Banks open here:"
 private val rememberedAs = Regex("^Remembered as \\S+?, shared with (.+)\\.$")
 private val proposedLayer = Regex("made for the (.+) instructions\\.")
-private val askedQuestion = Regex("^Question (\\S+) asked")
 private val foundConversation = Regex("^[0-9a-fA-F-]{36}: (.*)$")
 private val waitingToSend = Regex("^Waiting for the person to approve sending this to (.+?)(?: \\(proposal ([0-9a-fA-F-]{36})\\))?\\.$")
 private val waitingToStart = Regex("^Waiting for the person to approve starting .+ \\(proposal ([0-9a-fA-F-]{36})\\)\\.")
@@ -155,18 +144,6 @@ fun myceliumCall(call: ThreadItem.ToolCall): MyceliumCall? {
             val text = fields.requiredString("text", input) ?: return null
 
             MyceliumCall.Remember(text, rememberedAs.matchEntire(output.trim())?.groupValues?.get(1))
-        }
-
-        MyceliumTool.ProposeTask -> {
-            val title = fields.requiredString("title", input) ?: return null
-
-            MyceliumCall.ProposeTask(title, fields.string("body")?.trim()?.ifEmpty { null }, fields.string("project")?.trim()?.ifEmpty { null })
-        }
-
-        MyceliumTool.AskQuestion -> {
-            val question = fields.requiredString("question", input) ?: return null
-
-            MyceliumCall.AskQuestion(question, fields.strings("options").orEmpty(), askedQuestion.find(output.trim())?.groupValues?.get(1))
         }
 
         MyceliumTool.ProposeSchedule -> {

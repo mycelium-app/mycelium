@@ -10,7 +10,6 @@ import mycelium.api.Assistant
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.Project
-import mycelium.api.TaskStatuses
 import mycelium.api.Workflow
 import mycelium.api.WorkflowKinds
 import mycelium.state.WorkflowStepStatuses
@@ -64,7 +63,6 @@ private fun pendingRequest(item: ThreadItem, state: AppState): InboxRequest? {
 
     val parsed = myceliumCall(item) ?: return null
     val waiting = when (parsed) {
-        is MyceliumCall.AskQuestion -> askedTask(parsed, state.tasks)?.status == TaskStatuses.Question
         is MyceliumCall.SendToConversation -> proposedMessage(parsed, state.messageProposals)?.waiting == true
         is MyceliumCall.StartProposed -> proposedStart(parsed, state.startProposals)?.waiting == true
         is MyceliumCall.RequestApiAccess -> requestedAccess(parsed, state.apiAccessRequests)?.waiting == true
@@ -87,7 +85,7 @@ fun inboxItems(state: AppState): List<InboxItem> {
         fun item(key: String, context: String?, request: InboxRequest) =
             InboxItem("${conversation.id}/$key", conversation, project, project?.name ?: projectName(conversation.cwd), assistant, waitingSince, context, request, thread)
 
-        if (pending.isEmpty() && conversation.flaggedAt != null) {
+        if (pending.isEmpty()) {
             val text = conversation.flagReason?.takeIf { it.isNotBlank() } ?: lastAgentText(thread.size).orEmpty()
 
             listOf(item("flag", null, InboxRequest.Flag(text)))
@@ -119,7 +117,7 @@ fun rememberInbox(store: Store, state: AppState): List<InboxItem> {
         }
     }
 
-    return remember(state.conversations, state.events, state.tasks, state.messageProposals, state.startProposals, state.apiAccessRequests, state.sshAccessRequests, state.workflows, state.projects, state.assistants) { inboxItems(state) }
+    return remember(state.conversations, state.events, state.messageProposals, state.startProposals, state.apiAccessRequests, state.sshAccessRequests, state.workflows, state.projects, state.assistants) { inboxItems(state) }
 }
 
 data class TokenSample(val at: Instant, val total: Long, val conversations: Map<String, Long>)

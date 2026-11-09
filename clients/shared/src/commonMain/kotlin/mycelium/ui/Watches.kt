@@ -54,3 +54,11 @@ fun WatchLines(watches: List<Watch>, onOpen: (String) -> Unit, onStop: (Watch) -
         }
     }
 }
+
+@Composable
+fun WaitingForAnswerLine(modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+        Icon(MyIcon.Alert, MyTheme.colors.statusAttention, Tokens.Size.IconSm)
+        Label("Waiting for your answer", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+    }
+}

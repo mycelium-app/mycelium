@@ -17,10 +17,10 @@ mod memory;
 mod outline;
 mod project_icon;
 mod projects;
+mod schedules;
 mod screens;
 mod server_tools;
 mod ssh_access;
-mod tasks;
 mod terminals;
 mod todos;
 mod workflows;
@@ -54,7 +54,7 @@ enum Area {
     ServerTools,
     Workflows,
     Memory,
-    Tasks,
+    Schedules,
     EarlierTurns,
     Assistants,
     Learning,
@@ -81,7 +81,7 @@ fn area_of(tool: &str) -> Option<Area> {
         "find_integration_tools" => Some(Area::IntegrationTools),
         "start_workflow" | "start_subagent" | "list_places" | "get_workflow" => Some(Area::Workflows),
         "recall" | "remember" => Some(Area::Memory),
-        "propose_task" | "ask_question" | "list_tasks" | "approve_task" | "decline_task" | "close_tasks" | "propose_schedule" => Some(Area::Tasks),
+        "propose_schedule" => Some(Area::Schedules),
         "read_earlier_turns" => Some(Area::EarlierTurns),
         "assistant_list_files" | "assistant_read_file" | "assistant_write_file" | "assistant_delete_file" | "assistant_set_secret" | "assistant_request_secret" | "assistant_propose_action" | "assistant_list" | "assistant_create" | "assistant_update" | "assistant_use_workspace" => Some(Area::Assistants),
         "walkthrough" | "save_reflection" | "propose_exercise" | "note_learned" | "save_exercise_review" => Some(Area::Learning),
@@ -112,7 +112,7 @@ async fn call_area(area: Area, call: ToolCall<'_>) -> ApiResult<ToolReply> {
         Area::ServerTools => server_tools::call(call).await,
         Area::Workflows => workflows::call(call).await,
         Area::Memory => memory::call(call).await,
-        Area::Tasks => tasks::call(call).await,
+        Area::Schedules => schedules::call(call).await,
         Area::EarlierTurns => earlier_turns::call(call).await,
         Area::Assistants => assistants::call(call).await,
         Area::Learning => learning::call(call).await,
@@ -152,7 +152,7 @@ pub fn tool_definitions() -> Value {
         integration_tools::definitions(),
         workflows::definitions(),
         memory::definitions(),
-        tasks::definitions(),
+        schedules::definitions(),
         earlier_turns::definitions(),
         assistants::definitions(),
         learning::definitions(),
@@ -289,7 +289,7 @@ pub async fn respond(state: &AppState, node_id: Uuid, conversation_id: Option<Uu
                         ToolReply::Invalid(message) => failure(&id, INVALID_PARAMS, &message),
                     }
                 }
-                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use list_places, assistant_list, assistant_create, assistant_update, assistant_propose_action, recall, remember, propose_task, ask_question, propose_schedule, walkthrough, save_reflection, propose_exercise, note_learned, save_exercise_review, list_needs_you, resolve_needs_you, focus_needs_you, read_earlier_turns, get_instructions, propose_instructions_edit, find_conversations, read_conversation, send_to_conversation, request_api_access, decide, request_ssh_access, create_artifact, update_artifact, design_set_artboard, design_remove_item, read_artifact or read_artifact_feedback."),
+                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use list_places, assistant_list, assistant_create, assistant_update, assistant_propose_action, recall, remember, propose_schedule, walkthrough, save_reflection, propose_exercise, note_learned, save_exercise_review, list_needs_you, resolve_needs_you, focus_needs_you, read_earlier_turns, get_instructions, propose_instructions_edit, find_conversations, read_conversation, send_to_conversation, request_api_access, decide, request_ssh_access, create_artifact, update_artifact, design_set_artboard, design_remove_item, read_artifact or read_artifact_feedback."),
             }
         }
         _ => failure(&id, METHOD_NOT_FOUND, "Method not found."),

@@ -43,9 +43,6 @@ private fun scopedConversation(id: String, title: String, group: String?, archiv
 private fun scopedProject(id: String, name: String, group: String) =
     """{"id":"$id","node_id":"n1","name":"$name","path":"/work/$name","group_id":"$group","created_at":"2026-10-22T10:00:00Z"}"""
 
-private fun scopedTask(id: String, title: String, project: String) =
-    """{"id":"$id","node_id":"n1","agent":"claude","cwd":"/work/app","project_id":"$project","branch":null,"title":"$title","status":"open","created_at":"2026-10-22T10:00:00Z"}"""
-
 private fun scopedWorkflow(id: String, title: String, conversation: String) =
     """{"id":"$id","parent_id":null,"conversation_id":"$conversation","title":"$title","status":"running","round":1,"plan":{"steps":[]},"steps":[]}"""
 
@@ -80,7 +77,6 @@ class GroupScopeTest {
                 path.endsWith("/nodes") -> ScopedNodes
                 path.endsWith("/projects") -> "[${scopedProject("p1", "slop-app", "g1")},${scopedProject("p2", "work-app", "g2")}]"
                 path.endsWith("/worktrees") -> "[]"
-                path.endsWith("/tasks") -> "[${scopedTask("t1", "Slop task", "p1")},${scopedTask("t2", "Work task", "p2")}]"
                 path.endsWith("/workflows") -> "[${scopedWorkflow("w1", "Slop workflow", "c1")},${scopedWorkflow("w2", "Work workflow", "c2")}]"
                 path.endsWith("/schedules") -> "[${scopedSchedule("s1", "Slop schedule", "c1")},${scopedSchedule("s2", "Work schedule", null, "p2")},${scopedSchedule("s3", "Loose schedule", null)}]"
                 path.endsWith("/schedule-runs") -> "[]"
@@ -128,15 +124,6 @@ class GroupScopeTest {
 
         assertEquals(0, shown("Work page"))
         assertEquals(0, shown("Loose page"))
-    }
-
-    @Test
-    fun tasksShowOnlyThoseFiledAgainstTheSelectedGroupsProjects() {
-        show(Route.Tasks)
-
-        waitFor("Slop task")
-
-        assertEquals(0, shown("Work task"))
     }
 
     @Test

@@ -134,16 +134,6 @@ private val Repositories = """{"repositories":[
 {"forge_id":"$Gitlab","owner":"homelab","name":"homelab","full_name":"homelab/homelab"}],
 "organisations":[{"forge_id":"$Github","name":"example-org"},{"forge_id":"$Gitlab","name":"example"}]}"""
 
-private val Tasks = list(
-    """{"id":"k0","node_id":"$Willow","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Tag v0.11.1 now, or wait for the Firefox fix?","status":"question","options":["Tag now","Wait"],"source_title":"Release","created_at":"${ago(hours = 6)}"}""",
-    """{"id":"kp","node_id":"$Willow","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Cache cargo and Gradle in the release jobs","status":"proposed","source_title":"Release","created_at":"${ago(hours = 6)}"}""",
-    """{"id":"k1","node_id":"$Willow","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Rebuild install.md for the new flags","status":"open","created_at":"${ago(hours = 5)}"}""",
-    """{"id":"k2","node_id":"$Willow","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Verify the release from S3","status":"open","depends_on":["k1"],"created_at":"${ago(hours = 4)}"}""",
-    """{"id":"k3","node_id":"$Atlas","agent":"codex","cwd":"/srv","title":"Rotate the S3 keys","status":"open","created_at":"${ago(hours = 3)}"}""",
-    """{"id":"kc","node_id":"$Willow","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Merge the three Gradle jobs","status":"claimed","conversation_id":"$Main","created_at":"${ago(hours = 2)}"}""",
-    """{"id":"kd1","node_id":"$Willow","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Pin the Android SDK in CI","status":"done","created_at":"${ago(days = 2)}"}""",
-)
-
 private val Schedules = list(
     """{"id":"s1","node_id":"$Willow","agent":"claude","cwd":"/home/sam/projects/midden","project_id":"p1","prompt":"Renovate sweep: update and test dependencies","cron":"0 6 * * 1","each_run":"new","paused":false,"next_run_at":"${ahead(days = 3)}","last_run_at":"${ago(days = 4)}","created_at":"${ago(days = 30)}"}""",
     """{"id":"s2","node_id":"$Willow","agent":"claude","cwd":"/home/sam/projects/midden","project_id":"p1","prompt":"Check backups restored cleanly overnight","cron":"30 7 * * *","each_run":"same","paused":false,"next_run_at":"${ahead(hours = 11)}","last_run_at":"${ago(hours = 2)}","created_at":"${ago(days = 30)}"}""",
@@ -176,7 +166,7 @@ private val ReleaseNotes = """# Release notes v0.11.0
 | Area | Change |
 | --- | --- |
 | Chats | Provider picker remembers favourites |
-| Tasks | Answers can be edited before sending |
+| Artefacts | Links can be copied from the viewer |
 """
 
 private fun step(key: String, title: String, agent: String, status: String, depends: String = "[]", extra: String = "") =
@@ -278,7 +268,6 @@ private val Extra = linkedMapOf(
     "/groups" to Groups,
     "/forges" to Forges,
     "/repositories" to Repositories,
-    "/tasks" to Tasks,
     "/inbox/feed" to InboxFeedJson,
     "/schedules" to Schedules,
     "/schedule-runs" to ScheduleRuns,
@@ -349,7 +338,6 @@ class AllScreensRenderTest {
                 { store.refreshProjects() },
                 { store.refreshGroups() },
                 { store.refreshRepositories() },
-                { store.refreshBoard() },
                 { store.refreshSchedules() },
                 { store.refreshArtifacts() },
                 { store.refreshWorkflows() },
@@ -424,7 +412,6 @@ class AllScreensRenderTest {
         shell("history", Route.Archive, open = null)
         shell("artefacts", Route.Artifacts, open = null)
         shell("artefact-viewer", Route.Artefact("a1"), open = null)
-        shell("tasks", Route.Tasks, open = null)
         shell("workflows", Route.Workflows, open = null)
         shell("workflow-page", Route.Workflow("wf1"), open = null)
         shell("schedules", Route.Settings, open = null)
@@ -446,10 +433,9 @@ class AllScreensRenderTest {
 
     @Test
     fun emptyStates() {
-        val none = mapOf("/conversations" to "[]", "/tasks" to "[]", "/schedules" to "[]", "/artifacts" to "[]", "/workflows" to "[]", "/assistants" to "[]", "/projects" to "[]", "/issues" to """{"issues":[]}""", "/nodes" to "[]")
+        val none = mapOf("/conversations" to "[]", "/schedules" to "[]", "/artifacts" to "[]", "/workflows" to "[]", "/assistants" to "[]", "/projects" to "[]", "/issues" to """{"issues":[]}""", "/nodes" to "[]")
 
         shell("empty-history", Route.Archive, extra = none, open = null)
-        shell("empty-tasks", Route.Tasks, extra = none, open = null)
         shell("empty-schedules", Route.Settings, extra = none, open = null)
         shell("empty-artefacts", Route.Artifacts, extra = none, open = null)
         shell("empty-workflows", Route.Workflows, extra = none, open = null)
@@ -495,7 +481,6 @@ class AllScreensRenderTest {
         shell("new-chat", Route.NewChat, phone = true, open = null)
         shell("history", Route.Archive, phone = true, open = null)
         shell("artefacts", Route.Artifacts, phone = true, open = null)
-        shell("tasks", Route.Tasks, phone = true, open = null)
         shell("workflows", Route.Workflows, phone = true, open = null)
         shell("schedules", Route.Settings, phone = true, open = null)
         shell("assistants", Route.Assistants, phone = true, open = null)

@@ -17,9 +17,7 @@ import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
 import kotlinx.coroutines.runBlocking
 import mycelium.api.Me
-import mycelium.state.Lane
 import mycelium.state.Store
-import mycelium.state.boardCards
 import mycelium.ui.MyTheme
 import mycelium.ui.MoveSheet
 import mycelium.ui.NewChatScreen
@@ -111,16 +109,6 @@ private val BoardRepositories = """{"repositories":[
 {"forge_id":"$GitlabId","owner":"homelab","name":"homelab","full_name":"homelab/homelab"}],
 "organisations":[{"forge_id":"$GithubId","name":"acme-org"},{"forge_id":"$GitlabId","name":"slop"}]}"""
 
-private val BoardTasks = list(
-    """{"id":"k0","node_id":"$WillowId","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Tag v0.1.11 now, or wait for the Firefox fix?","status":"question","options":["Tag now","Wait"],"source_title":"Release","created_at":"${ago(hours = 6)}"}""",
-    """{"id":"kp","node_id":"$WillowId","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Cache cargo and Gradle in the release jobs","status":"proposed","source_title":"Release","created_at":"${ago(hours = 6)}"}""",
-    """{"id":"k1","node_id":"$WillowId","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Rebuild install.md for the new flags","status":"open","created_at":"${ago(hours = 5)}"}""",
-    """{"id":"k2","node_id":"$WillowId","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Verify v0.1.11 from S3","status":"open","depends_on":["k1"],"created_at":"${ago(hours = 4)}"}""",
-    """{"id":"k3","node_id":"$AtlasNodeId","agent":"codex","cwd":"/srv","title":"Rotate the S3 keys","status":"open","created_at":"${ago(hours = 3)}"}""",
-    """{"id":"kc","node_id":"$WillowId","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Merge the three Gradle jobs","status":"claimed","conversation_id":"11111111-1111-1111-1111-111111111111","created_at":"${ago(hours = 2)}"}""",
-    *(1..13).map { """{"id":"kd$it","node_id":"$WillowId","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Finished task $it","status":"done","created_at":"${ago(days = 2)}"}""" }.toTypedArray(),
-)
-
 private val BoardSchedules = list(
     """{"id":"s1","node_id":"$WillowId","agent":"claude","cwd":"/home/sam/projects/midden","project_id":"p1","prompt":"Renovate sweep: update and test dependencies","cron":"0 6 * * 1","each_run":"new","paused":false,"next_run_at":"${ahead(days = 3)}","last_run_at":"${ago(days = 4)}","created_at":"${ago(days = 30)}"}""",
     """{"id":"s2","node_id":"$WillowId","agent":"claude","cwd":"/home/sam/projects/acme-backups","project_id":"p1","prompt":"Check backups restored cleanly overnight","cron":"30 7 * * *","each_run":"same","paused":false,"next_run_at":"${ahead(hours = 11)}","last_run_at":"${ago(hours = 2)}","created_at":"${ago(days = 30)}"}""",
@@ -184,7 +172,6 @@ private fun boardApi(extra: Map<String, String> = emptyMap()) = fakeApi(
         "/groups" to BoardGroups,
         "/forges" to BoardForges,
         "/repositories" to BoardRepositories,
-        "/tasks" to BoardTasks,
         "/schedules" to BoardSchedules,
         "/schedule-runs" to BoardScheduleRuns,
         "/sessions" to BoardSessions,
@@ -219,7 +206,6 @@ class BoardsRenderTest {
             store.refreshProjects()
 
             if (board) {
-                store.refreshBoard()
                 store.refreshSchedules()
             }
 
@@ -244,14 +230,7 @@ class BoardsRenderTest {
     }
 
     @Test
-    fun tasksAndSchedules() {
-        val idle = mapOf("/conversations" to BoardConversations.dropLast(1) + "," + conversationJson("88888888-8888-8888-8888-888888888888", "Release", "review", WillowId, ago(minutes = 9), cwd = "/home/sam/projects/mycelium", project = "p2") + "]")
-
-        assertTrue(renderAt("board-tasks", true, false, content = shell(Route.Tasks, idle, board = true)).length() > 1_000)
-
-        val details = boardCards(store(idle, board = true).state.value).getValue(Lane.Open).associate { it.title to it.details }
-        assertEquals("mycelium · any idle conversation", details.getValue("Rebuild install.md for the new flags"))
-        assertTrue(!details.getValue("Rotate the S3 keys").contains("idle"))
+    fun schedules() {
         assertTrue(renderAt("board-schedules", true, false, content = shell(Route.Settings, board = true)).length() > 1_000)
     }
 

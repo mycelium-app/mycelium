@@ -27,8 +27,6 @@ import mycelium.api.Project
 import mycelium.api.Repository
 import mycelium.api.Schedule
 import mycelium.api.ScheduleRun
-import mycelium.api.Task
-import mycelium.api.Worktree
 import mycelium.api.QueuedPrompt
 import mycelium.api.StreamMessage
 
@@ -60,8 +58,6 @@ data class AppState(
     val groups: Map<String, Group> = emptyMap(),
     val forges: List<mycelium.api.Forge>? = null,
     val repositoryListing: mycelium.api.Repositories? = null,
-    val worktrees: Map<String, Worktree> = emptyMap(),
-    val tasks: Map<String, Task> = emptyMap(),
     val workflows: Map<String, Workflow> = emptyMap(),
     val schedules: Map<String, Schedule> = emptyMap(),
     val assistants: Map<String, mycelium.api.Assistant> = emptyMap(),
@@ -102,11 +98,11 @@ data class AppState(
     val terminalOutput: Map<String, TerminalFeed> = emptyMap(),
     val exitedTerminals: Set<String> = emptySet(),
     val environments: Map<String, mycelium.api.Environment> = emptyMap(),
-    val needsYouFocus: String? = null,
     val environmentActions: Map<String, List<mycelium.api.EnvironmentAction>> = emptyMap(),
     val lastEnvironmentNodeId: String? = null,
     val recentEnvironmentApps: Map<String, List<String>> = emptyMap(),
     val sending: Map<String, List<String>> = emptyMap(),
+    val needsYouFocus: String? = null,
     val connected: Boolean = false,
 )
 
@@ -231,11 +227,11 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.WatchesChanged -> state.copy(watchesRevision = state.watchesRevision + (message.conversationId to (state.watchesRevision[message.conversationId] ?: 0) + 1))
     is StreamMessage.ForgeChanged -> state.copy(forgeRevision = state.forgeRevision + 1)
 
-    is StreamMessage.NeedsYouFocused -> state.copy(needsYouFocus = message.key)
-
     is StreamMessage.WellnessChanged -> state
 
     is StreamMessage.ScreenOpened -> state
+
+    is StreamMessage.NeedsYouFocused -> state.copy(needsYouFocus = message.key)
 
     is StreamMessage.NodeRemoved -> state.copy(nodes = state.nodes - message.nodeId, resources = state.resources - message.nodeId)
 

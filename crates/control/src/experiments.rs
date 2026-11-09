@@ -17,7 +17,6 @@ pub enum Experiment {
 #[derive(Serialize, Deserialize, Default, Clone, Copy)]
 #[serde(default)]
 pub struct Experiments {
-    pub tasks: bool,
     pub workflows: bool,
     pub instructions: bool,
     pub details: bool,
@@ -38,7 +37,6 @@ pub struct Experiments {
 impl Experiments {
     pub fn graduated(voice: bool, kubernetes_nodes: bool, tasks_and_workflows: bool, history: bool) -> Self {
         Self {
-            tasks: true,
             workflows: true,
             instructions: true,
             details: true,
