@@ -88,8 +88,8 @@ class IntegrationsTest {
     private fun store(): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
-            requests += request
             bodies += String(request.body.toByteArray())
+            requests += request
             val path = request.url.encodedPath
 
             when {

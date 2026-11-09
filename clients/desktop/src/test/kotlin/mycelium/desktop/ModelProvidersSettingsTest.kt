@@ -52,8 +52,8 @@ class ModelProvidersSettingsTest {
     private fun show(experiments: String = "{}") {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
-            requests += request
             bodies += String(request.body.toByteArray())
+            requests += request
 
             when {
                 request.url.encodedPath.endsWith("/experiments") -> respond(experiments, HttpStatusCode.OK, json)

@@ -109,6 +109,7 @@ class GroupsSettingsTest {
     }
 
     private fun open(name: String) {
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open the $name group").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Open the $name group").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Group sections").fetchSemanticsNodes().isNotEmpty() }
     }
