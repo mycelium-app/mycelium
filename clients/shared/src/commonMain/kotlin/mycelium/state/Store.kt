@@ -333,17 +333,18 @@ class Store(
         val wantsSound = platform.loadPreference(NotifySoundPreference) != false.toString()
 
         val ping = updated.assistantId != null
+        val title = updated.assistantId?.let { before.assistants[it]?.name } ?: updated.title
 
         val closed = hoursView().closed(updated.groupId)
 
         if (if (ping) wellness.holdsPings(closed) else wellness.holdsNotifications(closed)) {
-            wellness.hold(HeldNotification(updated.title, updated.id, updated.groupId), ping)
+            wellness.hold(HeldNotification(title, updated.id, updated.groupId), ping)
 
             return
         }
 
         if (platform.loadPreference(NotifyFinishedPreference) != false.toString()) {
-            platform.notify(updated.title, listOfNotNull(outcome, node).joinToString(" · "), updated.id, wantsSound)
+            platform.notify(title, listOfNotNull(outcome, node).joinToString(" · "), updated.id, wantsSound)
         }
 
         if (wantsSound) {

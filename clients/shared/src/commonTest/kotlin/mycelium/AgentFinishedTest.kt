@@ -218,4 +218,27 @@ class AgentFinishedTest {
 
         assertEquals(listOf("notify Fix login c1 | Done | c1", "chime"), platform.calls)
     }
+
+    @Test
+    fun anAssistantThreadFinishingNotifiesWithTheAssistantsName() = runTest {
+        val platform = RecordingPlatform()
+        val store = storeWith(platform, backgroundScope)
+        store.receive(StreamMessage.AssistantChanged(mycelium.api.Assistant("a1", "Release captain", createdAt = "2026-10-23T09:00:00Z")))
+
+        store.receive(StreamMessage.ConversationChanged(conversation("c1", ConversationStatus.Working).copy(assistantId = "a1")))
+        store.receive(StreamMessage.ConversationChanged(conversation("c1", ConversationStatus.Done).copy(assistantId = "a1")))
+
+        assertEquals("notify Release captain | Done | c1", platform.calls.first())
+    }
+
+    @Test
+    fun anAssistantThreadWhoseAssistantIsNotLoadedFallsBackToItsTitle() = runTest {
+        val platform = RecordingPlatform()
+        val store = storeWith(platform, backgroundScope)
+
+        store.receive(StreamMessage.ConversationChanged(conversation("c1", ConversationStatus.Working).copy(assistantId = "a1")))
+        store.receive(StreamMessage.ConversationChanged(conversation("c1", ConversationStatus.Done).copy(assistantId = "a1")))
+
+        assertEquals("notify Fix login c1 | Done | c1", platform.calls.first())
+    }
 }
