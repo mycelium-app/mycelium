@@ -170,6 +170,7 @@ async fn cancelling_a_pending_resume_clears_it() {
     let mut link = server.online_node("laptop").await;
     let id = working_conversation(&server, &mut link).await;
     hit_limit(&server, &mut link, id, &limit_message(2)).await;
+    common::eventually("the automatic resume to be scheduled", || async { resume_at(&server, id).await }).await;
     schedule(&server, id).await;
 
     let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/conversations/{id}/resume"))).await;
