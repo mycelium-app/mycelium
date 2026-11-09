@@ -188,8 +188,9 @@ fun QueuedMessages(
                 }
 
                 Column(Modifier.weight(1f).alpha(if (item.editing) 0.6f else 1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+                    val preview = inlineText(pastedSummary(item.text).replace('\n', ' ').trim(), colors.text)
                     val line = buildAnnotatedString {
-                        append(pastedSummary(item.text).replace('\n', ' ').trim())
+                        append(preview)
 
                         for (image in images) {
                             if (length > 0) {
@@ -261,7 +262,7 @@ fun QueuedMessages(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(MyIcon.Working, colors.textMuted, Tokens.Size.IconSm, Modifier.semantics { contentDescription = "Sending" })
-                Label(text, Modifier.weight(1f), maxLines = 1)
+                MarkdownText(text, Modifier.weight(1f), maxLines = 1)
                 Label("Sending", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
             }
 

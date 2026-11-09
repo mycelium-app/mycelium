@@ -61,7 +61,7 @@ class InboxTest {
 
     private val feedRequests = java.util.concurrent.CopyOnWriteArrayList<String>()
 
-    private fun show(status: String, feed: String = NoFeed, privacy: String = VoiceOff): Store {
+    private fun show(status: String, feed: String = NoFeed, privacy: String = VoiceOff, events: String? = null): Store {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
 
@@ -73,7 +73,7 @@ class InboxTest {
                 path.endsWith("/inbox/feed") -> feed
                 path.endsWith("/privacy") -> privacy
                 path.endsWith("/conversations") -> "[${conversation(status)}]"
-                path.endsWith("/conversations/c1/events") -> if (status == "input") PermissionEvents else "[]"
+                path.endsWith("/conversations/c1/events") -> events ?: if (status == "input") PermissionEvents else "[]"
                 path.endsWith("/nodes") || path.endsWith("/groups") || path.endsWith("/workflows") || path.endsWith("/queue") || path.endsWith("/session-updates") -> "[]"
                 else -> "{}"
             }
@@ -124,6 +124,62 @@ class InboxTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Search now finds conversations by branch name.").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Scribe").assertExists()
         rule.onNodeWithContentDescription("Open chat: harbour, Restore flow copy").assertExists()
+    }
+
+    @Test
+    fun feedBodiesRenderFormattingListsCodeAndLinks() {
+        val message = "**Released** the `plan`\\n\\n- [x] Publish notes\\n\\n```text\\nsample command\\n```\\n\\n[the docs](https://example.com/docs)"
+        show("done", """{"posts":[${feedPost("p1", message)}]}""")
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Released the plan").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Done").assertExists()
+        rule.onNodeWithContentDescription("Copy text code").assertExists()
+        rule.onNodeWithText("the docs").performClick()
+        assertEquals(listOf("https://example.com/docs"), platform.opened)
+        rule.onNodeWithContentDescription("Open chat: harbour, Restore flow copy").assertExists()
+    }
+
+    @Test
+    fun needsYouFullBodyRendersListsAndCodeWithReplyControlsIntact() {
+        val events = """[{"conversation_id":"c1","seq":1,"kind":"acp_update","payload":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"**Review** the plan\n\n- [x] Check notes\n\n```text\nsample command\n```"}}}}]"""
+        show("input", events = events)
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Review the plan").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Done").assertExists()
+        rule.onNodeWithContentDescription("Copy text code").assertExists()
+        rule.onNodeWithText("Send reply").assertExists()
+    }
+
+    @Test
+    fun expandedNeedsYouPreviewsRenderInlineFormattingAndLinks() {
+        val events = """[{"conversation_id":"c1","seq":1,"kind":"user_message","payload":{"text":"[the **docs**](https://example.com/docs)"}},{"conversation_id":"c1","seq":2,"kind":"acp_update","payload":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"**Check** the `plan`"}}}},{"conversation_id":"c1","seq":3,"kind":"permission_request","payload":{"request_id":"r1","toolCall":{"title":"pnpm db:migrate"},"options":[{"optionId":"approve","name":"Approve","kind":"allow_once"}]}}]"""
+        show("input", events = events)
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Show more of Bump the UI kit").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Show more of Bump the UI kit").performClick()
+        rule.onNodeWithText("You: the docs").performClick()
+        assertEquals(listOf("https://example.com/docs"), platform.opened)
+        assertEquals(2, rule.onAllNodesWithText("Check the plan").fetchSemanticsNodes().size)
+        rule.onNodeWithText("**Check** the `plan`").assertDoesNotExist()
+    }
+
+    @Test
+    fun contextAndExpandedPreviewsKeepTheirTwoAndFourLineLimits() {
+        val text = "**Review** " + "the release notes ".repeat(100)
+        val encoded = kotlinx.serialization.json.Json.encodeToString(kotlinx.serialization.serializer<String>(), text)
+        val events = """[{"conversation_id":"c1","seq":1,"kind":"acp_update","payload":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":$encoded}}}},{"conversation_id":"c1","seq":2,"kind":"permission_request","payload":{"request_id":"r1","toolCall":{"title":"pnpm db:migrate"},"options":[{"optionId":"approve","name":"Approve","kind":"allow_once"}]}}]"""
+        show("input", events = events)
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Show more of Bump the UI kit").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Show more of Bump the UI kit").performClick()
+        val layouts = rule.onAllNodesWithText("Review " + "the release notes ".repeat(100)).fetchSemanticsNodes().map { node ->
+            val results = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            node.config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult].action?.invoke(results)
+            results.single()
+        }
+
+        assertEquals(listOf(2, 4), layouts.map { it.lineCount }.sorted())
+        assertTrue(layouts.all { it.isLineEllipsized(it.lineCount - 1) })
     }
 
     @Test

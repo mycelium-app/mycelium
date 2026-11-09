@@ -25,6 +25,7 @@ import mycelium.api.QueuedPrompt
 import mycelium.state.SessionOptions
 import mycelium.ui.Composer
 import mycelium.ui.LocalAttachmentBytes
+import mycelium.ui.LocalPlatform
 import mycelium.ui.LocalTouch
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.QueueEdit
@@ -38,6 +39,8 @@ class QueuedMessagesTest {
     @get:Rule
     val rule = createComposeRule()
 
+    private val platform = AppsPlatform()
+
     private val conversation = Conversation("c1", "u", "n", "claude", "/work", "t", ConversationStatus.Working, createdAt = "2026-10-22T10:00:00Z", updatedAt = "2026-10-22T10:00:00Z")
     private val queue = listOf(
         QueuedPrompt("q1", "c1", 1, "Open a merge request", "2026-10-22T10:00:00Z"),
@@ -46,6 +49,7 @@ class QueuedMessagesTest {
 
     private fun show(
         touch: Boolean = false,
+        sending: List<String> = emptyList(),
         queued: List<QueuedPrompt> = queue,
         sendNow: (String) -> Unit = {},
         edit: (QueuedPrompt) -> Unit = {},
@@ -56,9 +60,9 @@ class QueuedMessagesTest {
     ) {
         rule.setContent {
             MyceliumTheme(true) {
-                CompositionLocalProvider(LocalTouch provides touch, LocalAttachmentBytes provides { testPng(96, 64) }) {
+                CompositionLocalProvider(LocalPlatform provides platform, LocalTouch provides touch, LocalAttachmentBytes provides { testPng(96, 64) }) {
                     Composer(
-                        conversation = conversation, working = true, queue = queued, sending = emptyList(), onSend = {}, onStop = {},
+                        conversation = conversation, working = true, queue = queued, sending = sending, onSend = {}, onStop = {},
                         onSendQueuedNow = sendNow, onEditQueued = edit, onMoveQueued = move, onRemoveQueued = remove,
                         options = SessionOptions(emptyList(), null, emptyList(), null, emptyList()), commands = emptyList(),
                         onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },
@@ -71,6 +75,40 @@ class QueuedMessagesTest {
 
     private fun openActions(number: Int) {
         rule.onNodeWithContentDescription("Actions for queued message $number").performClick()
+    }
+
+    @Test
+    fun queuedPreviewsRenderInlineMarkdownAndEditingKeepsTheOriginalText() {
+        val text = "**Read** [the docs](https://example.com/docs) and `check` the plan"
+        val edited = mutableListOf<String>()
+        show(queued = listOf(queue.first().copy(text = text)), edit = { edited += it.text })
+
+        rule.onNodeWithText("Read the docs and check the plan").assertIsDisplayed()
+        rule.onNodeWithText(text).assertDoesNotExist()
+        openActions(1)
+        rule.onNodeWithText("Edit").performClick()
+        assertEquals(listOf(text), edited)
+    }
+
+    @Test
+    fun formattedQueuedPreviewsStillEllipsiseAfterTwoLines() {
+        val text = "**Review** " + "the release notes ".repeat(100)
+        show(queued = listOf(queue.first().copy(text = text)))
+        val results = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        val node = rule.onNodeWithText("Review " + "the release notes ".repeat(100).trimEnd()).fetchSemanticsNode()
+        node.config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult].action?.invoke(results)
+
+        assertEquals(2, results.single().lineCount)
+        assertTrue(results.single().isLineEllipsized(1))
+    }
+
+    @Test
+    fun sendingPreviewsRenderInlineLinks() {
+        show(queued = emptyList(), sending = listOf("[the **docs**](https://example.com/docs)"))
+
+        rule.onNodeWithText("the docs").performClick()
+        assertEquals(listOf("https://example.com/docs"), platform.opened)
+        rule.onNodeWithContentDescription("Sending").assertIsDisplayed()
     }
 
     @Test

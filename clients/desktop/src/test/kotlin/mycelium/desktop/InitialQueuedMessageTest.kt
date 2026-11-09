@@ -24,7 +24,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 private const val StartingConversation = """{"id":"c1","owner":"u","node_id":"n1","agent":"codex","cwd":"/work/app","title":"New workspace","status":"working","created_at":"2026-10-24T10:00:00Z","updated_at":"2026-10-24T10:00:00Z"}"""
-private const val InitialQueue = """[{"id":"q1","conversation_id":"c1","position":1,"text":"Build the search screen","created_at":"2026-10-24T10:00:00Z"}]"""
+private const val InitialQueue = """[{"id":"q1","conversation_id":"c1","position":1,"text":"**Build** the `search` screen","created_at":"2026-10-24T10:00:00Z"}]"""
 
 class InitialQueuedMessageTest {
     @get:Rule
@@ -61,7 +61,7 @@ class InitialQueuedMessageTest {
         assertEquals(1, rule.onAllNodesWithText("Build the search screen").fetchSemanticsNodes().size)
 
         rule.runOnIdle {
-            store.receive(StreamMessage.EventAppended(Event("c1", 1, "user_message", Json.parseToJsonElement("""{"text":"Build the search screen","prompt_id":"q1"}"""))))
+            store.receive(StreamMessage.EventAppended(Event("c1", 1, "user_message", Json.parseToJsonElement("""{"text":"**Build** the `search` screen","prompt_id":"q1"}"""))))
         }
 
         assertEquals(0, rule.onAllNodesWithText("1 queued message").fetchSemanticsNodes().size)

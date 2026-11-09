@@ -22,6 +22,7 @@ import mycelium.api.Artifact
 import mycelium.api.ArtifactAccessRequest
 import mycelium.api.ArtifactLink
 import mycelium.api.LinkArtifactRequest
+import mycelium.state.parsedMarkdown
 import mycelium.state.AppState
 import mycelium.state.Store
 
@@ -103,7 +104,7 @@ fun ArtifactAccessRequestCard(request: ArtifactAccessRequest, store: Store, stat
     Card(Modifier.padding(Tokens.Space.S2)) {
         Column(Modifier.padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             Label("${conversation?.title ?: "Conversation"} asks to ${request.permission} $title", style = Tokens.Type.UiStrong)
-            Label(request.reason)
+            MarkdownBlocks(parsedMarkdown(request.reason), textStyle = Tokens.Type.Ui, blockSpacing = Tokens.Space.S2)
 
             if (conversation?.projectId != null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

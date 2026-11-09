@@ -25,6 +25,7 @@ import mycelium.api.ArtifactKinds
 import mycelium.api.MessageProposal
 import mycelium.api.StartProposal
 import mycelium.api.StartProposalChoice
+import mycelium.state.parsedMarkdown
 import mycelium.state.AppState
 import mycelium.state.MyceliumCall
 import mycelium.state.MyceliumTool
@@ -290,7 +291,7 @@ private fun MyceliumBody(parsed: MyceliumCall) {
             if (controls != null && request?.state == "requested") {
                 ArtifactAccessRequestCard(request, controls.store, controls.state)
             } else {
-                Label(parsed.reason, style = Tokens.Type.Ui)
+                MarkdownBlocks(parsedMarkdown(parsed.reason), textStyle = Tokens.Type.Ui, blockSpacing = Tokens.Space.S2)
             }
         }
 
@@ -379,8 +380,8 @@ private fun SendToConversationBody(parsed: MyceliumCall.SendToConversation) {
         }
     }
 
-    Label(parsed.message, style = Tokens.Type.Ui, maxLines = ExcerptLines)
-    Label(parsed.reason, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = ExcerptLines)
+    MarkdownText(parsed.message, style = Tokens.Type.Ui, maxLines = ExcerptLines)
+    MarkdownText(parsed.reason, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = ExcerptLines)
 
     action.failure?.let { ErrorBanner(it, onDismiss = { action.failure = null }) }
 
@@ -460,7 +461,7 @@ private fun StartProposedBody(parsed: MyceliumCall.StartProposed) {
         }
 
         if (step.firstMessage.isNotEmpty()) {
-            Label(step.firstMessage, style = Tokens.Type.Ui, maxLines = ExcerptLines)
+            MarkdownText(step.firstMessage, style = Tokens.Type.Ui, maxLines = ExcerptLines)
         }
     }
 
@@ -525,7 +526,7 @@ private fun RequestApiAccessBody(parsed: MyceliumCall.RequestApiAccess) {
     }
 
     (request?.hours ?: parsed.hours)?.let { Label("For ${apiAccessDuration(it)}", style = Tokens.Type.Meta, color = colors.textMuted) }
-    Label(parsed.reason, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = ExcerptLines)
+    MarkdownText(parsed.reason, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = ExcerptLines)
 
     action.failure?.let { ErrorBanner(it, onDismiss = { action.failure = null }) }
 
@@ -577,7 +578,7 @@ private fun RequestSshAccessBody(parsed: MyceliumCall.RequestSshAccess) {
         request?.expiresAt?.takeIf { request.state == "approved" }?.let { Label("Until ${it.substring(11, 16)} UTC", style = Tokens.Type.Meta, color = colors.textMuted) }
     }
 
-    Label(parsed.reason, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = ExcerptLines)
+    MarkdownText(parsed.reason, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = ExcerptLines)
 
     action.failure?.let { ErrorBanner(it, onDismiss = { action.failure = null }) }
 

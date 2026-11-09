@@ -39,6 +39,9 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -399,7 +402,7 @@ internal fun UserMessage(text: String, files: List<Attachment>, images: List<Thr
             for (segment in remember(text) { parsePasted(text) }) {
                 when (segment) {
                     is PastedSegment.Plain -> if (segment.text.isNotBlank()) {
-                        Label(segment.text.trim('\n'), style = Tokens.Type.Prose)
+                        MarkdownBlocks(parsedMarkdown(segment.text.trim('\n')))
                     }
                     is PastedSegment.Pasted -> PastedMessageBlock(segment)
                 }
@@ -508,14 +511,14 @@ private fun AgentMessage(text: String) {
 }
 
 @Composable
-internal fun MarkdownBlocks(blocks: List<MarkdownBlock>) {
+internal fun MarkdownBlocks(blocks: List<MarkdownBlock>, textStyle: TextStyle = Tokens.Type.Prose, blockSpacing: Dp = Tokens.Space.S3) {
     val colors = MyTheme.colors
     val clipboard = LocalClipboardManager.current
 
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(blockSpacing)) {
         for (block in blocks) {
             when (block) {
-                is MarkdownBlock.Paragraph -> Prose(block.text)
+                is MarkdownBlock.Paragraph -> Prose(block.text, textStyle)
                 is MarkdownBlock.Heading -> BasicText(
                     inlineText(block.text, colors.text),
                     Modifier.semantics { heading() },
@@ -561,12 +564,12 @@ internal fun MarkdownBlocks(blocks: List<MarkdownBlock>) {
                         }
                     }
                 }
-                is MarkdownBlock.Bullets -> ListBlock(block.items, null)
-                is MarkdownBlock.Numbered -> ListBlock(block.items) { index -> "${block.start + index}." }
+                is MarkdownBlock.Bullets -> ListBlock(block.items, textStyle, blockSpacing, null)
+                is MarkdownBlock.Numbered -> ListBlock(block.items, textStyle, blockSpacing) { index -> "${block.start + index}." }
                 is MarkdownBlock.Quote -> Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                     Box(Modifier.fillMaxHeight().width(Tokens.Size.FocusRing).background(colors.border))
                     Box(Modifier.weight(1f).padding(start = Tokens.Space.S3)) {
-                        MarkdownBlocks(block.blocks)
+                        MarkdownBlocks(block.blocks, textStyle, blockSpacing)
                     }
                 }
                 is MarkdownBlock.Callout -> {
@@ -580,7 +583,7 @@ internal fun MarkdownBlocks(blocks: List<MarkdownBlock>) {
                                 Label(block.kind.label, style = Tokens.Type.UiStrong, color = tone.color)
                             }
 
-                            MarkdownBlocks(block.blocks)
+                            MarkdownBlocks(block.blocks, textStyle, blockSpacing)
                         }
                     }
                 }
@@ -595,7 +598,7 @@ internal fun MarkdownBlocks(blocks: List<MarkdownBlock>) {
                     }
                 }
                 MarkdownBlock.Rule -> Hairline()
-                is MarkdownBlock.Table -> TableBlock(block)
+                is MarkdownBlock.Table -> TableBlock(block, textStyle)
             }
         }
     }
@@ -669,12 +672,24 @@ internal fun inlineText(text: String, color: Color): AnnotatedString {
 }
 
 @Composable
-private fun Prose(text: String) {
-    BasicText(inlineText(text, MyTheme.colors.text), style = Tokens.Type.Prose.themed())
+internal fun MarkdownText(
+    text: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle = Tokens.Type.Ui,
+    color: Color = MyTheme.colors.text,
+    maxLines: Int = Int.MAX_VALUE,
+    overflow: TextOverflow = if (maxLines == 1) TextOverflow.Ellipsis else TextOverflow.Clip,
+) {
+    BasicText(inlineText(text, color), modifier, style.themed(), maxLines = maxLines, overflow = overflow)
 }
 
 @Composable
-internal fun TableBlock(table: MarkdownBlock.Table) {
+private fun Prose(text: String, style: TextStyle) {
+    MarkdownText(text, style = style)
+}
+
+@Composable
+internal fun TableBlock(table: MarkdownBlock.Table, textStyle: TextStyle = Tokens.Type.Prose) {
     val colors = MyTheme.colors
     val header = table.header.map { inlineText(it, colors.text) }
     val body = table.rows.map { row -> row.map { inlineText(it, colors.text) } }
@@ -688,7 +703,7 @@ internal fun TableBlock(table: MarkdownBlock.Table) {
     Table(
         columns,
         body.size,
-        { row, column -> TableCell.Rich(body[row][column], Tokens.Type.Prose) },
+        { row, column -> TableCell.Rich(body[row][column], textStyle) },
         fill = false,
         lazy = false,
         centred = true,
@@ -697,13 +712,13 @@ internal fun TableBlock(table: MarkdownBlock.Table) {
 }
 
 @Composable
-private fun ListBlock(items: List<MarkdownListItem>, numbering: ((Int) -> String)?) {
+private fun ListBlock(items: List<MarkdownListItem>, textStyle: TextStyle, blockSpacing: Dp, numbering: ((Int) -> String)?) {
     val colors = MyTheme.colors
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
         items.forEachIndexed { index, item ->
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                Box(Modifier.widthIn(min = Tokens.Space.S4).height(Tokens.Type.Prose.lineHeight.value.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.widthIn(min = Tokens.Space.S4).height(textStyle.lineHeight.value.dp), contentAlignment = Alignment.Center) {
                     val checked = item.checked
 
                     when {
@@ -719,16 +734,16 @@ private fun ListBlock(items: List<MarkdownListItem>, numbering: ((Int) -> String
                                 Icon(MyIcon.Check, colors.onAccent, Tokens.Size.IconSm)
                             }
                         }
-                        numbering != null -> Label(numbering(index), style = Tokens.Type.Prose, color = colors.textMuted)
+                        numbering != null -> Label(numbering(index), style = textStyle, color = colors.textMuted)
                         else -> Dot(colors.textMuted)
                     }
                 }
 
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                    Prose(item.text)
+                    Prose(item.text, textStyle)
 
                     if (item.children.isNotEmpty()) {
-                        MarkdownBlocks(item.children)
+                        MarkdownBlocks(item.children, textStyle, blockSpacing)
                     }
                 }
             }

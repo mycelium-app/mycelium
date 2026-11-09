@@ -8,7 +8,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -57,6 +56,7 @@ import kotlinx.coroutines.launch
 import mycelium.api.Project
 import mycelium.state.AppState
 import mycelium.state.Store
+import mycelium.state.parsedMarkdown
 import mycelium.state.ThreadItem
 import mycelium.api.ConversationStatus
 import mycelium.state.agentAccounts
@@ -285,14 +285,14 @@ private fun InboxItemRow(store: Store, state: AppState, item: InboxItem, focused
             MyButton({ expanded = !expanded }, icon = if (expanded) MyIcon.ChevronUp else MyIcon.ChevronDown, description = if (expanded) "Show less of ${conversation.title}" else "Show more of ${conversation.title}", size = ButtonSize.Sm, muted = true)
         }
 
-        item.context?.let { BasicText(inlineText(it, colors.textMuted), style = Tokens.Type.Ui, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+        item.context?.let { MarkdownText(it, style = Tokens.Type.Ui, color = colors.textMuted, maxLines = 2, overflow = TextOverflow.Ellipsis) }
 
         if (expanded) {
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                 for (message in recent) {
                     when (message) {
-                        is ThreadItem.UserMessage -> Label("You: ${message.text}", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                        is ThreadItem.AgentMessage -> Label(message.text, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                        is ThreadItem.UserMessage -> MarkdownText("You: ${message.text}", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                        is ThreadItem.AgentMessage -> MarkdownText(message.text, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 4, overflow = TextOverflow.Ellipsis)
                         else -> Unit
                     }
                 }
@@ -340,7 +340,7 @@ private fun FlagCard(text: String, onReply: (String) -> Unit) {
 
         Column(Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             if (text.isNotBlank()) {
-                Label(text, style = Tokens.Type.Ui)
+                MarkdownBlocks(parsedMarkdown(text), textStyle = Tokens.Type.Ui, blockSpacing = Tokens.Space.S2)
             }
 
             TextInput(reply, { reply = it }, "Reply", Modifier.fillMaxWidth(), placeholder = "Reply to this chat", onSubmit = ::send)
@@ -383,7 +383,7 @@ private fun FeedPostRow(post: FeedPost, onOpenConversation: (String) -> Unit) {
                 Label(post.time, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
             }
 
-            Label(post.text)
+            MarkdownBlocks(parsedMarkdown(post.text), textStyle = Tokens.Type.Ui, blockSpacing = Tokens.Space.S0_5)
 
             Row(
                 Modifier.heightIn(min = touchMin(Tokens.Size.ControlSm + Tokens.Space.S0_5)).pressable({ onOpenConversation(post.conversationId) }, description = "Open chat: $place", shape = ControlShape),
