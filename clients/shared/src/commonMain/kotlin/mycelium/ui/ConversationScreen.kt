@@ -609,6 +609,10 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             onArchived()
                         }
                     },
+                    watches = watches,
+                    watchStatus = { watched -> state.conversations[watched]?.status },
+                    onOpenWatch = onOpenConversation,
+                    onStopWatch = { watch -> store.act { api.deleteWatch(watch.id) } },
                 )
 
                 val diffs = store.diffTabs.collectAsState().value[id] ?: DiffTabs()
@@ -678,7 +682,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 )
 
                 conversation.snoozedUntil?.let { until -> SnoozedLine(until, onWake = { store.snooze(conversation, null) }) }
-                WatchLines(watches, onOpen = onOpenConversation, onStop = { watch -> store.act { api.deleteWatch(watch.id) } })
 
                 CompositionLocalProvider(LocalResponseActions provides responses, LocalPausedWorkflow provides PausedWorkflow(conversation.agent, limitActions)) {
                     ThreadView(
@@ -898,6 +901,10 @@ private fun ConversationHeader(
     onCloseSession: () -> Unit,
     onArchive: () -> Unit,
     onDelete: () -> Unit,
+    watches: List<Watch>,
+    watchStatus: (String) -> ConversationStatus?,
+    onOpenWatch: (String) -> Unit,
+    onStopWatch: (Watch) -> Unit,
 ) {
     val colors = MyTheme.colors
     var confirmingDelete by remember(conversation.id) { mutableStateOf(false) }
@@ -909,6 +916,7 @@ private fun ConversationHeader(
     var projectMenuOpen by remember { mutableStateOf(false) }
     var snoozeMenuOpen by remember { mutableStateOf(false) }
     var ideMenuOpen by remember { mutableStateOf(false) }
+    var watchingMenuOpen by remember { mutableStateOf(false) }
     val archived = conversation.archivedAt != null
     val density = LocalDensity.current
     val titleSource = remember { MutableInteractionSource() }
@@ -970,9 +978,11 @@ private fun ConversationHeader(
 
         if (compact && chat) {
             Box(Modifier.weight(0.001f))
+            WatchingButton(watches, watchStatus, onOpenWatch, onStopWatch, compact = true)
             MyButton(onEnvironment, icon = MyIcon.Desktop, description = "Environment", muted = true)
         } else if (compact) {
             MyButton(onNode, icon = node?.let(::nodeIcon) ?: MyIcon.Server, description = "Running on ${node?.name ?: "an unknown node"}", muted = true)
+            WatchingButton(watches, watchStatus, onOpenWatch, onStopWatch, compact = true)
 
             if (!conversation.scratch) {
                 MyButton(onTerminal, icon = MyIcon.Terminal, description = if (terminalShown) "Hide terminal" else "Show terminal", muted = true, selected = terminalShown)
@@ -993,6 +1003,8 @@ private fun ConversationHeader(
                             nodeMenu()
                         }
                     }
+
+                    WatchingButton(watches, watchStatus, onOpenWatch, onStopWatch)
                 }
             }
 
@@ -1027,6 +1039,10 @@ private fun ConversationHeader(
                 nodeMenu()
             }
 
+            if (watchingMenuOpen && watches.isNotEmpty()) {
+                WatchingMenu(watches, watchStatus, onOpenWatch, onStopWatch, onDismiss = { watchingMenuOpen = false })
+            }
+
             if (ideMenuOpen && ide != null) {
                 MenuPopup(onDismiss = { ideMenuOpen = false }) {
                     MenuLabel(ide.where)
@@ -1045,6 +1061,10 @@ private fun ConversationHeader(
 
                     if (placeInMore && node != null) {
                         MenuItem("Running on", onClick = { menuOpen = false; nodeMenuOpen = true }, hint = node.name, leading = nodeIcon(node))
+                    }
+
+                    if (placeInMore && watches.isNotEmpty()) {
+                        MenuItem("Watching", onClick = { menuOpen = false; watchingMenuOpen = true }, hint = watches.size.toString(), leading = MyIcon.Eye)
                     }
 
                     if (ideInMore && ide != null) {
