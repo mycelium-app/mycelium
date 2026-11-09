@@ -162,7 +162,6 @@ const EXCEPTIONS: &[(&str, &str, &str)] = &[
     ("POST", "/api/v1/start-proposals/{id}/connect", "approving an approval card from an agent would let it approve its own request"),
     ("POST", "/api/v1/api-access-requests/{id}/approve", "approving an approval card from an agent would let it approve its own request"),
     ("POST", "/api/v1/ssh-access-requests/{id}/approve", "approving an approval card from an agent would let it approve its own request"),
-    ("GET", "/api/v1/inbox/feed", "the Inbox column reads it, and agents read Murmur through its own integration tool"),
     ("POST", "/api/v1/schedules/{id}/confirm", "approving an approval card from an agent would let it approve its own request"),
     ("GET", "/integrations/oauth/callback", "OAuth callback"),
     ("GET", "/integrations/lastfm/callback", "OAuth callback"),

@@ -221,7 +221,7 @@ async fn voice_never_approves_a_workflow_gate_and_outlines_it_instead() {
     let resolved = call_tool(&server, &link, voice, "resolve_needs_you", json!({"key": format!("{host}/workflow-{workflow}"), "action": "approve"})).await;
 
     assert_eq!(resolved["isError"], true, "{resolved}");
-    assert!(text(&resolved).contains("tap on Approve"));
+    assert!(text(&resolved).contains("tap on Approve"), "{resolved}");
     let steps = sqlx::query_scalar::<_, Value>("select steps from workflows where id = $1").bind(workflow).fetch_one(&server.pool).await.unwrap();
     assert_eq!(steps[0]["status"], "gate");
     let focused = stream.until(|message| match message { StreamMessage::NeedsYouFocus { key } => Some(key), _ => None }).await;
