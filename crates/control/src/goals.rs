@@ -637,6 +637,7 @@ pub async fn send_again(State(state): State<AppState>, user: AuthUser, Path(id):
     }
 
     sqlx::query("update goals set delivery_state = 'pending', delivery_reason = null, why = $2 where conversation_id = $1").bind(id).bind(WHY_SENT_AGAIN).execute(&state.pool).await?;
+    announce(&state, user.id, id).await?;
     deliver(&state, user.id, id, &goal.text).await?;
     announce(&state, user.id, id).await?;
     let goal = read(&state, id).await?.ok_or_else(|| ApiError::not_found("That goal"))?;
