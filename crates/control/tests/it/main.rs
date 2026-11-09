@@ -70,6 +70,7 @@ mod sessions;
 mod sign_in;
 mod snapshots;
 mod ssh_access;
+mod start_proposals;
 mod subscription_prices;
 mod workflows;
 mod stoat;
