@@ -79,18 +79,29 @@ pub async fn end(state: &AppState, owner: Uuid, watch: Uuid) -> ApiResult<()> {
 }
 
 pub async fn watch_conversation(state: &AppState, owner: Uuid, watcher: Uuid, target: Uuid, only_waiting: bool) -> ApiResult<Uuid> {
-    let existing = sqlx::query_scalar::<_, Uuid>("select id from watches where watcher_id = $1 and target_id = $2 and kind = 'conversation' and ended_at is null").bind(watcher).bind(target).fetch_optional(&state.pool).await?;
+    let mut tx = state.pool.begin().await?;
+    let (id, added) = record_conversation_watch(&mut tx, owner, watcher, target, only_waiting).await?;
+    tx.commit().await?;
 
-    if let Some(existing) = existing {
-        sqlx::query("update watches set only_waiting = only_waiting and $2 where id = $1").bind(existing).bind(only_waiting).execute(&state.pool).await?;
-
-        return Ok(existing);
+    if added {
+        state.publish(Some(owner), StreamMessage::WatchesChanged { conversation_id: watcher });
     }
 
-    let id = sqlx::query_scalar::<_, Uuid>("insert into watches (owner, watcher_id, kind, target_id, only_waiting) values ($1, $2, 'conversation', $3, $4) returning id").bind(owner).bind(watcher).bind(target).bind(only_waiting).fetch_one(&state.pool).await?;
-    state.publish(Some(owner), StreamMessage::WatchesChanged { conversation_id: watcher });
-
     Ok(id)
+}
+
+pub async fn record_conversation_watch(tx: &mut sqlx::PgConnection, owner: Uuid, watcher: Uuid, target: Uuid, only_waiting: bool) -> sqlx::Result<(Uuid, bool)> {
+    let existing = sqlx::query_scalar::<_, Uuid>("select id from watches where watcher_id = $1 and target_id = $2 and kind = 'conversation' and ended_at is null").bind(watcher).bind(target).fetch_optional(&mut *tx).await?;
+
+    if let Some(existing) = existing {
+        sqlx::query("update watches set only_waiting = only_waiting and $2 where id = $1").bind(existing).bind(only_waiting).execute(&mut *tx).await?;
+
+        return Ok((existing, false));
+    }
+
+    let id = sqlx::query_scalar::<_, Uuid>("insert into watches (owner, watcher_id, kind, target_id, only_waiting) values ($1, $2, 'conversation', $3, $4) returning id").bind(owner).bind(watcher).bind(target).bind(only_waiting).fetch_one(&mut *tx).await?;
+
+    Ok((id, true))
 }
 
 pub async fn wake_at(state: &AppState, owner: Uuid, watcher: Uuid, due_at: chrono::DateTime<chrono::Utc>, note: &str) -> ApiResult<Uuid> {

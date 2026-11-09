@@ -173,16 +173,13 @@ async fn approve_and_send(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<
 
     let source = found.source_title.as_deref().map(|title| label(found.conversation_id.unwrap_or_default(), title)).unwrap_or_else(|| "another conversation".to_string());
     let text = format!("From {source}:\n\n{}", found.message);
-    let queued = prompts::send(state, owner, found.target_id, PromptRequest { text, ..Default::default() }).await;
+    let manager = found.conversation_id.filter(|_| found.target_archived);
+    let queued = prompts::send_reopening(state, owner, found.target_id, PromptRequest { text, ..Default::default() }, None, manager).await;
 
     if queued.is_ok()
         && let Some(source_id) = found.conversation_id
     {
         crate::conversation_connections::renew(state, owner, source_id, found.target_id).await?;
-
-        if found.target_archived {
-            crate::watches::watch_conversation(state, owner, source_id, found.target_id, false).await?;
-        }
     }
 
     let sent = match queued {

@@ -72,6 +72,17 @@ async fn send(setup: &Setup, from: Uuid, to: Uuid) -> Value {
     tool(setup, from, "send_to_conversation", json!({"conversation": to.to_string(), "message": "One more thing", "reason": "It was missed"})).await
 }
 
+async fn send_over_http(setup: &Setup, from: Uuid, to: Uuid) -> (u16, Value) {
+    let anonymous = setup.server.anonymous();
+    let request = anonymous
+        .post("/api/v1/mcp")
+        .header("authorization", format!("Bearer {}", setup.link.token))
+        .header("x-mycelium-conversation", from.to_string())
+        .json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "send_to_conversation", "arguments": {"conversation": to.to_string(), "message": "One more thing", "reason": "It was missed"}}}));
+
+    anonymous.json(request).await
+}
+
 async fn watchers(server: &Server, id: Uuid) -> Vec<Uuid> {
     sqlx::query_scalar("select watcher_id from watches where target_id = $1 and kind = 'conversation' and ended_at is null").bind(id).fetch_all(&server.pool).await.unwrap()
 }
@@ -286,16 +297,25 @@ async fn a_manager_send_that_fails_leaves_the_conversation_archived_and_unwatche
     let chat = managed_chat(&setup, 0).await;
     sqlx::query("update conversations set side_kind = 'subagent' where id = $1").bind(chat).execute(&setup.server.pool).await.unwrap();
     archive_and_wait_for_watches_to_end(&setup, chat).await;
-    let anonymous = setup.server.anonymous();
-    let request = anonymous
-        .post("/api/v1/mcp")
-        .header("authorization", format!("Bearer {}", setup.link.token))
-        .header("x-mycelium-conversation", setup.manager.to_string())
-        .json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "send_to_conversation", "arguments": {"conversation": chat.to_string(), "message": "One more thing", "reason": "It was missed"}}}));
 
-    let (status, body) = anonymous.json(request).await;
+    let (status, body) = send_over_http(&setup, setup.manager, chat).await;
 
     assert_eq!((status, body["error"].clone()), (400, json!("read_only")), "{body}");
+    assert!(archived(&setup.server, chat).await);
+    assert!(!received(&setup.server, chat).await);
+    assert!(watchers(&setup.server, chat).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_manager_send_whose_watch_cannot_be_written_reopens_nothing_and_delivers_nothing() {
+    let setup = setup().await;
+    let chat = managed_chat(&setup, 0).await;
+    archive_and_wait_for_watches_to_end(&setup, chat).await;
+    sqlx::query("alter table watches add constraint refuses_conversation_watches check (kind <> 'conversation') not valid").execute(&setup.server.pool).await.unwrap();
+
+    let (status, body) = send_over_http(&setup, setup.manager, chat).await;
+
+    assert!(status >= 400, "{status} {body}");
     assert!(archived(&setup.server, chat).await);
     assert!(!received(&setup.server, chat).await);
     assert!(watchers(&setup.server, chat).await.is_empty());

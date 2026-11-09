@@ -190,6 +190,10 @@ pub async fn send(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
 }
 
 pub async fn send_from(state: &AppState, owner: Uuid, id: Uuid, request: PromptRequest, origin: Option<&str>) -> ApiResult<Sent> {
+    send_reopening(state, owner, id, request, origin, None).await
+}
+
+pub async fn send_reopening(state: &AppState, owner: Uuid, id: Uuid, request: PromptRequest, origin: Option<&str>, manager: Option<Uuid>) -> ApiResult<Sent> {
     let text = request.text.trim();
 
     if text.is_empty() && request.attachments.is_empty() {
@@ -212,22 +216,41 @@ pub async fn send_from(state: &AppState, owner: Uuid, id: Uuid, request: PromptR
     }
 
     if chats::is_chat(&row) {
+        if manager.is_some() && row.archived_at.is_some() {
+            return Err(ApiError::conflict("target_archived", "The conversation this was for has been archived. Decline it, or ask the agent to propose it again."));
+        }
+
         drop(tx);
         chats::send(state, owner, id, text, attachments).await?;
 
         return Ok(Sent::Delivered);
     }
 
+    let mut reopened = None;
+
     if row.archived_at.is_some() {
         let restored = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set archived_at = null where id = $1 returning {CONVERSATION_COLUMNS}")))
             .bind(id)
             .fetch_one(&mut *tx)
             .await?;
-        state.publish(Some(owner), StreamMessage::Conversation(restored.to_proto()?));
+
+        if let Some(manager) = manager {
+            crate::watches::record_conversation_watch(&mut tx, owner, manager, id, false).await?;
+        }
+
+        reopened = Some(restored.to_proto()?);
     }
 
     enqueue(&mut tx, id, text, &attachments, origin).await?;
     tx.commit().await?;
+
+    if let Some(reopened) = reopened {
+        state.publish(Some(owner), StreamMessage::Conversation(reopened));
+
+        if let Some(manager) = manager {
+            state.publish(Some(owner), StreamMessage::WatchesChanged { conversation_id: manager });
+        }
+    }
 
     pump(state, id, false).await?;
     publish_queue(state, owner, id).await?;
