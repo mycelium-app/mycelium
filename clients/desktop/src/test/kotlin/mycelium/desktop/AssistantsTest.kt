@@ -103,6 +103,15 @@ class AssistantsTest {
     }
 
     @Test
+    fun theBuiltInVoiceAssistantIsLeftOutOfTheSidebarAssistants() {
+        shell(mutableListOf(assistantJson("Archivist"), assistantJson("Voice").replace("\"preferences\"", "\"builtin_key\":\"voice\",\"preferences\"")))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Archivist, Idle").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, rule.onAllNodesWithContentDescription("Voice, Idle").fetchSemanticsNodes().size)
+        rule.captureScreen("sidebar-assistants-without-voice")
+    }
+
+    @Test
     fun theConversationsLabelSitsApartFromTheAssistantsAndLinesUpWithTheirLabel() {
         shell(mutableListOf(assistantJson("Stand-up")))
 
