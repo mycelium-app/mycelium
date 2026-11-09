@@ -205,6 +205,16 @@ impl StreamClient {
     }
 }
 
+pub async fn next_matching<T>(link: &mut NodeLink, pick: impl Fn(&ControlToNode) -> Option<T>) -> T {
+    loop {
+        let message = link.next().await;
+
+        if let Some(found) = pick(&message) {
+            return found;
+        }
+    }
+}
+
 pub struct NodeLink {
     pub id: Uuid,
     pub token: String,

@@ -72,6 +72,7 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value> {
         GitCommand::TownPropose => run_town(cwd, &["propose"]),
         GitCommand::MovePlan => move_plan(cwd),
         GitCommand::Snapshot { .. } => snapshot(cwd),
+        GitCommand::Folder { .. } => Ok(serde_json::json!({"path": cwd.display().to_string()})),
         GitCommand::Apply { branch, head, patch, bundle, credentials, approved_urls } => apply(cwd, &branch, &head, &patch, bundle.as_deref(), credentials.as_ref(), &approved_urls),
         GitCommand::Undo { branch, previous, branch_before } => undo(cwd, &branch, &previous, branch_before.as_deref()),
         GitCommand::ReadFile { path } => read_file(cwd, &path),

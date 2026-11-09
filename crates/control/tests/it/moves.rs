@@ -2,8 +2,8 @@ use axum::Json;
 use axum::Router;
 use axum::routing::get;
 use base64::Engine;
-use crate::common::{NodeLink, Server, eventually, serve};
-use mycelium_proto::link::{ControlToNode, GitCommand, ListeningPort, NodeToControl, ProcessUsage, ResourceSample};
+use crate::common::{NodeLink, Server, eventually, next_matching, serve};
+use mycelium_proto::link::{ControlToNode, FolderFile, GitCommand, ListeningPort, NodeToControl, ProcessUsage, ResourceSample};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -12,6 +12,7 @@ const SESSION: &str = "acp-1";
 const SOURCE_PATH: &str = "/w/acme-org/app";
 const TARGET_PATH: &str = "/b/acme-org/app";
 const TRANSCRIPT: &str = ".claude/projects/-w-acme-org-app/acp-1.jsonl";
+const ASSISTANT_NODE_VERSION: &str = "0.31.0";
 
 struct Moving {
     server: Server,
@@ -199,6 +200,171 @@ async fn a_folder_that_is_not_a_forge_repository_cannot_be_moved_and_the_plan_sa
     assert_eq!(status, 200, "{plan}");
     assert_eq!(plan["movable"], false);
     assert!(plan["reason"].as_str().unwrap().contains("not a forge repository"), "{plan}");
+}
+
+fn stored_file(path: &str, content: &str) -> FolderFile {
+    FolderFile { path: path.into(), data_base64: base64::engine::general_purpose::STANDARD.encode(content) }
+}
+
+async fn answer_read_folder(link: &mut NodeLink, files: Vec<FolderFile>) {
+    let request_id = next_matching(link, |message| match message {
+        ControlToNode::ReadFolder { request_id, .. } => Some(*request_id),
+        _ => None,
+    })
+    .await;
+
+    link.send(NodeToControl::FolderFiles { request_id, files, truncated: false, error: None }).await;
+}
+
+async fn start_assistant(source_version: &str) -> (Moving, String) {
+    let server = Server::start().await;
+    let mut source = server.online_node_as("laptop", source_version).await;
+    let target = server.online_node_as("build", ASSISTANT_NODE_VERSION).await;
+    let (status, assistant) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "War room", "instructions": "Run the war room.", "preferences": {"models": [{"agent": "claude"}], "nodes": [source.id]}}))).await;
+    assert_eq!(status, 201, "{assistant}");
+    let id = assistant["id"].as_str().unwrap().to_string();
+    server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/files/notes/old.md")).body("old")).await;
+    let (status, saved) = server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/secrets/GITHUB_TOKEN")).json(&json!({"value": TOKEN}))).await;
+    assert_eq!(status, 200, "{saved}");
+    let (status, started) = server.user.json(server.user.post(&format!("/api/v1/assistants/{id}/prompt")).json(&json!({"text": "Open the war room"}))).await;
+    assert_eq!(status, 200, "{started}");
+    let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
+
+    next_matching(&mut source, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
+    source.start_session(conversation, SESSION).await;
+    next_matching(&mut source, |message| matches!(message, ControlToNode::Prompt { .. }).then_some(())).await;
+
+    let user = server.user.clone();
+    eventually("the session id", || async { (user.json(user.get(&format!("/api/v1/conversations/{conversation}"))).await.1["acp_session_id"] == json!(SESSION)).then_some(()) }).await;
+
+    source.send(NodeToControl::AcpUpdate { conversation_id: conversation, seq: 1, update: json!({"sessionUpdate": "agent_message_chunk"}) }).await;
+    source.send(NodeToControl::TurnEnd { conversation_id: conversation, seq: 2, stop_reason: "end_turn".into(), usage: None }).await;
+    answer_read_folder(&mut source, vec![stored_file("AGENTS.md", "Run the war room."), stored_file("notes/old.md", "old")]).await;
+    source.barrier(conversation, 3).await;
+
+    (Moving { server, source, target, forge_id: Uuid::nil(), conversation }, id)
+}
+
+async fn assistant_folder_reaches_the_target(moving: &mut Moving, id: &str) -> (String, String) {
+    let root = format!(".mycelium-assistants/{id}");
+    let source_transcript = format!(".claude/projects/-w--mycelium-assistants-{id}/acp-1.jsonl");
+    let engine = base64::engine::general_purpose::STANDARD;
+    moving.source.send(NodeToControl::Transcript { path: source_transcript.clone(), offset: 0, data: engine.encode("one\ntwo\nxyz"), size: None }).await;
+
+    let (cwd, command) = answer_next(&mut moving.source, Ok(json!({"path": format!("/w/{root}"), "transcript": {"path": source_transcript, "bytes": 11}}))).await;
+    assert_eq!((cwd.as_str(), command), (root.as_str(), GitCommand::Folder { session_id: Some(SESSION.into()) }));
+    answer_read_folder(&mut moving.source, vec![stored_file("AGENTS.md", "Run the war room."), stored_file("notes/old.md", "old"), stored_file("notes/between-turns.md", "fresh")]).await;
+
+    let (written_root, written, replace) = next_matching(&mut moving.target, |message| match message {
+        ControlToNode::WriteFolder { root, files, replace } => Some((root.clone(), files.clone(), *replace)),
+        _ => None,
+    })
+    .await;
+    assert_eq!((written_root.as_str(), replace), (root.as_str(), true));
+    assert_eq!(written.iter().map(|file| file.path.as_str()).collect::<Vec<_>>(), vec!["AGENTS.md", "notes/between-turns.md", "notes/old.md"]);
+
+    let (cwd, command) = answer_next(&mut moving.target, Ok(json!({"path": format!("/b/{root}")}))).await;
+    assert_eq!((cwd.as_str(), command), (root.as_str(), GitCommand::Folder { session_id: None }));
+
+    match next_command(&mut moving.target).await {
+        ControlToNode::RestoreTranscript { path, offset, data } => assert_eq!((path, offset, data), (format!(".claude/projects/-b--mycelium-assistants-{id}/acp-1.jsonl"), 0, engine.encode("one\ntwo\nxyz"))),
+        other => panic!("expected the transcript, got {other:?}"),
+    }
+
+    (root, TOKEN.to_string())
+}
+
+#[tokio::test]
+async fn the_plan_for_an_assistants_conversation_has_no_refusal() {
+    let (mut moving, _) = start_assistant(ASSISTANT_NODE_VERSION).await;
+    moving.source.send(NodeToControl::Resources { sample: sample(moving.conversation) }).await;
+
+    let (status, plan) = moving.server.user.json(moving.server.user.get(&format!("/api/v1/conversations/{}/move-plan?node_id={}", moving.conversation, moving.target.id))).await;
+
+    assert_eq!(status, 200, "{plan}");
+    assert_eq!((plan["movable"].clone(), plan["clones_project"].clone(), plan["agent_session"].clone()), (json!(true), json!(false), json!(true)), "{plan}");
+    assert!(plan.get("reason").is_none(), "{plan}");
+}
+
+#[tokio::test]
+async fn an_assistants_conversation_moves_with_its_storage_transcript_and_secrets() {
+    let (mut moving, id) = start_assistant(ASSISTANT_NODE_VERSION).await;
+
+    let (status, accepted) = request_move(&moving, false).await;
+    assert_eq!((status, accepted["state"].clone()), (202, json!("moving")), "{accepted}");
+
+    let (root, secret) = assistant_folder_reaches_the_target(&mut moving, &id).await;
+    assert_eq!(next_command(&mut moving.target).await, ControlToNode::ContinueSequence { conversation_id: moving.conversation, after: 3 });
+
+    match next_command(&mut moving.target).await {
+        ControlToNode::StartSession { conversation_id, cwd, resume, fork, env, .. } => {
+            assert_eq!((conversation_id, cwd.as_str(), resume.as_deref(), fork), (moving.conversation, root.as_str(), Some(SESSION), false));
+            assert_eq!(env, vec![("GITHUB_TOKEN".to_string(), secret)]);
+        }
+        other => panic!("expected start_session, got {other:?}"),
+    }
+
+    moving.target.start_session(moving.conversation, SESSION).await;
+    let done = progress(&moving, "done").await;
+
+    assert_eq!(done["result_id"], json!(moving.conversation));
+    assert_eq!(next_command(&mut moving.source).await, ControlToNode::CloseSession { conversation_id: moving.conversation });
+    let conversation = moving.server.conversation(moving.conversation).await;
+    assert_eq!((conversation["node_id"].clone(), conversation["cwd"].clone(), conversation["assistant_id"].clone()), (json!(moving.target.id), json!(root), json!(id)));
+
+    let (_, listed) = moving.server.user.json(moving.server.user.get(&format!("/api/v1/assistants/{id}/files"))).await;
+    assert!(listed.as_array().unwrap().iter().any(|file| file["path"] == "notes/between-turns.md"), "{listed}");
+}
+
+#[tokio::test]
+async fn forking_an_assistants_conversation_keeps_the_fork_with_the_assistant() {
+    let (mut moving, id) = start_assistant(ASSISTANT_NODE_VERSION).await;
+    request_move(&moving, true).await;
+
+    let (root, secret) = assistant_folder_reaches_the_target(&mut moving, &id).await;
+    let (forked, env, resume, fork) = next_matching(&mut moving.target, |message| match message {
+        ControlToNode::StartSession { conversation_id, env, resume, fork, .. } => Some((*conversation_id, env.clone(), resume.clone(), *fork)),
+        _ => None,
+    })
+    .await;
+
+    assert_eq!((resume.as_deref(), fork, env), (Some(SESSION), true, vec![("GITHUB_TOKEN".to_string(), secret)]));
+    moving.target.start_session(forked, "acp-2").await;
+    progress(&moving, "done").await;
+
+    let fork = moving.server.conversation(forked).await;
+    assert_eq!((fork["cwd"].clone(), fork["assistant_id"].clone()), (json!(root), json!(id)));
+    assert_eq!(moving.server.conversation(moving.conversation).await["node_id"], json!(moving.source.id));
+}
+
+#[tokio::test]
+async fn an_assistants_conversation_on_a_node_too_old_to_move_says_which_node_to_update() {
+    let (moving, _) = start_assistant("0.30.0").await;
+
+    let (status, refused) = moving.server.user.json(moving.server.user.get(&format!("/api/v1/conversations/{}/move-plan?node_id={}", moving.conversation, moving.target.id))).await;
+
+    assert_eq!((status, refused["error"].clone()), (409, json!("node_outdated")), "{refused}");
+    assert!(refused["message"].as_str().unwrap().contains("laptop"), "{refused}");
+}
+
+#[tokio::test]
+async fn moving_an_ordinary_folder_with_no_forge_is_refused_and_leaves_the_conversation_where_it_is() {
+    let server = Server::start().await;
+    let mut source = server.online_node("laptop").await;
+    let target = server.online_node("build").await;
+    let conversation = server.create_conversation(source.id, None).await;
+    source.expect_start_session().await;
+    source.start_session(conversation.id, SESSION).await;
+    source.send(NodeToControl::TurnEnd { conversation_id: conversation.id, seq: 1, stop_reason: "end_turn".into(), usage: None }).await;
+    source.barrier(conversation.id, 2).await;
+    let moving = Moving { server, source, target, forge_id: Uuid::nil(), conversation: conversation.id };
+
+    let (status, accepted) = request_move(&moving, false).await;
+    assert_eq!(status, 202, "{accepted}");
+    let failed = progress(&moving, "failed").await;
+
+    assert!(failed["message"].as_str().unwrap().contains("not a forge repository"), "{failed}");
+    assert_eq!(moving.server.conversation(moving.conversation).await["node_id"], json!(moving.source.id));
 }
 
 #[tokio::test]

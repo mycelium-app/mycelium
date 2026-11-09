@@ -1,10 +1,11 @@
+use crate::assistants;
 use crate::auth::AuthUser;
 use crate::conversations::require_signed_in_account;
 use crate::error::{ApiError, ApiResult};
 use crate::forges;
 use crate::git::relay;
 use crate::instructions;
-use crate::nodes::node_offline;
+use crate::nodes::{node_has, node_offline};
 use crate::projects::{self, PROJECT_COLUMNS, ProjectRow};
 use crate::prompts::pump;
 use crate::state::AppState;
@@ -28,6 +29,7 @@ const SESSION_START_WAIT: Duration = Duration::from_secs(90);
 const POLL: Duration = Duration::from_millis(100);
 const TRANSCRIPT_CHUNK_BYTES: usize = 192 * 1024;
 const WATCH_SECONDS: u32 = 10;
+const ASSISTANT_MOVE_SINCE: (u64, u64, u64) = (0, 31, 0);
 
 #[derive(Deserialize)]
 pub struct PlanQuery {
@@ -39,6 +41,7 @@ struct Route {
     source_node_name: String,
     source_project: Option<ProjectRow>,
     target_project: Option<ProjectRow>,
+    assistant_id: Option<Uuid>,
 }
 
 async fn route(state: &AppState, owner: Uuid, id: Uuid, target_node_id: Uuid) -> ApiResult<Route> {
@@ -69,6 +72,18 @@ async fn route(state: &AppState, owner: Uuid, id: Uuid, target_node_id: Uuid) ->
         require_signed_in_account(state, target_node_id, parse_enum(&source.agent)?, account).await?;
     }
 
+    let assistant_id = source.assistant_id.filter(|assistant_id| source.cwd == assistants::folder_of(*assistant_id));
+
+    if assistant_id.is_some() {
+        for node_id in [source.node_id, target_node_id] {
+            let (name, version) = sqlx::query_as::<_, (String, String)>("select name, version from nodes where id = $1").bind(node_id).fetch_one(&state.pool).await?;
+
+            if !node_has(&version, ASSISTANT_MOVE_SINCE) {
+                return Err(ApiError::conflict("node_outdated", format!("Update {name} to move an assistant's conversation.")));
+            }
+        }
+    }
+
     let source_node_name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(source.node_id).fetch_one(&state.pool).await?;
     let recorded = sqlx::query_scalar::<_, Option<Uuid>>("select project_id from conversations where id = $1").bind(id).fetch_one(&state.pool).await?;
     let on_source = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("select {PROJECT_COLUMNS} from projects where owner = $1 and node_id = $2"))).bind(owner).bind(source.node_id).fetch_all(&state.pool).await?;
@@ -88,7 +103,7 @@ async fn route(state: &AppState, owner: Uuid, id: Uuid, target_node_id: Uuid) ->
         None => None,
     };
 
-    Ok(Route { source, source_node_name, source_project, target_project })
+    Ok(Route { source, source_node_name, source_project, target_project, assistant_id })
 }
 
 fn stays_behind(sample: &ResourceSample, conversation_id: Uuid, cwd: &str) -> (Vec<u16>, Vec<String>) {
@@ -126,15 +141,15 @@ pub async fn plan(State(state): State<AppState>, user: AuthUser, Path(id): Path<
     let (stays_ports, stays_processes) = latest.map(|sample| stays_behind(&sample, id, &source.cwd)).unwrap_or_default();
 
     let repository = route.source_project.as_ref().and_then(|project| project.repository.as_ref());
-    let reason = if repository.is_none() {
+    let reason = if repository.is_none() && route.assistant_id.is_none() {
         Some("This folder is not a forge repository, so Mycelium cannot find the same project on the other node. Set the project up from a forge first.".to_string())
     } else {
         None
     };
 
-    let planned = match reason {
-        None => relay(&state, source.node_id, source.cwd.clone(), GitCommand::MovePlan).await,
-        Some(_) => Ok(serde_json::Value::Null),
+    let planned = match (&reason, route.assistant_id) {
+        (None, None) => relay(&state, source.node_id, source.cwd.clone(), GitCommand::MovePlan).await,
+        _ => Ok(serde_json::Value::Null),
     };
     let (branch, changed_files, reason) = match (planned, reason) {
         (_, Some(reason)) => (None, 0, Some(reason)),
@@ -244,63 +259,82 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
         return Err(reason("The conversation is not between turns."));
     }
 
-    let Some((source_project, forge_id, repository)) = route.source_project.clone().and_then(|project| project.forge_id.zip(project.repository.clone()).map(|(forge_id, repository)| (project, forge_id, repository))) else {
-        return Err(reason("This folder is not a forge repository, so Mycelium cannot find the same project on the other node."));
-    };
-
     let source = &route.source;
     let target_node_id = progress.node_id;
-    let snapshot = relay(state, source.node_id, source.cwd.clone(), GitCommand::Snapshot { session_id: source.acp_session_id.clone() }).await.map_err(|error| reason(error.message()))?;
+    let source_project_id = route.source_project.as_ref().map(|project| project.id);
 
-    let forge = forges::find_owned(state, forge_id, owner).await.map_err(|error| reason(error.message()))?;
-    let target_project = match route.target_project.clone() {
-        Some(project) => project,
+    let (snapshot, target_cwd, transcript_cwd, target_project_id, applied) = match route.assistant_id {
+        Some(assistant_id) => {
+            let located = relay(state, source.node_id, source.cwd.clone(), GitCommand::Folder { session_id: source.acp_session_id.clone() }).await.map_err(|error| reason(error.message()))?;
+            assistants::copy_up(state, owner, source.node_id, assistant_id).await.map_err(|error| reason(error.message()))?;
+            assistants::copy_down(state, target_node_id, assistant_id).await.map_err(|error| reason(error.message()))?;
+            let target_folder = relay(state, target_node_id, source.cwd.clone(), GitCommand::Folder { session_id: None }).await.map_err(|error| reason(error.message()))?;
+            let Some(path) = target_folder["path"].as_str() else {
+                return Err(reason("The other node did not say where the assistant's folder is."));
+            };
+
+            (located, source.cwd.clone(), path.to_string(), None, None)
+        }
         None => {
-            let path = projects::clone_repository(state, &forge, &repository, target_node_id, None).await.map_err(|error| reason(error.message()))?;
-            let name = repository.rsplit('/').next().unwrap_or(&repository).to_string();
+            let Some((source_project, forge_id, repository)) = route.source_project.clone().and_then(|project| project.forge_id.zip(project.repository.clone()).map(|(forge_id, repository)| (project, forge_id, repository))) else {
+                return Err(reason("This folder is not a forge repository, so Mycelium cannot find the same project on the other node."));
+            };
 
-            sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!(
-                "insert into projects (owner, node_id, name, path, forge_id, repository, group_id) values ($1, $2, $3, $4, $5, $6, $7)
-                 on conflict (node_id, path) do update set forge_id = excluded.forge_id, repository = excluded.repository where projects.owner = excluded.owner
-                 returning {PROJECT_COLUMNS}",
-            )))
-            .bind(owner)
-            .bind(target_node_id)
-            .bind(&name)
-            .bind(&path)
-            .bind(forge_id)
-            .bind(&repository)
-            .bind(source_project.group_id)
-            .fetch_optional(&state.pool)
-            .await
-            .map_err(|error| reason(ApiError::from(error).message()))?
-            .ok_or_else(|| reason("The folder on the other node already belongs to another account. Choose a different node."))?
+            let snapshot = relay(state, source.node_id, source.cwd.clone(), GitCommand::Snapshot { session_id: source.acp_session_id.clone() }).await.map_err(|error| reason(error.message()))?;
+
+            let forge = forges::find_owned(state, forge_id, owner).await.map_err(|error| reason(error.message()))?;
+            let target_project = match route.target_project.clone() {
+                Some(project) => project,
+                None => {
+                    let path = projects::clone_repository(state, &forge, &repository, target_node_id, None).await.map_err(|error| reason(error.message()))?;
+                    let name = repository.rsplit('/').next().unwrap_or(&repository).to_string();
+
+                    sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!(
+                        "insert into projects (owner, node_id, name, path, forge_id, repository, group_id) values ($1, $2, $3, $4, $5, $6, $7)
+                         on conflict (node_id, path) do update set forge_id = excluded.forge_id, repository = excluded.repository where projects.owner = excluded.owner
+                         returning {PROJECT_COLUMNS}",
+                    )))
+                    .bind(owner)
+                    .bind(target_node_id)
+                    .bind(&name)
+                    .bind(&path)
+                    .bind(forge_id)
+                    .bind(&repository)
+                    .bind(source_project.group_id)
+                    .fetch_optional(&state.pool)
+                    .await
+                    .map_err(|error| reason(ApiError::from(error).message()))?
+                    .ok_or_else(|| reason("The folder on the other node already belongs to another account. Choose a different node."))?
+                }
+            };
+
+            let target_cwd = match source.cwd.strip_prefix(&source_project.path) {
+                Some(inside) if inside.is_empty() || inside.starts_with('/') => format!("{}{inside}", target_project.path),
+                _ => target_project.path.clone(),
+            };
+
+            let apply = GitCommand::Apply {
+                branch: snapshot["branch"].as_str().unwrap_or_default().to_string(),
+                head: snapshot["head"].as_str().unwrap_or_default().to_string(),
+                patch: snapshot["patch"].as_str().unwrap_or_default().to_string(),
+                bundle: snapshot["bundle"].as_str().map(str::to_string),
+                credentials: Some(forge.git_credentials().map_err(|error| reason(error.message()))?),
+                approved_urls: forge.approved_clone_urls(&state.http, &repository).await.map_err(|error| reason(error.message()))?,
+            };
+            let applied = relay(state, target_node_id, target_project.path.clone(), apply).await.map_err(|error| reason(error.message()))?;
+
+            (snapshot, target_cwd.clone(), target_cwd, Some(target_project.id), Some((target_project.path.clone(), applied)))
         }
     };
 
-    let target_cwd = match source.cwd.strip_prefix(&source_project.path) {
-        Some(inside) if inside.is_empty() || inside.starts_with('/') => format!("{}{inside}", target_project.path),
-        _ => target_project.path.clone(),
-    };
-
     let target_name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(target_node_id).fetch_one(&state.pool).await.map_err(|error| reason(ApiError::from(error).message()))?;
-
-    let apply = GitCommand::Apply {
-        branch: snapshot["branch"].as_str().unwrap_or_default().to_string(),
-        head: snapshot["head"].as_str().unwrap_or_default().to_string(),
-        patch: snapshot["patch"].as_str().unwrap_or_default().to_string(),
-        bundle: snapshot["bundle"].as_str().map(str::to_string),
-        credentials: Some(forge.git_credentials().map_err(|error| reason(error.message()))?),
-        approved_urls: forge.approved_clone_urls(&state.http, &repository).await.map_err(|error| reason(error.message()))?,
-    };
-    let applied = relay(state, target_node_id, target_project.path.clone(), apply).await.map_err(|error| reason(error.message()))?;
 
     let rest = async {
         let reason = |text: &str| text.to_string();
 
 
         if let Some(session_id) = &source.acp_session_id {
-            copy_transcript(state, source, target_node_id, session_id, &snapshot["transcript"], &target_cwd).await.map_err(|text| reason(&text))?;
+            copy_transcript(state, source, target_node_id, session_id, &snapshot["transcript"], &transcript_cwd).await.map_err(|text| reason(&text))?;
         }
 
         let agent: AgentId = parse_enum(&source.agent).map_err(|error| reason(error.message()))?;
@@ -309,7 +343,7 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
         let started = if progress.fork {
             let title = format!("{} (fork)", source.title);
             let forked = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
-                "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, archived_at) values ($1, $2, $3, $4, $5, 'done', $6, $7, now())
+                "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, assistant_id, archived_at) values ($1, $2, $3, $4, $5, 'done', $6, $7, $8, now())
                  returning {CONVERSATION_COLUMNS}",
             )))
             .bind(owner)
@@ -318,15 +352,17 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
             .bind(&target_cwd)
             .bind(&title)
             .bind(&source.account)
-            .bind(target_project.id)
+            .bind(target_project_id)
+            .bind(route.assistant_id)
             .fetch_one(&state.pool)
             .await
             .map_err(|error| reason(ApiError::from(error).message()))?;
 
             let natively = agent == AgentId::Claude && source.acp_session_id.is_some();
             let instructions = instructions::session_layer(state, forked.id).await.map_err(|error| reason(error.message()))?;
+            let env = assistants::secret_env(state, forked.id).await.map_err(|error| reason(error.message()))?;
             let mcp_token = crate::mcp_tokens::mint(state, target_node_id, forked.id).await.map_err(|error| reason(error.message()))?;
-            state.hub.send(target_node_id, ControlToNode::StartSession { conversation_id: forked.id, agent, cwd: target_cwd.clone(), resume: source.acp_session_id.clone(), fork: natively, account: source.account.clone(), instructions, reload: false, env: Vec::new(), mcp_token });
+            state.hub.send(target_node_id, ControlToNode::StartSession { conversation_id: forked.id, agent, cwd: target_cwd.clone(), resume: source.acp_session_id.clone(), fork: natively, account: source.account.clone(), instructions, reload: false, env, mcp_token });
 
             match wait_for_session(state, target_node_id, forked.id, &target_name).await {
                 Ok(()) => {
@@ -347,10 +383,11 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
             let after = highest_node_seq(&state.pool, conversation_id).await.map_err(|error| reason(ApiError::from(error).message()))?;
             state.hub.send(target_node_id, ControlToNode::ContinueSequence { conversation_id, after });
 
-            sqlx::query("update conversations set node_id = $2, cwd = $3, project_id = $4, updated_at = now() where id = $1").bind(conversation_id).bind(target_node_id).bind(&target_cwd).bind(target_project.id).execute(&state.pool).await.map_err(|error| reason(ApiError::from(error).message()))?;
+            sqlx::query("update conversations set node_id = $2, cwd = $3, project_id = $4, updated_at = now() where id = $1").bind(conversation_id).bind(target_node_id).bind(&target_cwd).bind(target_project_id).execute(&state.pool).await.map_err(|error| reason(ApiError::from(error).message()))?;
             let instructions = instructions::session_layer(state, conversation_id).await.map_err(|error| reason(error.message()))?;
+            let env = assistants::secret_env(state, conversation_id).await.map_err(|error| reason(error.message()))?;
             let mcp_token = crate::mcp_tokens::mint(state, target_node_id, conversation_id).await.map_err(|error| reason(error.message()))?;
-            state.hub.send(target_node_id, ControlToNode::StartSession { conversation_id, agent, cwd: target_cwd.clone(), resume: source.acp_session_id.clone(), fork: false, account: source.account.clone(), instructions, reload: false, env: Vec::new(), mcp_token });
+            state.hub.send(target_node_id, ControlToNode::StartSession { conversation_id, agent, cwd: target_cwd.clone(), resume: source.acp_session_id.clone(), fork: false, account: source.account.clone(), instructions, reload: false, env, mcp_token });
 
             match wait_for_session(state, target_node_id, conversation_id, &target_name).await {
                 Ok(()) => {
@@ -369,7 +406,7 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
                     .bind(conversation_id)
                     .bind(source.node_id)
                     .bind(&source.cwd)
-                    .bind(source_project.id)
+                    .bind(source_project_id)
                     .bind(&source.status)
                     .bind(source.updated_at)
                     .fetch_one(&state.pool)
@@ -393,6 +430,10 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
         return rest;
     };
 
+    let Some((target_path, applied)) = applied else {
+        return Err(reason(&text));
+    };
+
     let undo = GitCommand::Undo {
         branch: snapshot["branch"].as_str().unwrap_or_default().to_string(),
         previous: applied["previous"].as_str().unwrap_or_default().to_string(),
@@ -400,9 +441,9 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
     };
     let previous = applied["previous"].as_str().unwrap_or("its previous branch");
 
-    match relay(state, target_node_id, target_project.path.clone(), undo).await {
+    match relay(state, target_node_id, target_path.clone(), undo).await {
         Ok(_) => Err(reason(&text)),
-        Err(error) => Err(format!("{text} The work from {source_name} could not be removed from the project folder on {target_name}: {}. In {}, run git reset --hard, then git clean -fd, then git checkout {previous}, and delete the branch {} if it did not exist there before. The conversation is still on {source_name}.", error.message(), target_project.path, snapshot["branch"].as_str().unwrap_or_default())),
+        Err(error) => Err(format!("{text} The work from {source_name} could not be removed from the project folder on {target_name}: {}. In {}, run git reset --hard, then git clean -fd, then git checkout {previous}, and delete the branch {} if it did not exist there before. The conversation is still on {source_name}.", error.message(), target_path, snapshot["branch"].as_str().unwrap_or_default())),
     }
 }
 

@@ -221,6 +221,15 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_that_is_not_a_repository_still_reports_its_path() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let output = run(dir.path(), GitCommand::Folder { session_id: None }).unwrap();
+
+        assert_eq!(output["path"], dir.path().display().to_string());
+    }
+
+    #[test]
     fn taking_a_snapshot_leaves_the_source_folder_and_its_staging_alone() {
         let dir = repository();
         write(&dir, "a.txt", "one\n");

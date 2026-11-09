@@ -432,7 +432,7 @@ impl Daemon {
 
                 tokio::task::spawn_blocking(move || {
                     let session_id = match &command {
-                        mycelium_proto::link::GitCommand::Snapshot { session_id } => session_id.clone(),
+                        mycelium_proto::link::GitCommand::Snapshot { session_id } | mycelium_proto::link::GitCommand::Folder { session_id } => session_id.clone(),
                         _ => None,
                     };
                     let reads_file = matches!(command, mycelium_proto::link::GitCommand::ReadFile { .. });

@@ -411,6 +411,10 @@ pub enum GitCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_id: Option<String>,
     },
+    Folder {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+    },
     Apply {
         branch: String,
         head: String,

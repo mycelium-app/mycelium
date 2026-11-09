@@ -6,7 +6,7 @@ use axum::extract::State;
 use axum::response::Response;
 use axum::routing::{get, post};
 use base64::Engine;
-use crate::common::{Client, NodeLink, Server, serve};
+use crate::common::{Client, Server, next_matching, serve};
 use mycelium_proto::link::{ControlToNode, FolderFile, NodeToControl};
 use futures_util::stream;
 use serde_json::{Value, json};
@@ -371,16 +371,6 @@ async fn paths_outside_the_storage_and_files_over_a_mebibyte_are_refused_with_a_
 
 fn encoded(text: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(text)
-}
-
-async fn next_matching<T>(link: &mut NodeLink, pick: impl Fn(&ControlToNode) -> Option<T>) -> T {
-    loop {
-        let message = link.next().await;
-
-        if let Some(found) = pick(&message) {
-            return found;
-        }
-    }
 }
 
 async fn harness_assistant(server: &Server, nodes: Value) -> Value {
