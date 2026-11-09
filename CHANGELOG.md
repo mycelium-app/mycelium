@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.33.0
+
+- Tool calls no longer fold into a "Show N tool calls" row; they show as they did before v0.32.0.
+- Subagents show in the thread as a card, each row with its status, harness, model, status and run time. A subagent waiting for an answer gets its own card with its question and a reply field that sends straight into it.
+- A pending artefact access request appears in the Inbox's Needs you.
+- Renaming an integration account changes its title and keeps the tool names agents use.
+- A backup asked for while one is running goes round again instead of being dropped, so a deletion always reaches the repository.
+- read_artifact takes save_to, writing what it reads to a file in the conversation folder.
+
 ## v0.32.0
 
 - Workflows leave the sidebar for the conversation's side panel: Subagents and workflows is one history, newest first, and a workflow opens there to its steps, with a waiting gate's Decline and Approve in the gate's row. The Workflows page and manual workflow form are gone.
