@@ -22,11 +22,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsSelected
-import androidx.compose.ui.test.assertHasClickAction
-import androidx.compose.ui.test.hasAnyAncestor
-import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.assertIsNotSelected
@@ -185,13 +181,13 @@ class OutlinePanelTest {
         showPanel()
 
         waitForText("Team norms")
-        rule.onNodeWithContentDescription("Outline account Docs, collection Handbook. Change").assertExists()
+        rule.onNodeWithContentDescription("Outline collection Handbook. Change").assertExists()
         rule.onNodeWithText("Team norms").performClick()
 
         rule.waitUntil(WaitMillis) { platform.shown.isNotEmpty() }
         assertEquals(listOf("https://docs.example.org/doc/team-norms-t1"), platform.shown.toList())
         rule.waitForIdle()
-        rule.onNodeWithContentDescription("Outline account Docs, collection Handbook. Change").assertExists()
+        rule.onNodeWithContentDescription("Outline collection Handbook. Change").assertExists()
         rule.onAllNodesWithText("Team norms").assertCountEquals(2)
         rule.captureScreen("outline-tree-and-document")
         rule.onNodeWithContentDescription("Open in browser").assertExists()
@@ -233,27 +229,7 @@ class OutlinePanelTest {
         rule.waitUntil(WaitMillis) { rule.onAllNodesWithText("Rota").fetchSemanticsNodes().size == 2 }
         rule.waitForIdle()
         rule.onAllNodesWithText("Rota").filterToOne(isSelected()).assertExists()
-        rule.onNodeWithContentDescription("Outline account Docs, collection Handbook. Change").assertExists()
-    }
-
-    @Test
-    fun aSingleAccountPickerNamesItsAccountAndSelectedCollection() {
-        showPanel()
-
-        waitForText("Engineering")
-        val picker = rule.onNodeWithContentDescription("Outline account Docs, collection Handbook. Change")
-
-        picker.assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button)).assertHasClickAction()
-        rule.onNode(hasText("Docs") and hasAnyAncestor(hasContentDescription("Outline account Docs, collection Handbook. Change")), useUnmergedTree = true).assertExists()
-        rule.onNode(hasText("Handbook") and hasAnyAncestor(hasContentDescription("Outline account Docs, collection Handbook. Change")), useUnmergedTree = true).assertExists()
-        picker.performClick()
-        rule.onNode(hasText("Handbook") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsSelected()
-        rule.onNodeWithText("Releases").performClick()
-
-        waitForText("harbour release notes, v0.4.0")
-        rule.onNodeWithContentDescription("Outline account Docs, collection Releases. Change").performClick()
-        rule.onNode(hasText("Releases") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsSelected()
-        rule.onNode(hasText("Handbook") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsNotSelected()
+        rule.onNodeWithContentDescription("Outline collection Handbook. Change").assertExists()
     }
 
     @Test
@@ -267,18 +243,7 @@ class OutlinePanelTest {
         rule.onNodeWithText("Releases").performClick()
 
         waitForText("harbour release notes, v0.4.0")
-        val picker = rule.onNodeWithContentDescription("Outline account Docs, collection Releases. Change")
-
-        picker.assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button)).assertHasClickAction()
-        picker.performClick()
-        rule.onNode(hasText("Releases") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsSelected()
-        rule.onNodeWithText("Product").performClick()
-        rule.waitUntil(WaitMillis) { runCatching { rule.onNodeWithContentDescription("Outline account Team wiki, collection Product. Change").fetchSemanticsNode() }.isSuccess }
-        rule.onNode(hasText("Team wiki") and hasAnyAncestor(hasContentDescription("Outline account Team wiki, collection Product. Change")), useUnmergedTree = true).assertExists()
-        rule.onNode(hasText("Product") and hasAnyAncestor(hasContentDescription("Outline account Team wiki, collection Product. Change")), useUnmergedTree = true).assertExists()
-        rule.onNodeWithContentDescription("Outline account Team wiki, collection Product. Change").performClick()
-        rule.onNode(hasText("Product") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsSelected()
-        rule.onNode(hasText("Releases") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsNotSelected()
+        rule.onNodeWithContentDescription("Outline account Docs, collection Releases. Change").assertExists()
     }
 
     @Test

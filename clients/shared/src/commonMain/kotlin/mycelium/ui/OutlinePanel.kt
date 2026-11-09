@@ -221,7 +221,7 @@ private fun OutlinePicker(browser: OutlineBrowser, servers: List<ChatToolServer>
     val several = servers.size > 1
     var open by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
-    val named = listOfNotNull(account?.name?.let { "account $it" }, collection?.name?.let { "collection $it" }).joinToString(", ")
+    val named = listOfNotNull(if (several) account?.name?.let { "account $it" } else null, collection?.name?.let { "collection $it" }).joinToString(", ")
 
     Box(modifier) {
         Row(
@@ -235,7 +235,7 @@ private fun OutlinePicker(browser: OutlineBrowser, servers: List<ChatToolServer>
         ) {
             Icon(MyIcon.BookOpen, colors.textMuted, Tokens.Size.IconSm)
 
-            if (account != null) {
+            if (several && account != null) {
                 Label(account.name, color = colors.textMuted, maxLines = 1)
 
                 if (collection != null) {
