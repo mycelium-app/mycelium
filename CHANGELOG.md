@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.2
+
+- The subagent proposal card lets you change the model, using the same model picker as the message box. A Claude agent that has offered no models in a conversation falls back to the models its node reported.
+- The start proposal integration tests run again.
+
 ## v0.34.1
 
 - The built-in Voice assistant is no longer listed under Assistants in the sidebar; it stays at the bottom left, in the Inbox dock and on the Assistants page.
