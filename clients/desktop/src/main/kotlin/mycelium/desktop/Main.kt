@@ -249,34 +249,18 @@ private object DesktopPlatform : Platform {
 
     override fun windowFocused(): Boolean = KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow != null
 
-    override fun notify(title: String, body: String, conversationId: String, sound: Boolean) {
-        notifiedConversation = conversationId
+    private val linuxNotifications = LinuxNotifications(open = { notificationOpener?.invoke(it) })
 
+    override fun notify(title: String, body: String, conversationId: String, sound: Boolean) = show(title, body, conversationId)
+
+    override fun breakNotification(title: String, body: String) = show(title, body, null)
+
+    private fun show(title: String, body: String, conversationId: String?) {
         if (isLinux) {
-            Thread { notifyOnLinux(title, body, conversationId) }.start()
+            linuxNotifications.show(title, body, conversationId)
         } else {
+            notifiedConversation = conversationId
             trayIcon?.displayMessage(title, body, TrayIcon.MessageType.NONE)
-        }
-    }
-
-    override fun breakNotification(title: String, body: String) = notify(title, body, "", false)
-
-    private fun notifyOnLinux(title: String, body: String, conversationId: String) {
-        val clicked = runCatching {
-            val process = ProcessBuilder("notify-send", "--app-name=Mycelium", "--expire-time=5000", "--action=open=Open", "--wait", title, body).redirectErrorStream(true).start()
-            val answer = process.inputStream.bufferedReader().readText().trim()
-
-            process.waitFor() == 0 && answer == "open"
-        }
-
-        if (clicked.isFailure) {
-            runCatching {
-                ProcessBuilder("gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "Mycelium", "0", "", title, body, "[]", "{}", "5000").start().waitFor()
-            }
-        }
-
-        if (clicked.getOrNull() == true) {
-            notificationOpener?.invoke(conversationId)
         }
     }
 
