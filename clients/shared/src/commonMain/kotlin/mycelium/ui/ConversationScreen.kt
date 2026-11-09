@@ -301,7 +301,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     }
 
     val scope = rememberCoroutineScope()
-    val speechProvided = providers.any { it.speechModel != null }
+    val voice by store.voice.state.collectAsState()
+    val speechProvided = voice.privacy.speechToTextProvider != null
     val dictation = remember(platform, state.experiments.voice, speechProvided) {
         when {
             !state.experiments.voice -> null

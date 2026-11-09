@@ -888,6 +888,7 @@ fun OptionMenu(
     buttonText: String? = null,
     tooltip: String? = null,
     maxWidth: Dp? = null,
+    variant: ButtonVariant = ButtonVariant.Ghost,
 ) {
     val buttonLabel = buttonText ?: choices.firstOrNull { it.id == current }?.name ?: label ?: name
     var open by remember { mutableStateOf(false) }
@@ -896,7 +897,7 @@ fun OptionMenu(
     val shown = if (search.isBlank()) choices else choices.filter { it.name.contains(search, ignoreCase = true) || it.id.contains(search, ignoreCase = true) }
 
     Box(if (fill) Modifier.fillMaxWidth() else Modifier) {
-        MyButton({ open = true }, text = buttonLabel, icon = icon, description = "$name: $buttonLabel", size = size, muted = true, trailingIcon = MyIcon.ChevronDown, selected = open, tooltip = tooltip ?: name, fill = fill, maxWidth = maxWidth)
+        MyButton({ open = true }, text = buttonLabel, icon = icon, description = "$name: $buttonLabel", variant = variant, size = size, muted = variant == ButtonVariant.Ghost, trailingIcon = MyIcon.ChevronDown, selected = open, tooltip = tooltip ?: name, fill = fill, maxWidth = maxWidth)
 
         if (open) {
             MenuPopup(onDismiss = { open = false }, width = if (choices.any { it.description != null }) Tokens.Size.Popover else Tokens.Size.Menu) {

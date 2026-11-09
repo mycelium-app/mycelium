@@ -42,6 +42,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -543,12 +544,15 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
     var settingsStart by remember { mutableStateOf<SettingsSection?>(null) }
     var settingsGroup by remember { mutableStateOf<String?>(null) }
     var settingsGroupTab by remember { mutableStateOf<String?>(null) }
+    var settingsRequest by remember { mutableStateOf(0) }
 
     LaunchedEffect(store) {
         store.screenRequests.collect { path ->
             val target = screenTarget(path) ?: return@collect
 
             settingsStart = target.second
+            settingsGroupTab = path.trim('/').split('/').getOrNull(2)
+            settingsRequest += 1
             onRoute(target.first)
         }
     }
@@ -621,7 +625,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
                     is Route.AssistantSettings -> AssistantSettingsScreen(store, state, route.id, route.section, onDone = { onRoute(Route.Assistants) }, onBack = { onRoute(Route.Assistant(route.id)) })
                     Route.Activity -> ActivityScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
                     Route.UsageHistory -> UsageHistoryScreen(store)
-                    Route.Settings -> CompositionLocalProvider(LocalOpenConversation provides { onRoute(Route.Chat(it)) }) { SettingsScreen(store, me, store.api.baseUrl, startOn = settingsStart, startGroup = settingsGroup, startGroupTab = settingsGroupTab, onSignOut = onSignOut) }
+                    Route.Settings -> CompositionLocalProvider(LocalOpenConversation provides { onRoute(Route.Chat(it)) }) { key(settingsRequest) { SettingsScreen(store, me, store.api.baseUrl, startOn = settingsStart, startGroup = settingsGroup, startGroupTab = settingsGroupTab, onSignOut = onSignOut) } }
                 }
             }
         }

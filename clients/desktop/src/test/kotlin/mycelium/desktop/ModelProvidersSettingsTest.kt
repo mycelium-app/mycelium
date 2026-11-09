@@ -4,6 +4,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -36,6 +37,8 @@ import kotlin.test.assertEquals
 private const val OllamaJson = """{"id":"p1","kind":"openai_compatible","name":"Ollama","base_url":"http://box:11434/v1","models":["llama3.2","qwen3"],"created_at":"2026-10-22T10:00:00Z"}"""
 
 private const val AnthropicJson = """{"id":"p2","kind":"anthropic","name":"Claude API","key_hint":"wxyz","models":["claude-sonnet-5-5","claude-opus-5-5"],"default_model":"claude-sonnet-5-5","created_at":"2026-10-22T10:00:00Z"}"""
+
+private val ChatModelsAddProvider = hasText("Add a provider").and(hasContentDescription("Add a provider for speech to text").not())
 
 class ModelProvidersSettingsTest {
     @get:Rule
@@ -118,7 +121,7 @@ class ModelProvidersSettingsTest {
         postAnswer = HttpStatusCode.Created to OllamaJson
         show()
 
-        rule.onNodeWithText("Add a provider").performClick()
+        rule.onNode(ChatModelsAddProvider).performClick()
         rule.onNodeWithContentDescription("Name").performTextInput("Ollama")
         rule.onNodeWithContentDescription("Base URL").performTextInput("http://box:11434/v1")
         rule.onNodeWithText("Add provider").performClick()
@@ -131,7 +134,7 @@ class ModelProvidersSettingsTest {
     fun addingAnAnthropicProviderSendsTheMaskedKeyAndShowsOnlyItsHint() {
         show()
 
-        rule.onNodeWithText("Add a provider").performClick()
+        rule.onNode(ChatModelsAddProvider).performClick()
         rule.onNodeWithText("Anthropic").performClick()
         rule.onNodeWithContentDescription("Name").performTextInput("Claude API")
         rule.onNodeWithContentDescription("API key").performTextInput("sk-ant-secret")
@@ -147,7 +150,7 @@ class ModelProvidersSettingsTest {
     fun addingOpenRouterSendsItsAddressWithTheKeyAndAsksForAKeyFirst() {
         show()
 
-        rule.onNodeWithText("Add a provider").performClick()
+        rule.onNode(ChatModelsAddProvider).performClick()
         rule.onNodeWithText("OpenRouter").performClick()
         rule.onNodeWithText("Add provider").performClick()
         rule.onNodeWithText("Enter your OpenRouter API key.").assertExists()
@@ -163,7 +166,7 @@ class ModelProvidersSettingsTest {
     fun addingLiteLlmSendsItsAddressAsOpenAiCompatibleWithTheKey() {
         show()
 
-        rule.onNodeWithText("Add a provider").performClick()
+        rule.onNode(ChatModelsAddProvider).performClick()
         rule.onNodeWithText("LiteLLM").performClick()
         rule.onNodeWithContentDescription("Base URL").performTextInput("http://proxy:4000")
         rule.onNodeWithContentDescription("API key, if the proxy needs one").performTextInput("sk-1")
@@ -178,7 +181,7 @@ class ModelProvidersSettingsTest {
         postAnswer = HttpStatusCode.BadRequest to """{"error":"provider_unreachable","message":"Mycelium could not reach http://box:11434/v1. Check the address and try again."}"""
         show()
 
-        rule.onNodeWithText("Add a provider").performClick()
+        rule.onNode(ChatModelsAddProvider).performClick()
         rule.onNodeWithText("Add provider").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("could not reach", substring = true).fetchSemanticsNodes().isNotEmpty() }

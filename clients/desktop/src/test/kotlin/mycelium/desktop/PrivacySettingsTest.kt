@@ -72,12 +72,12 @@ class PrivacySettingsTest {
     }
 
     @Test
-    fun withoutASpeechProviderTheErrorOffersProviders() {
+    fun withoutASpeechProviderTheErrorOffersToSetUpSpeechToText() {
         show(UnprovidedPrivacy)
         rule.waitUntil(5_000) { sent.any { it.first == "GET /api/v1/privacy" } }
         rule.waitForIdle()
 
         rule.onNodeWithText("Add a provider with a speech-to-text model in Providers to talk to Voice on this computer").assertExists()
-        rule.onNodeWithText("Providers").assertExists()
+        rule.onNodeWithText("Set up speech to text").assertExists()
     }
 }

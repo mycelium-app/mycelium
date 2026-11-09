@@ -18,6 +18,9 @@ data class PrivacySettings(
 )
 
 @Serializable
+data class ChooseSpeechModelRequest(@SerialName("provider_id") val providerId: String, val model: String)
+
+@Serializable
 data class SavePrivacyRequest(@SerialName("voice_enabled") val voiceEnabled: Boolean)
 
 @Serializable

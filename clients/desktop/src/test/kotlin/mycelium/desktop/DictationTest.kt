@@ -37,7 +37,8 @@ import kotlin.test.assertTrue
 private const val IdleJson = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Fix the build","status":"done",
 "acp_session_id":"s","mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}"""
 
-private const val SpeechProvider = """[{"id":"p1","kind":"openai_compatible","name":"Speech","models":["whisper-1"],"created_at":"2026-10-22T10:00:00Z","speech_model":"whisper-1"}]"""
+private const val SpeechProvider = """[{"id":"p1","kind":"openai_compatible","name":"Speech","models":["house-dictation"],"created_at":"2026-10-22T10:00:00Z"}]"""
+private const val ChosenSpeechPrivacy = """{"voice_enabled":true,"speech_to_text_provider":{"provider_id":"p1","name":"Speech","model":"house-dictation"}}"""
 
 private const val ChatOnlyProvider = """[{"id":"p1","kind":"openai_compatible","name":"Chat","models":["gpt-4o-mini"],"created_at":"2026-10-22T10:00:00Z"}]"""
 
@@ -85,6 +86,7 @@ class DictationTest {
                 path.endsWith("/experiments") -> respond(experiments, HttpStatusCode.OK, json)
                 path.endsWith("/transcriptions") && request.method == HttpMethod.Post -> respond("""{"text":"fix the build"}""", HttpStatusCode.OK, json)
                 path.endsWith("/model-providers") -> respond(providers, HttpStatusCode.OK, json)
+                path.endsWith("/privacy") -> respond(if (providers == SpeechProvider) ChosenSpeechPrivacy else "{}", HttpStatusCode.OK, json)
                 path.endsWith("/conversations") -> respond("[$IdleJson]", HttpStatusCode.OK, json)
                 path.endsWith("/conversations/c1") -> respond(IdleJson, HttpStatusCode.OK, json)
                 path.endsWith("/events") || path.endsWith("/queue") || path.endsWith("/nodes") -> respond("[]", HttpStatusCode.OK, json)

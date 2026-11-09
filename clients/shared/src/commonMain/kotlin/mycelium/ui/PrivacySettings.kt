@@ -43,7 +43,7 @@ const val WakePhraseUnavailable = "The wake phrase is not available on this devi
 private fun providerStatement(provider: SpeechProvider) = "${provider.name}, ${provider.model}"
 
 @Composable
-fun PrivacySettings(store: Store, platform: Platform?, onOpenProviders: () -> Unit = { store.openScreen("settings/providers") }) {
+fun PrivacySettings(store: Store, platform: Platform?, onOpenProviders: () -> Unit = { store.openScreen("settings/providers/$SpeechAnchor") }) {
     val colors = MyTheme.colors
     val voice by store.voice.state.collectAsState()
     val device = voice.device
@@ -119,7 +119,7 @@ fun PrivacySettings(store: Store, platform: Platform?, onOpenProviders: () -> Un
                 provider != null -> Label(providerStatement(provider))
                 noSpeechProvider -> FailureBlock {
                     Label(NoSpeechProviderStatement, style = Tokens.Type.Meta)
-                    Row { MyButton(onOpenProviders, text = "Providers", variant = ButtonVariant.Outline) }
+                    Row { MyButton(onOpenProviders, text = "Set up speech to text", variant = ButtonVariant.Outline) }
                 }
             }
         }

@@ -15,6 +15,8 @@ data class ModelProvider(
     @SerialName("created_at") val createdAt: String,
     @SerialName("model_class") val modelClass: String = "cloud",
     @SerialName("speech_model") val speechModel: String? = null,
+    @SerialName("speech_to_text_models") val speechToTextModels: List<String> = emptyList(),
+    @SerialName("text_to_speech_models") val textToSpeechModels: List<String> = emptyList(),
 )
 
 @Serializable

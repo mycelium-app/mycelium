@@ -18,6 +18,7 @@ import mycelium.DictationProblem
 import mycelium.Platform
 import mycelium.ProviderDictation
 import mycelium.api.ApiException
+import mycelium.api.ChooseSpeechModelRequest
 import mycelium.api.MyceliumApi
 import mycelium.api.PrivacySettings
 import mycelium.api.SavePrivacyRequest
@@ -232,6 +233,12 @@ class VoiceStore(private val api: MyceliumApi, private val scope: CoroutineScope
 
             mutableState.update { it.copy(privacy = saved ?: before) }
         }
+    }
+
+    suspend fun chooseSpeechModel(purpose: String, providerId: String, model: String) {
+        val saved = api.chooseSpeechModel(purpose, ChooseSpeechModelRequest(providerId, model))
+
+        mutableState.update { it.copy(privacy = saved, loaded = true) }
     }
 
     fun setWakePhraseEnabled(on: Boolean) {

@@ -130,7 +130,7 @@ private fun voiceCardActions(store: Store, platform: Platform?) = VoiceCardActio
     onTryAgain = store.voice::startListening,
     onTypeInstead = store.voice::typeInstead,
     onOpenConversation = store.voice::openThread,
-    onOpenProviders = { store.voice.close(); store.openScreen("settings/providers") },
+    onOpenProviders = { store.voice.close(); store.openScreen("settings/providers/$SpeechAnchor") },
     onOpenAndroidSettings = platform?.takeIf { it.opensMicrophoneSettings }?.let { opener -> { opener.openMicrophoneSettings() } },
     onClose = store.voice::close,
 )

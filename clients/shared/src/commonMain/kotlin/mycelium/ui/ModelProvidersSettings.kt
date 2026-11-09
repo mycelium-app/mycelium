@@ -1,6 +1,8 @@
 package mycelium.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -18,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,7 +39,7 @@ private val DataHandling = listOf(Choice("cloud", "Cloud"), Choice("zdr", "Zero 
 private const val OpenRouterUrl = "https://openrouter.ai/api/v1"
 
 @Composable
-fun ModelProvidersSettings(store: Store) {
+fun ModelProvidersSettings(store: Store, revealSpeech: Boolean = false) {
     val colors = MyTheme.colors
     var providers by remember { mutableStateOf<List<ModelProvider>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
@@ -53,10 +56,19 @@ fun ModelProvidersSettings(store: Store) {
     var name by remember { mutableStateOf("") }
     var baseUrl by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
+    var forSpeech by remember { mutableStateOf(false) }
     val runner = rememberAction()
+    val speech = remember { BringIntoViewRequester() }
 
     LaunchedEffect(Unit) {
         load()
+    }
+
+    LaunchedEffect(revealSpeech, loaded) {
+        if (revealSpeech && loaded) {
+            withFrameNanos {}
+            speech.bringIntoView()
+        }
     }
 
     fun add() {
@@ -75,6 +87,7 @@ fun ModelProvidersSettings(store: Store) {
             val added = store.api.createModelProvider(request)
             providers = providers.filter { it.id != added.id } + added
             adding = false
+            forSpeech = false
             name = ""
             baseUrl = ""
             apiKey = ""
@@ -85,7 +98,7 @@ fun ModelProvidersSettings(store: Store) {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Label("Chat models", Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong)
-                MyButton({ adding = true }, text = "Add a provider", icon = MyIcon.Plus, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+                MyButton({ adding = true; forSpeech = false }, text = "Add a provider", icon = MyIcon.Plus, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
             }
 
             ListSearch(query, { query = it }, "providers")
@@ -206,12 +219,12 @@ fun ModelProvidersSettings(store: Store) {
                     "anthropic" -> "Anthropic"
                     "openrouter" -> "OpenRouter"
                     "litellm" -> "LiteLLM"
-                    else -> "Ollama"
+                    else -> if (forSpeech) "Example Speech" else "Ollama"
                 })
 
                 if (kind == "openai_compatible") {
-                    TextInput(baseUrl, { baseUrl = it }, label = "Base URL", placeholder = "http://localhost:11434/v1", mono = true)
-                    Label("Ollama serves this at http://<host>:11434/v1.", style = Tokens.Type.Meta, color = colors.textMuted)
+                    TextInput(baseUrl, { baseUrl = it }, label = "Base URL", placeholder = if (forSpeech) "https://speech.example.com/v1" else "http://localhost:11434/v1", mono = true)
+                    Label(if (forSpeech) "Needs an address that offers a speech-to-text model, such as whisper-1." else "Ollama serves this at http://<host>:11434/v1.", style = Tokens.Type.Meta, color = colors.textMuted)
                 }
 
                 if (kind == "litellm") {
@@ -232,6 +245,7 @@ fun ModelProvidersSettings(store: Store) {
                     MyButton(
                         {
                             adding = false
+                            forSpeech = false
                             name = ""
                             baseUrl = ""
                             apiKey = ""
@@ -243,5 +257,16 @@ fun ModelProvidersSettings(store: Store) {
                 }
             }
         }
+
+        SpeechSettings(
+            store,
+            providers,
+            onAddProvider = {
+                adding = true
+                forSpeech = true
+                kind = "openai_compatible"
+            },
+            modifier = Modifier.bringIntoViewRequester(speech),
+        )
     }
 }

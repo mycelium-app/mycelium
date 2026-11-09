@@ -202,7 +202,7 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
             SettingsSection.Ides -> LocalPlatform.current?.let { IdesSettings(it) }
             SettingsSection.Accounts -> {
                 AccountsSettings(store)
-                ModelProvidersSettings(store)
+                ModelProvidersSettings(store, revealSpeech = links.tab == SpeechAnchor)
                 DecisionsSettings(store)
             }
             SettingsSection.Agents -> AgentsSettings(store)

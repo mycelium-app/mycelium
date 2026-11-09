@@ -1154,6 +1154,8 @@ class MyceliumApi(
 
     suspend fun savePrivacy(request: SavePrivacyRequest): PrivacySettings = call("/privacy") { client.put(it) { authorise(); json(request) } }.body()
 
+    suspend fun chooseSpeechModel(purpose: String, request: ChooseSpeechModelRequest): PrivacySettings = call("/speech/choices/$purpose") { client.put(it) { authorise(); json(request) } }.body()
+
     suspend fun speech(request: SpeechRequest): SpokenAudio {
         val response = call("/speech") { client.post(it) { authorise(); json(request) } }
 
