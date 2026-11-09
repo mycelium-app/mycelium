@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.34.1
+
+- The built-in Voice assistant is no longer listed under Assistants in the sidebar; it stays at the bottom left, in the Inbox dock and on the Assistants page.
+- Voice conversations never wait in Needs you or add to the Inbox count.
+- A Claude conversation on a signed-in account resumes after moving to another node. Only the control plane needs this version.
+
 ## v0.34.0
 
 - A conversation's watches are one Watching control in the header.
