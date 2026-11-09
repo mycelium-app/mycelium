@@ -91,9 +91,13 @@ fn permitted(user: &AuthUser, server_id: Uuid, reading: bool) -> bool {
     scopes.iter().any(|scope| scope == &token_scope(server_id, "write") || reading && scope == &token_scope(server_id, "read"))
 }
 
-async fn record(state: &AppState, owner: Uuid, server: &ServerRow, tool: &str, reading: bool, is_error: bool) {
+async fn record(state: &AppState, user: &AuthUser, server: &ServerRow, tool: &str, reading: bool, is_error: bool) {
+    if user.scopes.is_none() {
+        return;
+    }
+
     let recorded = sqlx::query("insert into integration_calls (owner, server_id, server_name, tool, kind, surface, decision, is_error) values ($1, $2, $3, $4, $5, 'workspace', 'auto', $6)")
-        .bind(owner)
+        .bind(user.id)
         .bind(server.id)
         .bind(&server.name)
         .bind(tool)
@@ -144,7 +148,7 @@ pub async fn proxy(State(state): State<AppState>, user: AuthUser, Path((server_i
     let response = match request.send().await {
         Ok(response) => response,
         Err(_) => {
-            record(&state, user.id, server, &tool, reading, true).await;
+            record(&state, &user, server, &tool, reading, true).await;
 
             return Err(ApiError::new(StatusCode::BAD_GATEWAY, "integration_unreachable", format!("Mycelium could not reach {}.", server.name)));
         }
@@ -152,7 +156,7 @@ pub async fn proxy(State(state): State<AppState>, user: AuthUser, Path((server_i
     let status = response.status();
 
     if status.is_redirection() {
-        record(&state, user.id, server, &tool, reading, true).await;
+        record(&state, &user, server, &tool, reading, true).await;
 
         return Err(ApiError::new(StatusCode::BAD_GATEWAY, "integration_redirected", format!("{} sent Mycelium to another address, which it does not follow. Check the integration's address in Settings, Integrations.", server.name)));
     }
@@ -161,14 +165,14 @@ pub async fn proxy(State(state): State<AppState>, user: AuthUser, Path((server_i
     let bytes = match read_limited(response, BODY_LIMIT).await {
         Ok(bytes) => bytes,
         Err(Oversize::Larger) => {
-            record(&state, user.id, server, &tool, reading, true).await;
+            record(&state, &user, server, &tool, reading, true).await;
 
             return Err(ApiError::new(StatusCode::BAD_GATEWAY, "integration_response_too_large", format!("{} answered with more than 16 MiB. Ask for a smaller part of it.", server.name)));
         }
         Err(Oversize::Stopped) => return Err(ApiError::new(StatusCode::BAD_GATEWAY, "integration_unreachable", format!("{} stopped answering part way.", server.name))),
     };
 
-    record(&state, user.id, server, &tool, reading, !status.is_success()).await;
+    record(&state, &user, server, &tool, reading, !status.is_success()).await;
 
     let mut answer = (status, bytes).into_response();
 
@@ -213,12 +217,13 @@ pub async fn grants(State(state): State<AppState>, user: AuthUser, Path(server_i
 mod tests {
     use super::*;
 
-    const OUTLINE: ApiSurface = ApiSurface { path: "/api/", post_reads: &["list", "info", "search", "search_titles", "drafts", "viewed", "archived", "deleted"] };
+    const OUTLINE: ApiSurface = ApiSurface { path: "/api/", post_reads: &["list", "info", "search", "search_titles", "drafts", "viewed", "archived", "deleted", "documents"] };
 
     #[test]
     fn outline_post_endpoints_that_only_read_count_as_reads() {
         assert!(is_read(&OUTLINE, &Method::POST, "documents.list"));
         assert!(is_read(&OUTLINE, &Method::POST, "documents.search"));
+        assert!(is_read(&OUTLINE, &Method::POST, "collections.documents"));
         assert!(!is_read(&OUTLINE, &Method::POST, "documents.create"));
         assert!(!is_read(&OUTLINE, &Method::DELETE, "documents.info"));
         assert!(is_read(&OUTLINE, &Method::GET, "anything"));

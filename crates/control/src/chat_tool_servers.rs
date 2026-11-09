@@ -42,7 +42,7 @@ pub const KNOWN_APPS: [KnownApp; 2] = [KnownApp {
     default_path: "/mcp",
     keeps_path: |path| path.trim_end_matches('/').ends_with("/mcp"),
     key_header: DEFAULT_KEY_HEADER,
-    api: Some(ApiSurface { path: "/api/", post_reads: &["list", "info", "search", "search_titles", "drafts", "viewed", "archived", "deleted"] }),
+    api: Some(ApiSurface { path: "/api/", post_reads: &["list", "info", "search", "search_titles", "drafts", "viewed", "archived", "deleted", "documents"] }),
 }, KnownApp {
     id: "litellm",
     stored_kind: "litellm",

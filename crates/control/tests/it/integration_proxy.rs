@@ -47,7 +47,7 @@ async fn document_info(Json(body): Json<Value>) -> Response {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    Json(json!({"data": {"title": "Release notes", "urlId": "aB3dE5fG"}})).into_response()
+    Json(json!({"data": {"id": "6a1b2c3d-0000-4000-8000-000000000001", "title": "Release notes", "urlId": "aB3dE5fG", "collectionId": "c0ffee00-0000-4000-8000-000000000002"}})).into_response()
 }
 
 async fn redirecting() -> Response {
@@ -115,6 +115,35 @@ async fn granted_token(server: &Server, link: &mut NodeLink, conversation: Uuid,
     };
 
     token
+}
+
+#[tokio::test]
+async fn the_persons_own_tree_loads_read_through_the_proxy_without_filling_activity() {
+    let server = Server::start().await;
+    let (id, fake) = add_outline(&server).await;
+    let proxy = |path: &str| format!("/api/v1/integrations/{id}/proxy/{path}");
+
+    let (collections, _) = server.user.json(server.user.post(&proxy("collections.list")).json(&json!({"limit": 100}))).await;
+    let (documents, _) = server.user.json(server.user.post(&proxy("collections.documents")).json(&json!({"id": "c0ffee00-0000-4000-8000-000000000002"}))).await;
+    let calls: Vec<String> = fake.api_calls.lock().unwrap().iter().map(|(action, _)| action.clone()).collect();
+    let (_, logged) = server.user.json(server.user.get(&format!("/api/v1/integration-calls?server_id={id}"))).await;
+
+    assert_eq!((collections, documents), (200, 200));
+    assert_eq!(calls, vec!["collections.list", "collections.documents"]);
+    assert_eq!(logged, json!([]));
+}
+
+#[tokio::test]
+async fn a_read_grant_can_load_a_collections_document_tree() {
+    let server = Server::start().await;
+    let (id, _) = add_outline(&server).await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = working_conversation(&server, &mut link).await;
+    let token = granted_token(&server, &mut link, conversation, json!(["read"])).await;
+
+    let tree = call(&server, &token, &id, "POST", "collections.documents").await;
+
+    assert_eq!(tree, 200);
 }
 
 #[tokio::test]
@@ -252,6 +281,8 @@ async fn open_outline_records_the_page_in_the_thread_with_its_title_and_address(
     assert_eq!(event["payload"]["title"], "Release notes");
     assert!(event["payload"]["url"].as_str().unwrap().ends_with("/doc/aB3dE5fG"));
     assert_eq!(event["payload"]["integration_id"], id);
+    assert_eq!(event["payload"]["document_id"], "6a1b2c3d-0000-4000-8000-000000000001");
+    assert_eq!(event["payload"]["collection_id"], "c0ffee00-0000-4000-8000-000000000002");
 }
 
 #[tokio::test]

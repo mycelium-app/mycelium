@@ -66,7 +66,7 @@ pub async fn open(state: &AppState, owner: Uuid, conversation_id: Uuid, group: O
     page.set_fragment(None);
 
     let mut tx = state.pool.begin().await?;
-    let event = append_event(&mut tx, conversation_id, EventKind::OpenOutline, &json!({"title": title, "url": page.as_str(), "integration_id": server.id, "integration_name": server.name}), None).await?;
+    let event = append_event(&mut tx, conversation_id, EventKind::OpenOutline, &json!({"title": title, "url": page.as_str(), "integration_id": server.id, "integration_name": server.name, "document_id": data["id"], "collection_id": data["collectionId"]}), None).await?;
     tx.commit().await?;
 
     if let Some(event) = event {
