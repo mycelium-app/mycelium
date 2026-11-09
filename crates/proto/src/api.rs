@@ -1319,6 +1319,8 @@ pub struct StartProposalStep {
     pub node_choices: Vec<StartProposalNode>,
     #[serde(default)]
     pub account_choices: Vec<String>,
+    #[serde(default)]
+    pub model_choices: Vec<HarnessModel>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1341,6 +1343,8 @@ pub struct StartProposalChoice {
     pub node_id: Option<Uuid>,
     #[serde(default)]
     pub account: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

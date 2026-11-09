@@ -23,11 +23,13 @@ import mycelium.api.SshAccessRequest
 import mycelium.api.Artifact
 import mycelium.api.ArtifactKinds
 import mycelium.api.MessageProposal
+import mycelium.api.ModelChoice
 import mycelium.api.StartProposal
 import mycelium.api.StartProposalChoice
 import mycelium.state.parsedMarkdown
 import mycelium.state.AppState
 import mycelium.state.MyceliumCall
+import mycelium.state.ModelOption
 import mycelium.state.MyceliumTool
 import mycelium.state.Store
 import mycelium.state.artifactKindName
@@ -48,11 +50,11 @@ val LocalMessageProposals = compositionLocalOf<MessageProposals?> { null }
 
 fun messageProposals(store: Store, state: AppState) = MessageProposals(state.messageProposals, { store.refreshMessageProposals() }, { proposal -> store.approveMessageProposal(proposal) }, { proposal -> store.declineMessageProposal(proposal) }, { proposal -> store.approveAndConnectMessageProposal(proposal) }, { proposal -> store.approveAndConnectGroupsMessageProposal(proposal) })
 
-class StartProposals(val proposals: Map<String, StartProposal>, val refresh: suspend () -> Unit, val approve: suspend (StartProposal, Map<String, StartProposalChoice>) -> Unit, val connect: suspend (StartProposal, Map<String, StartProposalChoice>) -> Unit, val decline: suspend (StartProposal) -> Unit)
+class StartProposals(val proposals: Map<String, StartProposal>, val refresh: suspend () -> Unit, val approve: suspend (StartProposal, Map<String, StartProposalChoice>) -> Unit, val connect: suspend (StartProposal, Map<String, StartProposalChoice>) -> Unit, val decline: suspend (StartProposal) -> Unit, val store: Store? = null)
 
 val LocalStartProposals = compositionLocalOf<StartProposals?> { null }
 
-fun startProposals(store: Store, state: AppState) = StartProposals(state.startProposals, { store.refreshStartProposals() }, { proposal, choices -> store.approveStartProposal(proposal, choices) }, { proposal, choices -> store.connectStartProposal(proposal, choices) }, { proposal -> store.declineStartProposal(proposal) })
+fun startProposals(store: Store, state: AppState) = StartProposals(state.startProposals, { store.refreshStartProposals() }, { proposal, choices -> store.approveStartProposal(proposal, choices) }, { proposal, choices -> store.connectStartProposal(proposal, choices) }, { proposal -> store.declineStartProposal(proposal) }, store)
 
 class ApiAccessRequests(val requests: Map<String, ApiAccessRequest>, val refresh: suspend () -> Unit, val approve: suspend (ApiAccessRequest, List<String>) -> Unit, val decline: suspend (ApiAccessRequest) -> Unit)
 
@@ -416,6 +418,11 @@ private fun StartProposedBody(parsed: MyceliumCall.StartProposed) {
     val proposal = proposedStart(parsed)
     val action = rememberAction()
     var chosen by remember(proposal?.id) { mutableStateOf<Map<String, StartProposalChoice>>(emptyMap()) }
+    val favourites = proposals?.store?.let { rememberFavouriteModels(it) }
+
+    fun choose(step: String, change: (StartProposalChoice) -> StartProposalChoice) {
+        chosen = chosen + (step to change(chosen[step] ?: StartProposalChoice()))
+    }
 
     LaunchedEffect(proposal == null) {
         if (proposals != null && proposal == null) {
@@ -441,19 +448,36 @@ private fun StartProposedBody(parsed: MyceliumCall.StartProposed) {
         if (waiting && step.nodeChoices.isNotEmpty()) {
             val labels = step.nodeChoices.associateBy { "${it.name}, ${if (it.online) "online" else "offline"}" }
 
-            Segmented(labels.keys.toList(), labels.entries.firstOrNull { it.value.id == choice?.nodeId }?.key.orEmpty(), { label -> labels[label]?.let { picked -> chosen = chosen + (step.key to (chosen[step.key] ?: StartProposalChoice()).copy(nodeId = picked.id)) } }, "Node for ${step.title}")
+            Segmented(labels.keys.toList(), labels.entries.firstOrNull { it.value.id == choice?.nodeId }?.key.orEmpty(), { label -> labels[label]?.let { picked -> choose(step.key) { it.copy(nodeId = picked.id) } } }, "Node for ${step.title}")
         }
 
         step.folder?.let { Label("Folder $it", style = Tokens.Type.Meta, color = colors.textMuted) }
 
-        val using = listOfNotNull(step.agent, step.account?.takeIf { step.accountChoices.isEmpty() }, step.model).joinToString(" · ")
+        val using = listOfNotNull(step.agent, step.account?.takeIf { step.accountChoices.isEmpty() }, step.model?.takeIf { step.modelChoices.isEmpty() }).joinToString(" · ")
 
         if (using.isNotEmpty()) {
             Label(using, style = Tokens.Type.Meta, color = colors.textMuted)
         }
 
         if (waiting && step.accountChoices.isNotEmpty()) {
-            Segmented(step.accountChoices, choice?.account.orEmpty(), { picked -> chosen = chosen + (step.key to (chosen[step.key] ?: StartProposalChoice()).copy(account = picked)) }, "Account for ${step.title}")
+            Segmented(step.accountChoices, choice?.account.orEmpty(), { picked -> choose(step.key) { it.copy(account = picked) } }, "Account for ${step.title}")
+        }
+
+        if (waiting && step.modelChoices.isNotEmpty()) {
+            val options = step.modelChoices.map { ModelOption(step.agent, null, it.id, it.name) }
+            val model = choice?.model ?: step.model
+
+            ModelPicker(
+                ModelPickerControls(
+                    label = options.firstOrNull { it.model == model }?.name ?: model ?: "Default model",
+                    options = options,
+                    favourites = favourites?.list.orEmpty(),
+                    providers = emptyList(),
+                    onPickModel = { picked -> choose(step.key) { it.copy(model = picked.model) } },
+                    onFavourite = { option, on -> favourites?.toggle?.invoke(option, on) },
+                    chosen = ModelChoice(agent = step.agent, model = model),
+                ),
+            )
         }
 
         if (step.dependsOn.isNotEmpty()) {

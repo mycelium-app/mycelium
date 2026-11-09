@@ -20,6 +20,7 @@ data class StartProposalStep(
     @SerialName("first_message") val firstMessage: String = "",
     @SerialName("node_choices") val nodeChoices: List<StartProposalNode> = emptyList(),
     @SerialName("account_choices") val accountChoices: List<String> = emptyList(),
+    @SerialName("model_choices") val modelChoices: List<HarnessModel> = emptyList(),
 )
 
 @Serializable
@@ -42,6 +43,7 @@ data class StartProposal(
 data class StartProposalChoice(
     @SerialName("node_id") val nodeId: String? = null,
     val account: String? = null,
+    val model: String? = null,
 )
 
 @Serializable

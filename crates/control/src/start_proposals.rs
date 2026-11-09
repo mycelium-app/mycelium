@@ -4,7 +4,7 @@ use crate::prompts;
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Path, State};
-use mycelium_proto::api::{ApproveStartProposalRequest, StartProposal, StartProposalNode, StartProposalState, StartProposalStep, WorkflowPlan};
+use mycelium_proto::api::{ApproveStartProposalRequest, HarnessModel, StartProposal, StartProposalNode, StartProposalState, StartProposalStep, WorkflowPlan};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -48,6 +48,7 @@ async fn to_proto(state: &AppState, row: ProposalRow) -> ApiResult<StartProposal
             let choice = &row.choices[&step.key];
             let node_choices = choice["node"].as_array().cloned().unwrap_or_default().iter().filter_map(|node| node["id"].as_str().and_then(|id| id.parse().ok())).map(|id| node_of(state, &names, id)).collect();
             let account_choices = choice["account"].as_array().cloned().unwrap_or_default().iter().filter_map(|account| account.as_str().map(String::from)).collect();
+            let model_choices = choice["model"].as_array().cloned().unwrap_or_default().iter().filter_map(|model| Some(HarnessModel { id: model["id"].as_str()?.to_string(), name: model["name"].as_str()?.to_string() })).collect();
             let folder = step.project_id.and_then(|id| projects.iter().find(|(project, _)| *project == id).map(|(_, name)| name.clone())).or_else(|| Some(step.cwd.clone()).filter(|cwd| !cwd.is_empty()));
 
             StartProposalStep {
@@ -63,6 +64,7 @@ async fn to_proto(state: &AppState, row: ProposalRow) -> ApiResult<StartProposal
                 first_message: step.prompt.clone(),
                 node_choices,
                 account_choices,
+                model_choices,
             }
         })
         .collect();
@@ -146,9 +148,14 @@ pub async fn propose(state: &AppState, owner: Uuid, conversation_id: Uuid, kind:
                 None => {}
             }
 
-            if let Some(model) = step.get("model").and_then(Value::as_str).map(String::from) {
-                let offered = crate::prompts::offered_models(state, owner, chosen, &agent).await?;
+            let offered = crate::prompts::offered_models(state, owner, chosen, &agent).await?;
+            let models: Vec<Value> = offered.iter().filter_map(|entry| Some(json!({"id": entry.get("modelId")?.as_str()?, "name": entry.get("name").and_then(Value::as_str).or_else(|| entry.get("modelId")?.as_str())?}))).collect();
 
+            if models.len() > 1 {
+                step_choices.insert("model".into(), json!(models));
+            }
+
+            if let Some(model) = step.get("model").and_then(Value::as_str).map(String::from) {
                 if !offered.is_empty() {
                     match crate::prompts::resolve_model(&offered, &model) {
                         Ok(id) => {
@@ -217,6 +224,7 @@ pub async fn approve_for(state: &AppState, owner: Uuid, id: Uuid, request: Appro
         let open = &found.choices[&step.key];
         let nodes: Vec<Uuid> = open["node"].as_array().cloned().unwrap_or_default().iter().filter_map(|node| node["id"].as_str().and_then(|id| id.parse().ok())).collect();
         let accounts: Vec<String> = open["account"].as_array().cloned().unwrap_or_default().iter().filter_map(|account| account.as_str().map(String::from)).collect();
+        let models: Vec<String> = open["model"].as_array().cloned().unwrap_or_default().iter().filter_map(|model| model["id"].as_str().map(String::from)).collect();
 
         if !nodes.is_empty() {
             match choice.and_then(|choice| choice.node_id).filter(|node| nodes.contains(node)) {
@@ -230,6 +238,14 @@ pub async fn approve_for(state: &AppState, owner: Uuid, id: Uuid, request: Appro
                 Some(account) => step.account = Some(account),
                 None => return Err(ApiError::conflict("choice_needed", format!("Choose an account for {}.", step.title))),
             }
+        }
+
+        if let Some(model) = choice.and_then(|choice| choice.model.clone()) {
+            if !models.contains(&model) {
+                return Err(ApiError::conflict("choice_needed", format!("Choose one of the models offered for {}.", step.title)));
+            }
+
+            step.model = Some(model);
         }
     }
 

@@ -284,6 +284,25 @@ async fn a_subagent_model_the_agent_does_not_offer_or_that_matches_two_is_refuse
 }
 
 #[tokio::test]
+async fn the_person_can_start_a_subagent_on_another_offered_model_than_the_one_proposed() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = caller(&server, &mut link).await;
+    offer_models(&server, conversation).await;
+    call(&server, &link, conversation, "start_subagent", subagent_on("opus")).await;
+    let proposal = proposals(&server).await[0].clone();
+    let id = proposal["id"].as_str().unwrap();
+    assert_eq!(proposal["steps"][0]["model_choices"], json!([{"id": "opus", "name": "Opus 5.5"}, {"id": "sonnet", "name": "Sonnet 5.5"}]));
+
+    let (status, refused) = server.user.json(server.user.post(&format!("/api/v1/start-proposals/{id}/approve")).json(&json!({"choices": {"subagent": {"model": "claude-fable-5-1"}}}))).await;
+    assert_eq!((status, refused["error"].clone()), (409, json!("choice_needed")), "{refused}");
+
+    let (status, approved) = server.user.json(server.user.post(&format!("/api/v1/start-proposals/{id}/approve")).json(&json!({"choices": {"subagent": {"model": "sonnet"}}}))).await;
+    assert_eq!((status, approved["state"].clone()), (200, json!("started")), "{approved}");
+    assert_eq!(workflows(&server).await[0]["plan"]["steps"][0]["model"], "sonnet");
+}
+
+#[tokio::test]
 async fn list_places_names_the_models_each_agent_last_offered_on_a_node() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

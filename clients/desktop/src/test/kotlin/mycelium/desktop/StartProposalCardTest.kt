@@ -51,6 +51,8 @@ private fun startSubagent(): List<Event> {
 
 private const val SingleChoice = ""","account":"a@example.com","model":null,"first_message":"Read the schema","node_choices":[],"account_choices":[]"""
 
+private const val ModelChoices = ""","account":"a@example.com","model":"opus","first_message":"Read the schema","node_choices":[],"account_choices":[],"model_choices":[{"id":"opus","name":"Opus 5.5"},{"id":"sonnet","name":"Sonnet 5.5"}]"""
+
 private const val Ambiguous = ""","first_message":"Read the schema","node_choices":[],"account_choices":["a@example.com","b@example.com"]"""
 
 private fun proposal(state: String, step: String = SingleChoice) =
@@ -65,12 +67,14 @@ class StartProposalCardTest {
 
     private val requests = java.util.concurrent.CopyOnWriteArrayList<Pair<HttpMethod, String>>()
 
+    private val bodies = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     private fun show(step: String = SingleChoice) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             requests += request.method to path
-            request.body.toByteArray()
+            bodies[path] = request.body.toByteArray().decodeToString()
             val body = when {
                 path.endsWith("/connect") || path.endsWith("/approve") -> proposal("started", step)
                 path.endsWith("/decline") -> proposal("declined", step)
@@ -163,5 +167,29 @@ class StartProposalCardTest {
         rule.onNodeWithText("Create").performClick()
 
         waitForRequest(HttpMethod.Post, "/start-proposals/$ProposalId/approve")
+    }
+
+    @Test
+    fun theCardStartsOnTheProposedModelUnlessAnotherIsChosen() {
+        show(ModelChoices)
+        waitForText("Create")
+
+        rule.onNodeWithText("claude · a@example.com").assertExists()
+        rule.onNodeWithContentDescription("Model: Opus 5.5").performClick()
+        rule.onNodeWithContentDescription("Claude Code: Sonnet 5.5").performClick()
+        rule.onNodeWithContentDescription("Model: Sonnet 5.5").assertExists()
+        rule.onNodeWithText("Create").performClick()
+
+        waitForRequest(HttpMethod.Post, "/start-proposals/$ProposalId/approve")
+        assertEquals("""{"choices":{"subagent":{"model":"sonnet"}}}""", bodies.entries.single { it.key.endsWith("/start-proposals/$ProposalId/approve") }.value)
+    }
+
+    @Test
+    fun aCardWithoutModelChoicesNamesTheModelAndOffersNoPicker() {
+        show(SingleChoice.replace("\"model\":null", "\"model\":\"opus\""))
+        waitForText("Create")
+
+        rule.onNodeWithText("claude · a@example.com · opus").assertExists()
+        rule.onNodeWithContentDescription("Model: opus").assertDoesNotExist()
     }
 }
