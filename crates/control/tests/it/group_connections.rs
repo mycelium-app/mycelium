@@ -502,6 +502,24 @@ async fn a_group_connection_never_expires() {
     assert_eq!(queue(&fleet.server, fleet.immich_chat).await.len(), 1);
 }
 
+#[tokio::test]
+async fn a_conversation_whose_starter_was_renamed_becomes_managed_by_it_and_one_the_person_started_stays_unmanaged() {
+    let mut fleet = fleet().await;
+    let started = started_chat(&mut fleet).await;
+    fleet.link.start_session(started, "acp-new").await;
+    fleet.link.expect_prompt().await;
+    let (first, second, _) = loose_pair(&mut fleet).await;
+    sqlx::query("update conversations set managed_by = null").execute(&fleet.server.pool).await.unwrap();
+    sqlx::query("update conversations set title = 'Slop manager' where id = $1").bind(fleet.yucca_chat).execute(&fleet.server.pool).await.unwrap();
+
+    sqlx::raw_sql(include_str!("../../migrations/0165_managed_conversations_after_renames.sql")).execute(&fleet.server.pool).await.unwrap();
+
+    let managed: Vec<(Uuid, Option<Uuid>)> = sqlx::query_as("select id, managed_by from conversations where id = any($1) order by id").bind(vec![started, first, second, fleet.yucca_chat]).fetch_all(&fleet.server.pool).await.unwrap();
+    let mut expected = vec![(started, Some(fleet.yucca_chat)), (first, None), (second, None), (fleet.yucca_chat, None)];
+    expected.sort();
+    assert_eq!(managed, expected);
+}
+
 async fn answered(server: &Server, link: &mut NodeLink, conversation: Uuid, answer: &str) {
     link.send(mycelium_proto::link::NodeToControl::AcpUpdate { conversation_id: conversation, seq: 3, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": answer}}}) }).await;
     link.send(mycelium_proto::link::NodeToControl::TurnEnd { conversation_id: conversation, seq: 4, stop_reason: "end_turn".into(), usage: None }).await;
