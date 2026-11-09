@@ -644,6 +644,14 @@ async fn launch_keeper(dir: &Path, launch: &Launch) -> Result<()> {
         );
     }
 
+    for _ in 0..KEEPER_SOCKET_ATTEMPTS {
+        if UnixStream::connect(&socket).await.is_err() {
+            break;
+        }
+
+        tokio::time::sleep(KEEPER_SOCKET_RETRY).await;
+    }
+
     clear_session_files(dir)?;
 
     let mut command = tokio::process::Command::new(&launch.keeper_binary);
