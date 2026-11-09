@@ -75,7 +75,7 @@ class ExperimentGatesTest {
     fun withEveryExperimentOffTheSubagentsPanelIsOffered() {
         shell(AllOff)
 
-        assertEquals(1, present("Open subagents"))
+        assertEquals(1, present("Open subagents and workflows"))
         assertEquals(1, present("Open git"))
     }
 
@@ -90,18 +90,16 @@ class ExperimentGatesTest {
     }
 
     @Test
-    fun withEveryExperimentOffTheSidebarHidesWorkflowsAndHistory() {
+    fun withEveryExperimentOffTheSidebarHidesHistory() {
         shell(AllOff)
 
-        assertEquals(0, rule.onAllNodesWithText("Workflows").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithText("History").fetchSemanticsNodes().size)
     }
 
     @Test
-    fun turningOnTheWorkflowsAndHistoryExperimentsShowsThemInTheSidebar() {
-        shell("""{"tasks_and_workflows":true,"history":true}""")
+    fun turningOnTheHistoryExperimentShowsItInTheSidebar() {
+        shell("""{"history":true}""")
 
-        assertEquals(1, rule.onAllNodesWithText("Workflows").fetchSemanticsNodes().size)
         assertEquals(1, rule.onAllNodesWithText("History").fetchSemanticsNodes().size)
     }
 

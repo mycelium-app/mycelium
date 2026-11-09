@@ -127,15 +127,6 @@ class GroupScopeTest {
     }
 
     @Test
-    fun workflowsShowOnlyThoseStartedFromTheSelectedGroupsConversations() {
-        show(Route.Workflows)
-
-        waitFor("Slop workflow")
-
-        assertEquals(0, shown("Work workflow"))
-    }
-
-    @Test
     fun schedulesShowOnlyThoseRunningInTheSelectedGroup() {
         showSchedules()
 

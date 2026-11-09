@@ -11,6 +11,9 @@ import kotlinx.coroutines.test.runTest
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.MyceliumApi
+import mycelium.api.Workflow
+import mycelium.api.WorkflowPlan
+import mycelium.state.HistoryEntry
 import mycelium.state.sideChatOf
 import mycelium.state.sidebarRows
 import mycelium.state.sidebarSections
@@ -67,6 +70,18 @@ class SideChatsTest {
 
         assertEquals(listOf("child" to listOf("grandchild"), "parent" to listOf("child", "sibling")), subagentSections(all, "child").map { it.owner.id to it.subagents.map { sub -> sub.id } })
         assertEquals(listOf("parent" to listOf("child", "sibling")), subagentSections(all, "sibling").map { it.owner.id to it.subagents.map { sub -> sub.id } })
+    }
+
+    @Test
+    fun aConversationsWorkflowsAndSubagentsShareOneHistoryNewestFirst() {
+        fun subagent(id: String, createdAt: String) = chat(id, "parent").copy(sideKind = "subagent", createdAt = createdAt)
+        fun workflow(id: String, conversationId: String, createdAt: String) = Workflow(id = id, conversationId = conversationId, title = id, status = "running", plan = WorkflowPlan(), steps = emptyList(), round = 1, createdAt = createdAt)
+        val all = listOf(chat("parent"), subagent("early", "2026-10-22T10:01:00Z"), subagent("late", "2026-10-22T10:05:00Z"))
+        val workflows = listOf(workflow("middle", "parent", "2026-10-22T10:03:00Z"), workflow("elsewhere", "other", "2026-10-22T10:04:00Z"))
+
+        val history = subagentSections(all, "parent", workflows).single().history.map { if (it is HistoryEntry.Run) "run ${it.workflow.id}" else "subagent ${(it as HistoryEntry.Subagent).conversation.id}" }
+
+        assertEquals(listOf("subagent late", "run middle", "subagent early"), history)
     }
 
     @Test

@@ -112,10 +112,6 @@ class MyceliumApi(
 
     suspend fun workflow(id: String): Workflow = call("/workflows/$id") { client.get(it) { authorise() } }.body()
 
-    suspend fun createWorkflow(plan: WorkflowPlan): Workflow = call("/workflows") { client.post(it) { authorise(); json(plan) } }.body()
-
-    suspend fun rerunWorkflow(id: String): Workflow = call("/workflows/$id/rerun") { client.post(it) { authorise() } }.body()
-
     suspend fun controlWorkflow(id: String, request: WorkflowControlRequest): Workflow = call("/workflows/$id/control") { client.post(it) { authorise(); json(request) } }.body()
 
     suspend fun me(): Me = call("/me") { client.get(it) { authorise() } }.body()

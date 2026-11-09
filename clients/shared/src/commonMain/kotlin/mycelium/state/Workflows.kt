@@ -11,15 +11,6 @@ import mycelium.api.WorkflowStatuses
 import kotlin.time.Duration
 import kotlin.time.Instant
 
-object WorkflowFilters {
-    const val All = "All"
-    const val Active = "Active"
-    const val Waiting = "Waiting for you"
-    const val Ended = "Ended"
-
-    val Options = listOf(All, Active, Waiting, Ended)
-}
-
 object WorkflowStepStatuses {
     const val Waiting = "waiting"
     const val Starting = "starting"
@@ -53,57 +44,6 @@ fun Workflow.stalled(now: Instant): Boolean {
 }
 
 fun Workflow.stepTitle(key: String?): String = plan.steps.firstOrNull { it.key == key }?.title ?: key.orEmpty()
-
-fun visibleWorkflows(workflows: Collection<Workflow>, filter: String, query: String, projectId: String?): List<Workflow> {
-    val needle = query.trim()
-
-    return workflows
-        .filter { workflow ->
-            when (filter) {
-                WorkflowFilters.Active -> !workflow.ended()
-                WorkflowFilters.Waiting -> workflow.status == WorkflowStatuses.Waiting
-                WorkflowFilters.Ended -> workflow.ended()
-                else -> true
-            }
-        }
-        .filter { projectId == null || it.projectId == projectId }
-        .filter { needle.isEmpty() || it.title.contains(needle, ignoreCase = true) }
-        .sortedWith(compareByDescending<Workflow> { it.createdAt }.thenBy { it.id })
-}
-
-private fun plural(count: Int, noun: String): String = "$count $noun${if (count == 1) "" else "s"}"
-
-fun workflowWhere(workflow: Workflow): String = if (workflow.kind == WorkflowKinds.AgentRun) agentRunWhere(workflow) else myceliumWhere(workflow)
-
-private fun myceliumWhere(workflow: Workflow): String {
-    val rounds = "round ${workflow.round} of ${workflow.plan.maxRounds}"
-
-    return when (workflow.status) {
-        WorkflowStatuses.Done -> "${plural(workflow.plan.steps.size, "step")}, ${plural(workflow.round, "round")}"
-        WorkflowStatuses.Failed -> workflow.endReason?.step?.let { "${workflow.stepTitle(it)} failed in round ${workflow.endReason?.round ?: workflow.round}" } ?: "Failed in round ${workflow.round}"
-        WorkflowStatuses.Stopped -> if (workflow.steps.none { it.status != WorkflowStepStatuses.Waiting && it.status != WorkflowStepStatuses.NotRun } && workflow.round <= 1) "Stopped before any step ran" else "Stopped in round ${workflow.round}"
-        else -> {
-            val current = workflow.steps.firstOrNull { it.status in setOf(WorkflowStepStatuses.Gate, WorkflowStepStatuses.Running, WorkflowStepStatuses.Starting) }
-                ?: workflow.steps.firstOrNull { it.status == WorkflowStepStatuses.Waiting }
-
-            if (current == null) rounds.replaceFirstChar { it.uppercase() } else "${workflow.stepTitle(current.key)}, $rounds"
-        }
-    }
-}
-
-private fun agentRunWhere(workflow: Workflow): String {
-    val agents = workflow.steps
-    val finished = agents.count { it.status == WorkflowStepStatuses.Done }
-    val unfinished = agents.firstOrNull { it.status != WorkflowStepStatuses.Done }
-    val phase = (unfinished ?: agents.lastOrNull())?.phase ?: workflow.phases.firstOrNull()
-
-    return when (workflow.status) {
-        WorkflowStatuses.Done -> plural(agents.size, "agent")
-        WorkflowStatuses.Failed -> unfinished?.label?.let { "$it failed" } ?: "Failed"
-        WorkflowStatuses.Stopped -> "Stopped with $finished of ${plural(agents.size, "agent")} finished"
-        else -> if (agents.isEmpty()) phase ?: "Starting" else "${phase ?: "Running"}, $finished of ${plural(agents.size, "agent")}"
-    }
-}
 
 fun runMinutes(start: String?, end: String?): String? {
     val from = start?.let(::instantOrNull) ?: return null

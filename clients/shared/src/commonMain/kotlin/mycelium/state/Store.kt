@@ -865,14 +865,6 @@ class Store(
         mutableState.update { it.copy(workflows = it.workflows + (workflow.id to workflow)) }
     }
 
-    suspend fun rerunWorkflow(id: String): String {
-        val workflow = api.rerunWorkflow(id)
-
-        mutableState.update { it.copy(workflows = it.workflows + (workflow.id to workflow)) }
-
-        return workflow.id
-    }
-
     suspend fun refreshSchedules() {
         val schedules = api.schedules()
         val runs = api.scheduleRuns()

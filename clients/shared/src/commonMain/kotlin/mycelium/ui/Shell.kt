@@ -166,11 +166,6 @@ sealed interface Route {
 
     data class Node(val id: String) : Route
 
-
-    data object Workflows : Route
-
-    data class Workflow(val id: String) : Route
-
     data object Wellness : Route
 
     data object Projects : Route
@@ -606,15 +601,13 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
                 if (closed != null) {
                     ClosedScreen(closed, onSelect = onChooseGroup, onOpenOutOfHours = { onOpenOutOfHours(closed.groupId) })
                 } else when (route) {
-                    Route.Inbox -> InboxScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenWorkflow = { onRoute(Route.Workflow(it)) }, onOpenUsageHistory = { onRoute(Route.UsageHistory) })
+                    Route.Inbox -> InboxScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenUsageHistory = { onRoute(Route.UsageHistory) })
                     Route.Empty, Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenNodes = { onRoute(Route.Nodes) })
-                    is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenNode = { onRoute(Route.Node(it)) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) }, onOpenWorkflow = { onRoute(Route.Workflow(it)) })
+                    is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenNode = { onRoute(Route.Node(it)) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) })
                     Route.NewChat -> NewChatScreen(store, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenSettings = { onRoute(Route.Settings) }, onOpenNodes = { onRoute(Route.Nodes) })
                     is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId, onOpenNodes = { onRoute(Route.Nodes) })
                     Route.Nodes -> NodesScreen(store, state, platform, onOpenNode = { onRoute(Route.Node(it)) })
                     is Route.Node -> NodePage(store, state, route.id, platform, onBack = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
-                    Route.Workflows -> WorkflowsScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenWorkflow = { onRoute(Route.Workflow(it)) })
-                    is Route.Workflow -> WorkflowScreen(store, state, route.id, onBack = { onRoute(Route.Workflows) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenWorkflow = { onRoute(Route.Workflow(it)) }, onOpenProjects = { onRoute(Route.Projects) })
                     Route.Wellness -> WellnessScreen(store, platform, onOpenAssistant = { onRoute(Route.Assistant(it)) }, onOpenConversation = { onRoute(Route.Chat(it)) })
                     Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) })
                     Route.Issues -> IssuesScreen(store, state, onOpened = { onRoute(Route.Chat(it.id)) })
@@ -649,7 +642,6 @@ internal fun screenTarget(path: String): Pair<Route, SettingsSection?>? {
         "inbox" -> Route.Inbox to null
         "new" -> Route.New to null
         "nodes" -> Route.Nodes to null
-        "workflows" -> Route.Workflows to null
         "schedules" -> Route.Settings to SettingsSection.Schedules
         "wellness" -> Route.Wellness to null
         "projects" -> Route.Projects to null
@@ -801,10 +793,6 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 }
 
                 SidebarLink("Artefacts", MyIcon.Layers, selected = route == Route.Artifacts || route is Route.Artefact) { onRoute(Route.Artifacts) }
-
-                if (state.experiments.tasksAndWorkflows) {
-                    SidebarLink("Workflows", MyIcon.Workflow, selected = route == Route.Workflows || route is Route.Workflow) { onRoute(Route.Workflows) }
-                }
 
                 SidebarLink("Wellness & Learning", MyIcon.Leaf, selected = route == Route.Wellness, tint = MyTheme.colors.leaf) { onRoute(Route.Wellness) }
             }

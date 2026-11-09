@@ -1,5 +1,10 @@
 package mycelium.ui
 
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.withStyle
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.ui.text.style.TextOverflow
 import mycelium.api.ModelChoice
 import mycelium.api.Routing
 import mycelium.state.appsLinkVisible
@@ -57,6 +62,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.semantics
 import mycelium.ProviderDictation
 import mycelium.api.Conversation
+import mycelium.api.Workflow
+import mycelium.api.WorkflowControlRequest
+import mycelium.state.WorkflowStepStatuses
+import mycelium.api.WorkflowStatuses
 import mycelium.api.Watch
 import mycelium.api.CreateProjectRequest
 import mycelium.api.Project
@@ -106,6 +115,7 @@ import mycelium.state.reportedModelChoices
 import mycelium.state.sessionOptions
 import mycelium.state.slashCommands
 import mycelium.state.turnIsOpen
+import mycelium.state.HistoryEntry
 import mycelium.state.SubagentSection
 import mycelium.state.ago
 import mycelium.state.relativeTime
@@ -115,7 +125,7 @@ import mycelium.state.loginMethodName
 import mycelium.state.statusSectionName
 
 @Composable
-fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenNode: (String) -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}, onOpenWorkflow: ((String) -> Unit)? = null, panels: Boolean = true, header: HeaderSlots? = null, onManageActions: () -> Unit = {}) {
+fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenNode: (String) -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}, panels: Boolean = true, header: HeaderSlots? = null, onManageActions: () -> Unit = {}) {
     val api = store.api
     var fetched by remember(id) { mutableStateOf<Conversation?>(null) }
     var watches by remember(id) { mutableStateOf<List<Watch>>(emptyList()) }
@@ -478,10 +488,13 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
+    var openedWorkflowId by remember(id) { mutableStateOf<String?>(null) }
+    val openedWorkflow = openedWorkflowId?.let { state.workflows[it] }
+    val workflowControl: (String, WorkflowControlRequest) -> Unit = { workflowId, request -> store.act { store.controlWorkflow(workflowId, request) } }
     val conversationWorkflows = ConversationWorkflows(
         workflows = state.workflows.values.filter { it.conversationId == id }.sortedBy { it.createdAt },
-        onOpen = onOpenWorkflow,
-        onControl = { workflowId, request -> store.act { store.controlWorkflow(workflowId, request) } },
+        onOpen = if (chat || !panels) null else { workflowId -> openedWorkflowId = workflowId; openPanel(SidePanel.Subagents) },
+        onControl = workflowControl,
     )
 
     LaunchedEffect(id) {
@@ -513,7 +526,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
         val panelContent: @Composable () -> Unit = {
             when (panel) {
-                SidePanel.Subagents -> SubagentsPanel(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation, store::closeSession)
+                SidePanel.Subagents -> SubagentsPanel(subagentSections(state.conversations.values, id, state.workflows.values), id, subagentParent, openedWorkflow, { openedWorkflowId = it }, workflowControl, onOpenConversation, store::closeSession, state.conversations.values)
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
                 SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, onOpenArtefact, Modifier.fillMaxSize()) }
                 SidePanel.Apps -> platform?.let { AppsPanel(store, state, it, id, viewedApp, { viewedApp = it }, Modifier.fillMaxSize()) }
@@ -825,7 +838,11 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     if (compact && !chat && panels && panel != null) {
         BottomSheet(onDismiss = { openPanel(null) }) {
             when (panel) {
-                SidePanel.Subagents -> SubagentsList(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation, store::closeSession)
+                SidePanel.Subagents -> if (openedWorkflow != null) {
+                    WorkflowPanelDetail(openedWorkflow, state.conversations.values, { openedWorkflowId = null }, onOpenConversation) { workflowControl(openedWorkflow.id, it) }
+                } else {
+                    SubagentsList(subagentSections(state.conversations.values, id, state.workflows.values), id, subagentParent, { openedWorkflowId = it }, onOpenConversation, store::closeSession)
+                }
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, { openPanel(null); onOpenArtefact(it) }, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 SidePanel.PullRequest -> key(conversation.id) { ConversationPullRequestPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
@@ -1125,7 +1142,7 @@ private fun Rail(open: SidePanel?, outlineOpen: Boolean, hasApps: Boolean, hasPu
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (!environmentOnly) {
-                MyButton({ onToggle(SidePanel.Subagents) }, icon = MyIcon.Agent, description = if (open == SidePanel.Subagents) "Close subagents" else "Open subagents", muted = true, selected = open == SidePanel.Subagents)
+                MyButton({ onToggle(SidePanel.Subagents) }, icon = MyIcon.Agent, description = if (open == SidePanel.Subagents) "Close subagents and workflows" else "Open subagents and workflows", muted = true, selected = open == SidePanel.Subagents)
 
                 MyButton({ onToggle(SidePanel.Git) }, icon = MyIcon.Branch, description = if (open == SidePanel.Git) "Close git" else "Open git", muted = true, selected = open == SidePanel.Git)
                 if (hasPullRequest) {
@@ -1148,20 +1165,26 @@ private fun Rail(open: SidePanel?, outlineOpen: Boolean, hasApps: Boolean, hasPu
 }
 
 @Composable
-private fun SubagentsPanel(sections: List<SubagentSection>, currentId: String, parent: Conversation?, onOpen: (String) -> Unit, onStop: (Conversation) -> Unit) {
-    Column(Modifier.fillMaxSize().background(MyTheme.colors.bgPanel).semantics { contentDescription = "Subagents" }) {
+private fun SubagentsPanel(sections: List<SubagentSection>, currentId: String, parent: Conversation?, openedWorkflow: Workflow?, onOpenWorkflow: (String?) -> Unit, onControl: (String, WorkflowControlRequest) -> Unit, onOpen: (String) -> Unit, onStop: (Conversation) -> Unit, conversations: Collection<Conversation>) {
+    if (openedWorkflow != null) {
+        WorkflowPanelDetail(openedWorkflow, conversations, { onOpenWorkflow(null) }, onOpen) { onControl(openedWorkflow.id, it) }
+
+        return
+    }
+
+    Column(Modifier.fillMaxSize().background(MyTheme.colors.bgPanel).semantics { contentDescription = "Subagents and workflows" }) {
         Bar {
-            PanelTitle("Subagents")
+            PanelTitle("Subagents and workflows")
         }
 
         Column(Modifier.weight(1f).verticalScrollWithBar().padding(vertical = Tokens.Space.S2)) {
-            SubagentsList(sections, currentId, parent, onOpen, onStop)
+            SubagentsList(sections, currentId, parent, onOpenWorkflow, onOpen, onStop)
         }
     }
 }
 
 @Composable
-private fun SubagentsList(sections: List<SubagentSection>, currentId: String, parent: Conversation?, onOpen: (String) -> Unit, onStop: (Conversation) -> Unit) {
+private fun SubagentsList(sections: List<SubagentSection>, currentId: String, parent: Conversation?, onOpenWorkflow: (String) -> Unit, onOpen: (String) -> Unit, onStop: (Conversation) -> Unit) {
     val colors = MyTheme.colors
 
     if (parent != null) {
@@ -1169,7 +1192,7 @@ private fun SubagentsList(sections: List<SubagentSection>, currentId: String, pa
     }
 
     if (sections.isEmpty()) {
-        Label("This conversation has no subagents.", Modifier.padding(horizontal = Tokens.Space.S3), color = colors.textMuted)
+        Label("This conversation has no subagents or workflows.", Modifier.padding(horizontal = Tokens.Space.S3), color = colors.textMuted)
     }
 
     sections.forEachIndexed { index, section ->
@@ -1181,32 +1204,53 @@ private fun SubagentsList(sections: List<SubagentSection>, currentId: String, pa
             Label(section.owner.title, Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1).semantics { heading() }, Tokens.Type.MetaStrong, colors.textMuted, maxLines = 1)
         }
 
-        section.subagents.forEach { subagent ->
-            val status = statusSectionName(subagent.status)
-            val since = relativeTime(subagent.createdAt)
-
+        section.history.forEach { entry ->
             val menu = rememberRowMenuState()
-            val running = subagent.status == ConversationStatus.Working || subagent.status == ConversationStatus.Input
+            val workflow = (entry as? HistoryEntry.Run)?.workflow
+            val subagent = (entry as? HistoryEntry.Subagent)?.conversation
+            val look = workflow?.let { workflowStatusLook(it.status) }
+            val progress = workflow?.takeIf { it.status == WorkflowStatuses.Done && it.plan.steps.isNotEmpty() }?.let { ", ${it.steps.count { step -> step.status == WorkflowStepStatuses.Done || step.status == WorkflowStepStatuses.Approved }} of ${it.plan.steps.size} steps" }.orEmpty()
+            val state = if (workflow != null && look != null) look.label + progress else statusSectionName(subagent!!.status)
+            val attention = look?.tone == Tone.Attention || subagent?.status == ConversationStatus.Input
+            val title = workflow?.title ?: subagent!!.title
+            val createdAt = entry.createdAt
+            val running = subagent?.status == ConversationStatus.Working || subagent?.status == ConversationStatus.Input
+            val open = { if (workflow != null) onOpenWorkflow(workflow.id) else onOpen(subagent!!.id) }
 
             Row(
                 Modifier
                     .fillMaxWidth()
                     .rowContextMenu(menu)
-                    .pressable({ onOpen(subagent.id) }, selected = subagent.id == currentId, shape = BlockShape, description = "${subagent.title}, $status, started ${ago(subagent.createdAt)}")
+                    .pressable(open, selected = subagent != null && subagent.id == currentId, shape = BlockShape, description = if (workflow != null) "Workflow $title, $state, started ${ago(createdAt)}" else "$title, $state, started ${ago(createdAt)}")
                     .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1_5),
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(iconOf(subagent.status), colors.textMuted, Tokens.Size.IconSm)
-                Label(subagent.title, Modifier.weight(1f), maxLines = 1)
-                Label(status, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-                Label(since, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+                Icon(if (workflow != null) MyIcon.Workflow else MyIcon.Agent, colors.textMuted, Tokens.Size.IconSm)
 
-                RowMenu(subagent.title, menu) { close ->
-                    MenuItem("Open", onClick = { close(); onOpen(subagent.id) }, leading = MyIcon.Agent)
+                Column(Modifier.weight(1f)) {
+                    Label(title, maxLines = 1)
+                    val line = buildAnnotatedString {
+                        append("${if (workflow != null) "Workflow" else "Subagent"} · ")
 
-                    if (running) {
-                        MenuItem("Stop", onClick = { close(); onStop(subagent) }, leading = MyIcon.Stop)
+                        if (attention) {
+                            withStyle(SpanStyle(color = MyTheme.colors.statusAttention)) { append(state) }
+                        } else {
+                            append(state)
+                        }
+                    }
+                    BasicText(line, style = Tokens.Type.Meta.themed().copy(color = colors.textMuted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+
+                Label(relativeTime(createdAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+
+                if (subagent != null) {
+                    RowMenu(subagent.title, menu) { close ->
+                        MenuItem("Open", onClick = { close(); onOpen(subagent.id) }, leading = MyIcon.Agent)
+
+                        if (running) {
+                            MenuItem("Stop", onClick = { close(); onStop(subagent) }, leading = MyIcon.Stop)
+                        }
                     }
                 }
             }

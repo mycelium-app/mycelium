@@ -394,14 +394,28 @@ fun sidebarRows(parents: List<Conversation>, conversations: Collection<Conversat
         listOf(SidebarRow(parent, depth, sideChats.size)) + shown
     }
 
-data class SubagentSection(val owner: Conversation, val subagents: List<Conversation>)
+sealed interface HistoryEntry {
+    val createdAt: String
 
-fun subagentSections(conversations: Collection<Conversation>, conversationId: String): List<SubagentSection> {
+    data class Subagent(val conversation: Conversation) : HistoryEntry {
+        override val createdAt get() = conversation.createdAt
+    }
+
+    data class Run(val workflow: Workflow) : HistoryEntry {
+        override val createdAt get() = workflow.createdAt
+    }
+}
+
+data class SubagentSection(val owner: Conversation, val subagents: List<Conversation>, val workflows: List<Workflow> = emptyList()) {
+    val history: List<HistoryEntry> = (subagents.map { HistoryEntry.Subagent(it) } + workflows.map { HistoryEntry.Run(it) }).sortedByDescending { it.createdAt }
+}
+
+fun subagentSections(conversations: Collection<Conversation>, conversationId: String, workflows: Collection<Workflow> = emptyList()): List<SubagentSection> {
     val byId = conversations.associateBy { it.id }
 
     return generateSequence(byId[conversationId]) { current -> current.parentId?.let(byId::get) }
-        .map { owner -> SubagentSection(owner, subagentsOf(conversations, owner.id)) }
-        .filter { it.subagents.isNotEmpty() }
+        .map { owner -> SubagentSection(owner, subagentsOf(conversations, owner.id), workflows.filter { it.conversationId == owner.id }) }
+        .filter { it.subagents.isNotEmpty() || it.workflows.isNotEmpty() }
         .toList()
 }
 

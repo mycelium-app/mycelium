@@ -72,8 +72,8 @@ class SubagentChatsTest {
     private fun openSubagentsOfTheParent() {
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Review the change, ", substring = true).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Review the change, ", substring = true).performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open subagents").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Open subagents").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open subagents and workflows").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Open subagents and workflows").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Check the build, ", substring = true).fetchSemanticsNodes().isNotEmpty() }
     }
 
@@ -110,8 +110,8 @@ class SubagentChatsTest {
         rule.onNodeWithContentDescription("Check the build, ", substring = true).performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Open the conversation it belongs to").fetchSemanticsNodes().isNotEmpty() }
 
-        if (rule.onAllNodesWithContentDescription("Open subagents").fetchSemanticsNodes().isNotEmpty()) {
-            rule.onNodeWithContentDescription("Open subagents").performClick()
+        if (rule.onAllNodesWithContentDescription("Open subagents and workflows").fetchSemanticsNodes().isNotEmpty()) {
+            rule.onNodeWithContentDescription("Open subagents and workflows").performClick()
         }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Back to Review the change").fetchSemanticsNodes().isNotEmpty() }

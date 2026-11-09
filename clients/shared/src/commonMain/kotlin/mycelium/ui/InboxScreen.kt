@@ -97,7 +97,7 @@ private data class InboxStats(val rate: TokenRate?, val now: kotlin.time.Instant
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun InboxScreen(store: Store, state: AppState, onOpenConversation: (String) -> Unit, onOpenWorkflow: (String) -> Unit, onOpenUsageHistory: () -> Unit) {
+fun InboxScreen(store: Store, state: AppState, onOpenConversation: (String) -> Unit, onOpenUsageHistory: () -> Unit) {
     val items = rememberInbox(store, state)
     val lingering = remember { mutableStateMapOf<String, InboxItem>() }
     var previous by remember { mutableStateOf(items) }
@@ -153,7 +153,7 @@ fun InboxScreen(store: Store, state: AppState, onOpenConversation: (String) -> U
     }
 
     val shown = (items + lingering.values.filter { lingered -> items.none { it.key == lingered.key } }).sortedByDescending { it.waitingSince }
-    val needsYou: @Composable (Modifier, Boolean) -> Unit = { modifier, headed -> NeedsYouColumn(store, state, shown, state.needsYouFocus, voice.open && voice.privacy.voiceEnabled, onOpenConversation, onOpenWorkflow, modifier, headed) }
+    val needsYou: @Composable (Modifier, Boolean) -> Unit = { modifier, headed -> NeedsYouColumn(store, state, shown, state.needsYouFocus, voice.open && voice.privacy.voiceEnabled, onOpenConversation, modifier, headed) }
     val feedColumn: @Composable (Modifier) -> Unit = { modifier -> FeedColumn(posts, onOpenConversation, modifier) }
     val statsColumn: @Composable (Modifier) -> Unit = { modifier -> StatsColumn(store, state, stats, onOpenConversation, onOpenUsageHistory, modifier) }
 
@@ -212,7 +212,7 @@ private fun ColumnHeading(text: String) {
 }
 
 @Composable
-private fun NeedsYouColumn(store: Store, state: AppState, items: List<InboxItem>, focusedKey: String?, voiceDocked: Boolean, onOpenConversation: (String) -> Unit, onOpenWorkflow: (String) -> Unit, modifier: Modifier, headed: Boolean) {
+private fun NeedsYouColumn(store: Store, state: AppState, items: List<InboxItem>, focusedKey: String?, voiceDocked: Boolean, onOpenConversation: (String) -> Unit, modifier: Modifier, headed: Boolean) {
     val listState = rememberLazyListState()
     val outlinedKey = focusedKey?.takeIf { key -> items.any { it.key == key } } ?: items.firstOrNull()?.key?.takeIf { voiceDocked }
 
@@ -238,7 +238,7 @@ private fun NeedsYouColumn(store: Store, state: AppState, items: List<InboxItem>
                 LazyColumn(Modifier.fillMaxSize(), listState) {
                     items(items, key = { it.key }) { item ->
                         Hairline()
-                        InboxItemRow(store, state, item, item.key == outlinedKey, onOpenConversation, onOpenWorkflow)
+                        InboxItemRow(store, state, item, item.key == outlinedKey, onOpenConversation)
                     }
                 }
             }
@@ -252,7 +252,7 @@ private fun NeedsYouColumn(store: Store, state: AppState, items: List<InboxItem>
 }
 
 @Composable
-private fun InboxItemRow(store: Store, state: AppState, item: InboxItem, focused: Boolean, onOpenConversation: (String) -> Unit, onOpenWorkflow: (String) -> Unit) {
+private fun InboxItemRow(store: Store, state: AppState, item: InboxItem, focused: Boolean, onOpenConversation: (String) -> Unit) {
     val colors = MyTheme.colors
     var expanded by remember { mutableStateOf(false) }
     val conversation = item.conversation
@@ -300,7 +300,7 @@ private fun InboxItemRow(store: Store, state: AppState, item: InboxItem, focused
             is InboxRequest.Mycelium -> MyceliumCard(request.call, request.parsed)
             is InboxRequest.Gate -> {
                 val workflow = state.workflows[request.workflow.id] ?: request.workflow
-                val workflows = ConversationWorkflows(listOf(workflow), onOpenWorkflow, onControl = { workflowId, control -> store.act { store.controlWorkflow(workflowId, control) } })
+                val workflows = ConversationWorkflows(listOf(workflow), null, onControl = { workflowId, control -> store.act { store.controlWorkflow(workflowId, control) } })
 
                 CompositionLocalProvider(LocalConversationWorkflows provides workflows) {
                     MyceliumWorkflowCard(workflow)
