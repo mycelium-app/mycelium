@@ -1185,13 +1185,16 @@ async fn link_mcp_server(state: &AppState, owner: Uuid, forge: &ForgeRow, kind: 
                 Err(_) => format!("{product} {host}"),
             };
 
-            sqlx::query("insert into chat_tool_servers (owner, name, kind, url, bearer_token, tools, settings, forge_id) values ($1, $2, 'mcp', $3, $4, $5, '{}', $6)")
+            let tool_prefix = crate::chat_tool_servers::free_prefix(state, owner, &name).await?;
+
+            sqlx::query("insert into chat_tool_servers (owner, name, kind, url, bearer_token, tools, settings, forge_id, tool_prefix) values ($1, $2, 'mcp', $3, $4, $5, '{}', $6, $7)")
                 .bind(owner)
                 .bind(name)
                 .bind(&address)
                 .bind(&forge.token)
                 .bind(sqlx::types::Json(tools))
                 .bind(forge.id)
+                .bind(&tool_prefix)
                 .execute(&state.pool)
                 .await?;
         }

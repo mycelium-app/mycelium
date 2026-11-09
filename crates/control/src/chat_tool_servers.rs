@@ -73,12 +73,13 @@ impl KnownApp {
 pub fn known_app(id: &str) -> Option<&'static KnownApp> {
     KNOWN_APPS.iter().find(|app| app.id == id)
 }
-pub const SERVER_COLUMNS: &str = "id, name, kind, url, account, settings, bearer_token, oauth_refresh_token, oauth_expires_at, oauth, enabled, tools, created_at, token_expires_at, last_used_at, last_error, policy, session_key, forge_id";
+pub const SERVER_COLUMNS: &str = "id, name, tool_prefix, kind, url, account, settings, bearer_token, oauth_refresh_token, oauth_expires_at, oauth, enabled, tools, created_at, token_expires_at, last_used_at, last_error, policy, session_key, forge_id";
 
 #[derive(sqlx::FromRow, Clone)]
 pub struct ServerRow {
     pub id: Uuid,
     pub name: String,
+    pub tool_prefix: String,
     pub kind: String,
     pub url: String,
     pub account: Option<String>,
@@ -254,6 +255,21 @@ pub async fn free_name(state: &AppState, owner: Uuid, base: &str, except: Option
     Err(ApiError::conflict("name_taken", "Enter a name for this account. Every name Mycelium tried is taken."))
 }
 
+pub async fn free_prefix(state: &AppState, owner: Uuid, name: &str) -> ApiResult<String> {
+    let taken: Vec<String> = list_owned(state, owner).await?.into_iter().map(|row| row.tool_prefix).collect();
+    let base = slug(name);
+
+    for number in 1..100 {
+        let candidate = if number == 1 { base.clone() } else { format!("{base}_{number}") };
+
+        if candidate != OWN_SERVER && !taken.contains(&candidate) {
+            return Ok(candidate);
+        }
+    }
+
+    Err(ApiError::conflict("name_taken", "Enter a name for this account. Every tool prefix Mycelium tried is taken."))
+}
+
 pub async fn check_name(state: &AppState, owner: Uuid, name: &str, except: Option<Uuid>) -> ApiResult<()> {
     if name.is_empty() || slug(name).is_empty() {
         return Err(ApiError::bad_request("name_required", "Enter a name for this server, using letters or numbers."));
@@ -391,7 +407,8 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         }
     };
     let kind = app.map_or(kind, |app| app.stored_kind);
-    let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("insert into chat_tool_servers (owner, name, kind, url, account, bearer_token, tools, settings, token_expires_at, policy) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning {SERVER_COLUMNS}")))
+    let tool_prefix = free_prefix(&state, user.id, name).await?;
+    let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("insert into chat_tool_servers (owner, name, tool_prefix, kind, url, account, bearer_token, tools, settings, token_expires_at, policy) values ($1, $2, $11, $3, $4, $5, $6, $7, $8, $9, $10) returning {SERVER_COLUMNS}")))
         .bind(user.id)
         .bind(name)
         .bind(kind)
@@ -402,6 +419,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         .bind(SealedSettings(settings))
         .bind(request.token_expires_at)
         .bind(sqlx::types::Json(request.policy.clone().unwrap_or_else(|| IntegrationPolicy { preset: Integration::parse(kind).map_or(ApprovalPreset::AskAll, Integration::default_preset), ..Default::default() })))
+        .bind(&tool_prefix)
         .fetch_one(&state.pool)
         .await?;
 

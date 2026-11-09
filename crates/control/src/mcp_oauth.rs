@@ -237,12 +237,13 @@ pub async fn callback(State(state): State<AppState>, Query(query): Query<Callbac
 
 async fn connect(state: &AppState, pending: &PendingOAuth, tokens: &Tokens, app: Option<&crate::chat_tool_servers::KnownApp>) -> ApiResult<()> {
     check_name(state, pending.owner, &pending.name, None).await?;
+    let tool_prefix = crate::chat_tool_servers::free_prefix(state, pending.owner, &pending.name).await?;
 
     let listed = fetch_tools(state, &pending.name, &pending.url, Some(&tokens.access_token), DEFAULT_KEY_HEADER, app).await?;
     let oauth = json!({"client_id": pending.client_id, "token_endpoint": pending.token_endpoint, "resource": pending.url});
 
     sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!(
-        "insert into chat_tool_servers (owner, name, kind, url, bearer_token, oauth_refresh_token, oauth_expires_at, oauth, tools, settings, forge_id) values ($1, $2, 'mcp', $3, $4, $5, $6, $7, $8, $9, $10) returning {SERVER_COLUMNS}"
+        "insert into chat_tool_servers (owner, name, kind, url, bearer_token, oauth_refresh_token, oauth_expires_at, oauth, tools, settings, forge_id, tool_prefix) values ($1, $2, 'mcp', $3, $4, $5, $6, $7, $8, $9, $10, $11) returning {SERVER_COLUMNS}"
     )))
     .bind(pending.owner)
     .bind(&pending.name)
@@ -254,6 +255,7 @@ async fn connect(state: &AppState, pending: &PendingOAuth, tokens: &Tokens, app:
     .bind(sqlx::types::Json(listed))
     .bind(crate::secrets::SealedSettings(pending.settings.clone()))
     .bind(pending.forge_id)
+    .bind(&tool_prefix)
     .fetch_one(&state.pool)
     .await?;
     state.hub.tools_changed(pending.owner);

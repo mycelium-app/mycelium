@@ -1,5 +1,5 @@
 use super::call::{Caller, ToolCall, ToolReply};
-use crate::chat_tool_servers::{bearer, list_owned, refreshable_after_rejection, renew, slug};
+use crate::chat_tool_servers::{bearer, list_owned, refreshable_after_rejection, renew, ServerRow};
 use crate::chat_tools;
 use crate::error::ApiResult;
 use crate::mcp_client::{McpConnection, McpError};
@@ -45,7 +45,7 @@ pub async fn listed(caller: &Caller<'_>) -> ApiResult<Vec<Value>> {
 
     for server in servers.iter().filter(|server| server.integration().is_some()) {
         for tool in server.tool_list() {
-            tools.push(integration_tool_value(&server.name, &tool.name, &tool.description, tool.input_schema));
+            tools.push(integration_tool_value(server, &tool.name, &tool.description, tool.input_schema));
         }
     }
 
@@ -53,10 +53,10 @@ pub async fn listed(caller: &Caller<'_>) -> ApiResult<Vec<Value>> {
         match remote {
             Ok(remote) => {
                 for tool in remote {
-                    tools.push(integration_tool_value(&server.name, &tool.name, &tool.description, tool.input_schema));
+                    tools.push(integration_tool_value(server, &tool.name, &tool.description, tool.input_schema));
                 }
             }
-            Err(Some(message)) => tools.push(json!({"name": format!("{}__sign_in_again", slug(&server.name)), "description": format!("{}: {message}", server.name), "inputSchema": {"type": "object"}})),
+            Err(Some(message)) => tools.push(json!({"name": format!("{}__sign_in_again", server.tool_prefix), "description": format!("{}: {message}", server.name), "inputSchema": {"type": "object"}})),
             Err(None) => {}
         }
     }
@@ -64,8 +64,8 @@ pub async fn listed(caller: &Caller<'_>) -> ApiResult<Vec<Value>> {
     Ok(tools)
 }
 
-fn integration_tool_value(server_name: &str, name: &str, description: &str, input_schema: Value) -> Value {
-    json!({"name": format!("{}__{}", slug(server_name), name), "description": format!("{}: {} {}", server_name, description, crate::file_arguments::ADVERT), "inputSchema": crate::file_arguments::with_save_property(response_editor::with_filter_property(input_schema))})
+fn integration_tool_value(server: &ServerRow, name: &str, description: &str, input_schema: Value) -> Value {
+    json!({"name": format!("{}__{}", server.tool_prefix, name), "description": format!("{}: {} {}", server.name, description, crate::file_arguments::ADVERT), "inputSchema": crate::file_arguments::with_save_property(response_editor::with_filter_property(input_schema))})
 }
 
 pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {

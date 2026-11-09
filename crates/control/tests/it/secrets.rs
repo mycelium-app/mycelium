@@ -23,7 +23,7 @@ async fn insert_plaintext_rows(pool: &PgPool) {
     sqlx::query("insert into forges (owner, kind, base_url, account, token, webhook_secret) values ($1, 'gitlab', 'https://gitlab.example.com', 'sam', $2, $3)").bind(owner).bind(FIXTURES[0].2).bind(FIXTURES[1].2).execute(pool).await.unwrap();
     sqlx::query("insert into model_providers (owner, kind, name, base_url, api_key) values ($1, 'openai_compatible', 'Provider', 'https://llm.example.com/v1', $2)").bind(owner).bind(FIXTURES[2].2).execute(pool).await.unwrap();
     sqlx::query("insert into decision_providers (owner, name, base_url, api_key, model) values ($1, 'Decisions', 'https://llm.example.com/v1', $2, 'small')").bind(owner).bind(FIXTURES[3].2).execute(pool).await.unwrap();
-    sqlx::query("insert into chat_tool_servers (owner, name, kind, url, bearer_token, oauth_refresh_token, session_key, settings) values ($1, 'Budget', 'actual', 'https://budget.example.com', $2, $3, $4, $5)")
+    sqlx::query("insert into chat_tool_servers (owner, name, tool_prefix, kind, url, bearer_token, oauth_refresh_token, session_key, settings) values ($1, 'Budget', 'budget', 'actual', 'https://budget.example.com', $2, $3, $4, $5)")
         .bind(owner)
         .bind(FIXTURES[4].2)
         .bind(FIXTURES[5].2)

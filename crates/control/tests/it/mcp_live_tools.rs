@@ -117,6 +117,40 @@ async fn workspace_agents_list_and_call_litellm_tools_through_mycelium() {
 }
 
 #[tokio::test]
+async fn renaming_a_server_changes_its_title_and_leaves_the_prefix_agents_use_alone() {
+    let server = Server::start().await;
+    let (_, token) = server.join("node", "laptop").await;
+    let (_, id) = add_lab(&server).await;
+    let (status, renamed) = server.user.json(server.user.patch(&format!("/api/v1/chat-tool-servers/{id}")).json(&json!({"name": "Weather"}))).await;
+    assert_eq!((status, renamed["name"].clone()), (200, json!("Weather")));
+
+    let listed = mcp(&server, &token, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})).await;
+    let called = mcp(&server, &token, json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "lab__get_weather", "arguments": {"city": "Oslo"}}})).await;
+    let (_, servers) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
+
+    assert!(names(&listed).contains(&"lab__get_weather".to_string()));
+    assert!(!names(&listed).contains(&"weather__get_weather".to_string()));
+    assert_eq!(called["result"]["isError"], false);
+    assert_eq!(servers[0]["name"], "Weather");
+}
+
+#[tokio::test]
+async fn a_new_server_never_takes_the_prefix_a_renamed_one_still_uses() {
+    let server = Server::start().await;
+    let (_, id) = add_lab(&server).await;
+    server.user.json(server.user.patch(&format!("/api/v1/chat-tool-servers/{id}")).json(&json!({"name": "Weather"}))).await;
+    let base = serve(fake_server()).await;
+    let (status, _) = server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Lab", "kind": "litellm", "url": base, "bearer_token": "sk-lite"}))).await;
+    assert_eq!(status, 201);
+    let (_, token) = server.join("node", "laptop").await;
+
+    let listed = mcp(&server, &token, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})).await;
+
+    assert!(names(&listed).contains(&"lab__get_weather".to_string()));
+    assert!(names(&listed).contains(&"lab_2__get_weather".to_string()));
+}
+
+#[tokio::test]
 async fn a_disabled_server_is_left_out_and_calling_it_says_why() {
     let server = Server::start().await;
     let (_, token) = server.join("node", "laptop").await;

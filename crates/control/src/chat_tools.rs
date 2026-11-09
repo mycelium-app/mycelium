@@ -1,4 +1,4 @@
-use crate::chat_tool_servers::{OWN_SERVER, ServerRow, bearer, list_owned, refreshable_after_rejection, renew, slug};
+use crate::chat_tool_servers::{OWN_SERVER, ServerRow, bearer, list_owned, refreshable_after_rejection, renew};
 use crate::chats::{chat_node, record};
 use crate::error::ApiResult;
 use crate::mcp;
@@ -64,10 +64,10 @@ pub struct Toolbox {
     changes: broadcast::Receiver<()>,
 }
 
-fn model_name(server: &str, tool: &str) -> String {
+fn model_name(prefix: &str, tool: &str) -> String {
     let safe: String = tool.chars().map(|character| if character.is_ascii_alphanumeric() || character == '_' || character == '-' { character } else { '_' }).collect();
 
-    format!("mcp__{}__{safe}", slug(server)).chars().take(MAX_TOOL_NAME).collect()
+    format!("mcp__{prefix}__{safe}").chars().take(MAX_TOOL_NAME).collect()
 }
 
 fn words(text: &str) -> Vec<String> {
@@ -137,7 +137,7 @@ impl Toolbox {
                     None => Source::Remote { server: Box::new(server.clone()) },
                 };
 
-                tools.push(Tool { name: model_name(&server.name, &stored.name), server: server.name.clone(), original: stored.name, description: stored.description, schema: response_editor::with_filter_property(stored.input_schema), source });
+                tools.push(Tool { name: model_name(&server.tool_prefix, &stored.name), server: server.name.clone(), original: stored.name, description: stored.description, schema: response_editor::with_filter_property(stored.input_schema), source });
             }
         }
 

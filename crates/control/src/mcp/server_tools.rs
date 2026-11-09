@@ -1,5 +1,5 @@
 use super::call::{ToolCall, ToolReply};
-use crate::chat_tool_servers::{bearer, list_owned, refreshable_after_rejection, renew, slug};
+use crate::chat_tool_servers::{bearer, list_owned, refreshable_after_rejection, renew};
 use crate::chat_tools;
 use crate::error::ApiResult;
 use crate::mcp_client::{McpConnection, McpError};
@@ -12,7 +12,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
     let state = caller.state;
     let owner = caller.owner().await?;
     let servers = list_owned(state, owner).await?;
-    let found = servers.iter().find_map(|server| name.strip_prefix(&format!("{}__", slug(&server.name))).map(|tool| (server, tool)));
+    let found = servers.iter().find_map(|server| name.strip_prefix(&format!("{}__", server.tool_prefix)).map(|tool| (server, tool)));
     let Some((server, tool)) = found else {
         return Ok(ToolReply::invalid("Unknown tool. Use a tool from tools/list."));
     };

@@ -531,7 +531,9 @@ async fn name_after_company(state: &AppState, owner: Uuid, row: &ServerRow, toke
         settings.remove(crate::chat_tool_servers::NAMED_BY_COMPANY);
     }
 
-    sqlx::query("update chat_tool_servers set name = $2, settings = $3 where id = $1").bind(row.id).bind(&name).bind(crate::secrets::SealedSettings(settings)).execute(&state.pool).await.ok()?;
+    let tool_prefix = crate::chat_tool_servers::free_prefix(state, owner, &name).await.ok()?;
+
+    sqlx::query("update chat_tool_servers set name = $2, settings = $3, tool_prefix = $4 where id = $1").bind(row.id).bind(&name).bind(crate::secrets::SealedSettings(settings)).bind(&tool_prefix).execute(&state.pool).await.ok()?;
 
     Some(name)
 }
