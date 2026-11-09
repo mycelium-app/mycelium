@@ -64,7 +64,7 @@ async fn workflow_gate(server: &Server, conversation: Uuid) -> Uuid {
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation).fetch_one(&server.pool).await.unwrap();
     let steps = json!([{"key": "review", "status": "gate", "conversation_id": null, "workflow_id": null, "output": ""}]);
 
-    sqlx::query_scalar::<_, Uuid>("insert into workflows (id, owner, conversation_id, title, status, kind, plan, steps) values (gen_random_uuid(), $1, $2, 'Release', 'running', 'mycelium', '{}', $3) returning id").bind(owner).bind(conversation).bind(steps).fetch_one(&server.pool).await.unwrap()
+    sqlx::query_scalar::<_, Uuid>("insert into workflows (id, owner, conversation_id, title, status, kind, plan, steps) values (gen_random_uuid(), $1, $2, 'Release', 'running', 'mycelium', $4, $3) returning id").bind(owner).bind(conversation).bind(steps).bind(json!({"title": "Release", "steps": [{"key": "review", "title": "Review", "gate": true}]})).fetch_one(&server.pool).await.unwrap()
 }
 
 async fn updated_at(server: &Server, conversation: Uuid, at: &str) {
