@@ -35,7 +35,7 @@ class GroupConnectionsTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val calls = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private val calls = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private fun show(experiments: String, groups: String = "[$Yucca,$Immich]", connections: String = "[]", conversationConnections: String = "[]", shown: String = "No conversations are connected.") {
         val json = headersOf(HttpHeaders.ContentType, "application/json")

@@ -93,7 +93,7 @@ class AccountsAndSessionsTest {
     val scopes = TestScopes()
 
     private val requests = java.util.concurrent.CopyOnWriteArrayList<HttpRequestData>()
-    private val bodies = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private val bodies = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private fun store(nodesJson: String = NodesJson): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")

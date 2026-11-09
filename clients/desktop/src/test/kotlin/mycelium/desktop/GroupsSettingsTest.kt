@@ -63,7 +63,7 @@ class GroupsSettingsTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val requests = java.util.Collections.synchronizedList(mutableListOf<Triple<HttpMethod, String, String>>())
+    private val requests = java.util.concurrent.CopyOnWriteArrayList<Triple<HttpMethod, String, String>>()
 
     private fun requestTo(method: HttpMethod, pathEnd: String): Triple<HttpMethod, String, String> {
         rule.waitUntil(timeoutMillis = 5_000) { requests.toList().any { it.first == method && it.second.endsWith(pathEnd) } }
@@ -244,6 +244,7 @@ class GroupsSettingsTest {
         rule.setContent { MyceliumTheme(true) { Box(Modifier.height(900.dp)) { SettingsScreen(store, Me("u", "sam@example.com", "Sam"), "https://mycelium.test", startOn = SettingsSection.Instructions, onSignOut = {}) } } }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open the slop group").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Global instructions").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Open the slop group").performScrollTo().performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Group sections").fetchSemanticsNodes().isNotEmpty() }

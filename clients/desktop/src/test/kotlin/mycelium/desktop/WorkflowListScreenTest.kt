@@ -43,8 +43,8 @@ class WorkflowListScreenTest {
     @get:Rule val rule = createComposeRule()
     @get:Rule val scopes = TestScopes()
 
-    private val posts = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
-    private val opened = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private val posts = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
+    private val opened = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private val fixtures = listOf(
         workflow("a", "Restore flow hardening", "waiting", "2025-03-04T09:12:00Z", listOf(WorkflowRunStep("build", "done"), WorkflowRunStep("review", "gate")), round = 2),

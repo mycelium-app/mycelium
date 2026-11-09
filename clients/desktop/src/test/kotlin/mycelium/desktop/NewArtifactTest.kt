@@ -37,7 +37,7 @@ class NewArtifactTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val posts = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
+    private val posts = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
 
     private fun store(): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")

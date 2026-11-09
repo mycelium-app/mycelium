@@ -43,7 +43,7 @@ private const val SolutionJson = """[{"path":"src/Filter.kt","diff":"@@ -1,2 +1,
 private const val LearnedJson = """[{"id":"l1","text":"combine versus zip for StateFlow","source_kind":"teach_me","conversation_id":"c1","conversation_title":"Usage card flicker","message_id":12,"created_at":"2026-10-27T09:00:00Z"}]"""
 
 internal class LearningRequests {
-    val seen = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
+    val seen = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
     private var exercise = Suggested
     private var hidden = false
 

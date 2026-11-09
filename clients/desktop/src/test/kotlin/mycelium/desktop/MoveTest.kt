@@ -65,8 +65,8 @@ class MoveTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val requests = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
-    private val opened = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private val requests = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
+    private val opened = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private fun store(plan: String, answer: String): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")

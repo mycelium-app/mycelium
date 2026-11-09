@@ -62,9 +62,9 @@ class WorkflowCardsTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val controls = java.util.Collections.synchronizedList(mutableListOf<Pair<String, WorkflowControlRequest>>())
-    private val opened = java.util.Collections.synchronizedList(mutableListOf<String>())
-    private val stopped = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private val controls = java.util.concurrent.CopyOnWriteArrayList<Pair<String, WorkflowControlRequest>>()
+    private val opened = java.util.concurrent.CopyOnWriteArrayList<String>()
+    private val stopped = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private fun show(items: List<ThreadItem>, workflows: List<Workflow>) {
         rule.setContent {

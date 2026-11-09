@@ -66,8 +66,8 @@ internal const val ActivityTodayJson = """{"date":"2026-10-28","on_screen_minute
 internal fun activityEmptyDayJson(date: String) = """{"date":"$date","on_screen_minutes":0,"spans":[],"breaks":[],"recorded_since":"2026-10-24"}"""
 
 internal class WellnessRequests {
-    val seen = java.util.Collections.synchronizedList(mutableListOf<Triple<String, String, String>>())
-    val queries = java.util.Collections.synchronizedList(mutableListOf<String>())
+    val seen = java.util.concurrent.CopyOnWriteArrayList<Triple<String, String, String>>()
+    val queries = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     fun sent(method: String, suffix: String) = seen.toList().firstOrNull { it.first == method && it.second.endsWith(suffix) }
 

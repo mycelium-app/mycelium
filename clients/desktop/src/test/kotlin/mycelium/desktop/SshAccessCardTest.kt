@@ -60,7 +60,7 @@ class SshAccessCardTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val sent = java.util.Collections.synchronizedList(mutableListOf<SshSent>())
+    private val sent = java.util.concurrent.CopyOnWriteArrayList<SshSent>()
 
     private fun show() {
         val json = headersOf(HttpHeaders.ContentType, "application/json")

@@ -56,10 +56,10 @@ class FolderBrowserTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val posts = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
+    private val posts = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
     private var directories: Pair<HttpStatusCode, String>? = null
     private var refusal: String? = null
-    private val listed = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private val listed = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private fun store(): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")

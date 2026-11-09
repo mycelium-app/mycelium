@@ -29,7 +29,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 private class BesidePlatform(private val inner: AppsPlatform) : Platform by inner {
-    val shown = java.util.Collections.synchronizedList(mutableListOf<String>())
+    val shown = java.util.concurrent.CopyOnWriteArrayList<String>()
     val preferences = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     override fun loadPreference(key: String): String? = preferences[key]

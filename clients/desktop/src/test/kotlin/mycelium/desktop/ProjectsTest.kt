@@ -77,10 +77,10 @@ class ProjectsTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val posts = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
-    private val patches = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
+    private val posts = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
+    private val patches = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
     private var repositoriesDelay = 20L
-    private val repositoryQueries = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private val repositoryQueries = java.util.concurrent.CopyOnWriteArrayList<String>()
     private var groups = "[]"
     private var forges = ForgesJson
     private var repositories = RepositoriesJson

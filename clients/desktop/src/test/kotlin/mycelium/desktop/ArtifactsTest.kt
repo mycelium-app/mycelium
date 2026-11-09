@@ -75,7 +75,7 @@ class ArtifactsScreenTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val requests = java.util.Collections.synchronizedList(mutableListOf<Triple<String, String, String>>())
+    private val requests = java.util.concurrent.CopyOnWriteArrayList<Triple<String, String, String>>()
     private val platform = ArtifactsPlatform()
     private val opened = CopyOnWriteArrayList<String>()
 

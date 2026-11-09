@@ -40,7 +40,7 @@ class LazyHistoryTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val requested = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private val requested = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private fun showLongConversation(): Store {
         val engine = MockEngine { request ->

@@ -41,8 +41,8 @@ class ForgesSettingsTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val requests = java.util.Collections.synchronizedList(mutableListOf<HttpRequestData>())
-    private val bodies = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private val requests = java.util.concurrent.CopyOnWriteArrayList<HttpRequestData>()
+    private val bodies = java.util.concurrent.CopyOnWriteArrayList<String>()
     private var connectAnswer: Pair<HttpStatusCode, String> = HttpStatusCode.Created to GitLabJson
 
     private fun store(initial: String = "[$GitHubJson]"): Store {

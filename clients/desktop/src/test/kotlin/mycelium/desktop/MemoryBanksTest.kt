@@ -34,7 +34,7 @@ class MemoryBanksTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val calls = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private val calls = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private fun show(experiments: String) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")

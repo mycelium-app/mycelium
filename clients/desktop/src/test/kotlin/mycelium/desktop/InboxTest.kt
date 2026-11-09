@@ -56,11 +56,11 @@ class InboxTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val posts = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
+    private val posts = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
 
     private val platform = AppsPlatform()
 
-    private val feedRequests = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private val feedRequests = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private fun show(status: String, feed: String = NoFeed, privacy: String = VoiceOff): Store {
         val engine = MockEngine { request ->

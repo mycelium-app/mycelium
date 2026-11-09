@@ -35,7 +35,7 @@ class WorkflowsTest {
 
     @Test
     fun aChatModelStepUsesItsSelectedProviderAndModel() {
-        val requests = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath

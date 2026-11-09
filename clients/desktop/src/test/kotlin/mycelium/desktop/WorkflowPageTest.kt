@@ -91,8 +91,8 @@ class WorkflowPageTest {
     @get:Rule val rule = createComposeRule()
     @get:Rule val scopes = TestScopes()
 
-    private val posts = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
-    private val opened = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private val posts = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
+    private val opened = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private fun show(workflow: Workflow, rerun: Workflow? = null) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")

@@ -63,7 +63,7 @@ class ApiAccessCardTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val sent = java.util.Collections.synchronizedList(mutableListOf<Sent>())
+    private val sent = java.util.concurrent.CopyOnWriteArrayList<Sent>()
 
     private fun show() {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -160,7 +160,7 @@ class AgentSessionsTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val sent = java.util.Collections.synchronizedList(mutableListOf<Sent>())
+    private val sent = java.util.concurrent.CopyOnWriteArrayList<Sent>()
 
     private fun show() {
         val json = headersOf(HttpHeaders.ContentType, "application/json")

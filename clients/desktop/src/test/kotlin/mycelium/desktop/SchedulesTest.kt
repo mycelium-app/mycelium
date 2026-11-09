@@ -63,7 +63,7 @@ class SchedulesTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val requests = java.util.Collections.synchronizedList(mutableListOf<Triple<String, String, String>>())
+    private val requests = java.util.concurrent.CopyOnWriteArrayList<Triple<String, String, String>>()
 
     private fun showSchedules(nodes: String = ScheduleNodes) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")

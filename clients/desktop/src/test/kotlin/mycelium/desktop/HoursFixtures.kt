@@ -44,7 +44,7 @@ internal fun clockIn(minutes: Int): String = (Clock.System.now() + minutes.minut
 internal fun isoIn(minutes: Int): String = (Clock.System.now() + minutes.minutes).toString()
 
 internal class HoursServer(private val groups: List<String>, private val conversations: List<String>, val settings: String = WellnessSettingsJson.replace("\"always_open\":false", "\"always_open\":true"), private val projects: List<String> = emptyList()) {
-    val seen = java.util.Collections.synchronizedList(mutableListOf<Triple<String, String, String>>())
+    val seen = java.util.concurrent.CopyOnWriteArrayList<Triple<String, String, String>>()
 
     var savedHoursResponse: String = "{}"
 

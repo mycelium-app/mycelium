@@ -76,7 +76,7 @@ class PastConversationsTest {
     val scopes = TestScopes()
 
     private val importFinishes = CompletableDeferred<Unit>()
-    private val deleted = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private val deleted = java.util.concurrent.CopyOnWriteArrayList<String>()
     private var importStarted = false
 
     private fun store(usage: String = UsageJson, current: String = "[]", archived: String = ArchivedJson): Store {

@@ -56,7 +56,7 @@ class ContinueOnTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val requests = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
+    private val requests = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
 
     private fun shell(experiments: String, events: String = "[]", started: String = Started) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")

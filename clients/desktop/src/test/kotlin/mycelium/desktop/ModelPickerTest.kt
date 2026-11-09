@@ -49,7 +49,7 @@ class ModelPickerTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val posts = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
+    private val posts = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
 
     private val nodes = MyceliumJson.decodeFromString<List<NodeSummary>>(WillowAndAtlas)
 

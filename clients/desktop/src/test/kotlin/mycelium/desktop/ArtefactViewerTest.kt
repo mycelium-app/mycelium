@@ -31,7 +31,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 private class ViewerPlatform : Platform {
-    val loaded = java.util.Collections.synchronizedList(mutableListOf<String>())
+    val loaded = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     override val originUrl: String? = null
     override val signsInThroughTheBrowser = false

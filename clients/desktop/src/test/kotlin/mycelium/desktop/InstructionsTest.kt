@@ -53,7 +53,7 @@ class InstructionsTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val requests = java.util.Collections.synchronizedList(mutableListOf<Triple<HttpMethod, String, String>>())
+    private val requests = java.util.concurrent.CopyOnWriteArrayList<Triple<HttpMethod, String, String>>()
 
     private fun requestTo(method: HttpMethod, pathEnd: String): Triple<HttpMethod, String, String> {
         rule.waitUntil(timeoutMillis = 5_000) { requests.toList().any { it.first == method && it.second.endsWith(pathEnd) } || false }

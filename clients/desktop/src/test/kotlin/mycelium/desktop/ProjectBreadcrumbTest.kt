@@ -44,7 +44,7 @@ class ProjectBreadcrumbTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val requests = java.util.Collections.synchronizedList(mutableListOf<Triple<HttpMethod, String, String>>())
+    private val requests = java.util.concurrent.CopyOnWriteArrayList<Triple<HttpMethod, String, String>>()
 
     private fun store(): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")

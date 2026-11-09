@@ -37,7 +37,7 @@ private val KeyWords = listOf("Piano", "Lock", "Map", "Typewriter")
 private val OtherWords = listOf("Bass", "Mole", "Bench", "Pike", "Stool", "Sole", "Spy", "Throne", "Plant", "Perch", "Sofa", "Agent")
 
 private class PuzzleServer {
-    val seen = java.util.Collections.synchronizedList(mutableListOf<Triple<String, String, String>>())
+    val seen = java.util.concurrent.CopyOnWriteArrayList<Triple<String, String, String>>()
     var failing = false
     private val words = mutableListOf<String>()
     private var mistakes = 0

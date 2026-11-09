@@ -63,7 +63,7 @@ class MessageProposalCardTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val requests = java.util.Collections.synchronizedList(mutableListOf<Pair<HttpMethod, String>>())
+    private val requests = java.util.concurrent.CopyOnWriteArrayList<Pair<HttpMethod, String>>()
 
     private fun show(groups: String = "", experiments: String = "{}") {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
