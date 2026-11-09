@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.MockEngineConfig
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
 import io.ktor.http.HttpHeaders
@@ -21,6 +22,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import mycelium.Platform
 import mycelium.api.MyceliumApi
@@ -68,7 +70,7 @@ private class PuzzleServer {
 
     fun api(): MyceliumApi {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
-        val engine = MockEngine { request ->
+        val engine = MockEngine(MockEngineConfig().apply { dispatcher = Dispatchers.Unconfined; addHandler { request ->
             val path = request.url.encodedPath
             val body = String(request.body.toByteArray())
             seen += Triple(request.method.value, path, body)
@@ -105,7 +107,7 @@ private class PuzzleServer {
                 request.method != HttpMethod.Get -> respond("", HttpStatusCode.NoContent)
                 else -> respond("{}", HttpStatusCode.OK, json)
             }
-        }
+        } })
 
         return MyceliumApi("https://mycelium.test", "token", engine)
     }
