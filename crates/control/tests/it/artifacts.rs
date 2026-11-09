@@ -426,6 +426,42 @@ async fn an_agent_creates_a_file_artifact_from_a_path_on_its_node() {
 }
 
 #[tokio::test]
+async fn design_set_artboard_reads_the_html_from_a_file_in_the_conversation_folder() {
+    let server = Server::start().await;
+    let (mut link, conversation) = started(&server).await;
+    let design = created(&server.user, "design", "Landing", r##"{"pages":[{"id":"p1","name":"Page 1","items":[]}]}"##).await;
+    grant(&server.user, &design, conversation).await;
+    let id = design["id"].as_str().unwrap().to_string();
+    let calling = {
+        let token = link.token.clone();
+        let anonymous = server.anonymous();
+        let id = id.clone();
+
+        tokio::spawn(async move {
+            let request = anonymous
+                .post("/api/v1/mcp")
+                .header("authorization", format!("Bearer {token}"))
+                .header("x-mycelium-conversation", conversation.to_string())
+                .json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "design_set_artboard", "arguments": {"artifact": id, "name": "Home", "path": "design/home.html"}}}));
+
+            anonymous.json(request).await
+        })
+    };
+
+    let (request_id, command) = match link.next().await {
+        ControlToNode::Git { request_id, command, .. } => (request_id, command),
+        other => panic!("expected git, got {other:?}"),
+    };
+    let html = "<!doctype html><h1>Home, from a file</h1>";
+    link.send(NodeToControl::GitResult { request_id, ok: true, output: json!({"data": base64::engine::general_purpose::STANDARD.encode(html), "size": html.len()}), error: None }).await;
+    let (_, answer) = calling.await.unwrap();
+
+    assert_eq!(command, GitCommand::ReadFile { path: "design/home.html".into() });
+    assert_eq!(answer["result"]["isError"], false, "{answer}");
+    assert_eq!(design_of(&server.user, &id).await["pages"][0]["items"][0]["html"], html);
+}
+
+#[tokio::test]
 async fn design_set_artboard_adds_an_artboard_then_replaces_it_and_leaves_everything_else() {
     let server = Server::start().await;
     let (link, conversation) = started(&server).await;

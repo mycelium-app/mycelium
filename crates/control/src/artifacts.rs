@@ -910,12 +910,12 @@ async fn resolve_named(state: &AppState, owner: Uuid, arguments: &Value, name: &
     }
 }
 
-async fn content_from(state: &AppState, owner: Uuid, conversation_id: Uuid, arguments: &Value) -> ApiResult<Option<Vec<u8>>> {
-    let text = arguments.get("content").and_then(Value::as_str);
+async fn content_from(state: &AppState, owner: Uuid, conversation_id: Uuid, arguments: &Value, field: &str) -> ApiResult<Option<Vec<u8>>> {
+    let text = arguments.get(field).and_then(Value::as_str);
     let path = argument(arguments, "path");
 
     match (text, path) {
-        (Some(_), Some(_)) => Err(ApiError::bad_request("content_ambiguous", "Give content or path, not both.")),
+        (Some(_), Some(_)) => Err(ApiError::bad_request("content_ambiguous", format!("Give {field} or path, not both."))),
         (Some(text), None) => Ok(Some(text.as_bytes().to_vec())),
         (None, Some(path)) => {
             let conversation = store::find_owned(&state.pool, conversation_id, owner).await?;
@@ -999,7 +999,7 @@ pub async fn tool(state: &AppState, owner: Uuid, conversation_id: Uuid, name: &s
         }
         "create_artifact" => {
             let kind = parse_kind(argument(arguments, "kind").unwrap_or_default())?;
-            let content = content_from(state, owner, conversation_id, arguments).await?;
+            let content = content_from(state, owner, conversation_id, arguments, "content").await?;
             let requested = argument(arguments, "media_type").or_else(|| argument(arguments, "path").map(media_type_of_path));
             let design_system_id = match argument(arguments, "design_system") {
                 Some(_) => Some(resolve_named(state, owner, arguments, "design_system").await?.id),
@@ -1011,14 +1011,15 @@ pub async fn tool(state: &AppState, owner: Uuid, conversation_id: Uuid, name: &s
         }
         "update_artifact" => {
             let row = resolve(state, owner, arguments).await?;
-            let content = content_from(state, owner, conversation_id, arguments).await?.ok_or_else(|| ApiError::bad_request("content_required", "Give content or path."))?;
+            let content = content_from(state, owner, conversation_id, arguments, "content").await?.ok_or_else(|| ApiError::bad_request("content_required", "Give content or path."))?;
             let artifact = add_version(state, &row, ArtifactAuthor::Agent, &content, argument(arguments, "note")).await?;
 
             Ok(format!("Updated \"{}\" to version {}.", artifact.title, artifact.latest_version))
         }
         "design_set_artboard" => {
-            let Some(html) = arguments.get("html").and_then(Value::as_str).filter(|html| !html.trim().is_empty()) else {
-                return Err(ApiError::bad_request("html_required", "Give the artboard's html."));
+            let given = content_from(state, owner, conversation_id, arguments, "html").await?.map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
+            let Some(html) = given.as_deref().filter(|html| !html.trim().is_empty()) else {
+                return Err(ApiError::bad_request("html_required", "Give the artboard's html, or path to a file holding it."));
             };
 
             let design_row = resolve(state, owner, arguments).await?;

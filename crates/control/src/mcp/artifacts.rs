@@ -61,8 +61,9 @@ pub fn definitions() -> Value {
                     "w": {"type": "number", "description": "Width. Defaults to 1440 for a new artboard."},
                     "h": {"type": "number", "description": "Height. Defaults to 900 for a new artboard."},
                     "html": {"type": "string", "description": "The artboard's complete HTML document."},
+                    "path": {"type": "string", "description": "A file in this conversation's folder holding the HTML, instead of html. Use it for large artboards."},
                 },
-                "required": ["artifact", "html"],
+                "required": ["artifact"],
             },
         },
         {
