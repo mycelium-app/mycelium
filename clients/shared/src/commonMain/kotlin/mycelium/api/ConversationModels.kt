@@ -209,6 +209,7 @@ data class Conversation(
     @SerialName("teach_me") val teachMe: Boolean = false,
     val routing: String? = null,
     val scratch: Boolean = false,
+    val unread: Boolean = false,
 )
 
 @Serializable

@@ -13,6 +13,7 @@ import mycelium.state.RoutingPrefix
 import mycelium.state.anyAccountId
 import mycelium.state.currentTodos
 import mycelium.state.todosAreShown
+import mycelium.state.waitsToBeOpened
 import mycelium.state.conversationModelLabel
 import mycelium.state.modelOptions
 import androidx.compose.foundation.background
@@ -259,8 +260,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         return
     }
 
-    LaunchedEffect(id, conversation.status) {
-        if (conversation.status == ConversationStatus.Review) {
+    LaunchedEffect(id, conversation.waitsToBeOpened) {
+        if (conversation.waitsToBeOpened) {
             store.act { api.markOpened(id) }
         }
     }

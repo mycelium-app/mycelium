@@ -1010,7 +1010,7 @@ class Store(
 
         val conversation = state.value.conversations[conversationId]
 
-        if (conversation != null && conversation.status == mycelium.api.ConversationStatus.Review) {
+        if (conversation != null && conversation.waitsToBeOpened) {
             api.markOpened(conversationId)
         }
     }

@@ -141,13 +141,15 @@ internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, 
         val menu = rememberRowMenuState()
         val groupName = assistant.groupId?.takeIf { showGroup }?.let { state.groups[it]?.name }
         val shownName = listOfNotNull(groupName, assistant.name).joinToString(" ")
+        val pingHeld = store.wellness.holdsPings(LocalHoursView.current?.closed(assistant.groupId) == true)
+        val unread = state.conversations[assistant.conversationId]?.unread == true && !pingHeld
 
         Box(Modifier.fillMaxWidth().rowContextMenu(menu), contentAlignment = Alignment.CenterStart) {
             Row(
                 Modifier
                     .fillMaxWidth()
                     .heightIn(min = rowHeight())
-                    .pressable({ onRoute(Route.Assistant(assistant.id)) }, description = "$shownName, ${assistantStateName(assistant.state)}${if (assistant.pinnedAt != null) ", pinned" else ""}", selected = route == Route.Assistant(assistant.id) || menu.open, shape = BlockShape)
+                    .pressable({ onRoute(Route.Assistant(assistant.id)) }, description = "$shownName${if (unread) ", unread" else ""}, ${assistantStateName(assistant.state)}${if (assistant.pinnedAt != null) ", pinned" else ""}", selected = route == Route.Assistant(assistant.id) || menu.open, shape = BlockShape)
                     .padding(horizontal = Tokens.Space.S2),
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                 verticalAlignment = Alignment.CenterVertically,
@@ -163,7 +165,7 @@ internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, 
                         append(assistant.name)
                     },
                     Modifier.weight(1f),
-                    style = Tokens.Type.Ui.themed().copy(color = MyTheme.colors.text),
+                    style = Tokens.Type.Ui.themed().copy(color = MyTheme.colors.text, fontWeight = if (unread) FontWeight.SemiBold else null),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -177,6 +179,10 @@ internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, 
                 if (assistant.pinnedAt != null) {
                     Icon(MyIcon.Pin, MyTheme.colors.textMuted, Tokens.Size.IconSm)
                 }
+            }
+
+            if (unread) {
+                UnreadDot()
             }
 
             RowMenuPopup(menu) { close ->

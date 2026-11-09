@@ -3,6 +3,7 @@ package mycelium.state
 import kotlin.time.Clock
 import kotlin.time.Instant
 import mycelium.api.Conversation
+import mycelium.api.ConversationStatus
 
 const val ChatAgent = "chat"
 
@@ -22,6 +23,8 @@ val Conversation.isChat: Boolean get() = agent == ChatAgent
 val Conversation.inChatList: Boolean get() = isChat || scratch
 
 val Conversation.isAssistantSession: Boolean get() = assistantId != null
+
+val Conversation.waitsToBeOpened: Boolean get() = status == ConversationStatus.Review || unread
 
 val Conversation.isSubagent: Boolean get() = sideKind == SubagentKind
 

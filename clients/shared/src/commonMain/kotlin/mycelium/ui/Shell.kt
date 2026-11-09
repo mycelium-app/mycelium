@@ -1087,6 +1087,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
     val pausedUntil = row.resumeAt?.let(::resetBefore)?.let { reset -> "Paused until ${clockTime(reset) { millis -> platform?.localDateTime(millis) }}" }
     val statusName = pausedUntil ?: statusSectionName(row.status)
     val notRunning = node != null && (!node.online || row.id !in node.sessions)
+    val unread = row.unread && !pingHeld
     val indent = Tokens.Space.S3 * depth
     val projectName = project?.takeIf { !row.isChat }?.name
     val shownTitle = projectName?.let { "$it ${row.title}" } ?: row.title
@@ -1128,7 +1129,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                     onClick,
                     selected = selected || menu.open,
                     shape = BlockShape,
-                    description = "$shownTitle, $statusName${row.flagReason?.let { ", $it" }.orEmpty()}, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.isSubagent) ", subagent" else ", side chat" }.orEmpty()}${if (!row.isChat && place.isNotEmpty()) ", " + listOfNotNull(row.branch?.let { "branch $it" }, pullRequestText).joinToString(", ") else ""}",
+                    description = "$shownTitle${if (unread) ", unread" else ""}, $statusName${row.flagReason?.let { ", $it" }.orEmpty()}, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.isSubagent) ", subagent" else ", side chat" }.orEmpty()}${if (!row.isChat && place.isNotEmpty()) ", " + listOfNotNull(row.branch?.let { "branch $it" }, pullRequestText).joinToString(", ") else ""}",
                 )
                 .padding(start = Tokens.Space.S2 + (if (row.isChat && sideChats == 0) 0.dp else Tokens.Space.S3) + indent, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
@@ -1136,7 +1137,8 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
         ) {
             val badge = when (row.status) {
                 ConversationStatus.Working -> colors.statusWorking
-                ConversationStatus.Input, ConversationStatus.Review -> colors.statusAttention.takeUnless { pingHeld }
+                ConversationStatus.Input -> colors.statusAttention.takeUnless { pingHeld }
+                ConversationStatus.Review -> colors.statusAttention.takeUnless { pingHeld || unread }
                 ConversationStatus.Failed -> if (row.resumeAt != null) colors.statusAttention else colors.statusFailed
                 ConversationStatus.Done -> null
             }
@@ -1171,7 +1173,8 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
 
                     append(row.title)
                 }
-                BasicText(title, style = Tokens.Type.Ui.themed().copy(color = if (notRunning) colors.textMuted else colors.text), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val titleStyle = Tokens.Type.Ui.themed().copy(color = if (notRunning && !unread) colors.textMuted else colors.text)
+                BasicText(title, style = if (unread) titleStyle.copy(fontWeight = FontWeight.SemiBold) else titleStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
 
                 if (pausedUntil != null) {
                     Label(pausedUntil, style = Tokens.Type.Meta, color = colors.statusAttention, maxLines = 1)
@@ -1202,12 +1205,13 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
             }
 
             if (row.isChat) {
-                val unread = when (row.status) {
-                    ConversationStatus.Input, ConversationStatus.Review -> colors.text.takeUnless { pingHeld }
+                val waitingMark = when (row.status) {
+                    ConversationStatus.Input -> colors.text.takeUnless { pingHeld }
+                    ConversationStatus.Review -> colors.text.takeUnless { pingHeld || unread }
                     else -> badge
                 }
 
-                Box(Modifier.size(Tokens.Space.S2).background(unread ?: Color.Transparent, CircleShape))
+                Box(Modifier.size(Tokens.Space.S2).background(waitingMark ?: Color.Transparent, CircleShape))
             } else {
                 Icon(agentIcon(row.agent), colors.textMuted, Tokens.Size.IconSm)
             }
@@ -1215,6 +1219,10 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
             if (node != null) {
                 Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconSm)
             }
+        }
+
+        if (unread) {
+            UnreadDot()
         }
 
         RowMenuPopup(menu) { close ->
@@ -1250,6 +1258,13 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
             )
         }
     }
+}
+
+private val UnreadDotOutset = 5.dp
+
+@Composable
+internal fun UnreadDot() {
+    Box(Modifier.offset(x = -UnreadDotOutset).size(Tokens.Size.Dot).background(MyTheme.colors.text, CircleShape))
 }
 
 val NodeColours = Accent.entries.filter { it != Accent.System && it != Accent.Neutral }
