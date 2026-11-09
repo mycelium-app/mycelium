@@ -1,5 +1,7 @@
 package mycelium.desktop
 
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -74,7 +76,7 @@ class SubagentChatsTest {
         rule.onNodeWithContentDescription("Review the change, ", substring = true).performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open subagents and workflows").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Open subagents and workflows").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Check the build, ", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodes(hasContentDescription("Check the build, ", substring = true) and hasAnyAncestor(hasContentDescription("Subagents and workflows"))).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -84,7 +86,7 @@ class SubagentChatsTest {
         openSubagentsOfTheParent()
 
         assertEquals(0, rule.onAllNodesWithContentDescription(", subagent", substring = true).fetchSemanticsNodes().size)
-        assertEquals(1, rule.onAllNodesWithContentDescription("Check the build, ", substring = true).fetchSemanticsNodes().size)
+        assertEquals(1, rule.onAllNodes(hasContentDescription("Check the build, ", substring = true) and hasAnyAncestor(hasContentDescription("Subagents and workflows"))).fetchSemanticsNodes().size)
     }
 
     @Test
@@ -92,7 +94,7 @@ class SubagentChatsTest {
         shell()
         openSubagentsOfTheParent()
 
-        rule.onNodeWithContentDescription("Check the build, ", substring = true).performClick()
+        rule.onNode(hasContentDescription("Check the build, ", substring = true) and hasAnyAncestor(hasContentDescription("Subagents and workflows"))).performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Open the conversation it belongs to").fetchSemanticsNodes().isNotEmpty() }
         assertEquals(0, rule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size)
@@ -107,7 +109,7 @@ class SubagentChatsTest {
         shell()
         openSubagentsOfTheParent()
 
-        rule.onNodeWithContentDescription("Check the build, ", substring = true).performClick()
+        rule.onNode(hasContentDescription("Check the build, ", substring = true) and hasAnyAncestor(hasContentDescription("Subagents and workflows"))).performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Open the conversation it belongs to").fetchSemanticsNodes().isNotEmpty() }
 
         if (rule.onAllNodesWithContentDescription("Open subagents and workflows").fetchSemanticsNodes().isNotEmpty()) {
@@ -115,7 +117,7 @@ class SubagentChatsTest {
         }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Back to Review the change").fetchSemanticsNodes().isNotEmpty() }
-        assertEquals(1, rule.onAllNodesWithContentDescription("Check the build, ", substring = true).fetchSemanticsNodes().size)
+        assertEquals(1, rule.onAllNodes(hasContentDescription("Check the build, ", substring = true) and hasAnyAncestor(hasContentDescription("Subagents and workflows"))).fetchSemanticsNodes().size)
 
         rule.onNodeWithContentDescription("Back to Review the change").performClick()
 

@@ -614,6 +614,35 @@ fun TextInput(
 }
 
 @Composable
+fun ReplyField(
+    label: String,
+    sendDescription: String,
+    onSend: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: String = "",
+    hint: String? = null,
+    showLabel: Boolean = true,
+    sendText: String? = null,
+) {
+    var reply by remember { mutableStateOf("") }
+
+    fun send() {
+        if (reply.isNotBlank()) {
+            onSend(reply)
+            reply = ""
+        }
+    }
+
+    TextInput(reply, { reply = it }, label, modifier, placeholder = placeholder, hint = hint, showLabel = showLabel, onSubmit = ::send, trailing = {
+        if (sendText != null) {
+            MyButton(::send, text = sendText, description = sendDescription, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+        } else {
+            MyButton(::send, icon = MyIcon.Send, description = sendDescription, muted = true)
+        }
+    })
+}
+
+@Composable
 fun TextArea(
     value: String,
     onValueChange: (String) -> Unit,

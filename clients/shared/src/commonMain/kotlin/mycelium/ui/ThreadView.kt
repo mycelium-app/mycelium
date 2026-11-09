@@ -43,6 +43,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.runtime.staticCompositionLocalOf
 import mycelium.state.isFilePath
+import mycelium.state.subagentsOf
 import mycelium.state.BadgeGap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.buildAnnotatedString
@@ -173,6 +174,7 @@ fun ThreadView(
         }.filter { it.sameAs == null }
     }
     val lastFailure = remember(items) { items.indexOfLast { it is ThreadItem.Failure } }
+    val subagents = LocalThreadSubagents.current
     val workflowCards = pinnedWorkflows(LocalConversationWorkflows.current?.workflows?.filter { it.kind == WorkflowKinds.Mycelium }.orEmpty(), dismissedPins, now)
 
 
@@ -223,6 +225,12 @@ fun ThreadView(
                                     MyceliumWorkflowCard(workflow, onUnpin = { onUnpin(workflowPinKey(workflow.id)) })
                                 }
                             }
+                        }
+                    }
+
+                    if (subagents != null && subagentsOf(subagents.state.conversations.values, subagents.conversationId).isNotEmpty()) {
+                        item(key = "subagents") {
+                            SubagentCards(subagents)
                         }
                     }
 

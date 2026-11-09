@@ -1,5 +1,7 @@
 package mycelium.desktop
 
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -96,7 +98,7 @@ class WorkflowPanelTest {
         openTheHistory()
 
         val workflowTop = rule.onNodeWithContentDescription("Workflow Pin the UI kit, ", substring = true).fetchSemanticsNode().boundsInRoot.top
-        val subagentTop = rule.onNodeWithContentDescription("Check the build, ", substring = true).fetchSemanticsNode().boundsInRoot.top
+        val subagentTop = rule.onNode(hasContentDescription("Check the build, ", substring = true) and hasAnyAncestor(hasContentDescription("Subagents and workflows"))).fetchSemanticsNode().boundsInRoot.top
 
         assertTrue(workflowTop < subagentTop)
         rule.onNodeWithText("Workflow · Waiting for you").assertIsDisplayed()

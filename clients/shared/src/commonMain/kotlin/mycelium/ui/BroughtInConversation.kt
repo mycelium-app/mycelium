@@ -42,7 +42,6 @@ fun BroughtInConversation(actions: BroughtInActions, conversationId: String, tit
     val events = state.events[conversationId]
     val thread = remember(events) { buildThread(events.orEmpty()) }
     val colors = MyTheme.colors
-    var reply by remember { mutableStateOf("") }
     var repliedAfter by remember { mutableStateOf<Int?>(null) }
 
     LaunchedEffect(conversationId) {
@@ -62,14 +61,6 @@ fun BroughtInConversation(actions: BroughtInActions, conversationId: String, tit
     val requests = pendingRequests(thread, state).map { it.request } + workflowGates(state).filter { it.conversationId == conversationId }.map { InboxRequest.Gate(it) }
     val exchanged = thread.filter { it is ThreadItem.UserMessage || it is ThreadItem.AgentMessage }
     val shown = repliedAfter?.let { exchanged.drop(it).takeLast(ShownMessages) } ?: exchanged.takeLast(1).filterIsInstance<ThreadItem.AgentMessage>()
-
-    fun send() {
-        if (reply.isNotBlank()) {
-            repliedAfter = exchanged.size
-            store.send(conversationId, reply)
-            reply = ""
-        }
-    }
 
     Card(Modifier.semantics { contentDescription = "Chat: $label" }) {
         CardHead {
@@ -114,9 +105,10 @@ fun BroughtInConversation(actions: BroughtInActions, conversationId: String, tit
         Hairline()
 
         Column(Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2)) {
-            TextInput(reply, { reply = it }, "Reply in ${conversation.title}", Modifier.padding(bottom = Tokens.Space.S1), placeholder = "Message the chat", hint = "Sent as you, straight into the chat", onSubmit = ::send, trailing = {
-                MyButton(::send, icon = MyIcon.Send, description = "Send to ${conversation.title}", muted = true)
-            })
+            ReplyField("Reply in ${conversation.title}", "Send to ${conversation.title}", { text ->
+                repliedAfter = exchanged.size
+                store.send(conversationId, text)
+            }, Modifier.padding(bottom = Tokens.Space.S1), placeholder = "Message the chat", hint = "Sent as you, straight into the chat")
         }
     }
 }
