@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.31.0
+
+- Tasks is retired: the board, its sidebar link, the /api/v1/tasks routes and the propose_task, ask_question, list_tasks, approve_task, decline_task and close_tasks tools are gone, and the tasks table is dropped. An agent asks its question as an ordinary message and ends its turn; a turn whose last agent message ends with a question leaves the conversation in Needs input, and the thread shows "Waiting for your answer" after the last message.
+- The Inbox feed is native: agents post one sentence per release or finished feature with post_to_feed, shown newest first with a link to the chat. Murmur is no longer a feed source.
+- An assistant's conversation moves to another node with its storage, transcript and secrets. Nodes need this version.
+- Chats started by another conversation before v0.29.0 count as managed even when their starter has been renamed since.
+- A failed workflow marks its unstarted steps not run at the same moment, and a goal sent again shows as pending before it is delivered.
+
 ## v0.30.0
 
 - Inbox sits under New conversation and is the screen the app opens on. Stats show tokens per second, today's spend by hour, account usage and what is running; Needs you lists pending permissions, questions, proposals, workflow gates and flagged chats from every conversation, each resolved in place; the feed shows Murmur posts when a Murmur integration is set up. Narrow windows collapse the stats, and phones get Needs you, Feed and Stats tabs.
