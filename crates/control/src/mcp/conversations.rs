@@ -4,7 +4,8 @@ use crate::error::ApiResult;
 use crate::forge_watches::{self, Target};
 use crate::group_connections;
 use crate::message_proposals;
-use crate::store::{CONVERSATION_COLUMNS, CONVERSATION_GROUP_SQL, ConversationRow};
+use crate::store::{CONVERSATION_COLUMNS, CONVERSATION_GROUP_SQL, ConversationRow, append_event};
+use mycelium_proto::conversation::EventKind;
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -69,6 +70,17 @@ pub fn definitions() -> Value {
                     "query": {"type": "string", "description": "Words to search for in its messages."},
                     "before": {"type": "number", "description": "Only messages before this number, as given in the last answer, to page back."},
                     "limit": {"type": "number", "description": "How many messages to return. Defaults to 10, at most 50."},
+                },
+                "required": ["conversation"],
+            },
+        },
+        {
+            "name": "show_conversation",
+            "description": "Show the person another of their conversations in this thread: its state, its latest result and everything it is waiting on, live, with a reply box. Use it when they need to see or answer what another conversation is waiting on. Only the person can act on approvals: you can show one and never answer it. It needs the same access as read_conversation.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "conversation": {"type": "string", "description": "The id of the conversation to show, or its exact title."},
                 },
                 "required": ["conversation"],
             },
@@ -177,6 +189,43 @@ async fn refusal(state: &crate::state::AppState, owner: Uuid, from: Uuid, to: Uu
     };
 
     Ok(Some(message))
+}
+
+struct ReadableTarget {
+    owner: Uuid,
+    conversation_id: Uuid,
+    target_id: Uuid,
+    title: String,
+    label: String,
+    status: String,
+}
+
+async fn readable_target(caller: &super::call::Caller<'_>, arguments: &Value, tool: &str, outcome: &str) -> ApiResult<Result<ReadableTarget, ToolReply>> {
+    let state = caller.state;
+    let Some(target) = arguments.get("conversation").and_then(Value::as_str).map(str::trim).filter(|target| !target.is_empty()) else {
+        return Ok(Err(ToolReply::invalid(&format!("{tool} needs conversation, a string."))));
+    };
+    let Some((conversation_id, _)) = caller.conversation().await? else {
+        return Ok(Err(ToolReply::text(&format!("Nothing was {outcome}. Another conversation is {outcome} from a conversation, and this call did not come from one."), true)));
+    };
+    let owner = caller.owner().await?;
+    let target_id = match message_proposals::resolve(state, owner, target).await? {
+        Ok(target_id) => target_id,
+        Err(reason) => return Ok(Err(ToolReply::text(&format!("Nothing was {outcome}. {reason}"), true))),
+    };
+
+    if target_id == conversation_id {
+        return Ok(Err(ToolReply::text(&format!("Nothing was {outcome}. That is this conversation. Read its earlier turns with read_earlier_turns."), true)));
+    }
+
+    let (title, status) = sqlx::query_as::<_, (String, String)>("select title, status from conversations where id = $1").bind(target_id).fetch_one(&state.pool).await?;
+    let label = message_proposals::label(target_id, &title);
+
+    if let Some(message) = refusal(state, owner, conversation_id, target_id, &label).await? {
+        return Ok(Err(ToolReply::text(&format!("Nothing was {outcome}. {message}"), true)));
+    }
+
+    Ok(Ok(ReadableTarget { owner, conversation_id, target_id, title, label, status }))
 }
 
 #[derive(sqlx::FromRow)]
@@ -368,28 +417,11 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             ToolReply::text(&format!("Flagged {label} ({}) for the person.", flagged.id), false)
         }
         "read_conversation" => {
-            let Some(target) = arguments.get("conversation").and_then(Value::as_str).map(str::trim).filter(|target| !target.is_empty()) else {
-                return Ok(ToolReply::invalid("read_conversation needs conversation, a string."));
+            let target = match readable_target(&caller, &arguments, "read_conversation", "read").await? {
+                Ok(target) => target,
+                Err(reply) => return Ok(reply),
             };
-            let Some((conversation_id, _)) = caller.conversation().await? else {
-                return Ok(ToolReply::text("Nothing was read. Another conversation is read from a conversation, and this call did not come from one.", true));
-            };
-            let owner = caller.owner().await?;
-            let target_id = match message_proposals::resolve(state, owner, target).await? {
-                Ok(target_id) => target_id,
-                Err(reason) => return Ok(ToolReply::text(&format!("Nothing was read. {reason}"), true)),
-            };
-
-            if target_id == conversation_id {
-                return Ok(ToolReply::text("Nothing was read. That is this conversation. Read its earlier turns with read_earlier_turns.", true));
-            }
-
-            let (title, status) = sqlx::query_as::<_, (String, String)>("select title, status from conversations where id = $1").bind(target_id).fetch_one(&state.pool).await?;
-            let label = message_proposals::label(target_id, &title);
-
-            if let Some(message) = refusal(state, owner, conversation_id, target_id, &label).await? {
-                return Ok(ToolReply::text(&format!("Nothing was read. {message}"), true));
-            }
+            let ReadableTarget { target_id, label, status, .. } = target;
 
             let super::earlier_turns::Page { messages, more } = super::earlier_turns::page(state, target_id, &arguments).await?;
             let latest = crate::watches::latest_result(state, target_id).await?;
@@ -412,6 +444,22 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             }
 
             ToolReply::text(&parts.join("\n\n"), false)
+        }
+        "show_conversation" => {
+            let target = match readable_target(&caller, &arguments, "show_conversation", "shown").await? {
+                Ok(target) => target,
+                Err(reply) => return Ok(reply),
+            };
+            let ReadableTarget { owner, conversation_id, target_id, title, label, .. } = target;
+            let mut tx = state.pool.begin().await?;
+            let event = append_event(&mut tx, conversation_id, EventKind::BroughtInConversation, &json!({"conversation_id": target_id, "title": title}), None).await?;
+            tx.commit().await?;
+
+            if let Some(event) = event {
+                state.publish(Some(owner), StreamMessage::Event(event));
+            }
+
+            ToolReply::text(&format!("Showing {label} ({target_id}) to the person in this thread, live, with a reply box. Only the person can approve or decline what it is waiting on."), false)
         }
         "watch_conversation" => {
             let Some(target) = arguments.get("conversation").and_then(Value::as_str).map(str::trim).filter(|target| !target.is_empty()) else {

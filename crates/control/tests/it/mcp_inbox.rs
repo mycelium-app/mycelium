@@ -86,6 +86,23 @@ async fn only_the_voice_assistant_sees_and_may_call_the_inbox_tools() {
 }
 
 #[tokio::test]
+async fn an_agent_that_is_not_voice_cannot_resolve_what_is_waiting_on_the_person() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let agent = conversation(&server, &mut link, "Plan").await;
+    let source = waiting(&server, &mut link, "Release notes").await;
+    let target = conversation(&server, &mut link, "Target").await;
+    let (id, key) = proposal(&server, source, target).await;
+
+    let refused = call_tool(&server, &link, agent, "resolve_needs_you", json!({"key": key, "action": "approve"})).await;
+
+    assert_eq!(refused["isError"], true);
+    assert_eq!(text(&refused), "Only the Voice assistant can act on the Inbox. Nothing was done.");
+    let state = sqlx::query_scalar::<_, String>("select state from message_proposals where id = $1").bind(id).fetch_one(&server.pool).await.unwrap();
+    assert_eq!(state, "proposed");
+}
+
+#[tokio::test]
 async fn voice_lists_a_waiting_question_and_a_message_proposal() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

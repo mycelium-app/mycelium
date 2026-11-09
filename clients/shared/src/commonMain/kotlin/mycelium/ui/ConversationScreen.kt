@@ -519,7 +519,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         node?.let { FolderBrowserDialog(store, it.id, it.name, parentFolder(path), onChoose = { browsingPath = null }, onDismiss = { browsingPath = null }) }
     }
 
-    CompositionLocalProvider(LocalPathOpener provides pathOpener, LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAppViewer provides appViewer, LocalAgentOpener provides agentOpener, LocalConversationWorkflows provides conversationWorkflows, LocalOutlineOpener provides showOutline, LocalOutlinePage provides (outlinePage ?: liveOutline), LocalIdeTarget provides ideTarget) {
+    CompositionLocalProvider(LocalBroughtIn provides BroughtInActions(store, state, onOpenConversation), LocalPathOpener provides pathOpener, LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAppViewer provides appViewer, LocalAgentOpener provides agentOpener, LocalConversationWorkflows provides conversationWorkflows, LocalOutlineOpener provides showOutline, LocalOutlinePage provides (outlinePage ?: liveOutline), LocalIdeTarget provides ideTarget) {
         val walkthrough = state.walkthroughs[id]?.takeIf { !it.dismissed && !chat }
 
         val density = LocalDensity.current
@@ -700,6 +700,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             dismissedPins = store.pinDismissals[id]
                         },
                         waitingForAnswer = conversation.status == ConversationStatus.Input,
+                        waitsOnPerson = { pendingRequest(it, state) != null },
                     )
                 }
 

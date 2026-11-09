@@ -87,6 +87,7 @@ import mycelium.state.parsePasted
 import mycelium.state.MarkdownListItem
 import mycelium.state.parseUiBlock
 import mycelium.state.pinnedCards
+import mycelium.state.collapseSteps
 import mycelium.state.pinnedWorkflows
 import mycelium.state.agentName
 import mycelium.state.clockTime
@@ -129,8 +130,11 @@ fun ThreadView(
     loadingOlder: Boolean = false,
     onLoadOlder: () -> Unit = {},
     waitingForAnswer: Boolean = false,
+    waitsOnPerson: (ThreadItem) -> Boolean = { it is ThreadItem.Permission && !it.resolved },
 ) {
     val state = rememberLazyListState()
+    var expandedSteps by remember { mutableStateOf(emptySet<String>()) }
+    val rows = remember(items, expandedSteps, waitsOnPerson, agent) { if (agent == "chat") items else collapseSteps(items, expandedSteps, waitsOnPerson) }
     val loadOlder by rememberUpdatedState(onLoadOlder)
     val now = rememberNow(30_000L)
     val pinned = remember(items, dismissedPins, now) { pinnedCards(items, dismissedPins, now) }
@@ -172,7 +176,7 @@ fun ThreadView(
             }
         }.filter { it.sameAs == null }
     }
-    val lastFailure = remember(items) { items.indexOfLast { it is ThreadItem.Failure } }
+    val lastFailure = remember(rows) { rows.indexOfLast { it is ThreadItem.Failure } }
     val workflowCards = pinnedWorkflows(LocalConversationWorkflows.current?.workflows?.filter { it.kind == WorkflowKinds.Mycelium }.orEmpty(), dismissedPins, now)
 
 
@@ -183,10 +187,10 @@ fun ThreadView(
     }
 
     val jumpToImage: (String) -> Unit = { key ->
-        val target = items.indexOfFirst { it.key == key }
+        val target = rows.indexOfFirst { it.key == key }
 
         if (target >= 0) {
-            scope.launch { showTopOf(items.lastIndex - target) }
+            scope.launch { showTopOf(rows.lastIndex - target) }
         }
     }
 
@@ -226,24 +230,24 @@ fun ThreadView(
                         }
                     }
 
-                    itemsIndexed(items.asReversed(), key = { _, item -> item.key }, contentType = { _, item -> item::class }) { reversedIndex, item ->
-                        val index = items.lastIndex - reversedIndex
+                    itemsIndexed(rows.asReversed(), key = { _, item -> item.key }, contentType = { _, item -> item::class }) { reversedIndex, item ->
+                        val index = rows.lastIndex - reversedIndex
 
                         if (item is ThreadItem.TurnEnd) {
-                            val asked = items.subList(0, index).indexOfLast { it is ThreadItem.UserMessage }
-                            val answer = items.subList(asked + 1, index).filterIsInstance<ThreadItem.AgentMessage>().joinToString("\n\n") { it.text }
+                            val asked = rows.subList(0, index).indexOfLast { it is ThreadItem.UserMessage }
+                            val answer = rows.subList(asked + 1, index).filterIsInstance<ThreadItem.AgentMessage>().joinToString("\n\n") { it.text }
 
                             TurnEnd(
                                 item = item,
-                                suggestions = if (index == items.lastIndex && item.stopReason == "end_turn") suggestedReplies(answer) else emptyList(),
+                                suggestions = if (index == rows.lastIndex && item.stopReason == "end_turn") suggestedReplies(answer) else emptyList(),
                                 onSuggest = onSuggest,
                                 onCopy = if (answer.isEmpty()) null else ({ clipboard.setText(AnnotatedString(answer)) }),
-                                onScrollToMessage = if (asked < 0) null else ({ scope.launch { showTopOf(items.lastIndex - asked) } }),
-                                onScrollToTop = if (asked + 1 >= index) null else ({ scope.launch { showTopOf(items.lastIndex - (asked + 1)) } }),
+                                onScrollToMessage = if (asked < 0) null else ({ scope.launch { showTopOf(rows.lastIndex - asked) } }),
+                                onScrollToTop = if (asked + 1 >= index) null else ({ scope.launch { showTopOf(rows.lastIndex - (asked + 1)) } }),
                             )
                         } else {
                             CompositionLocalProvider(LocalImageJump provides jumpToImage, LocalImageGallery provides gallery, LocalPinnedKeys provides pinnedKeys) {
-                                ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) onDismissFailure else null, if (index == lastFailure) limitActions else null, agent)
+                                ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) onDismissFailure else null, if (index == lastFailure) limitActions else null, agent, onToggleSteps = { key -> expandedSteps = if (key in expandedSteps) expandedSteps - key else expandedSteps + key })
                             }
                         }
                     }
@@ -286,7 +290,7 @@ fun ThreadView(
 val LocalReadAloud = compositionLocalOf<((String) -> Unit)?> { null }
 
 @Composable
-private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?, onDismissFailure: (() -> Unit)?, limitActions: LimitActions?, agent: String) {
+private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?, onDismissFailure: (() -> Unit)?, limitActions: LimitActions?, agent: String, onToggleSteps: (String) -> Unit) {
     when (item) {
         is ThreadItem.UserMessage -> UserMessage(item.text, item.files, item.images, item.goalSentAt, item.goalNudge, item.goalWhy, item.spoken, item.spokenAt, agent)
         is ThreadItem.GoalReport -> GoalReportBlock(item, agent)
@@ -323,6 +327,34 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
             SwitchLine(item.text, if (time.isEmpty()) item.why else "$time · ${item.why}", environmentLineIcon(item.event))
         }
         is ThreadItem.Note -> Label(item.text, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+        is ThreadItem.BroughtIn -> LocalBroughtIn.current?.let { BroughtInConversation(it, item.conversationId, item.title) }
+        is ThreadItem.Steps -> StepsRow(item, onToggle = { onToggleSteps(item.key) })
+    }
+}
+
+@Composable
+private fun StepsRow(steps: ThreadItem.Steps, onToggle: () -> Unit) {
+    val colors = MyTheme.colors
+    val waiting = if (steps.waiting > 0) "${steps.waiting} waiting for ${if (steps.approvalsOnly) "your approval" else "you"}" else null
+    val description = "${if (steps.expanded) "Hide" else "Show"} ${steps.calls} tool calls" + (waiting?.let { ", $it" } ?: "")
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(Tokens.Size.DiffFile)
+            .background(colors.bgPanel, BlockShape)
+            .border(Tokens.Size.Hairline, colors.border, BlockShape)
+            .pressable(onToggle, description = description, shape = BlockShape, stateDescription = if (steps.expanded) "Expanded" else "Collapsed")
+            .padding(horizontal = Tokens.Space.S2),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(if (steps.expanded) MyIcon.ChevronDown else MyIcon.ChevronRight, colors.textMuted, Tokens.Size.IconSm)
+        Label("${if (steps.running) "Running" else "Ran"} ${steps.calls} tool calls", Modifier.weight(1f), Tokens.Type.UiStrong, maxLines = 1)
+
+        if (waiting != null) {
+            StatusMark(waiting, Tone.Attention, MyIcon.Alert)
+        }
     }
 }
 
@@ -361,7 +393,7 @@ private fun SwitchLine(text: String, why: String, icon: MyIcon = MyIcon.Refresh)
 }
 
 @Composable
-private fun UserMessage(text: String, files: List<Attachment>, images: List<ThreadImage>, goalSentAt: String?, goalNudge: Int?, goalWhy: String?, spoken: Boolean, spokenAt: String?, agent: String) {
+internal fun UserMessage(text: String, files: List<Attachment>, images: List<ThreadImage>, goalSentAt: String?, goalNudge: Int?, goalWhy: String?, spoken: Boolean, spokenAt: String?, agent: String) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
 

@@ -52,7 +52,7 @@ fun InboxItem.resolved(): InboxItem? = when (request) {
 fun inboxConversations(conversations: Collection<Conversation>): List<Conversation> =
     conversations.filter { it.archivedAt == null && ((it.status == ConversationStatus.Input && it.managedBy == null) || it.flaggedAt != null) }
 
-private fun pendingRequest(item: ThreadItem, state: AppState): InboxRequest? {
+fun pendingRequest(item: ThreadItem, state: AppState): InboxRequest? {
     if (item is ThreadItem.Permission) {
         return if (item.resolved) null else InboxRequest.Approval(item)
     }
@@ -73,11 +73,28 @@ private fun pendingRequest(item: ThreadItem, state: AppState): InboxRequest? {
     return if (waiting) InboxRequest.Mycelium(item, parsed) else null
 }
 
+data class PendingRequest(val key: String, val context: String?, val request: InboxRequest)
+
+fun pendingRequests(thread: List<ThreadItem>, state: AppState): List<PendingRequest> =
+    thread.mapIndexedNotNull { index, item ->
+        val request = pendingRequest(item, state) ?: return@mapIndexedNotNull null
+
+        PendingRequest(item.key, thread.take(index).filterIsInstance<ThreadItem.AgentMessage>().lastOrNull()?.text, request)
+    }
+
+fun workflowGates(state: AppState): List<Workflow> =
+    state.workflows.values.filter { it.kind == WorkflowKinds.Mycelium && it.steps.any { step -> step.status == WorkflowStepStatuses.Gate } }
+
+fun ensureOpened(store: Store, conversationId: String) {
+    if (conversationId !in store.state.value.openedConversations) {
+        store.act { store.open(conversationId) }
+    }
+}
+
 fun inboxItems(state: AppState): List<InboxItem> {
     val fromConversations = inboxConversations(state.conversations.values).flatMap { conversation ->
         val thread = buildThread(state.events[conversation.id].orEmpty())
-        val pending = thread.mapIndexedNotNull { index, item -> pendingRequest(item, state)?.let { index to it } }
-        val lastAgentText = { before: Int -> thread.take(before).filterIsInstance<ThreadItem.AgentMessage>().lastOrNull()?.text }
+        val pending = pendingRequests(thread, state)
         val project = conversation.projectId?.let { state.projects[it] }
         val assistant = conversation.assistantId?.let { state.assistants[it] }
         val waitingSince = conversation.flaggedAt ?: conversation.updatedAt
@@ -86,15 +103,14 @@ fun inboxItems(state: AppState): List<InboxItem> {
             InboxItem("${conversation.id}/$key", conversation, project, project?.name ?: projectName(conversation.cwd), assistant, waitingSince, context, request, thread)
 
         if (pending.isEmpty()) {
-            val text = conversation.flagReason?.takeIf { it.isNotBlank() } ?: lastAgentText(thread.size).orEmpty()
+            val text = conversation.flagReason?.takeIf { it.isNotBlank() } ?: thread.filterIsInstance<ThreadItem.AgentMessage>().lastOrNull()?.text.orEmpty()
 
             listOf(item("flag", null, InboxRequest.Flag(text)))
         } else {
-            pending.map { (index, request) -> item(thread[index].key, lastAgentText(index), request) }
+            pending.map { item(it.key, it.context, it.request) }
         }
     }
-    val fromGates = state.workflows.values
-        .filter { it.kind == WorkflowKinds.Mycelium && it.steps.any { step -> step.status == WorkflowStepStatuses.Gate } }
+    val fromGates = workflowGates(state)
         .mapNotNull { workflow ->
             val conversation = workflow.conversationId?.let { state.conversations[it] } ?: return@mapNotNull null
             val project = conversation.projectId?.let { state.projects[it] }
@@ -111,9 +127,7 @@ fun rememberInbox(store: Store, state: AppState): List<InboxItem> {
 
     LaunchedEffect(waiting) {
         for (id in waiting) {
-            if (id !in store.state.value.openedConversations) {
-                store.act { store.open(id) }
-            }
+            ensureOpened(store, id)
         }
     }
 

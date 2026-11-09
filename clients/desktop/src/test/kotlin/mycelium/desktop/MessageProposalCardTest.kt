@@ -9,6 +9,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -28,6 +29,7 @@ import mycelium.api.Event
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
 import mycelium.state.buildThread
+import mycelium.ui.pendingRequest
 import mycelium.ui.LocalMessageProposals
 import mycelium.ui.MyTheme
 import mycelium.ui.MyceliumTheme
@@ -172,4 +174,39 @@ class MessageProposalCardTest {
         rule.onNodeWithText("Send and connect groups").assertDoesNotExist()
     }
 
+
+    @Test
+    fun aPendingProposalInsideCollapsedToolStepsStaysVisibleAndShowsOnceWhenExpanded() {
+        val json = headersOf(HttpHeaders.ContentType, "application/json")
+        val engine = MockEngine { request ->
+            request.body.toByteArray()
+            val body = if (request.url.encodedPath.endsWith("/message-proposals")) "[${proposal("proposed", AcrossGroups)}]" else "{}"
+
+            respond(body, HttpStatusCode.OK, json)
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
+        val reads = (1..3).map { Event("c1", it.toLong(), "acp_update", Json.parseToJsonElement("""{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"r$it","title":"Read file $it","kind":"read","status":"completed","rawInput":{}}}""")) }
+        val items = buildThread(reads + sendToConversation().map { it.copy(seq = it.seq + 3L) })
+        runBlocking { store.refreshMessageProposals() }
+
+        rule.setContent {
+            MyceliumTheme(true) {
+                val state by store.state.collectAsState()
+
+                CompositionLocalProvider(LocalMessageProposals provides messageProposals(store, state)) {
+                    Box(Modifier.width(640.dp)) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, waitsOnPerson = { pendingRequest(it, state) != null }) }
+                }
+            }
+        }
+
+        rule.onNodeWithContentDescription("Show 4 tool calls, 1 waiting for you").assertExists()
+        rule.onNodeWithText("The schema is ready").assertExists()
+        assertEquals(1, rule.onAllNodesWithText("The schema is ready").fetchSemanticsNodes().size)
+
+        rule.onNodeWithContentDescription("Show 4 tool calls, 1 waiting for you").performClick()
+        rule.waitForIdle()
+
+        rule.onNodeWithContentDescription("Hide 4 tool calls, 1 waiting for you").assertExists()
+        assertEquals(1, rule.onAllNodesWithText("The schema is ready").fetchSemanticsNodes().size)
+    }
 }

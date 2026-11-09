@@ -295,19 +295,24 @@ private fun InboxItemRow(store: Store, state: AppState, item: InboxItem, focused
             }
         }
 
-        when (val request = item.request) {
-            is InboxRequest.Approval -> ToolApprovalCard(request.permission, onAnswer = { requestId, option -> store.act { store.api.answerPermission(conversation.id, requestId, option) } })
-            is InboxRequest.Mycelium -> MyceliumCard(request.call, request.parsed)
-            is InboxRequest.Gate -> {
-                val workflow = state.workflows[request.workflow.id] ?: request.workflow
-                val workflows = ConversationWorkflows(listOf(workflow), null, onControl = { workflowId, control -> store.act { store.controlWorkflow(workflowId, control) } })
+        RequestCard(store, state, conversation.id, item.request)
+    }
+}
 
-                CompositionLocalProvider(LocalConversationWorkflows provides workflows) {
-                    MyceliumWorkflowCard(workflow)
-                }
+@Composable
+fun RequestCard(store: Store, state: AppState, conversationId: String, request: InboxRequest) {
+    when (request) {
+        is InboxRequest.Approval -> ToolApprovalCard(request.permission, onAnswer = { requestId, option -> store.act { store.api.answerPermission(conversationId, requestId, option) } })
+        is InboxRequest.Mycelium -> MyceliumCard(request.call, request.parsed)
+        is InboxRequest.Gate -> {
+            val workflow = state.workflows[request.workflow.id] ?: request.workflow
+            val workflows = ConversationWorkflows(listOf(workflow), null, onControl = { workflowId, control -> store.act { store.controlWorkflow(workflowId, control) } })
+
+            CompositionLocalProvider(LocalConversationWorkflows provides workflows) {
+                MyceliumWorkflowCard(workflow)
             }
-            is InboxRequest.Flag -> FlagCard(request.text, onReply = { store.send(conversation.id, it) })
         }
+        is InboxRequest.Flag -> FlagCard(request.text, onReply = { store.send(conversationId, it) })
     }
 }
 

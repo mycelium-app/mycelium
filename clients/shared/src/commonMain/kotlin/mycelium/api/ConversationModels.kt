@@ -38,6 +38,7 @@ object EventKinds {
     const val Continued = "continued"
     const val TeachMode = "teach_mode"
     const val OpenOutline = "open_outline"
+    const val BroughtInConversation = "brought_in_conversation"
     const val GoalReport = "goal_report"
     const val Environment = "environment"
 }

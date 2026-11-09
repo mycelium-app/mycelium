@@ -74,6 +74,7 @@ pub enum EventKind {
     Continued,
     TeachMode,
     OpenOutline,
+    BroughtInConversation,
     GoalReport,
     Environment,
 }
