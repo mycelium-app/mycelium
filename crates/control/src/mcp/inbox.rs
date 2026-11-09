@@ -16,7 +16,7 @@ const PERMISSION_RULE: &str = "That one runs a command, so it is never resolved 
 
 const GATE_RULE: &str = "A workflow gate is never resolved by voice. It is outlined in the Inbox. Tell the person: \"That workflow is waiting for your tap on Approve. I have outlined it.\"";
 
-const WAITING_CONVERSATION: &str = "c.owner = $1 and c.archived_at is null and ((c.status = 'input' and c.managed_by is null) or c.flagged_at is not null)";
+const WAITING_CONVERSATION: &str = "c.owner = $1 and c.archived_at is null and ((c.status = 'input' and c.managed_by is null) or c.flagged_at is not null) and not exists (select 1 from assistants a where a.id = c.assistant_id and a.builtin_key = 'voice')";
 
 enum Target {
     Permission,

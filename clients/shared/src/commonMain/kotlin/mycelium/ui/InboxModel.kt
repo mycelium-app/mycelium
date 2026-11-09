@@ -16,6 +16,7 @@ import mycelium.state.WorkflowStepStatuses
 import mycelium.state.AppState
 import mycelium.state.MyceliumCall
 import mycelium.state.Store
+import mycelium.state.VoiceAssistantKey
 import mycelium.state.ThreadItem
 import mycelium.state.buildThread
 import mycelium.state.myceliumCall
@@ -49,8 +50,12 @@ fun InboxItem.resolved(): InboxItem? = when (request) {
     is InboxRequest.Flag -> null
 }
 
-fun inboxConversations(conversations: Collection<Conversation>): List<Conversation> =
-    conversations.filter { it.archivedAt == null && ((it.status == ConversationStatus.Input && it.managedBy == null) || it.flaggedAt != null) }
+fun inboxConversations(state: AppState): List<Conversation> =
+    state.conversations.values.filter { conversation ->
+        val voice = state.assistants[conversation.assistantId]?.builtinKey == VoiceAssistantKey
+
+        conversation.archivedAt == null && !voice && ((conversation.status == ConversationStatus.Input && conversation.managedBy == null) || conversation.flaggedAt != null)
+    }
 
 fun pendingRequest(item: ThreadItem, state: AppState): InboxRequest? {
     if (item is ThreadItem.Permission) {
@@ -93,7 +98,7 @@ fun ensureOpened(store: Store, conversationId: String) {
 }
 
 fun inboxItems(state: AppState): List<InboxItem> {
-    val fromConversations = inboxConversations(state.conversations.values).flatMap { conversation ->
+    val fromConversations = inboxConversations(state).flatMap { conversation ->
         val thread = buildThread(state.events[conversation.id].orEmpty())
         val pending = pendingRequests(thread, state)
         val project = conversation.projectId?.let { state.projects[it] }
@@ -124,7 +129,7 @@ fun inboxItems(state: AppState): List<InboxItem> {
 
 @Composable
 fun rememberInbox(store: Store, state: AppState): List<InboxItem> {
-    val waiting = inboxConversations(state.conversations.values).map { it.id }.sorted()
+    val waiting = inboxConversations(state).map { it.id }.sorted()
 
     LaunchedEffect(waiting) {
         for (id in waiting) {

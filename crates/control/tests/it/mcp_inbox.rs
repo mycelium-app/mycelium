@@ -244,3 +244,22 @@ async fn voice_never_approves_a_workflow_gate_and_outlines_it_instead() {
     let focused = stream.until(|message| match message { StreamMessage::NeedsYouFocus { key } => Some(key), _ => None }).await;
     assert_eq!(focused, format!("{host}/workflow-{workflow}"));
 }
+
+#[tokio::test]
+async fn a_voice_conversation_waiting_for_a_reply_is_not_listed_while_another_assistants_is() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let voice = voice_conversation(&server, &mut link).await;
+    crate::watches::end_turn(&mut link, voice, 2).await;
+    sqlx::query("update conversations set status = 'input' where id = $1").bind(voice).execute(&server.pool).await.unwrap();
+    let archivist = waiting(&server, &mut link, "Archivist").await;
+    let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(archivist).fetch_one(&server.pool).await.unwrap();
+    let assistant = sqlx::query_scalar::<_, Uuid>("insert into assistants (owner, name, description) values ($1, 'Archivist', '') returning id").bind(owner).fetch_one(&server.pool).await.unwrap();
+    sqlx::query("update conversations set assistant_id = $2 where id = $1").bind(archivist).bind(assistant).execute(&server.pool).await.unwrap();
+
+    let listed = call_tool(&server, &link, voice, "list_needs_you", json!({})).await;
+    let items: Vec<Value> = serde_json::from_str(&text(&listed)).unwrap();
+
+    let conversations: Vec<&Value> = items.iter().map(|item| &item["conversation"]).collect();
+    assert_eq!(conversations, vec!["Archivist"]);
+}
