@@ -302,6 +302,43 @@ async fn the_person_can_start_a_subagent_on_another_offered_model_than_the_one_p
     assert_eq!(workflows(&server).await[0]["plan"]["steps"][0]["model"], "sonnet");
 }
 
+async fn report_models(server: &Server, node: Uuid) {
+    sqlx::query("insert into harness_models (node_id, agent, account, models) values ($1, 'claude', 'a@example.com', $2)").bind(node).bind(json!([{"id": "opus", "name": "Opus 5.5"}, {"id": "sonnet", "name": "Sonnet 5.5"}])).execute(&server.pool).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_claude_subagent_with_no_offered_models_is_offered_the_models_its_node_reported() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = caller(&server, &mut link).await;
+    report_models(&server, link.id).await;
+
+    let places: Value = serde_json::from_str(&text(&call(&server, &link, conversation, "list_places", json!({})).await)).unwrap();
+    assert_eq!(places["nodes"][0]["agent_models"]["claude"], json!([{"model": "opus", "name": "Opus 5.5"}, {"model": "sonnet", "name": "Sonnet 5.5"}]));
+
+    call(&server, &link, conversation, "start_subagent", subagent_on("Opus 5.5")).await;
+    let proposal = proposals(&server).await[0].clone();
+    let id = proposal["id"].as_str().unwrap();
+    assert_eq!((proposal["steps"][0]["model"].clone(), proposal["steps"][0]["model_choices"].clone()), (json!("opus"), json!([{"id": "opus", "name": "Opus 5.5"}, {"id": "sonnet", "name": "Sonnet 5.5"}])));
+
+    let (status, approved) = server.user.json(server.user.post(&format!("/api/v1/start-proposals/{id}/approve")).json(&json!({"choices": {"subagent": {"model": "sonnet"}}}))).await;
+    assert_eq!((status, approved["state"].clone()), (200, json!("started")), "{approved}");
+    assert_eq!(workflows(&server).await[0]["plan"]["steps"][0]["model"], "sonnet");
+}
+
+#[tokio::test]
+async fn a_model_the_node_did_not_report_is_refused_before_any_card() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = caller(&server, &mut link).await;
+    report_models(&server, link.id).await;
+
+    let result = call(&server, &link, conversation, "start_subagent", subagent_on("claude-fable-5-1")).await;
+
+    assert_eq!(result["isError"], true, "{result}");
+    assert!(text(&result).contains("It offers: opus (Opus 5.5), sonnet (Sonnet 5.5)"), "{}", text(&result));
+}
+
 #[tokio::test]
 async fn list_places_names_the_models_each_agent_last_offered_on_a_node() {
     let server = Server::start().await;

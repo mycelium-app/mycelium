@@ -756,7 +756,19 @@ pub async fn offered_models(state: &AppState, owner: Uuid, node_id: Uuid, agent:
     .fetch_optional(&state.pool)
     .await?;
 
-    Ok(models.and_then(|models| models.as_array().cloned()).unwrap_or_default())
+    let offered = models.and_then(|models| models.as_array().cloned()).unwrap_or_default();
+
+    if !offered.is_empty() {
+        return Ok(offered);
+    }
+
+    let reported: Option<Value> = sqlx::query_scalar("select models from harness_models where node_id = $1 and agent = $2 and jsonb_array_length(models) > 0 order by reported_at desc limit 1")
+        .bind(node_id)
+        .bind(agent)
+        .fetch_optional(&state.pool)
+        .await?;
+
+    Ok(reported.and_then(|models| models.as_array().cloned()).unwrap_or_default().iter().filter_map(|model| Some(json!({"modelId": model.get("id")?, "name": model.get("name")?}))).collect())
 }
 
 pub async fn apply_model(state: &AppState, owner: Uuid, conversation: Uuid, model: Option<&str>, difficulty: Option<&str>) -> ApiResult<()> {
