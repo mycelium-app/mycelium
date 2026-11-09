@@ -80,12 +80,13 @@ pub fn definitions() -> Value {
         },
         {
             "name": "read_artifact",
-            "description": "Read the latest version of an artifact: the text of a page or document, a summary of a file, or for a design its pages and items with ids, names and sizes. Give artboard to read the full HTML of one artboard of a design.",
+            "description": "Read the latest version of an artifact: the text of a page or document, a summary of a file, or for a design its pages and items with ids, names and sizes. Give artboard to read the full HTML of one artboard of a design. Give save_to to write it to a file in the conversation folder instead, for large artboards.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "artifact": {"type": "string", "description": "The artifact's id or slug."},
                     "artboard": {"type": "string", "description": "The id or name of an artboard of a design."},
+                    "save_to": {"type": "string", "description": "Optional path in the conversation folder. Mycelium writes the whole answer there and returns only where it went and its size."},
                 },
                 "required": ["artifact"],
             },
@@ -105,16 +106,21 @@ pub fn definitions() -> Value {
 }
 
 pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
-    let ToolCall { caller, tool, arguments, .. } = call;
+    let ToolCall { caller, tool, mut arguments, .. } = call;
     let state = caller.state;
 
     let Some((conversation_id, _)) = caller.conversation().await? else {
         return Ok(ToolReply::text("An artifact belongs to a conversation, and this call did not come from one.", true));
     };
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+    let save_to = if tool == "read_artifact" { crate::file_arguments::take_save_to(&mut arguments) } else { None };
 
-    Ok(match artifacts::tool(state, owner, conversation_id, tool, &arguments).await {
-        Ok(text) => ToolReply::text(&text, false),
-        Err(error) => ToolReply::text(error.message(), true),
+    Ok(match (artifacts::tool(state, owner, conversation_id, tool, &arguments).await, save_to) {
+        (Ok(text), Some(path)) => match crate::file_arguments::save(state, owner, conversation_id, &path, text.as_bytes()).await {
+            Ok(saved) => ToolReply::text(&saved, false),
+            Err(reason) => ToolReply::text(&format!("The artifact was read, but it could not be saved: {reason}"), true),
+        },
+        (Ok(text), None) => ToolReply::text(&text, false),
+        (Err(error), _) => ToolReply::text(error.message(), true),
     })
 }

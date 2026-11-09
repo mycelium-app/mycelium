@@ -426,6 +426,41 @@ async fn an_agent_creates_a_file_artifact_from_a_path_on_its_node() {
 }
 
 #[tokio::test]
+async fn read_artifact_writes_an_artboard_to_a_file_in_the_conversation_folder_with_save_to() {
+    let server = Server::start().await;
+    let (mut link, conversation) = started(&server).await;
+    let html = "<!doctype html><h1>Home</h1>";
+    let design = created(&server.user, "design", "Landing", &json!({"pages": [{"id": "p1", "name": "Page 1", "items": [{"id": "a1", "type": "artboard", "name": "Home", "x": 0, "y": 0, "w": 1440, "h": 900, "html": html}]}]}).to_string()).await;
+    grant(&server.user, &design, conversation).await;
+    let id = design["id"].as_str().unwrap().to_string();
+    let calling = {
+        let token = link.token.clone();
+        let anonymous = server.anonymous();
+
+        tokio::spawn(async move {
+            let request = anonymous
+                .post("/api/v1/mcp")
+                .header("authorization", format!("Bearer {token}"))
+                .header("x-mycelium-conversation", conversation.to_string())
+                .json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "read_artifact", "arguments": {"artifact": id, "artboard": "a1", "save_to": "design/home.html"}}}));
+
+            anonymous.json(request).await
+        })
+    };
+
+    let (request_id, command) = match link.next().await {
+        ControlToNode::Git { request_id, command, .. } => (request_id, command),
+        other => panic!("expected git, got {other:?}"),
+    };
+    link.send(NodeToControl::GitResult { request_id, ok: true, output: json!({"size": html.len()}), error: None }).await;
+    let (_, answer) = calling.await.unwrap();
+
+    assert_eq!(command, GitCommand::WriteFile { path: "design/home.html".into(), data_base64: base64::engine::general_purpose::STANDARD.encode(html) });
+    assert_eq!(answer["result"]["isError"], false, "{answer}");
+    assert!(!answer["result"]["content"][0]["text"].as_str().unwrap().contains("<h1>"), "{answer}");
+}
+
+#[tokio::test]
 async fn design_set_artboard_reads_the_html_from_a_file_in_the_conversation_folder() {
     let server = Server::start().await;
     let (mut link, conversation) = started(&server).await;
