@@ -14,7 +14,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mycelium_proto::api::{ConfigRequest, MoveQueuedRequest, PatchQueueRequest, PermissionAnswer, PromptRequest, RevokePermissionRequest};
-use mycelium_proto::conversation::{Attachment, ConversationStatus, EventKind, QueuedPrompt};
+use mycelium_proto::conversation::{Attachment, Conversation, ConversationStatus, EventKind, QueuedPrompt};
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
@@ -216,40 +216,22 @@ pub async fn send_reopening(state: &AppState, owner: Uuid, id: Uuid, request: Pr
     }
 
     if chats::is_chat(&row) {
-        if manager.is_some() && row.archived_at.is_some() {
-            return Err(ApiError::conflict("target_archived", "The conversation this was for has been archived. Decline it, or ask the agent to propose it again."));
-        }
-
         drop(tx);
-        chats::send(state, owner, id, text, attachments).await?;
+        chats::send_reopening(state, owner, id, text, attachments, manager).await?;
 
         return Ok(Sent::Delivered);
     }
 
-    let mut reopened = None;
-
-    if row.archived_at.is_some() {
-        let restored = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set archived_at = null where id = $1 returning {CONVERSATION_COLUMNS}")))
-            .bind(id)
-            .fetch_one(&mut *tx)
-            .await?;
-
-        if let Some(manager) = manager {
-            crate::watches::record_conversation_watch(&mut tx, owner, manager, id, false).await?;
-        }
-
-        reopened = Some(restored.to_proto()?);
-    }
+    let reopened = match row.archived_at {
+        Some(_) => Some(reopen(&mut tx, owner, id, manager).await?),
+        None => None,
+    };
 
     enqueue(&mut tx, id, text, &attachments, origin).await?;
     tx.commit().await?;
 
     if let Some(reopened) = reopened {
-        state.publish(Some(owner), StreamMessage::Conversation(reopened));
-
-        if let Some(manager) = manager {
-            state.publish(Some(owner), StreamMessage::WatchesChanged { conversation_id: manager });
-        }
+        publish_reopened(state, owner, reopened, manager);
     }
 
     pump(state, id, false).await?;
@@ -266,6 +248,27 @@ pub async fn send_reopening(state: &AppState, owner: Uuid, id: Uuid, request: Pr
     }
 
     Ok(Sent::Delivered)
+}
+
+pub async fn reopen(tx: &mut sqlx::PgConnection, owner: Uuid, id: Uuid, manager: Option<Uuid>) -> ApiResult<Conversation> {
+    let restored = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set archived_at = null where id = $1 returning {CONVERSATION_COLUMNS}")))
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+    if let Some(manager) = manager {
+        crate::watches::record_conversation_watch(&mut *tx, owner, manager, id, false).await?;
+    }
+
+    restored.to_proto()
+}
+
+pub fn publish_reopened(state: &AppState, owner: Uuid, reopened: Conversation, manager: Option<Uuid>) {
+    state.publish(Some(owner), StreamMessage::Conversation(reopened));
+
+    if let Some(manager) = manager {
+        state.publish(Some(owner), StreamMessage::WatchesChanged { conversation_id: manager });
+    }
 }
 
 pub async fn tell_agent(state: &AppState, owner: Uuid, conversation_id: Uuid, text: String) {

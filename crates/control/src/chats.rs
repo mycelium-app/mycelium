@@ -177,6 +177,10 @@ pub async fn start(state: &AppState, owner: Uuid, request: CreateChatRequest, si
 }
 
 pub async fn send(state: &AppState, owner: Uuid, id: Uuid, text: &str, attachments: Vec<Attachment>) -> ApiResult<Conversation> {
+    send_reopening(state, owner, id, text, attachments, None).await
+}
+
+pub async fn send_reopening(state: &AppState, owner: Uuid, id: Uuid, text: &str, attachments: Vec<Attachment>, manager: Option<Uuid>) -> ApiResult<Conversation> {
     if !crate::boot::is_ready(state) {
         return Err(ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "starting", "The control plane is still starting. Wait a moment, then send your message again."));
     }
@@ -185,9 +189,18 @@ pub async fn send(state: &AppState, owner: Uuid, id: Uuid, text: &str, attachmen
 
     if crate::routing::before_chat_turn(state, owner, id).await? {
         let mut queue = state.pool.begin().await?;
+        let reopened = match manager {
+            Some(_) if lock_owned(&mut queue, id, owner).await?.archived_at.is_some() => Some(crate::prompts::reopen(&mut queue, owner, id, manager).await?),
+            _ => None,
+        };
 
         enqueue(&mut queue, id, text, &attachments, None).await?;
         queue.commit().await?;
+
+        if let Some(reopened) = reopened {
+            crate::prompts::publish_reopened(state, owner, reopened, manager);
+        }
+
         crate::prompts::pump(state, id, false).await?;
 
         return Ok(find_owned(&state.pool, id, owner).await?.to_proto()?);
@@ -213,6 +226,12 @@ pub async fn send(state: &AppState, owner: Uuid, id: Uuid, text: &str, attachmen
     .bind(derived_title(text, &attachments))
     .fetch_one(&mut *tx)
     .await?;
+    let reopening_manager = manager.filter(|_| row.archived_at.is_some());
+
+    if let Some(manager) = reopening_manager {
+        crate::watches::record_conversation_watch(&mut tx, owner, manager, id, false).await?;
+    }
+
     let working = set_status(&mut tx, id, ConversationStatus::Working).await?;
     tx.commit().await?;
 
@@ -223,7 +242,7 @@ pub async fn send(state: &AppState, owner: Uuid, id: Uuid, text: &str, attachmen
     }
 
     let conversation = working.to_proto()?;
-    state.publish(Some(owner), StreamMessage::Conversation(conversation.clone()));
+    crate::prompts::publish_reopened(state, owner, conversation.clone(), reopening_manager);
 
     spawn_turn(state, owner, id, provider_id, model).await?;
 

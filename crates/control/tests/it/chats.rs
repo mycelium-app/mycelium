@@ -18,8 +18,8 @@ const OPENAI_KEY: &str = "sk-local-0123456789abcdef";
 const ANTHROPIC_KEY: &str = "sk-ant-0123456789abcdefghij";
 
 #[derive(Default)]
-struct Fake {
-    requests: Mutex<Vec<Value>>,
+pub(crate) struct Fake {
+    pub(crate) requests: Mutex<Vec<Value>>,
     headers: Mutex<Vec<HeaderMap>>,
 }
 
@@ -34,7 +34,7 @@ fn event_stream(lines: Vec<String>, hang: bool) -> Response {
     Response::builder().header("content-type", "text/event-stream").body(Body::from_stream(body)).unwrap()
 }
 
-fn fake_openai(key: Option<&'static str>) -> (Router, Arc<Fake>) {
+pub(crate) fn fake_openai(key: Option<&'static str>) -> (Router, Arc<Fake>) {
     async fn models(State((fake, key)): State<(Arc<Fake>, Option<&'static str>)>, headers: HeaderMap) -> Result<Json<Value>, StatusCode> {
         fake.headers.lock().unwrap().push(headers.clone());
         let allowed = key.is_none_or(|key| headers.get("authorization").and_then(|value| value.to_str().ok()) == Some(&format!("Bearer {key}")));
@@ -107,7 +107,7 @@ fn fake_anthropic() -> (Router, Arc<Fake>) {
     (router, fake)
 }
 
-async fn add_openai(server: &Server, base: &str, key: Option<&str>) -> Value {
+pub(crate) async fn add_openai(server: &Server, base: &str, key: Option<&str>) -> Value {
     let (status, provider) = server.user.json(server.user.post("/api/v1/model-providers").json(&json!({"kind": "openai_compatible", "name": "Ollama", "base_url": format!("{base}/v1"), "api_key": key}))).await;
     assert_eq!(status, 201, "{provider}");
 
@@ -121,14 +121,14 @@ async fn add_anthropic(server: &Server, base: &str) -> Value {
     provider
 }
 
-async fn new_chat(server: &Server, provider: &Value, prompt: &str) -> Value {
+pub(crate) async fn new_chat(server: &Server, provider: &Value, prompt: &str) -> Value {
     let (status, chat) = server.user.json(server.user.post("/api/v1/chats").json(&json!({"provider_id": provider["id"], "prompt": prompt}))).await;
     assert_eq!(status, 201, "{chat}");
 
     chat
 }
 
-async fn reply_finished(server: &Server, chat: &Value) -> Vec<Value> {
+pub(crate) async fn reply_finished(server: &Server, chat: &Value) -> Vec<Value> {
     let id = chat["id"].as_str().unwrap().to_string();
 
     eventually("the reply to end", || async {

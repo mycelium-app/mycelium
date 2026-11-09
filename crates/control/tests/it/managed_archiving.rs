@@ -1,5 +1,7 @@
+use crate::chats::{Fake, add_openai, fake_openai, new_chat, reply_finished};
 use crate::common::{self, NodeLink, Server};
 use serde_json::{Value, json};
+use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -39,6 +41,24 @@ async fn prompted_chat(setup: &mut Setup, session: &str) -> Uuid {
 
 async fn connect(server: &Server, first: Uuid, second: Uuid) {
     sqlx::query("insert into conversation_connections (owner, source_id, target_id) select owner, least($1::uuid, $2::uuid), greatest($1::uuid, $2::uuid) from conversations where id = $1").bind(first).bind(second).execute(&server.pool).await.unwrap();
+}
+
+async fn managed_model_chat(setup: &Setup) -> (Uuid, Arc<Fake>) {
+    let (router, fake) = fake_openai(None);
+    let base = common::serve(router).await;
+    let provider = add_openai(&setup.server, &base, None).await;
+    let chat = new_chat(&setup.server, &provider, "Summarise the notes").await;
+    reply_finished(&setup.server, &chat).await;
+    let id: Uuid = chat["id"].as_str().unwrap().parse().unwrap();
+    common::eventually("the chat to stop replying", || async { (setup.server.conversation(id).await["status"] != "working").then_some(()) }).await;
+    sqlx::query("update conversations set managed_by = $2 where id = $1").bind(id).bind(setup.manager).execute(&setup.server.pool).await.unwrap();
+    connect(&setup.server, setup.manager, id).await;
+
+    (id, fake)
+}
+
+fn model_calls(fake: &Fake) -> usize {
+    fake.requests.lock().unwrap().len()
 }
 
 async fn idle_for(server: &Server, id: Uuid, days: i32) {
@@ -319,6 +339,55 @@ async fn a_manager_send_whose_watch_cannot_be_written_reopens_nothing_and_delive
     assert!(archived(&setup.server, chat).await);
     assert!(!received(&setup.server, chat).await);
     assert!(watchers(&setup.server, chat).await.is_empty());
+}
+
+#[tokio::test]
+async fn its_manager_reopens_an_archived_model_chat_and_the_model_answers_the_message() {
+    let setup = setup().await;
+    let (chat, fake) = managed_model_chat(&setup).await;
+    archive_and_wait_for_watches_to_end(&setup, chat).await;
+
+    let reply = send(&setup, setup.manager, chat).await;
+
+    assert_eq!(reply["isError"], json!(false), "{reply}");
+    assert!(!archived(&setup.server, chat).await);
+    assert!(received(&setup.server, chat).await);
+    assert_eq!(watchers(&setup.server, chat).await, [setup.manager]);
+    common::eventually("the model to be asked again", || async { (model_calls(&fake) == 2).then_some(()) }).await;
+    assert!(fake.requests.lock().unwrap()[1].to_string().contains("One more thing"));
+}
+
+#[tokio::test]
+async fn a_connected_conversation_that_is_not_the_manager_cannot_reopen_an_archived_model_chat() {
+    let setup = setup().await;
+    let (chat, fake) = managed_model_chat(&setup).await;
+    let neighbour = setup.server.create_conversation(setup.link.id, None).await.id;
+    connect(&setup.server, neighbour, chat).await;
+    archive_and_wait_for_watches_to_end(&setup, chat).await;
+
+    let reply = send(&setup, neighbour, chat).await;
+
+    assert_eq!(reply["isError"], json!(true), "{reply}");
+    assert!(archived(&setup.server, chat).await);
+    assert!(!received(&setup.server, chat).await);
+    assert!(watchers(&setup.server, chat).await.is_empty());
+    assert_eq!(model_calls(&fake), 1);
+}
+
+#[tokio::test]
+async fn a_manager_send_to_a_model_chat_whose_watch_cannot_be_written_reopens_nothing_and_asks_nothing() {
+    let setup = setup().await;
+    let (chat, fake) = managed_model_chat(&setup).await;
+    archive_and_wait_for_watches_to_end(&setup, chat).await;
+    sqlx::query("alter table watches add constraint refuses_conversation_watches check (kind <> 'conversation') not valid").execute(&setup.server.pool).await.unwrap();
+
+    let (status, body) = send_over_http(&setup, setup.manager, chat).await;
+
+    assert!(status >= 400, "{status} {body}");
+    assert!(archived(&setup.server, chat).await);
+    assert!(!received(&setup.server, chat).await);
+    assert!(watchers(&setup.server, chat).await.is_empty());
+    assert_eq!(model_calls(&fake), 1);
 }
 
 #[tokio::test]
