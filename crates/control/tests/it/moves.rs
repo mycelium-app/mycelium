@@ -486,6 +486,25 @@ async fn a_failed_conversation_is_between_turns_and_moves() {
 }
 
 #[tokio::test]
+async fn a_transcript_kept_in_a_signed_in_accounts_folder_is_restored_under_the_target_folder_for_the_agent_to_adopt() {
+    let mut moving = start(true, false).await;
+    let account_transcript = ".local/state/mycelium/accounts/claude/sam@example.com/projects/-w-acme-org-app/acp-1.jsonl";
+    let engine = base64::engine::general_purpose::STANDARD;
+    moving.source.send(NodeToControl::Transcript { path: account_transcript.into(), offset: 0, data: engine.encode("one\ntwo\nxyz"), size: None }).await;
+    let mut kept_in_the_account = snapshot();
+    kept_in_the_account["transcript"] = json!({"path": account_transcript, "bytes": 11});
+    request_move(&moving, false).await;
+
+    answer_next(&mut moving.source, Ok(kept_in_the_account)).await;
+    answer_next(&mut moving.target, Ok(json!({"applied_files": 0}))).await;
+
+    match next_command(&mut moving.target).await {
+        ControlToNode::RestoreTranscript { path, .. } => assert_eq!(path, ".claude/projects/-b-acme-org-app/acp-1.jsonl"),
+        other => panic!("expected the transcript, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn a_conversation_in_a_subfolder_of_the_project_continues_in_the_same_subfolder() {
     let mut moving = start(true, false).await;
     mirror_transcript(&mut moving).await;

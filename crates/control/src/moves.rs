@@ -470,14 +470,14 @@ async fn copy_transcript(state: &AppState, source: &ConversationRow, target_node
     }
 
     let content = tokio::fs::read(&mirrored).await.map_err(|error| format!("The copy of the transcript could not be read: {error}."))?;
-    let target_path = match path.strip_prefix(".claude/projects/") {
-        Some(rest) => {
-            let file = rest.rsplit('/').next().unwrap_or(rest);
+    let target_path = match parse_enum::<AgentId>(&source.agent) {
+        Ok(AgentId::Claude) => {
+            let file = path.rsplit('/').next().unwrap_or(path);
             let folder: String = target_cwd.chars().map(|character| if character.is_ascii_alphanumeric() { character } else { '-' }).collect();
 
             format!(".claude/projects/{folder}/{file}")
         }
-        None => path.to_string(),
+        _ => path.to_string(),
     };
     let engine = base64::engine::general_purpose::STANDARD;
     let mut offset = 0usize;
