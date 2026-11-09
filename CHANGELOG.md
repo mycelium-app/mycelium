@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.34.0
+
+- A conversation's watches are one Watching control in the header.
+- A conversation with an agent reply you have not opened is unread: its sidebar row shows a white dot and a semibold title.
+- A favourite that names only a harness, with no model, can be chosen.
+- Inbox items and sent messages render Markdown; compact previews keep their line limits.
+- Managed conversations idle for 3 days archive themselves, and managers can archive theirs. A manager's message reopens an archived conversation it manages. The 3 days is fixed, with no setting.
+- Settings, Providers has a Speech section: speech to text and reading replies aloud each use a stored provider and model, chosen in a model dialog, with "Choose a model" when no model is recognised.
+
 ## v0.33.0
 
 - Tool calls no longer fold into a "Show N tool calls" row; they show as they did before v0.32.0.
