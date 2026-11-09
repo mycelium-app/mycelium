@@ -23,8 +23,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, body: Bytes) 
         return Err(ApiError::bad_request("audio_empty", "The recording is empty. Hold the microphone button and speak, then try again."));
     }
 
-    let providers = model_providers::list_owned(&state, user.id).await?;
-    let found = providers.iter().find_map(|provider| provider.speech_model().map(|model| (provider, model)));
+    let found = model_providers::speech_model(&state, user.id).await?;
     let Some((provider, model)) = found else {
         return Err(ApiError::conflict("no_speech_provider", "Add a provider with a speech-to-text model in Settings, Providers to dictate on this device."));
     };

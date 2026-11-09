@@ -122,3 +122,34 @@ async fn providers_report_their_speech_model() {
     let speech: Vec<Value> = providers.as_array().unwrap().iter().map(|provider| provider["speech_model"].clone()).collect();
     assert_eq!(speech, vec![json!("whisper-1"), Value::Null]);
 }
+
+#[tokio::test]
+async fn the_chosen_speech_model_transcribes_instead_of_the_first_recognised_one() {
+    let server = Server::start().await;
+    voice_on(&server).await;
+    let first = Arc::new(Heard::default());
+    let chosen = Arc::new(Heard::default());
+    add_provider(&server, speech_server(first.clone(), vec!["whisper-1"]), "First").await;
+    let provider = add_provider(&server, speech_server(chosen.clone(), vec!["house-dictation"]), "Example Speech").await;
+    let (status, privacy) = server.user.json(server.user.put("/api/v1/speech/choices/speech_to_text").json(&json!({"provider_id": provider["id"], "model": "house-dictation"}))).await;
+    assert_eq!((status, privacy["speech_to_text_provider"]["model"].clone()), (200, json!("house-dictation")));
+
+    let (status, reply) = transcribe(&server, RECORDING).await;
+    assert_eq!((status, reply["text"].clone()), (200, json!("fix the build")));
+    assert!(first.bodies.lock().unwrap().is_empty());
+    assert!(contains(&chosen.bodies.lock().unwrap()[0], b"house-dictation"));
+}
+
+#[tokio::test]
+async fn removing_the_chosen_provider_falls_back_to_the_first_recognised_one() {
+    let server = Server::start().await;
+    let first = add_provider(&server, speech_server(Arc::default(), vec!["whisper-1"]), "First").await;
+    let chosen = add_provider(&server, speech_server(Arc::default(), vec!["transcribe-large"]), "Example Speech").await;
+    server.user.json(server.user.put("/api/v1/speech/choices/speech_to_text").json(&json!({"provider_id": chosen["id"], "model": "transcribe-large"}))).await;
+
+    let removed = server.user.delete(&format!("/api/v1/model-providers/{}", chosen["id"].as_str().unwrap())).send().await.unwrap();
+    assert!(removed.status().is_success());
+
+    let (_, privacy) = server.user.json(server.user.get("/api/v1/privacy")).await;
+    assert_eq!(privacy["speech_to_text_provider"], json!({"provider_id": first["id"], "name": "First", "model": "whisper-1"}));
+}

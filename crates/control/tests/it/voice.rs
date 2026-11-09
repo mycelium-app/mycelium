@@ -170,3 +170,41 @@ async fn a_failing_tts_provider_is_reported_as_a_bad_gateway() {
     let failed: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!((status, failed["error"].clone()), (502, json!("speech_failed")));
 }
+
+#[tokio::test]
+async fn reading_aloud_uses_the_chosen_model_and_the_choice_is_kept_per_person() {
+    let server = Server::start().await;
+    let asked = Arc::new(Asked::default());
+    let provider = add_provider(&server, speech_server(asked.clone(), vec!["tts-1", "voice-natural"]), "Example Speech").await;
+    let (status, chosen) = server.user.json(server.user.put("/api/v1/speech/choices/text_to_speech").json(&json!({"provider_id": provider["id"], "model": "voice-natural"}))).await;
+    assert_eq!((status, chosen["text_to_speech_provider"].clone()), (200, json!({"provider_id": provider["id"], "name": "Example Speech", "model": "voice-natural"})));
+
+    let (_, read_back) = server.user.json(server.user.get("/api/v1/privacy")).await;
+    assert_eq!(read_back["text_to_speech_provider"]["model"], json!("voice-natural"));
+
+    let (status, _, _) = speak(&server, json!({"text": "Hello"})).await;
+    assert_eq!(status, 200);
+    assert_eq!(asked.requests.lock().unwrap()[0]["model"], json!("voice-natural"));
+
+    let other = server.second_user("alex@example.com").await;
+    let (_, theirs) = other.json(other.get("/api/v1/privacy")).await;
+    assert_eq!(theirs["text_to_speech_provider"], Value::Null);
+}
+
+#[tokio::test]
+async fn a_speech_model_the_provider_does_not_offer_is_refused() {
+    let server = Server::start().await;
+    let provider = add_provider(&server, speech_server(Arc::default(), vec!["whisper-1"]), "Example Speech").await;
+    let (status, refused) = server.user.json(server.user.put("/api/v1/speech/choices/speech_to_text").json(&json!({"provider_id": provider["id"], "model": "whisper-9"}))).await;
+    assert_eq!((status, refused["error"].clone()), (400, json!("speech_model_unknown")));
+    assert_eq!(refused["message"], json!("Example Speech does not offer whisper-9. Choose one of its models, or refresh its models in Chat models."));
+}
+
+#[tokio::test]
+async fn another_persons_provider_cannot_be_chosen_for_speech() {
+    let server = Server::start().await;
+    let provider = add_provider(&server, speech_server(Arc::default(), vec!["whisper-1"]), "Example Speech").await;
+    let other = server.second_user("sam@example.com").await;
+    let (status, _) = other.json(other.put("/api/v1/speech/choices/speech_to_text").json(&json!({"provider_id": provider["id"], "model": "whisper-1"}))).await;
+    assert_eq!(status, 404);
+}

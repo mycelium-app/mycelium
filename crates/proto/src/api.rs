@@ -732,6 +732,10 @@ pub struct ModelProvider {
     pub model_class: ModelClass,
     #[serde(default)]
     pub speech_model: Option<String>,
+    #[serde(default)]
+    pub speech_to_text_models: Vec<String>,
+    #[serde(default)]
+    pub text_to_speech_models: Vec<String>,
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -3203,6 +3207,19 @@ pub struct PrivacySettings {
     pub speech_to_text_provider: Option<SpeechProvider>,
     #[serde(default)]
     pub text_to_speech_provider: Option<SpeechProvider>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeechUse {
+    SpeechToText,
+    TextToSpeech,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChooseSpeechModelRequest {
+    pub provider_id: Uuid,
+    pub model: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

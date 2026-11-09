@@ -104,10 +104,9 @@ pub async fn reset_instructions(State(state): State<AppState>, user: AuthUser, P
     Ok(Json(assistant))
 }
 
-async fn privacy_of(state: &AppState, owner: Uuid) -> ApiResult<PrivacySettings> {
-    let providers = model_providers::list_owned(state, owner).await?;
-    let speech_to_text_provider = providers.iter().find_map(|provider| provider.speech_model().map(|model| SpeechProvider { provider_id: provider.id, name: provider.name.clone(), model }));
-    let text_to_speech_provider = providers.iter().find_map(|provider| provider.tts_model().map(|model| SpeechProvider { provider_id: provider.id, name: provider.name.clone(), model }));
+pub async fn privacy_of(state: &AppState, owner: Uuid) -> ApiResult<PrivacySettings> {
+    let speech_to_text_provider = model_providers::speech_model(state, owner).await?.map(|(provider, model)| SpeechProvider { provider_id: provider.id, name: provider.name, model });
+    let text_to_speech_provider = model_providers::tts_model(state, owner).await?.map(|(provider, model)| SpeechProvider { provider_id: provider.id, name: provider.name, model });
 
     Ok(PrivacySettings { voice_enabled: enabled(state, owner).await?, speech_to_text_provider, text_to_speech_provider })
 }
@@ -129,8 +128,11 @@ pub async fn save_privacy(State(state): State<AppState>, user: AuthUser, Json(re
 }
 
 pub async fn voices(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<SpeechVoices>> {
-    let providers = model_providers::list_owned(&state, user.id).await?;
-    let voices = providers.iter().map(|provider| provider.voices()).find(|voices| !voices.is_empty()).unwrap_or_default();
+    let speaker = model_providers::tts_model(&state, user.id).await?;
+    let voices = match speaker {
+        Some(_) => model_providers::SPEECH_VOICES.iter().map(|voice| voice.to_string()).collect(),
+        None => Vec::new(),
+    };
 
     Ok(Json(SpeechVoices { voices }))
 }
@@ -160,8 +162,7 @@ pub async fn speak(State(state): State<AppState>, user: AuthUser, Json(request):
         return Err(ApiError::bad_request("text_too_long", "That is too long to read aloud in one go. Read a shorter part."));
     }
 
-    let providers = model_providers::list_owned(&state, user.id).await?;
-    let found = providers.iter().find_map(|provider| provider.tts_model().map(|model| (provider, model)));
+    let found = model_providers::tts_model(&state, user.id).await?;
     let Some((provider, model)) = found else {
         return Err(ApiError::conflict("no_tts_provider", "Add a provider with a text-to-speech model in Settings, Providers to have replies read aloud."));
     };

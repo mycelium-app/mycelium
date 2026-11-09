@@ -7,7 +7,7 @@ use crate::store::{enum_text, parse_enum};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{CreateModelProviderRequest, ModelProvider, ModelProviderKind, UpdateModelProviderRequest};
+use mycelium_proto::api::{ChooseSpeechModelRequest, CreateModelProviderRequest, ModelProvider, ModelProviderKind, PrivacySettings, SpeechUse, UpdateModelProviderRequest};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, VecDeque};
 use std::time::Duration;
@@ -18,7 +18,7 @@ const REPLY_TIMEOUT: Duration = Duration::from_secs(600);
 const ANTHROPIC_URL: &str = "https://api.anthropic.com";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const ANTHROPIC_MAX_TOKENS: u32 = 8192;
-const SPEECH_VOICES: [&str; 9] = ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"];
+pub const SPEECH_VOICES: [&str; 9] = ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"];
 const ANTHROPIC_PREFERRED: [&str; 3] = ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5"];
 const PROVIDER_COLUMNS: &str = "id, kind, name, base_url, api_key, models, default_model, created_at, model_class";
 
@@ -249,35 +249,25 @@ impl ProviderRow {
             default_model: self.default_model.clone(),
             created_at: self.created_at,
             model_class: parse_enum(&self.model_class)?,
-            speech_model: self.speech_model(),
+            speech_model: self.recognised_models(SpeechUse::SpeechToText).into_iter().next(),
+            speech_to_text_models: self.recognised_models(SpeechUse::SpeechToText),
+            text_to_speech_models: self.recognised_models(SpeechUse::TextToSpeech),
         })
     }
 
-    pub fn speech_model(&self) -> Option<String> {
-        if self.parsed_kind().ok()? != ModelProviderKind::OpenaiCompatible {
-            return None;
+    pub fn recognised_models(&self, purpose: SpeechUse) -> Vec<String> {
+        if self.parsed_kind().ok() != Some(ModelProviderKind::OpenaiCompatible) {
+            return Vec::new();
         }
 
-        self.models.iter().find(|model| {
+        self.models.iter().filter(|model| {
             let lowered = model.to_lowercase();
 
-            lowered.contains("whisper") || lowered.contains("transcribe")
-        }).cloned()
-    }
-
-    pub fn tts_model(&self) -> Option<String> {
-        if self.parsed_kind().ok()? != ModelProviderKind::OpenaiCompatible {
-            return None;
-        }
-
-        self.models.iter().find(|model| model.to_lowercase().contains("tts")).cloned()
-    }
-
-    pub fn voices(&self) -> Vec<String> {
-        match self.tts_model() {
-            Some(_) => SPEECH_VOICES.iter().map(|voice| voice.to_string()).collect(),
-            None => Vec::new(),
-        }
+            match purpose {
+                SpeechUse::SpeechToText => lowered.contains("whisper") || lowered.contains("transcribe"),
+                SpeechUse::TextToSpeech => lowered.contains("tts"),
+            }
+        }).cloned().collect()
     }
 
     pub(crate) fn authorised(&self, request: reqwest::RequestBuilder) -> ApiResult<reqwest::RequestBuilder> {
@@ -537,6 +527,50 @@ pub async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<Pr
     let row = sqlx::query_as::<_, ProviderRow>(sqlx::AssertSqlSafe(format!("select {PROVIDER_COLUMNS} from model_providers where id = $1 and owner = $2"))).bind(id).bind(owner).fetch_optional(&state.pool).await?;
 
     row.ok_or_else(|| ApiError::not_found("That model provider"))
+}
+
+pub async fn speech_model(state: &AppState, owner: Uuid) -> ApiResult<Option<(ProviderRow, String)>> {
+    chosen_speech_model(state, owner, SpeechUse::SpeechToText).await
+}
+
+pub async fn tts_model(state: &AppState, owner: Uuid) -> ApiResult<Option<(ProviderRow, String)>> {
+    chosen_speech_model(state, owner, SpeechUse::TextToSpeech).await
+}
+
+async fn chosen_speech_model(state: &AppState, owner: Uuid, purpose: SpeechUse) -> ApiResult<Option<(ProviderRow, String)>> {
+    let mut providers = list_owned(state, owner).await?;
+    let stored = sqlx::query_as::<_, (Uuid, String)>("select provider_id, model from speech_choices where owner = $1 and purpose = $2").bind(owner).bind(enum_text(&purpose)).fetch_optional(&state.pool).await?;
+    let chosen = stored.and_then(|(provider_id, model)| providers.iter().position(|provider| provider.id == provider_id).map(|index| (index, model)));
+
+    if let Some((index, model)) = chosen {
+        return Ok(Some((providers.swap_remove(index), model)));
+    }
+
+    Ok(providers.into_iter().find_map(|provider| provider.recognised_models(purpose).into_iter().next().map(|model| (provider, model))))
+}
+
+pub async fn choose_speech_model(State(state): State<AppState>, user: AuthUser, Path(purpose): Path<SpeechUse>, Json(request): Json<ChooseSpeechModelRequest>) -> ApiResult<Json<PrivacySettings>> {
+    user.require_full_access()?;
+
+    let provider = find_owned(&state, request.provider_id, user.id).await?;
+
+    if provider.parsed_kind()? != ModelProviderKind::OpenaiCompatible {
+        return Err(ApiError::bad_request("speech_provider_unsupported", format!("{} cannot handle speech. Choose an OpenAI-compatible provider.", provider.name)));
+    }
+
+    if !provider.models.contains(&request.model) {
+        return Err(ApiError::bad_request("speech_model_unknown", format!("{} does not offer {}. Choose one of its models, or refresh its models in Chat models.", provider.name, request.model)));
+    }
+
+    sqlx::query("insert into speech_choices (owner, purpose, provider_id, model) values ($1, $2, $3, $4) on conflict (owner, purpose) do update set provider_id = excluded.provider_id, model = excluded.model")
+        .bind(user.id)
+        .bind(enum_text(&purpose))
+        .bind(provider.id)
+        .bind(&request.model)
+        .execute(&state.pool)
+        .await?;
+
+    Ok(Json(crate::voice::privacy_of(&state, user.id).await?))
 }
 
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<ModelProvider>>> {

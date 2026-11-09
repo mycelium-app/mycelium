@@ -335,6 +335,7 @@ const NOT_YET_COVERED: &[(&str, &str)] = &[
     ("POST", "/api/v1/forges/{id}/mcp"),
     ("GET", "/api/v1/privacy"),
     ("PUT", "/api/v1/privacy"),
+    ("PUT", "/api/v1/speech/choices/{purpose}"),
     ("GET", "/api/v1/decision-providers"),
     ("PATCH", "/api/v1/decision-providers/{id}"),
     ("DELETE", "/api/v1/decision-providers/{id}"),
