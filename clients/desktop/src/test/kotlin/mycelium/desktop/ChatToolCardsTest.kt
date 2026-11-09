@@ -61,7 +61,6 @@ class ChatToolCardsTest {
             update(3, """{"sessionUpdate":"tool_call","toolCallId":"instructions","title":"mcp.mycelium.get_instructions","kind":"execute","status":"completed","rawInput":{"server":"mycelium","tool":"get_instructions","arguments":{"layer":"global"}},"rawOutput":{"result":{"content":[{"type":"text","text":"Use British English."}]},"error":null}}"""),
         ), agent = "codex")
 
-        rule.onNodeWithContentDescription("Show 3 tool calls").performClick()
         rule.onNodeWithContentDescription("Guardian Review").assertExists()
         rule.onNodeWithContentDescription("Searched memory for “release”").assertExists()
         rule.onNodeWithContentDescription("Get instructions, mycelium, done").assertExists()

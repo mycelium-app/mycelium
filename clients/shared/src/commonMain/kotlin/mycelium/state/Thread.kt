@@ -186,8 +186,6 @@ sealed interface ThreadItem {
     data class TeachMode(override val key: String, val on: Boolean) : ThreadItem
 
     data class BroughtIn(override val key: String, val conversationId: String, val title: String) : ThreadItem
-
-    data class Steps(override val key: String, val calls: Int, val waiting: Int, val approvalsOnly: Boolean, val running: Boolean, val expanded: Boolean) : ThreadItem
 }
 
 data class ContinuedFrom(val agent: String, val account: String?, val model: String?, val provider: String?)
@@ -203,48 +201,6 @@ private fun usageLimitFrom(payload: JsonObject): UsageLimitNote? {
 private const val MaxDiffSide = 400
 
 fun buildThread(events: List<Event>): List<ThreadItem> = ThreadBuilder().build(events)
-
-const val MinimumCollapsedCalls = 3
-
-private fun isStep(item: ThreadItem) = item is ThreadItem.ToolCall || item is ThreadItem.Permission
-
-fun collapseSteps(items: List<ThreadItem>, expanded: Set<String>, waitsOnPerson: (ThreadItem) -> Boolean = { it is ThreadItem.Permission && !it.resolved }): List<ThreadItem> {
-    val shown = mutableListOf<ThreadItem>()
-    val hiddenRequests = mutableListOf<ThreadItem>()
-    var index = 0
-
-    while (index < items.size) {
-        if (!isStep(items[index])) {
-            shown += items[index]
-            index++
-            continue
-        }
-
-        val end = (index until items.size).firstOrNull { !isStep(items[it]) } ?: items.size
-        val run = items.subList(index, end)
-        val calls = run.filterIsInstance<ThreadItem.ToolCall>()
-
-        if (calls.size < MinimumCollapsedCalls) {
-            shown += run
-        } else {
-            val requests = run.filter(waitsOnPerson)
-            val key = "steps-${run.first().key}"
-            val open = key in expanded
-
-            shown += ThreadItem.Steps(key, calls.size, requests.size, requests.all { it is ThreadItem.Permission }, calls.any { it.status == ToolStatus.Running }, open)
-
-            if (open) {
-                shown += run
-            } else {
-                hiddenRequests += requests
-            }
-        }
-
-        index = end
-    }
-
-    return shown + hiddenRequests
-}
 
 fun turnIsOpen(events: List<Event>): Boolean = events.lastOrNull { it.kind == EventKinds.UserMessage || it.kind == EventKinds.TurnEnd }?.kind == EventKinds.UserMessage
 

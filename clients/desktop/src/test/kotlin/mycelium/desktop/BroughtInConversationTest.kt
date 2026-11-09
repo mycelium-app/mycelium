@@ -26,10 +26,8 @@ import mycelium.api.Event
 import mycelium.api.MyceliumApi
 import mycelium.api.MyceliumJson
 import mycelium.api.StreamMessage
-import mycelium.state.PermissionOption
 import mycelium.state.Store
 import mycelium.state.ThreadItem
-import mycelium.state.ToolStatus
 import mycelium.ui.BroughtInActions
 import mycelium.ui.LocalBroughtIn
 import mycelium.ui.MyceliumTheme
@@ -43,8 +41,6 @@ private const val Atlas = """{"id":"c2","owner":"u","node_id":"n1","agent":"clau
 private const val Caller = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Release captain","status":"review","acp_session_id":"s","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:05:00Z"}"""
 private const val AtlasEvents = """[{"conversation_id":"c2","seq":1,"kind":"acp_update","payload":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"The changelog and version bump are done."}}}},
 {"conversation_id":"c2","seq":2,"kind":"permission_request","payload":{"request_id":"r1","toolCall":{"title":"mcp__gitlab__create_merge_request","server":"GitLab"},"options":[{"optionId":"approve","name":"Approve","kind":"allow_once"},{"optionId":"deny","name":"Deny","kind":"reject_once"}]}}]"""
-
-private val Options = listOf(PermissionOption("approve", "Approve", "allow_once"), PermissionOption("deny", "Deny", "reject_once"))
 
 class BroughtInConversationTest {
     @get:Rule
@@ -156,29 +152,5 @@ class BroughtInConversationTest {
         rule.onNodeWithText("Merge request opened as !42.").assertExists()
         assertEquals(0, rule.onAllNodesWithContentDescription("Approve mcp__gitlab__create_merge_request").fetchSemanticsNodes().size)
         rule.captureScreen("7.21-brought-in-after-reply")
-    }
-
-    @Test
-    fun aPendingApprovalStaysVisibleWhileToolStepsAreCollapsedAndShowsOnceWhenExpanded() {
-        val calls = (1..4).map { ThreadItem.ToolCall("k$it", "call$it", "Read file $it", "read", "file$it.kt", ToolStatus.Done, null, null, awaitingApproval = it == 4) }
-        val permission = ThreadItem.Permission("kp", "r1", "mcp__gitlab__create_merge_request", Options, false, "GitLab", null, null, false, null, "call4")
-        val approvals = mutableListOf<String>()
-
-        rule.setContent { MyceliumTheme(true) { Box(Modifier.width(720.dp)) { ThreadView(calls + permission, onAnswer = { _, option -> approvals += option }, onStopWorkflow = {}) } } }
-
-        val summary = "Show 4 tool calls, 1 waiting for your approval"
-        rule.onNodeWithContentDescription(summary).assertExists()
-        assertEquals(1, rule.onAllNodesWithContentDescription("Approve mcp__gitlab__create_merge_request").fetchSemanticsNodes().size)
-        assertEquals(0, rule.onAllNodesWithText("Read file 1").fetchSemanticsNodes().size)
-        rule.captureScreen("3.28-pending-approval-visible")
-
-        rule.onNodeWithContentDescription(summary).performClick()
-        rule.waitForIdle()
-
-        rule.onNodeWithContentDescription("Hide 4 tool calls, 1 waiting for your approval").assertExists()
-        assertEquals(1, rule.onAllNodesWithContentDescription("Approve mcp__gitlab__create_merge_request").fetchSemanticsNodes().size)
-
-        rule.onNodeWithContentDescription("Approve mcp__gitlab__create_merge_request").performClick()
-        assertEquals(listOf("approve"), approvals)
     }
 }

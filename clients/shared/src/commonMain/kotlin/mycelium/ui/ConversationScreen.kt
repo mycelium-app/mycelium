@@ -700,7 +700,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             dismissedPins = store.pinDismissals[id]
                         },
                         waitingForAnswer = conversation.status == ConversationStatus.Input,
-                        waitsOnPerson = { pendingRequest(it, state) != null },
                     )
                 }
 
