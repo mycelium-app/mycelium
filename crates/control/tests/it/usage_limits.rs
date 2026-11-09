@@ -207,6 +207,7 @@ async fn a_due_resume_sends_what_was_queued_instead_of_continue() {
     let id = working_conversation(&server, &mut link).await;
     sqlx::query("insert into queued_prompts (conversation_id, position, text) values ($1, 1, 'waiting')").bind(id).execute(&server.pool).await.unwrap();
     hit_limit(&server, &mut link, id, &limit_message(2)).await;
+    common::eventually("the automatic resume to be scheduled", || async { resume_at(&server, id).await }).await;
     schedule(&server, id).await;
 
     make_due(&server, id).await;
@@ -235,6 +236,7 @@ async fn a_resume_whose_node_is_offline_tries_again_later_without_using_up_an_at
     let mut link = server.online_node("laptop").await;
     let id = working_conversation(&server, &mut link).await;
     hit_limit(&server, &mut link, id, &limit_message(2)).await;
+    common::eventually("the automatic resume to be scheduled", || async { resume_at(&server, id).await }).await;
     schedule(&server, id).await;
     drop(link);
     common::eventually("the node to go offline", || async { (server.conversation(id).await["status"] == "failed").then_some(()) }).await;
@@ -516,6 +518,7 @@ async fn a_held_goal_carries_on_when_the_limit_resets_and_keeps_its_counts() {
     let id = working_conversation(&server, &mut link).await;
     server.user.json(server.user.put(&format!("/api/v1/conversations/{id}/goal")).json(&json!({"text": "Every test passes", "token_budget": 100000, "time_limit_seconds": 7200}))).await;
     hit_limit(&server, &mut link, id, &limit_message(2)).await;
+    common::eventually("the automatic resume to be scheduled", || async { resume_at(&server, id).await }).await;
     common::eventually("the resume to be scheduled", || async { resume_at(&server, id).await }).await;
     sqlx::query("update goals set held_since = now() - interval '1 hour' where conversation_id = $1").bind(id).execute(&server.pool).await.unwrap();
     let started: Value = server.user.json(server.user.get(&format!("/api/v1/conversations/{id}/goal"))).await.1;
