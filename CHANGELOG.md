@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.30.0
+
+- Inbox sits under New conversation and is the screen the app opens on. Stats show tokens per second, today's spend by hour, account usage and what is running; Needs you lists pending permissions, questions, proposals, workflow gates and flagged chats from every conversation, each resolved in place; the feed shows Murmur posts when a Murmur integration is set up. Narrow windows collapse the stats, and phones get Needs you, Feed and Stats tabs.
+- With Voice open on the Inbox, saying approve, decline or an answer acts on the outlined question or proposal. Permission requests and workflow gates still need a tap.
+- Paperless-ngx has an api tool for any /api/ path and query, with all_pages; GET runs at once and writes follow the account's approvals. download_document saves a document's original unchanged with save_to, and get_document saves the whole OCR text when save_to is used.
+- all_pages keeps the caller's filters on every page. FreeAgent's next-page links drop them, so a filtered read used to return every row after the first page.
+- send_to_conversation delivers at once to a conversation in the same group, as read_conversation already allowed.
+- A connection between two conversations expires a week after it was last used, and each delivered message renews it. A managing link is kept while the managed chat is busy. Settings, Agent connections shows when each expires. Group connections do not expire.
+
 ## v0.29.0
 
 - A conversation started by another conversation is managed by it. Managed conversations sit in a Managed by assistant section below Working, collapsed by default, and never notify the person: their events go to the manager. Conversations started that way before this version count as managed.
