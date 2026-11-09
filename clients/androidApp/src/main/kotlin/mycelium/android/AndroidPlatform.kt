@@ -246,7 +246,7 @@ class AndroidPlatform(private val context: Context, private val launchPicker: ()
     }
 
     @Composable
-    override fun WebContent(url: String, token: String?, modifier: Modifier, reading: PageReading?) = AndroidWebContent(url, token, modifier)
+    override fun WebContent(url: String, token: String?, modifier: Modifier, reading: PageReading?) = AndroidWebContent(url, token, modifier, reading)
 
     override fun copyToClipboard(text: String) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager

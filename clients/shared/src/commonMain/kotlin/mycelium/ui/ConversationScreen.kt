@@ -85,6 +85,7 @@ import mycelium.state.QueueEditing
 import mycelium.state.ComposerDraft
 import mycelium.state.Ide
 import mycelium.state.OutlinePage
+import mycelium.state.outlineIntegrations
 import mycelium.state.DiffTabs
 import mycelium.state.DraftAttachment
 import mycelium.state.PickedFile
@@ -277,11 +278,34 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val groupName = groupId?.let { state.groups[it]?.name }
     val chat = conversation.isChat
     var outlinePage by remember(id) { mutableStateOf<OutlinePage?>(null) }
+    var outlinePhoneStage by remember(id) { mutableStateOf<OutlinePhoneStage?>(null) }
+    val embedsOutline = platform?.embedsOtherSites != false
+    val revealOutline: (OutlinePage) -> Boolean = { page ->
+        outlinePage = page
+
+        when {
+            chat || !panels -> false
+            compact -> {
+                outlinePhoneStage = if (embedsOutline) OutlinePhoneStage.Document else OutlinePhoneStage.Tree
+
+                true
+            }
+            else -> {
+                openPanel(SidePanel.Outline)
+
+                true
+            }
+        }
+    }
     val showOutline: (OutlinePage) -> Unit = { page ->
-        if (!compact && !chat && panels) {
-            outlinePage = page
-            openPanel(SidePanel.Outline)
-        } else {
+        if (!revealOutline(page) || !embedsOutline) {
+            platform?.openUrl(page.url)
+        }
+    }
+    val selectOutline: (OutlinePage) -> Unit = { page ->
+        outlinePage = page
+
+        if (!embedsOutline) {
             platform?.openUrl(page.url)
         }
     }
@@ -289,10 +313,14 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val liveOutline = state.outlinePages[id]
 
     LaunchedEffect(liveOutline) {
-        if (liveOutline != null && liveOutline != outlineOnEntry) {
-            showOutline(liveOutline)
+        if (liveOutline != null && liveOutline != outlineOnEntry && !revealOutline(liveOutline)) {
+            platform?.openUrl(liveOutline.url)
         }
     }
+
+    val outlineAccounts = outlineIntegrations(state.chatToolServers, groupId)
+    val shownOutlinePage = outlinePage ?: liveOutline
+    val outlineBrowser = rememberOutlineBrowser(id, store.api, outlineAccounts, shownOutlinePage, panel == SidePanel.Outline || outlinePhoneStage != null)
 
     var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
 
@@ -521,7 +549,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         node?.let { FolderBrowserDialog(store, it.id, it.name, parentFolder(path), onChoose = { browsingPath = null }, onDismiss = { browsingPath = null }) }
     }
 
-    CompositionLocalProvider(LocalBroughtIn provides BroughtInActions(store, state, onOpenConversation), LocalThreadSubagents provides ThreadSubagents(store, state, id, onOpenConversation), LocalPathOpener provides pathOpener, LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAppViewer provides appViewer, LocalAgentOpener provides agentOpener, LocalConversationWorkflows provides conversationWorkflows, LocalOutlineOpener provides showOutline, LocalOutlinePage provides (outlinePage ?: liveOutline), LocalIdeTarget provides ideTarget) {
+    CompositionLocalProvider(LocalBroughtIn provides BroughtInActions(store, state, onOpenConversation), LocalThreadSubagents provides ThreadSubagents(store, state, id, onOpenConversation), LocalPathOpener provides pathOpener, LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAppViewer provides appViewer, LocalAgentOpener provides agentOpener, LocalConversationWorkflows provides conversationWorkflows, LocalOutlineOpener provides showOutline, LocalOutlinePage provides shownOutlinePage, LocalIdeTarget provides ideTarget) {
         val walkthrough = state.walkthroughs[id]?.takeIf { !it.dismissed && !chat }
 
         val density = LocalDensity.current
@@ -532,7 +560,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
                 SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, onOpenArtefact, Modifier.fillMaxSize()) }
                 SidePanel.Apps -> platform?.let { AppsPanel(store, state, it, id, viewedApp, { viewedApp = it }, Modifier.fillMaxSize()) }
-                SidePanel.Outline -> outlinePage?.let { page -> platform?.let { BrowserPanel(it, page.url, page.title, onClose = { openPanel(null) }) } }
+                SidePanel.Outline -> platform?.let { OutlinePanel(outlineBrowser, it, outlineAccounts, shownOutlinePage, selectOutline, onClose = { openPanel(null) }) }
                 SidePanel.PullRequest -> key(conversation.id) { ConversationPullRequestPanel(store, state, conversation, Modifier.fillMaxSize()) }
                 SidePanel.Environment -> key(conversation.id) { EnvironmentPanel(store, state, conversation, environmentFillsArea, { environmentExpanded = it }, { openPanel(null) }, onOpenNode, onOpenConversation, onOpenNodes) }
                 null -> Unit
@@ -825,7 +853,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     }
                 }
 
-                Rail(if (narrow && chatForced) null else panel, outlinePage != null, conversationApps(state, id).isNotEmpty(), conversation.pullRequestNumber != null, conversation.scratch || chat) { chosen ->
+                Rail(if (narrow && chatForced) null else panel, !chat && outlineAccounts.isNotEmpty(), conversationApps(state, id).isNotEmpty(), conversation.pullRequestNumber != null, conversation.scratch || chat) { chosen ->
                     if (narrow) {
                         if (panel == chosen && !chatForced) {
                             chatForced = true
@@ -853,6 +881,12 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 SidePanel.PullRequest -> key(conversation.id) { ConversationPullRequestPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 SidePanel.Apps, SidePanel.Outline, SidePanel.Environment, null -> Unit
             }
+        }
+    }
+
+    outlinePhoneStage?.takeIf { compact && !chat && panels }?.let { stage ->
+        FullScreenSheet({ outlinePhoneStage = if (stage == OutlinePhoneStage.Document) OutlinePhoneStage.Tree else null }) {
+            platform?.let { OutlinePhone(outlineBrowser, it, outlineAccounts, shownOutlinePage, stage, { next -> outlinePhoneStage = next }, selectOutline, onClose = { outlinePhoneStage = null }) }
         }
     }
 
@@ -1153,7 +1187,7 @@ private const val WalkthroughTab = "Walkthrough"
 private enum class SidePanel { Subagents, Git, PullRequest, Artefacts, Apps, Outline, Environment }
 
 @Composable
-private fun Rail(open: SidePanel?, outlineOpen: Boolean, hasApps: Boolean, hasPullRequest: Boolean, environmentOnly: Boolean, onToggle: (SidePanel) -> Unit) {
+private fun Rail(open: SidePanel?, hasOutline: Boolean, hasApps: Boolean, hasPullRequest: Boolean, environmentOnly: Boolean, onToggle: (SidePanel) -> Unit) {
     val colors = MyTheme.colors
 
     Row(Modifier.fillMaxHeight()) {
@@ -1179,8 +1213,8 @@ private fun Rail(open: SidePanel?, outlineOpen: Boolean, hasApps: Boolean, hasPu
 
             MyButton({ onToggle(SidePanel.Environment) }, icon = MyIcon.Desktop, description = if (open == SidePanel.Environment) "Close the environment panel" else "Open environment", muted = true, selected = open == SidePanel.Environment)
 
-            if (outlineOpen) {
-                MyButton({ onToggle(SidePanel.Outline) }, icon = MyIcon.Globe, description = if (open == SidePanel.Outline) "Close Outline page" else "Open Outline page", muted = true, selected = open == SidePanel.Outline)
+            if (hasOutline) {
+                MyButton({ onToggle(SidePanel.Outline) }, icon = MyIcon.BookOpen, description = if (open == SidePanel.Outline) "Close Outline" else "Open Outline", muted = true, selected = open == SidePanel.Outline)
             }
         }
     }

@@ -83,3 +83,18 @@ data class OAuthStart(@SerialName("authorize_url") val authorizeUrl: String)
 
 @Serializable
 data class PatchChatToolServerRequest(val enabled: Boolean? = null, val name: String? = null, @SerialName("token_expires_at") val tokenExpiresAt: String? = null, @SerialName("clear_token_expiry") val clearTokenExpiry: Boolean? = null, val policy: IntegrationPolicy? = null, @SerialName("bearer_token") val bearerToken: String? = null)
+
+@Serializable
+data class OutlineCollection(val id: String, val name: String)
+
+@Serializable
+data class OutlineDocumentNode(val id: String, val title: String, val url: String = "", val children: List<OutlineDocumentNode> = emptyList())
+
+@Serializable
+data class OutlineAnswer<T>(val data: List<T> = emptyList())
+
+@Serializable
+data class OutlineCollectionsRequest(val limit: Int)
+
+@Serializable
+data class OutlineCollectionRequest(val id: String)

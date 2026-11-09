@@ -545,6 +545,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
     var settingsGroup by remember { mutableStateOf<String?>(null) }
     var settingsGroupTab by remember { mutableStateOf<String?>(null) }
     var settingsRequest by remember { mutableStateOf(0) }
+    var settingsIntegration by remember { mutableStateOf<IntegrationStart?>(null) }
 
     LaunchedEffect(store) {
         store.screenRequests.collect { path ->
@@ -562,6 +563,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
             settingsStart = null
             settingsGroup = null
             settingsGroupTab = null
+            settingsIntegration = null
         }
     }
 
@@ -582,7 +584,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
         attempt { store.refreshChatToolServers() }
     }
 
-    CompositionLocalProvider(LocalPlatform provides platform, LocalBrowserTasks provides browserTasks(store, state), LocalMessageProposals provides messageProposals(store, state), LocalStartProposals provides startProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactAccessControls provides ArtifactAccessControls(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides reviewInstructions, LocalGroupFilter provides groupFilter, LocalHoursView provides hours, LocalIdes provides ides, LocalAppsOpener provides { onRoute(Route.Apps) }, LocalAppOpener provides { uuid, deployment -> onRoute(Route.App(uuid, if (deployment != null) AppLogsTab else AppOverviewTab, deployment)) }, LocalAppViewer provides { uuid -> onRoute(Route.App(uuid, viewing = true)) }, LocalAppDeployments provides appDeployments) {
+    CompositionLocalProvider(LocalPlatform provides platform, LocalBrowserTasks provides browserTasks(store, state), LocalMessageProposals provides messageProposals(store, state), LocalStartProposals provides startProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactAccessControls provides ArtifactAccessControls(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides reviewInstructions, LocalOpenIntegrationSettings provides { start -> settingsStart = SettingsSection.ChatTools; settingsIntegration = start; onRoute(Route.Settings) }, LocalGroupFilter provides groupFilter, LocalHoursView provides hours, LocalIdes provides ides, LocalAppsOpener provides { onRoute(Route.Apps) }, LocalAppOpener provides { uuid, deployment -> onRoute(Route.App(uuid, if (deployment != null) AppLogsTab else AppOverviewTab, deployment)) }, LocalAppViewer provides { uuid -> onRoute(Route.App(uuid, viewing = true)) }, LocalAppDeployments provides appDeployments) {
         val selected = routeGroup(route, state, groupFilter)
         val closed = closedNotice(hours, selected, workingBehindClosedDoors(state.conversations.values, hours, selected), platform).takeIf { route.opensBehindHours() }
         val notice = hoursNotice(hours, groupChoiceOf(groupFilter), platform)
@@ -625,7 +627,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
                     is Route.AssistantSettings -> AssistantSettingsScreen(store, state, route.id, route.section, onDone = { onRoute(Route.Assistants) }, onBack = { onRoute(Route.Assistant(route.id)) })
                     Route.Activity -> ActivityScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
                     Route.UsageHistory -> UsageHistoryScreen(store)
-                    Route.Settings -> CompositionLocalProvider(LocalOpenConversation provides { onRoute(Route.Chat(it)) }) { key(settingsRequest) { SettingsScreen(store, me, store.api.baseUrl, startOn = settingsStart, startGroup = settingsGroup, startGroupTab = settingsGroupTab, onSignOut = onSignOut) } }
+                    Route.Settings -> CompositionLocalProvider(LocalOpenConversation provides { onRoute(Route.Chat(it)) }) { key(settingsRequest) { SettingsScreen(store, me, store.api.baseUrl, startOn = settingsStart, startGroup = settingsGroup, startGroupTab = settingsGroupTab, startIntegration = settingsIntegration, onSignOut = onSignOut) } }
                 }
             }
         }

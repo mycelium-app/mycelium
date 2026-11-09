@@ -30,7 +30,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 
 @Composable
-fun ResizeHandle(description: String, orientation: Orientation = Orientation.Horizontal, onMove: (Dp) -> Unit) {
+fun ResizeHandle(description: String, orientation: Orientation = Orientation.Horizontal, onActivate: (() -> Unit)? = null, onMove: (Dp) -> Unit) {
     val colors = MyTheme.colors
     val density = LocalDensity.current
     val handle = remember { MutableInteractionSource() }
@@ -49,6 +49,14 @@ fun ResizeHandle(description: String, orientation: Orientation = Orientation.Hor
                 .pointerHoverIcon(if (vertical) VerticalResizeIcon else HorizontalResizeIcon)
                 .draggable(rememberDraggableState { delta -> onMove(with(density) { delta.toDp() }) }, orientation)
                 .onKeyEvent { event ->
+                    if (onActivate != null && event.key == Key.Enter) {
+                        if (event.type == KeyEventType.KeyDown) {
+                            onActivate()
+                        }
+
+                        return@onKeyEvent true
+                    }
+
                     val step = when (event.key) {
                         Key.DirectionLeft -> if (vertical) null else -Tokens.Space.S4
                         Key.DirectionRight -> if (vertical) null else Tokens.Space.S4

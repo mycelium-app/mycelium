@@ -277,7 +277,7 @@ fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, mod
                     }
                 } else {
                     Box(Modifier.offset(maxWidth * area.x, maxHeight * (area.y + area.height * divider.ratio)).width(maxWidth * area.width).height(Tokens.Size.Hairline)) {
-                        ResizeHandle("Resize the split", Orientation.Vertical, resize)
+                        ResizeHandle("Resize the split", Orientation.Vertical, onMove = resize)
                     }
                 }
             }

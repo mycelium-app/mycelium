@@ -22,6 +22,8 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 private class PageThatReads(private val storage: String, private val url: String) : Platform by OpeningPlatform() {
+    override val readsPages = true
+
     @Composable
     override fun WebContent(url: String, token: String?, modifier: Modifier, reading: PageReading?) {
         LaunchedEffect(reading) {

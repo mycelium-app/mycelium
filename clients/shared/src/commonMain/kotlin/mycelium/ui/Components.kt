@@ -409,6 +409,7 @@ fun Bar(
     modifier: Modifier = Modifier,
     chrome: Boolean = false,
     startPadding: Dp = Tokens.Space.S3,
+    gap: Dp = Tokens.Space.S2,
     content: @Composable RowScope.() -> Unit,
 ) {
     val colors = MyTheme.colors
@@ -416,7 +417,7 @@ fun Bar(
     Column(modifier.background(if (chrome) colors.bgChrome else colors.bgContent)) {
         Row(
             Modifier.fillMaxWidth().height(barHeight()).padding(start = startPadding, end = Tokens.Space.S2),
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+            horizontalArrangement = Arrangement.spacedBy(gap),
             verticalAlignment = Alignment.CenterVertically,
             content = content,
         )

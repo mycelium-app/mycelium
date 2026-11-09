@@ -52,6 +52,8 @@ private const val StreamPingMillis = 20_000L
 
 private const val ConnectTimeoutMillis = 10_000L
 
+private const val OutlineCollectionsLimit = 100
+
 class MyceliumApi(
     val baseUrl: String,
     private val clientToken: String? = null,
@@ -394,6 +396,12 @@ class MyceliumApi(
 
     suspend fun setChatToolServerGroups(id: String, groups: List<String>): ChatToolServer =
         call("/chat-tool-servers/$id/groups") { client.put(it) { authorise(); json(SetIntegrationGroupsRequest(groups)) } }.body()
+
+    suspend fun outlineCollections(server: String): List<OutlineCollection> =
+        call("/integrations/$server/proxy/collections.list") { client.post(it) { authorise(); json(OutlineCollectionsRequest(OutlineCollectionsLimit)) } }.body<OutlineAnswer<OutlineCollection>>().data
+
+    suspend fun outlineDocuments(server: String, collection: String): List<OutlineDocumentNode> =
+        call("/integrations/$server/proxy/collections.documents") { client.post(it) { authorise(); json(OutlineCollectionRequest(collection)) } }.body<OutlineAnswer<OutlineDocumentNode>>().data
 
     suspend fun integrationCalls(server: String? = null, before: String? = null): List<IntegrationCall> =
         call("/integration-calls") { client.get(it) { authorise(); server?.let { value -> parameter("server", value) }; before?.let { value -> parameter("before", value) } } }.body()

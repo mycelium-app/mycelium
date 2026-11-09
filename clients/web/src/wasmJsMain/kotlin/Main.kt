@@ -277,6 +277,8 @@ private object WebPlatform : Platform {
 
     override suspend fun readClipboard(): String? = suspendCoroutine { continuation -> readClipboardText { text -> continuation.resume(text?.toString()) } }
 
+    override val embedsOtherSites: Boolean get() = false
+
     @Composable
     override fun WebContent(url: String, token: String?, modifier: Modifier, reading: PageReading?) = IframeWebContent(url, modifier)
 

@@ -29,6 +29,8 @@ interface Platform {
 
     val readsPages: Boolean get() = false
 
+    val embedsOtherSites: Boolean get() = true
+
     val originUrl: String?
 
     val signInCallback: String? get() = null

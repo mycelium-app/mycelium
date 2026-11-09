@@ -332,6 +332,6 @@ fun PuzzleBrowser(store: Store, platform: Platform, puzzle: Puzzle, onBack: () -
             MyButton({ platform.openUrl(puzzle.url) }, text = "Open in browser", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
         }
 
-        platform.WebContent(puzzle.url, null, Modifier.weight(1f).fillMaxWidth(), reading)
+        platform.WebContent(puzzle.url, null, Modifier.weight(1f).fillMaxWidth(), reading.takeIf { platform.readsPages })
     }
 }

@@ -72,7 +72,7 @@ private class GroupLinks(val tab: String?, val openHours: (String) -> Unit, val 
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: SettingsSection? = null, startGroup: String? = null, startGroupTab: String? = null, onSignOut: () -> Unit) {
+fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: SettingsSection? = null, startGroup: String? = null, startGroupTab: String? = null, startIntegration: IntegrationStart? = null, onSignOut: () -> Unit) {
     var section by remember { mutableStateOf(startOn) }
     var openGroup by remember { mutableStateOf(startGroup) }
     var groupTab by remember { mutableStateOf(startGroupTab) }
@@ -139,7 +139,7 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
                 }
             } else {
                 CompositionLocalProvider(LocalOpenList provides null) {
-                    SettingsContent(opened, store, me, controlPlane, onSignOut, openGroup, { openGroup = it }, showGroup, GroupLinks(groupTab, showGroupHours, showTimeAndFocus), Modifier.weight(1f))
+                    SettingsContent(opened, store, me, controlPlane, onSignOut, openGroup, { openGroup = it }, showGroup, GroupLinks(groupTab, showGroupHours, showTimeAndFocus), startIntegration, Modifier.weight(1f))
                 }
             }
         } else {
@@ -171,14 +171,14 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
                 }
 
                 VerticalHairline()
-                SettingsContent(opened ?: SettingsSection.Appearance, store, me, controlPlane, onSignOut, openGroup, { openGroup = it }, showGroup, GroupLinks(groupTab, showGroupHours, showTimeAndFocus), Modifier.weight(1f))
+                SettingsContent(opened ?: SettingsSection.Appearance, store, me, controlPlane, onSignOut, openGroup, { openGroup = it }, showGroup, GroupLinks(groupTab, showGroupHours, showTimeAndFocus), startIntegration, Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun SettingsContent(section: SettingsSection, store: Store, me: Me, controlPlane: String, onSignOut: () -> Unit, openGroup: String?, onOpenGroup: (String?) -> Unit, showGroup: ((String) -> Unit)?, links: GroupLinks, modifier: Modifier) {
+private fun SettingsContent(section: SettingsSection, store: Store, me: Me, controlPlane: String, onSignOut: () -> Unit, openGroup: String?, onOpenGroup: (String?) -> Unit, showGroup: ((String) -> Unit)?, links: GroupLinks, startIntegration: IntegrationStart?, modifier: Modifier) {
     if (section == SettingsSection.Schedules) {
         val state by store.state.collectAsState()
 
@@ -212,7 +212,7 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
             SettingsSection.Memories -> MemoriesSettings(store)
             SettingsSection.Sessions -> SessionsSettings(store, onSignOut)
             SettingsSection.Connections -> ConversationConnectionsSettings(store)
-            SettingsSection.ChatTools -> ChatToolsSettings(store)
+            SettingsSection.ChatTools -> ChatToolsSettings(store, startIntegration)
             SettingsSection.Forges -> ForgesSettings(store)
             SettingsSection.Indexing -> IndexingSettings(store)
             SettingsSection.Account -> AccountSettings(store, me, controlPlane, onSignOut)

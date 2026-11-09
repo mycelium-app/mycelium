@@ -100,10 +100,10 @@ private fun formKind(entry: CatalogueEntry): String = when (entry.kind) {
 }
 
 @Composable
-fun ChatToolsSettings(store: Store) {
+fun ChatToolsSettings(store: Store, start: IntegrationStart? = null) {
     var servers by remember { mutableStateOf<List<ChatToolServer>>(emptyList()) }
     var forges by remember { mutableStateOf<List<Forge>>(emptyList()) }
-    var view by remember { mutableStateOf<IntegrationsView>(IntegrationsView.Home) }
+    var view by remember { mutableStateOf<IntegrationsView>(if (start == IntegrationStart.Catalogue) IntegrationsView.Catalogue else IntegrationsView.Home) }
     var removing by remember { mutableStateOf<Integration?>(null) }
     var flow by remember { mutableStateOf<SetupRequest?>(null) }
 
@@ -124,6 +124,11 @@ fun ChatToolsSettings(store: Store) {
 
         store.act {
             servers = store.api.chatToolServers()
+
+            if (!loaded && start is IntegrationStart.Page) {
+                integrationsOf(servers).firstOrNull { integration -> integration.accounts.any { it.id == start.serverId } }?.let { view = IntegrationsView.Page(it.key) }
+            }
+
             loaded = true
 
             if (signingIn) {
