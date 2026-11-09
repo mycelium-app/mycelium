@@ -89,6 +89,7 @@ fn conversation() -> Conversation {
         teach_me: false,
         routing: None,
         scratch: false,
+        unread: false,
     }
 }
 

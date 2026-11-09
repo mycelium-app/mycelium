@@ -19,7 +19,7 @@ macro_rules! conversation_group_sql {
 }
 
 pub const CONVERSATION_GROUP_SQL: &str = conversation_group_sql!();
-pub const CONVERSATION_COLUMNS: &str = concat!("id, owner, node_id, agent, cwd, title, title_user_set, status, agent_active, acp_session_id, mode, model, account, options, parent_id, side_kind, imported_from, provider_id, project_id, ", conversation_group_sql!(), " as group_id, created_at, updated_at, archived_at, pinned_at, resume_at, snoozed_until, managed_by, flagged_at, flag_reason, branch, pull_request_label, pull_request_url, pull_request_state, pull_request_number, assistant_id, teach_me, routing, scratch");
+pub const CONVERSATION_COLUMNS: &str = concat!("id, owner, node_id, agent, cwd, title, title_user_set, status, agent_active, acp_session_id, mode, model, account, options, parent_id, side_kind, imported_from, provider_id, project_id, ", conversation_group_sql!(), " as group_id, created_at, updated_at, archived_at, pinned_at, resume_at, snoozed_until, managed_by, flagged_at, flag_reason, branch, pull_request_label, pull_request_url, pull_request_state, pull_request_number, assistant_id, teach_me, routing, scratch, last_message_seq > coalesce((select r.seq from conversation_reads r where r.conversation_id = id and r.user_id = owner), 0) as unread");
 pub const TURN_HAS_ENDED: &str = "coalesce((select max(seq) from events where conversation_id = $1 and kind = 'turn_end'), 0) >= coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message'), 0)";
 
 pub const WORKFLOW_AGENT_QUIET_SECONDS: i32 = 15 * 60;
@@ -106,6 +106,7 @@ pub struct ConversationRow {
     pub teach_me: bool,
     pub routing: Option<String>,
     pub scratch: bool,
+    pub unread: bool,
 }
 
 impl ConversationRow {
@@ -149,6 +150,7 @@ impl ConversationRow {
             teach_me: self.teach_me,
             routing: self.routing.as_deref().and_then(mycelium_proto::routing::Routing::parse),
             scratch: self.scratch,
+            unread: self.unread,
         })
     }
 
@@ -315,6 +317,20 @@ pub async fn append_event(tx: &mut Tx<'_>, conversation_id: Uuid, kind: EventKin
     }
 
     Ok(Some(Event { conversation_id, seq, kind, payload: payload.clone() }))
+}
+
+pub async fn note_agent_reply(tx: &mut Tx<'_>, conversation_id: Uuid, turn_end_seq: i64) -> sqlx::Result<()> {
+    sqlx::query(
+        "update conversations set last_message_seq = $2 where id = $1 and exists (
+             select 1 from events where conversation_id = $1 and kind = 'acp_update' and payload->'update'->>'sessionUpdate' = 'agent_message_chunk'
+               and seq < $2 and seq > coalesce((select max(seq) from events where conversation_id = $1 and kind in ('user_message', 'turn_end') and seq < $2), 0))",
+    )
+    .bind(conversation_id)
+    .bind(turn_end_seq)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
 }
 
 pub async fn highest_node_seq(pool: &PgPool, conversation_id: Uuid) -> sqlx::Result<i64> {

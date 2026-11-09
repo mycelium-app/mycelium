@@ -170,6 +170,8 @@ pub struct Conversation {
     pub routing: Option<Routing>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub scratch: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unread: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

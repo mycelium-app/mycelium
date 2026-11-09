@@ -2037,3 +2037,104 @@ async fn initial_settings_are_sent_before_the_first_prompt() {
 
     assert_eq!(link.expect_prompt().await.1, "Check the build");
 }
+
+fn is_unread(conversation: &serde_json::Value) -> bool {
+    conversation["unread"].as_bool().unwrap_or(false)
+}
+
+async fn agent_says(link: &mut NodeLink, id: Uuid, seq: i64, text: &str) {
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}}) }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: seq + 1, stop_reason: "end_turn".into(), usage: None }).await;
+}
+
+async fn open(client: &common::Client, id: Uuid) -> u16 {
+    client.json(client.post(&format!("/api/v1/conversations/{id}/opened"))).await.0
+}
+
+#[tokio::test]
+async fn an_agent_reply_is_unread_until_the_person_opens_it_and_the_next_reply_is_unread_again() {
+    let server = Server::start().await;
+    let mut stream = server.user.stream().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("first")).await;
+    link.expect_prompt().await;
+
+    agent_says(&mut link, id, 3, "Here is the answer.").await;
+    assert!(stream.conversation_with_status("review").await.unread);
+    assert!(is_unread(&server.conversation(id).await));
+
+    assert_eq!(open(&server.user, id).await, 204);
+    assert!(!stream.conversation_with_status("done").await.unread);
+    assert!(!is_unread(&server.conversation(id).await));
+
+    prompt(&server, id, "second").await;
+    link.expect_prompt().await;
+    agent_says(&mut link, id, 5, "Another answer.").await;
+    assert!(stream.conversation_with_status("review").await.unread);
+}
+
+#[tokio::test]
+async fn opening_stores_the_read_position_of_the_latest_agent_reply() {
+    let server = Server::start().await;
+    let mut stream = server.user.stream().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("first")).await;
+    link.expect_prompt().await;
+
+    agent_says(&mut link, id, 3, "Here is the answer.").await;
+    stream.conversation_with_status("review").await;
+    open(&server.user, id).await;
+
+    let turn_end = server.events(id).await.iter().find(|event| event["kind"] == "turn_end").unwrap()["seq"].as_i64().unwrap();
+    let stored = sqlx::query_scalar::<_, i64>("select seq from conversation_reads where conversation_id = $1").bind(id).fetch_one(&server.pool).await.unwrap();
+    assert_eq!(stored, turn_end);
+}
+
+#[tokio::test]
+async fn a_turn_with_only_tool_calls_does_not_mark_the_conversation_unread() {
+    let server = Server::start().await;
+    let mut stream = server.user.stream().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("first")).await;
+    link.expect_prompt().await;
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 3, update: json!({"update": {"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Read a file"}}) }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 4, stop_reason: "end_turn".into(), usage: None }).await;
+
+    assert!(!stream.conversation_with_status("review").await.unread);
+}
+
+#[tokio::test]
+async fn opening_a_conversation_waiting_on_a_question_clears_unread_and_keeps_it_waiting() {
+    let server = Server::start().await;
+    let mut stream = server.user.stream().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("first")).await;
+    link.expect_prompt().await;
+
+    agent_says(&mut link, id, 3, "Which database should I use?").await;
+    assert!(stream.conversation_with_status("input").await.unread);
+
+    assert_eq!(open(&server.user, id).await, 204);
+    assert!(!is_unread(&server.conversation(id).await));
+    assert_eq!(server.conversation(id).await["status"], "input");
+}
+
+#[tokio::test]
+async fn one_persons_read_position_does_not_clear_unread_for_another() {
+    let server = Server::start().await;
+    let mut stream = server.user.stream().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("first")).await;
+    link.expect_prompt().await;
+    agent_says(&mut link, id, 3, "Here is the answer.").await;
+    stream.conversation_with_status("review").await;
+
+    let other = server.second_user("alex@example.com").await;
+    assert_eq!(open(&other, id).await, 404);
+
+    let other_id = sqlx::query_scalar::<_, Uuid>("select id from users where email = 'alex@example.com'").fetch_one(&server.pool).await.unwrap();
+    sqlx::query("insert into conversation_reads (user_id, conversation_id, seq) values ($1, $2, 1000)").bind(other_id).bind(id).execute(&server.pool).await.unwrap();
+
+    assert!(is_unread(&server.conversation(id).await));
+}

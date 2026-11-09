@@ -746,8 +746,9 @@ async fn record(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: Opt
     let mut updated = None;
     let mut withdrawn = Vec::new();
 
-    if event.is_some() && kind == EventKind::TurnEnd {
+    if let Some(ended) = event.as_ref().filter(|_| kind == EventKind::TurnEnd) {
         sqlx::query("update conversations set agent_active = false where id = $1").bind(conversation_id).execute(&mut *tx).await?;
+        crate::store::note_agent_reply(&mut tx, conversation_id, ended.seq).await?;
     }
 
     if event.is_some() && matches!(kind, EventKind::TurnEnd | EventKind::Error) {

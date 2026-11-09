@@ -571,6 +571,11 @@ async fn finish(state: &AppState, owner: Uuid, id: Uuid, stop_reason: &str, usag
     }
 
     let event = append_event(&mut tx, id, EventKind::TurnEnd, &json!({"stop_reason": stop_reason}), None).await?;
+
+    if let Some(ended) = &event {
+        crate::store::note_agent_reply(&mut tx, id, ended.seq).await?;
+    }
+
     let review = set_status(&mut tx, id, ConversationStatus::Review).await?;
     tx.commit().await?;
 

@@ -705,13 +705,25 @@ pub async fn opened(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     let mut tx = state.pool.begin().await?;
     let row = lock_owned(&mut tx, id, user.id).await?;
 
-    if row.status != enum_text(&ConversationStatus::Review) {
+    let reviewing = row.status == enum_text(&ConversationStatus::Review);
+
+    if !reviewing && !row.unread {
         return Ok(StatusCode::NO_CONTENT);
     }
 
+    sqlx::query(
+        "insert into conversation_reads (user_id, conversation_id, seq) select $1, id, last_message_seq from conversations where id = $2
+         on conflict (user_id, conversation_id) do update set seq = greatest(conversation_reads.seq, excluded.seq)",
+    )
+    .bind(user.id)
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+
+    let status = if reviewing { ConversationStatus::Done } else { row.parsed_status()? };
     let updated = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set status = $2 where id = $1 returning {CONVERSATION_COLUMNS}")))
         .bind(id)
-        .bind(enum_text(&ConversationStatus::Done))
+        .bind(enum_text(&status))
         .fetch_one(&mut *tx)
         .await?;
     tx.commit().await?;
