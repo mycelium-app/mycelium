@@ -61,7 +61,7 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
     val defaultChatModel = loaded?.firstOrNull { it.models.isNotEmpty() }?.let { provider -> provider.defaultModel?.takeIf { it in provider.models } ?: provider.models.first() }
     val chosenOption = when {
         anyModel -> favouriteOptions.firstOrNull()
-        else -> options.firstOrNull { it.key == pickedKey } ?: favouriteOptions.firstOrNull() ?: options.firstOrNull { it.providerId != null && it.model == defaultChatModel } ?: options.firstOrNull()
+        else -> (options + favouriteOptions).firstOrNull { it.key == pickedKey } ?: favouriteOptions.firstOrNull() ?: options.firstOrNull { it.providerId != null && it.model == defaultChatModel } ?: options.firstOrNull()
     }
     val pin = pinned?.takeIf { it.agent == chosenOption?.agent }
 

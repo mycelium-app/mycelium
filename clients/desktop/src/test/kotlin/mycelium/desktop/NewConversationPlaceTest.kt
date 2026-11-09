@@ -5,6 +5,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -47,6 +48,13 @@ private const val CreatedJson = """{"id":"c1","owner":"u","node_id":"$OrionId","
 private const val RecentJson = """[{"id":"c0","owner":"u","node_id":"$OrionId","agent":"claude","cwd":"/p/harbour","title":"Restore flow","status":"done","project_id":"p1",
 "acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T11:00:00Z","archived_at":null}]"""
 
+private const val TwoAccountsJson = """[{"id":"$OrionId","name":"orion","hostname":"orion","os":"linux","arch":"x86_64","version":"0.1.0","online":true,"draining":false,
+"agents":[{"agent":"claude","version":"2.1.308","available":true},{"agent":"codex","version":"0.9.0","available":true}],
+"logins":[{"agent":"claude","account":"sam@example.com","method":"token","state":"signed_in"},{"agent":"claude","account":"work@example.org","method":"token","state":"signed_in"},{"agent":"codex","account":"sam@example.com","method":"token","state":"signed_in"}],
+"harness_models":[{"agent":"claude","models":[{"id":"opus","name":"Opus"}],"default_model":"opus","reported_at":"2026-10-22T10:00:00Z"},{"agent":"codex","models":[{"id":"sol","name":"Sol"}],"default_model":"sol","reported_at":"2026-10-22T10:00:00Z"}]}]"""
+
+private const val HarnessFirstSettings = """{"default_modes":{},"account_modes":[],"any_model":[{"agent":"claude"},{"agent":"codex","model":"sol"}]}"""
+
 class NewConversationPlaceTest {
     @get:Rule
     val rule = createComposeRule()
@@ -57,7 +65,7 @@ class NewConversationPlaceTest {
     private val bodies = CopyOnWriteArrayList<String>()
     private val configs = CopyOnWriteArrayList<String>()
 
-    private fun store(nodes: String = OrionJson): Store {
+    private fun store(nodes: String = OrionJson, settings: String = "{}"): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -73,6 +81,7 @@ class NewConversationPlaceTest {
                 }
                 path.endsWith("/projects") -> respond(HarbourJson, HttpStatusCode.OK, json)
                 path.endsWith("/nodes") -> respond(nodes, HttpStatusCode.OK, json)
+                path.endsWith("/agent-settings") -> respond(settings, HttpStatusCode.OK, json)
                 path.endsWith("/conversations") -> respond(RecentJson, HttpStatusCode.OK, json)
                 else -> respond("{}", HttpStatusCode.OK, json)
             }
@@ -108,6 +117,20 @@ class NewConversationPlaceTest {
 
         rule.waitUntil(5_000) { created != null }
         assertEquals("""{"node_id":"$OrionId","agent":"claude","project_id":"p1","prompt":"Restore the copy"}""", bodies.single())
+    }
+
+    @Test
+    fun aFirstFavouriteThatNamesOnlyClaudeCodeStartsOnClaudeCodeWithAnyOfItsAccounts() {
+        var created: Conversation? = null
+        show(store(TwoAccountsJson, HarnessFirstSettings), onCreated = { created = it })
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Claude Code", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Message").performTextInput("Plan the restore")
+        rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }
+
+        rule.waitUntil(5_000) { created != null && bodies.isNotEmpty() }
+        assertTrue(bodies.single().contains("\"agent\":\"claude\""), bodies.single())
+        assertTrue(bodies.single().contains("\"routing\":\"claude_any\""), bodies.single())
     }
 
     @Test

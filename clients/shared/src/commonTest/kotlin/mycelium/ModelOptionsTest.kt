@@ -73,6 +73,26 @@ class ModelOptionsTest {
     }
 
     @Test
+    fun aFavouriteThatNamesOnlyTheHarnessStaysFirstWhileThatHarnessCanRun() {
+        val options = modelOptions(listOf(Orion), Orion, emptyList())
+        val saved = listOf(ModelChoice(agent = "claude"), ModelChoice(agent = "codex", model = "sol"))
+
+        val usable = saved.favouriteOptions(options, emptyList()).filter { it.available }
+
+        assertEquals(listOf("claude", "codex"), usable.map { it.agent })
+        assertEquals(null, usable.first().choice().model)
+    }
+
+    @Test
+    fun aFavouriteThatNamesOnlyAHarnessNoNodeHereCanRunIsNotUsable() {
+        val options = modelOptions(listOf(Laptop, Orion), Laptop, emptyList())
+
+        val favourites = listOf(ModelChoice(agent = "codex")).favouriteOptions(options, emptyList())
+
+        assertFalse(favourites.single().available)
+    }
+
+    @Test
     fun aStarAddsAModelToTheEndAndAnotherPressRemovesIt() {
         val options = modelOptions(listOf(Laptop), Laptop, emptyList())
         val opus = options.first { it.model == "opus" }

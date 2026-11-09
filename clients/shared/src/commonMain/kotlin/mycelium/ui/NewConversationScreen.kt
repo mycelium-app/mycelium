@@ -159,7 +159,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val favourites = rememberFavouriteModels(store)
     val options = remember(state.nodes, node) { modelOptions(state.nodes.values, node, emptyList()) }
     val favouriteOptions = favourites.list.favouriteOptions(options, emptyList()).filter { it.available }
-    val explicitOption = if (anyModel) null else options.firstOrNull { it.key == pickedKey && it.available } ?: favouriteOptions.firstOrNull()
+    val explicitOption = if (anyModel) null else (options + favouriteOptions).firstOrNull { it.key == pickedKey && it.available } ?: favouriteOptions.firstOrNull()
     val chosenOption = if (anyModel) null else explicitOption ?: options.firstOrNull { it.available && it.agent in agents.map { held -> held.agent } }
     val chosenAgent = if (anyModel) agents.firstOrNull()?.agent else chosenOption?.agent?.takeIf { picked -> agents.any { it.agent == picked } } ?: agents.firstOrNull()?.agent
     val accounts = switchableAccounts(node, chosenAgent.orEmpty())
