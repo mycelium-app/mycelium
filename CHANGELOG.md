@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.32.0
+
+- Workflows leave the sidebar for the conversation's side panel: Subagents and workflows is one history, newest first, and a workflow opens there to its steps, with a waiting gate's Decline and Approve in the gate's row. The Workflows page and manual workflow form are gone.
+- show_conversation brings another chat into an assistant's thread as a live card: its state, latest result and everything it waits on, with the same approval cards as the chat itself, and a reply box that sends straight into it as you. Only you can approve.
+- Three or more tool calls in a row fold into one row, and anything waiting on you inside them is shown above the composer instead.
+- Chats and workflow steps that agents start use Any model when they name no model or account, and take an optional routing.
+- The Inbox's Voice dock always sits below Needs you and takes typed requests; the microphone setting only controls listening.
+- An assistant's notifications carry the assistant's name rather than the thread's title.
+- A conversation restarted while busy, for new secrets, a reload or another account, no longer gets stuck before it starts. Nodes need this version.
+- design_set_artboard takes the artboard's HTML from a file in the conversation folder.
+
 ## v0.31.0
 
 - Tasks is retired: the board, its sidebar link, the /api/v1/tasks routes and the propose_task, ask_question, list_tasks, approve_task, decline_task and close_tasks tools are gone, and the tasks table is dropped. An agent asks its question as an ordinary message and ends its turn; a turn whose last agent message ends with a question leaves the conversation in Needs input, and the thread shows "Waiting for your answer" after the last message.
