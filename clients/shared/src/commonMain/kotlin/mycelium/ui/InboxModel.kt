@@ -67,6 +67,7 @@ fun pendingRequest(item: ThreadItem, state: AppState): InboxRequest? {
         is MyceliumCall.StartProposed -> proposedStart(parsed, state.startProposals)?.waiting == true
         is MyceliumCall.RequestApiAccess -> requestedAccess(parsed, state.apiAccessRequests)?.waiting == true
         is MyceliumCall.RequestSshAccess -> requestedSshAccess(parsed, state.sshAccessRequests)?.waiting == true
+        is MyceliumCall.RequestArtifactAccess -> parsed.requestId?.let { state.artifactAccessRequests[it] }?.state == "requested"
         else -> false
     }
 
@@ -131,7 +132,7 @@ fun rememberInbox(store: Store, state: AppState): List<InboxItem> {
         }
     }
 
-    return remember(state.conversations, state.events, state.messageProposals, state.startProposals, state.apiAccessRequests, state.sshAccessRequests, state.workflows, state.projects, state.assistants) { inboxItems(state) }
+    return remember(state.conversations, state.events, state.messageProposals, state.startProposals, state.apiAccessRequests, state.sshAccessRequests, state.artifactAccessRequests, state.workflows, state.projects, state.assistants) { inboxItems(state) }
 }
 
 data class TokenSample(val at: Instant, val total: Long, val conversations: Map<String, Long>)
