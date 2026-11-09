@@ -306,6 +306,7 @@ private fun click(scene: ImageComposeScene, x: Float, y: Float) {
 }
 
 private val VoiceDockFixture = VoiceState(
+    privacy = mycelium.api.PrivacySettings(voiceEnabled = true),
     open = true,
     phase = VoicePhase.Listening,
     earlier = listOf(
@@ -313,6 +314,8 @@ private val VoiceDockFixture = VoiceState(
         VoiceTurn(said = "Approve", reply = "The harbour migration runs a command, so it needs your tap. I have outlined it."),
     ),
 )
+
+private val VoiceEnabled = mapOf("/privacy" to """{"voice_enabled":true,"speech_to_text_provider":null,"text_to_speech_provider":null}""")
 
 private const val OpenWednesdayMorning = "2026-10-21T10:30"
 
@@ -400,6 +403,7 @@ class AllScreensRenderTest {
     fun shellScreens() {
         shell("shell-empty", Route.Empty, open = null)
         shell("inbox", Route.Inbox, open = null)
+        shell("inbox-voice-idle", Route.Inbox, extra = VoiceEnabled, open = null)
         snap("inbox-voice-dock") {
             Box(Modifier.width(860.dp).background(MyTheme.colors.bgContent)) {
                 VoiceDockContent(VoiceDockFixture, VoiceCardActions({}, {}, {}, {}, {}, {}, {}, {}, {}, null, {}), {}, {})
@@ -473,6 +477,7 @@ class AllScreensRenderTest {
     fun phoneScreens() {
         shell("empty", Route.Empty, phone = true, open = null)
         shell("inbox", Route.Inbox, phone = true, open = null)
+        shell("inbox-voice-idle", Route.Inbox, phone = true, extra = VoiceEnabled, open = null)
         shell("conversation", Route.Chat(Main), phone = true)
         shell("new-conversation", Route.New, phone = true, open = null)
         shell("new-chat", Route.NewChat, phone = true, open = null)

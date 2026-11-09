@@ -1,5 +1,9 @@
 package mycelium.desktop
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performImeAction
@@ -9,6 +13,8 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
@@ -54,8 +60,10 @@ private const val VoiceThreadJson = """{"id":"c-voice","owner":"u","node_id":"n-
 private class HeardDictation : Dictation {
     var onHeard: (String) -> Unit = {}
     var onStopped: (DictationProblem?) -> Unit = {}
+    var starts = 0
 
     override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit) {
+        starts += 1
         this.onHeard = onHeard
         this.onStopped = onStopped
     }
@@ -63,8 +71,8 @@ private class HeardDictation : Dictation {
     override fun stop() = onStopped(null)
 }
 
-private class MicrophonePlatform(private val dictation: Dictation) : Platform by QuietPlatform {
-    override fun dictation(): Dictation = dictation
+private class MicrophonePlatform(private val dictation: Dictation?) : Platform by QuietPlatform {
+    override fun dictation(): Dictation? = dictation
 }
 
 private val NoActions = VoiceCardActions({}, {}, {}, {}, {}, {}, {}, {}, {}, null, {})
@@ -78,7 +86,7 @@ class VoiceTest {
 
     private val requests = CopyOnWriteArrayList<Pair<String, String>>()
 
-    private fun open(privacy: String, dictation: Dictation = HeardDictation()): Store {
+    private fun open(privacy: String, dictation: Dictation? = HeardDictation(), route: Route = Route.Empty, width: Dp? = null): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -86,6 +94,7 @@ class VoiceTest {
 
             when {
                 path.endsWith("/privacy") -> respond(privacy, HttpStatusCode.OK, json)
+                path.endsWith("/inbox/feed") -> respond("""{"posts":[]}""", HttpStatusCode.OK, json)
                 path.endsWith("/assistants/builtin/voice") -> respond(VoiceAssistantJson, HttpStatusCode.OK, json)
                 path.endsWith("/prompt") && request.method == HttpMethod.Post -> respond(VoiceThreadJson, HttpStatusCode.OK, json)
                 path.endsWith("/conversations") || path.endsWith("/assistants") || path.endsWith("/nodes") || path.endsWith("/events") -> respond("[]", HttpStatusCode.OK, json)
@@ -96,7 +105,13 @@ class VoiceTest {
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create(), platform)
 
         runBlocking { store.refresh() }
-        rule.setContent { MyceliumTheme(true) { Shell(store, platform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Empty) } }
+        rule.setContent {
+            MyceliumTheme(true) {
+                Box(if (width == null) Modifier.fillMaxSize() else Modifier.size(width, 800.dp)) {
+                    Shell(store, platform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = route)
+                }
+            }
+        }
 
         return store
     }
@@ -197,7 +212,7 @@ class VoiceTest {
     fun withoutASpeechProviderTheCardOffersProvidersInsteadOfTryAgain() {
         card(VoiceState(open = true, phase = VoicePhase.Problem(VoiceProblem.NoSpeechProvider)))
 
-        rule.onNodeWithText("Providers").assertExists()
+        rule.onNodeWithText("Set up speech to text").assertExists()
         assertTrue(rule.onAllNodesWithContentDescription("Try again").fetchSemanticsNodes().isEmpty())
     }
 
@@ -217,6 +232,115 @@ class VoiceTest {
         card(VoiceState(open = true, phase = VoicePhase.Ended, turn = VoiceTurn(said = "what is next", reply = "Review the draft.", conversationId = "c-voice")))
 
         rule.onNodeWithText("Talk again").assertExists()
+    }
+
+    private fun dockShows() = rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open the Voice thread").fetchSemanticsNodes().isNotEmpty() }
+
+    private fun voiceHeadings() = rule.onAllNodesWithText("Voice").fetchSemanticsNodes().size
+
+    @Test
+    fun theDockOnTheInboxDoesNotStartListeningByItself() {
+        val dictation = HeardDictation()
+        val store = open(VoiceOn, dictation, Route.Inbox)
+        dockShows()
+        rule.waitForIdle()
+
+        assertTrue(dictation.starts == 0)
+        assertTrue(store.voice.state.value.phase == VoicePhase.Idle)
+    }
+
+    @Test
+    fun theDockMicrophoneStartsListeningOnlyWhenPressed() {
+        val dictation = HeardDictation()
+        open(VoiceOn, dictation, Route.Inbox)
+        dockShows()
+
+        rule.onNodeWithContentDescription("Start listening (Ctrl+Shift+Space)").performClick()
+
+        assertTrue(dictation.starts == 1)
+        rule.onNodeWithContentDescription("Stop listening (Ctrl+Shift+Space)").assertExists()
+    }
+
+    @Test
+    fun theBottomBarMicrophoneOnTheInboxListensInTheDockWithoutTheFloatingCard() {
+        val dictation = HeardDictation()
+        open(VoiceOn, dictation, Route.Inbox)
+        dockShows()
+
+        rule.onNodeWithContentDescription("Talk to Voice").performClick()
+
+        assertTrue(dictation.starts == 1)
+        rule.onNodeWithContentDescription("Stop listening (Ctrl+Shift+Space)").assertExists()
+        assertTrue(voiceHeadings() == 1)
+        assertTrue(rule.onAllNodesWithText("Cancel").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun closingVoiceFromTheBottomBarLeavesTheIdleDockOnTheInbox() {
+        val store = open(VoiceOn, HeardDictation(), Route.Inbox)
+        dockShows()
+        rule.onNodeWithContentDescription("Talk to Voice").performClick()
+        rule.runOnIdle { store.voice.cancelListening() }
+
+        rule.onNodeWithContentDescription("Close Voice").performClick()
+
+        assertTrue(!store.voice.state.value.open)
+        rule.onNodeWithContentDescription("Start listening (Ctrl+Shift+Space)").assertExists()
+        rule.onNodeWithContentDescription("Talk to Voice").assertExists()
+        assertTrue(voiceHeadings() == 1)
+    }
+
+    @Test
+    fun typingInTheDockWithVoiceOffSendsItToVoice() {
+        open(VoiceOff, route = Route.Inbox)
+        dockShows()
+
+        rule.onNode(hasSetTextAction()).performTextInput("what needs me")
+        rule.onNode(hasSetTextAction()).performImeAction()
+        rule.waitUntil(5_000) { requests.any { it.first.endsWith("/assistants/a-voice/prompt") } }
+
+        assertTrue(requests.first { it.first.endsWith("/prompt") }.second.contains("\"text\":\"what needs me\""))
+    }
+
+    @Test
+    fun theDockMicrophoneWithoutASpeechProviderShowsTheSetupInTheDockAndTypingCarriesOn() {
+        open(VoiceOn, dictation = null, route = Route.Inbox)
+        dockShows()
+
+        rule.onNodeWithContentDescription("Start listening (Ctrl+Shift+Space)").performClick()
+
+        rule.onNodeWithText("Add a provider with a speech-to-text model in Settings, Providers to dictate on this device.").assertExists()
+        rule.onNodeWithText("Set up speech to text").assertExists()
+        assertTrue(voiceHeadings() == 1)
+
+        rule.onNodeWithText("Type instead").performClick()
+
+        assertTrue(rule.onAllNodesWithText("Set up speech to text").fetchSemanticsNodes().isEmpty())
+        rule.onNodeWithText("Talk or type to Voice").assertExists()
+    }
+
+    @Test
+    fun awayFromTheInboxVoiceIsTheFloatingCardAlone() {
+        open(VoiceOn)
+
+        rule.onNodeWithContentDescription("Talk to Voice").performClick()
+
+        rule.onNodeWithText("Cancel").assertExists()
+        assertTrue(voiceHeadings() == 1)
+        assertTrue(rule.onAllNodesWithContentDescription("Stop listening (Ctrl+Shift+Space)").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun voiceStartingOnThePhoneFeedTabReturnsToNeedsYouToShowTheDock() {
+        val store = open(VoiceOn, HeardDictation(), Route.Inbox, width = 400.dp)
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Feed").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Feed").performClick()
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithContentDescription("Open the Voice thread").fetchSemanticsNodes().isEmpty())
+
+        rule.runOnIdle { store.voice.startListening() }
+
+        rule.onNodeWithContentDescription("Stop listening (Ctrl+Shift+Space)").assertExists()
     }
 
     private fun dock(state: VoiceState, onSay: (String) -> Unit = {}, onOpen: (String) -> Unit = {}) {

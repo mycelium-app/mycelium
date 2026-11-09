@@ -133,6 +133,12 @@ fun InboxScreen(store: Store, state: AppState, onOpenConversation: (String) -> U
         store.refreshFeed()
     }
 
+    LaunchedEffect(voice.open) {
+        if (voice.open) {
+            tab = NeedsYouTab
+        }
+    }
+
     LaunchedEffect(store) {
         var earlier: TokenSample? = null
         var peak = 0L
@@ -153,7 +159,7 @@ fun InboxScreen(store: Store, state: AppState, onOpenConversation: (String) -> U
     }
 
     val shown = (items + lingering.values.filter { lingered -> items.none { it.key == lingered.key } }).sortedByDescending { it.waitingSince }
-    val needsYou: @Composable (Modifier, Boolean) -> Unit = { modifier, headed -> NeedsYouColumn(store, state, shown, state.needsYouFocus, voice.open && voice.privacy.voiceEnabled, onOpenConversation, modifier, headed) }
+    val needsYou: @Composable (Modifier, Boolean) -> Unit = { modifier, headed -> NeedsYouColumn(store, state, shown, state.needsYouFocus, voice.open, onOpenConversation, modifier, headed) }
     val feedColumn: @Composable (Modifier) -> Unit = { modifier -> FeedColumn(posts, onOpenConversation, modifier) }
     val statsColumn: @Composable (Modifier) -> Unit = { modifier -> StatsColumn(store, state, stats, onOpenConversation, onOpenUsageHistory, modifier) }
 
@@ -212,9 +218,9 @@ private fun ColumnHeading(text: String) {
 }
 
 @Composable
-private fun NeedsYouColumn(store: Store, state: AppState, items: List<InboxItem>, focusedKey: String?, voiceDocked: Boolean, onOpenConversation: (String) -> Unit, modifier: Modifier, headed: Boolean) {
+private fun NeedsYouColumn(store: Store, state: AppState, items: List<InboxItem>, focusedKey: String?, voiceInUse: Boolean, onOpenConversation: (String) -> Unit, modifier: Modifier, headed: Boolean) {
     val listState = rememberLazyListState()
-    val outlinedKey = focusedKey?.takeIf { key -> items.any { it.key == key } } ?: items.firstOrNull()?.key?.takeIf { voiceDocked }
+    val outlinedKey = focusedKey?.takeIf { key -> items.any { it.key == key } } ?: items.firstOrNull()?.key?.takeIf { voiceInUse }
 
     LaunchedEffect(outlinedKey, items) {
         val index = items.indexOfFirst { it.key == outlinedKey }
@@ -244,10 +250,8 @@ private fun NeedsYouColumn(store: Store, state: AppState, items: List<InboxItem>
             }
         }
 
-        if (voiceDocked) {
-            Hairline()
-            VoiceDock(store, LocalPlatform.current, onOpenConversation)
-        }
+        Hairline()
+        VoiceDock(store, LocalPlatform.current, onOpenConversation)
     }
 }
 

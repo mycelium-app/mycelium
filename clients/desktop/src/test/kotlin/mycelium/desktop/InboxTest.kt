@@ -190,6 +190,26 @@ class InboxTest {
     }
 
     @Test
+    fun withVoiceEnabledTheDockShowsBelowNeedsYouWithNothingOpened() {
+        val store = show("input", privacy = VoiceOn)
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open the Voice thread").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithText("Talk or type to Voice").assertExists()
+        rule.onNodeWithContentDescription("Start listening (Ctrl+Shift+Space)").assertExists()
+        assertTrue(!store.voice.state.value.open)
+    }
+
+    @Test
+    fun withVoiceDisabledTheDockStillTakesTypingWithoutAMicrophone() {
+        show("input", privacy = VoiceOff)
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Approve pnpm db:migrate").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithContentDescription("Open the Voice thread").assertExists()
+        rule.onNodeWithText("Talk or type to Voice").assertExists()
+        assertTrue(rule.onAllNodesWithContentDescription("Start listening (Ctrl+Shift+Space)").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
     fun nothingPendingSaysSo() {
         show("done")
 

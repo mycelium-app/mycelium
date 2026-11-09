@@ -60,7 +60,7 @@ private val VoiceDockMaxHeight = 320.dp
 private val VoiceSaidMaxWidth = 480.dp
 private const val PushToTalkMillis = 500L
 
-class VoiceCardActions(
+data class VoiceCardActions(
     val onStopListening: () -> Unit,
     val onCancel: () -> Unit,
     val onStopTurn: () -> Unit,
@@ -150,7 +150,9 @@ fun OpenVoiceCard(store: Store, platform: Platform?, modifier: Modifier = Modifi
 fun VoiceDock(store: Store, platform: Platform?, onOpenConversation: (String) -> Unit, modifier: Modifier = Modifier) {
     val voice by store.voice.state.collectAsState()
 
-    VoiceDockContent(voice, voiceCardActions(store, platform), store.voice::say, onOpenConversation, modifier)
+    val actions = voiceCardActions(store, platform)
+
+    VoiceDockContent(voice, actions.copy(onTypeInstead = store.voice::cancelListening), store.voice::say, onOpenConversation, modifier)
 }
 
 @Composable
@@ -174,7 +176,6 @@ fun VoiceDockContent(state: VoiceState, actions: VoiceCardActions, onSay: (Strin
                 }
             }
             .padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S3),
-        verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(Tokens.Size.Avatar).background(colors.bgSelected, CircleShape).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
@@ -184,8 +185,10 @@ fun VoiceDockContent(state: VoiceState, actions: VoiceCardActions, onSay: (Strin
             MyButton(actions.onOpenConversation, icon = MyIcon.Move, description = "Open the Voice thread", size = ButtonSize.Sm, muted = true)
         }
 
+        val hasLog = turns.isNotEmpty() || (state.phase != VoicePhase.Idle && state.phase != VoicePhase.Ended)
+
         Column(
-            Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).semantics { liveRegion = LiveRegionMode.Polite },
+            Modifier.weight(1f, fill = false).then(if (hasLog) Modifier.padding(top = Tokens.Space.S2) else Modifier).verticalScroll(rememberScrollState()).semantics { liveRegion = LiveRegionMode.Polite },
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
         ) {
             for (turn in turns) {
@@ -230,7 +233,7 @@ fun VoiceDockContent(state: VoiceState, actions: VoiceCardActions, onSay: (Strin
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(top = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             TextInput(
                 typed,
                 { typed = it },
@@ -243,13 +246,16 @@ fun VoiceDockContent(state: VoiceState, actions: VoiceCardActions, onSay: (Strin
                     typed = ""
                 },
             )
-            MyButton(
-                if (listening) actions.onStopListening else actions.onTalkAgain,
-                icon = MyIcon.Microphone,
-                description = if (listening) "Stop listening ($VoiceShortcutLabel)" else "Start listening ($VoiceShortcutLabel)",
-                selected = listening,
-                muted = !listening,
-            )
+
+            if (state.privacy.voiceEnabled) {
+                MyButton(
+                    if (listening) actions.onStopListening else actions.onTalkAgain,
+                    icon = MyIcon.Microphone,
+                    description = if (listening) "Stop listening ($VoiceShortcutLabel)" else "Start listening ($VoiceShortcutLabel)",
+                    selected = listening,
+                    muted = !listening,
+                )
+            }
         }
     }
 }
@@ -370,7 +376,7 @@ private fun VoiceProblemBlock(problem: VoiceProblem, actions: VoiceCardActions) 
 
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             if (problem == VoiceProblem.NoSpeechProvider) {
-                MyButton(actions.onOpenProviders, text = "Providers", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+                MyButton(actions.onOpenProviders, text = "Set up speech to text", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
             } else {
                 MyButton(actions.onTryAgain, text = "Try again", icon = MyIcon.Refresh, size = ButtonSize.Sm, variant = ButtonVariant.Outline)
             }
