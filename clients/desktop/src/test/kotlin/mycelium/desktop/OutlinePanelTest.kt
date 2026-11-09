@@ -1,7 +1,10 @@
 package mycelium.desktop
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
@@ -11,7 +14,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertCountEquals
@@ -37,6 +53,7 @@ import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import mycelium.PageReading
@@ -44,8 +61,15 @@ import mycelium.Platform
 import mycelium.api.ChatToolServer
 import mycelium.api.Me
 import mycelium.api.MyceliumApi
+import mycelium.api.OutlineAnswer
+import mycelium.api.OutlineCollection
+import mycelium.api.OutlineDocumentNode
 import mycelium.state.OutlinePage
 import mycelium.state.Store
+import mycelium.ui.Label
+import mycelium.ui.MyTheme
+import mycelium.ui.OutlineBrowser
+import mycelium.ui.OutlineTreeState
 import mycelium.ui.LocalOpenList
 import mycelium.ui.LocalPanelBack
 import mycelium.ui.LocalTouch
@@ -57,6 +81,7 @@ import mycelium.ui.Route
 import mycelium.ui.Shell
 import mycelium.ui.rememberOutlineBrowser
 import org.junit.Rule
+import javax.imageio.ImageIO
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -94,6 +119,9 @@ private class OutlinePlatform(private val inner: AppsPlatform = AppsPlatform(), 
     override fun WebContent(url: String, token: String?, modifier: Modifier, reading: PageReading?) {
         this.reading = reading
         LaunchedEffect(url) { shown += url }
+        Box(modifier.background(Color.White).padding(24.dp)) {
+            Label("Outline page (test stub)", color = Color.Black)
+        }
     }
 }
 
@@ -157,13 +185,13 @@ class OutlinePanelTest {
         showPanel()
 
         waitForText("Team norms")
-        rule.onNodeWithContentDescription("Outline collection Handbook. Change").assertExists()
+        rule.onNodeWithContentDescription("Outline account Docs, collection Handbook. Change").assertExists()
         rule.onNodeWithText("Team norms").performClick()
 
         rule.waitUntil(WaitMillis) { platform.shown.isNotEmpty() }
         assertEquals(listOf("https://docs.example.org/doc/team-norms-t1"), platform.shown.toList())
         rule.waitForIdle()
-        rule.onNodeWithContentDescription("Outline collection Handbook. Change").assertExists()
+        rule.onNodeWithContentDescription("Outline account Docs, collection Handbook. Change").assertExists()
         rule.onAllNodesWithText("Team norms").assertCountEquals(2)
         rule.captureScreen("outline-tree-and-document")
         rule.onNodeWithContentDescription("Open in browser").assertExists()
@@ -205,7 +233,27 @@ class OutlinePanelTest {
         rule.waitUntil(WaitMillis) { rule.onAllNodesWithText("Rota").fetchSemanticsNodes().size == 2 }
         rule.waitForIdle()
         rule.onAllNodesWithText("Rota").filterToOne(isSelected()).assertExists()
-        rule.onNodeWithContentDescription("Outline collection Handbook. Change").assertExists()
+        rule.onNodeWithContentDescription("Outline account Docs, collection Handbook. Change").assertExists()
+    }
+
+    @Test
+    fun aSingleAccountPickerNamesItsAccountAndSelectedCollection() {
+        showPanel()
+
+        waitForText("Engineering")
+        val picker = rule.onNodeWithContentDescription("Outline account Docs, collection Handbook. Change")
+
+        picker.assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button)).assertHasClickAction()
+        rule.onNode(hasText("Docs") and hasAnyAncestor(hasContentDescription("Outline account Docs, collection Handbook. Change")), useUnmergedTree = true).assertExists()
+        rule.onNode(hasText("Handbook") and hasAnyAncestor(hasContentDescription("Outline account Docs, collection Handbook. Change")), useUnmergedTree = true).assertExists()
+        picker.performClick()
+        rule.onNode(hasText("Handbook") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsSelected()
+        rule.onNodeWithText("Releases").performClick()
+
+        waitForText("harbour release notes, v0.4.0")
+        rule.onNodeWithContentDescription("Outline account Docs, collection Releases. Change").performClick()
+        rule.onNode(hasText("Releases") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsSelected()
+        rule.onNode(hasText("Handbook") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsNotSelected()
     }
 
     @Test
@@ -219,7 +267,18 @@ class OutlinePanelTest {
         rule.onNodeWithText("Releases").performClick()
 
         waitForText("harbour release notes, v0.4.0")
-        rule.onNodeWithContentDescription("Outline account Docs, collection Releases. Change").assertExists()
+        val picker = rule.onNodeWithContentDescription("Outline account Docs, collection Releases. Change")
+
+        picker.assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button)).assertHasClickAction()
+        picker.performClick()
+        rule.onNode(hasText("Releases") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsSelected()
+        rule.onNodeWithText("Product").performClick()
+        rule.waitUntil(WaitMillis) { runCatching { rule.onNodeWithContentDescription("Outline account Team wiki, collection Product. Change").fetchSemanticsNode() }.isSuccess }
+        rule.onNode(hasText("Team wiki") and hasAnyAncestor(hasContentDescription("Outline account Team wiki, collection Product. Change")), useUnmergedTree = true).assertExists()
+        rule.onNode(hasText("Product") and hasAnyAncestor(hasContentDescription("Outline account Team wiki, collection Product. Change")), useUnmergedTree = true).assertExists()
+        rule.onNodeWithContentDescription("Outline account Team wiki, collection Product. Change").performClick()
+        rule.onNode(hasText("Product") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsSelected()
+        rule.onNode(hasText("Releases") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsNotSelected()
     }
 
     @Test
@@ -344,7 +403,7 @@ class OutlinePanelTest {
     @Test
     fun onThePhoneARowOpensTheDocumentScreenAndBackReturnsToTheTree() {
         val api = MyceliumApi("https://mycelium.test", "token", outlineEngine())
-        val accounts = listOf(DocsAccount)
+        val accounts = listOf(DocsAccount, WikiAccount)
 
         rule.setContent {
             MyceliumTheme(true) {
@@ -362,11 +421,20 @@ class OutlinePanelTest {
 
         waitForText("Team norms")
         rule.onNodeWithContentDescription("Back to the conversation").assertExists()
-        rule.captureScreen("outline-phone-tree")
+        rule.onNodeWithContentDescription("Outline account Docs, collection Handbook. Change").performClick()
+        rule.onNode(hasText("Handbook") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsSelected()
+        rule.onNode(hasText("Product") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertIsNotSelected()
+        assertTrue(rule.onAllNodesWithText("Find a collection").fetchSemanticsNodes().isEmpty())
+        rule.onNode(hasText("Handbook") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).performClick()
         rule.onNodeWithText("Team norms").performClick()
 
         rule.waitUntil(WaitMillis) { platform.shown.isNotEmpty() }
-        rule.captureScreen("outline-phone-document")
+        rule.waitUntil(WaitMillis) { platform.reading != null }
+        platform.reading!!.onRead("/")
+        waitForText("Sign in once on this device to open documents here.")
+        rule.onNodeWithText("Docs").assertExists()
+        platform.reading!!.onRead("/doc/team-norms-t1")
+        waitForAbsence("Sign in once on this device to open documents here.")
         rule.onNodeWithContentDescription("Back to the document tree").performClick()
         waitForText("Engineering")
     }
@@ -443,5 +511,67 @@ class OutlinePanelTest {
         rule.waitUntil(WaitMillis) { web.opened.isNotEmpty() }
         assertEquals(listOf("https://docs.example.org/doc/team-norms-t1"), web.opened)
         assertTrue(web.shown.isEmpty())
+    }
+}
+
+@OptIn(InternalComposeUiApi::class)
+class OutlineRenderTest {
+    private fun phone(name: String, stage: OutlinePhoneStage = OutlinePhoneStage.Tree, sheet: Boolean = false, signedOut: Boolean = false) {
+        val platform = OutlinePlatform()
+        val accounts = listOf(DocsAccount, WikiAccount)
+        val page = OutlinePage("Deployment guide", "https://docs.example.org/doc/deployment-guide-a1B2c3D", "s1", "d-deploy", HandbookId)
+        val browser = OutlineBrowser().apply {
+            collections = mapOf(
+                "s1" to listOf(OutlineCollection(HandbookId, "Handbook"), OutlineCollection(ReleasesId, "Releases")),
+                "s2" to listOf(OutlineCollection("col-product", "Product")),
+            )
+            choose("s1", HandbookId)
+            tree = OutlineTreeState.Loaded(Json.decodeFromString<OutlineAnswer<OutlineDocumentNode>>(HandbookTree).data)
+            expanded = setOf("d-eng")
+        }
+        val out = renderAt(name, dark = true, phone = true, interact = { scene ->
+            if (sheet) {
+                for (key in listOf(Key.Tab, Key.Tab, Key.Enter)) {
+                    scene.sendKeyEvent(KeyEvent(key, KeyEventType.KeyDown))
+                    scene.sendKeyEvent(KeyEvent(key, KeyEventType.KeyUp))
+                }
+            }
+
+            if (signedOut) {
+                requireNotNull(platform.reading).onRead("/")
+            }
+        }) {
+            Column(Modifier.fillMaxSize().background(MyTheme.colors.bgPanel)) {
+                OutlinePhone(browser, platform, accounts, page, stage, {}, {}, onClose = {})
+            }
+        }
+        val image = ImageIO.read(out)
+
+        assertEquals(390, image.width)
+        assertEquals(844, image.height)
+
+        if (signedOut) {
+            assertTrue(browser.signedOut)
+        }
+    }
+
+    @Test
+    fun thePhoneTreeRendersAtTheDesignedSize() {
+        phone("outline-tree")
+    }
+
+    @Test
+    fun thePhonePickerSheetRendersAtTheDesignedSize() {
+        phone("outline-picker-sheet", sheet = true)
+    }
+
+    @Test
+    fun thePhoneDocumentRendersAtTheDesignedSize() {
+        phone("outline-document", stage = OutlinePhoneStage.Document)
+    }
+
+    @Test
+    fun thePhoneSignInNoticeRendersAtTheDesignedSize() {
+        phone("outline-sign-in", stage = OutlinePhoneStage.Document, signedOut = true)
     }
 }
