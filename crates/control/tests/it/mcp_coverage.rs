@@ -155,6 +155,7 @@ const EXCEPTIONS: &[(&str, &str, &str)] = &[
     ("POST", "/api/v1/assistants/{id}/action-proposals/{proposal_id}/approve", "approving an approval card from an agent would let it approve its own request"),
     ("POST", "/api/v1/instruction-proposals/{id}/approve", "approving an approval card from an agent would let it approve its own request"),
     ("POST", "/api/v1/message-proposals/{id}/connect", "approving an approval card from an agent would let it approve its own request"),
+    ("GET", "/api/v1/inbox/feed", "the Inbox column reads it, and agents only post to it with post_to_feed"),
     ("POST", "/api/v1/message-proposals/{id}/connect-groups", "approving an approval card from an agent would let it approve its own request"),
     ("POST", "/api/v1/message-proposals/{id}/approve", "approving an approval card from an agent would let it approve its own request"),
     ("POST", "/api/v1/start-proposals/{id}/approve", "approving an approval card from an agent would let it approve its own request"),

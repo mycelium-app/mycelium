@@ -3,10 +3,9 @@ package mycelium.desktop
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.hasContentDescription
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import io.ktor.client.engine.mock.MockEngine
@@ -41,13 +40,13 @@ private fun conversation(status: String) = """{"id":"c1","owner":"u","node_id":"
 private const val PermissionEvents = """[{"conversation_id":"c1","seq":1,"kind":"permission_request","payload":{"request_id":"r1","toolCall":{"title":"pnpm db:migrate"},
 "options":[{"optionId":"approve","name":"Approve","kind":"allow_once"},{"optionId":"deny","name":"Deny","kind":"reject_once"}]}}]"""
 
-private const val NoFeed = """{"configured":false,"posts":[]}"""
+private const val NoFeed = """{"posts":[]}"""
 
 private const val VoiceOff = """{"voice_enabled":false}"""
 
 private const val VoiceOn = """{"voice_enabled":true,"speech_to_text_provider":null,"text_to_speech_provider":null}"""
 
-private fun feedPost(id: String, kind: String, message: String, url: String? = null) = """{"id":"$id","author":"Ada","kind":"$kind","message":"$message","project":null,"url":${url?.let { "\"$it\"" }},"created_at":"2026-10-22T10:00:00Z"}"""
+private fun feedPost(id: String, message: String, project: String? = "harbour", createdAt: String = "2026-10-22T10:00:00Z") = """{"id":"$id","author":"Scribe","message":"$message","project":${project?.let { "\"$it\"" }},"conversation_id":"c1","conversation_title":"Restore flow copy","created_at":"$createdAt"}"""
 
 class InboxTest {
     @get:Rule
@@ -65,10 +64,6 @@ class InboxTest {
     private fun show(status: String, feed: String = NoFeed, privacy: String = VoiceOff): Store {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
-
-            if (path.endsWith("/inbox/feed")) {
-                feedRequests += request.url.encodedQuery
-            }
 
             if (request.method == HttpMethod.Post) {
                 posts += path to String(request.body.toByteArray())
@@ -123,47 +118,49 @@ class InboxTest {
     }
 
     @Test
-    fun postsFromTheFeedAppearInTheFeedColumn() {
-        show("done", """{"configured":true,"posts":[${feedPost("p1", "shipped", "Released 0.30")}]}""")
+    fun aPostShowsItsAuthorAndALinkToItsChat() {
+        show("done", """{"posts":[${feedPost("p1", "Search now finds conversations by branch name.")}]}""")
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Released 0.30").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Shipped").assertExists()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Search now finds conversations by branch name.").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Scribe").assertExists()
+        rule.onNodeWithContentDescription("Open chat: harbour, Restore flow copy").assertExists()
     }
 
     @Test
-    fun aDoneNeedsYouPostReadsAsAnUpdate() {
-        show("done", """{"configured":true,"posts":[${feedPost("n1", "needs_you", "Picked a launch date")}]}""")
+    fun aPostWithoutAProjectLinksByChatTitleAlone() {
+        show("done", """{"posts":[${feedPost("p1", "The billing guide is published.", project = null)}]}""")
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Picked a launch date").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Update").assertExists()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open chat: Restore flow copy").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
-    fun withoutAFeedSourceTheFeedSaysNoPostsYet() {
+    fun thePostLinkOpensItsChat() {
+        show("done", """{"posts":[${feedPost("p1", "The restore flow copy is live.")}]}""")
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open chat: harbour, Restore flow copy").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithContentDescription("Open chat: harbour, Restore flow copy").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("The restore flow copy is live.").fetchSemanticsNodes().isEmpty() }
+    }
+
+    @Test
+    fun anEmptyFeedSaysNoPostsYet() {
         show("done")
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("No posts yet").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
-    fun aPostLinkOpensInTheBrowser() {
-        show("done", """{"configured":true,"posts":[${feedPost("p1", "update", "Reworked the feed", "https://murmur.example/p/p1")}]}""")
+    fun aPostArrivingOnTheStreamAppearsAboveEarlierPosts() {
+        val store = show("done", """{"posts":[${feedPost("p1", "The first release is out.")}]}""")
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("The first release is out.").fetchSemanticsNodes().isNotEmpty() }
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open https://murmur.example/p/p1").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Open https://murmur.example/p/p1").performClick()
+        store.receive(mycelium.api.StreamMessage.FeedPosted(MyceliumJson.decodeFromString(mycelium.api.InboxPost.serializer(), feedPost("p2", "The second release is out.", createdAt = "2026-10-22T11:00:00Z"))))
 
-        assertEquals(listOf("https://murmur.example/p/p1"), platform.opened)
-    }
-
-    @Test
-    fun whenMurmurDoesNotAnswerTheFeedSaysSoAndRetryAsksAgain() {
-        show("done", """{"configured":true,"posts":[${feedPost("p1", "update", "Reworked the feed")}],"error":"Murmur did not answer.","stale_since":"2026-10-22T10:00:00Z"}""")
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Murmur did not answer. Showing posts from", substring = true).fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Reworked the feed").assertExists()
-        rule.onNode(hasText("Retry") and !hasContentDescription("Retry")).performClick()
-
-        rule.waitUntil(5_000) { feedRequests.any { it.contains("refresh=true") } }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("The second release is out.").fetchSemanticsNodes().isNotEmpty() }
+        val newest = rule.onNodeWithText("The second release is out.").getUnclippedBoundsInRoot().top
+        val earlier = rule.onNodeWithText("The first release is out.").getUnclippedBoundsInRoot().top
+        assertTrue(newest < earlier)
     }
 
     @Test

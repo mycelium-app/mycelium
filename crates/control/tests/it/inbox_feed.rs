@@ -1,105 +1,148 @@
-use crate::common::{Server, serve};
-use axum::Json;
-use axum::Router;
-use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use crate::common::Server;
+use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use uuid::Uuid;
 
-#[derive(Clone, Default)]
-struct Murmur {
-    keys: Arc<Mutex<Vec<String>>>,
-    failing: Arc<AtomicBool>,
+async fn post(server: &Server, token: &str, conversation: Uuid, message: &str) -> Value {
+    let reply = server.agent_mcp(token, conversation, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "post_to_feed", "arguments": {"message": message}}})).await;
+
+    reply["result"].clone()
 }
 
-fn updates() -> Value {
-    json!({
-        "needsYou": [
-            {"id": "n1", "author": "Ada", "project": "Mycelium", "kind": "needs_you", "message": "Pick a launch date", "links": [{"url": "https://murmur.example/p/n1"}], "createdAt": "2026-11-08T09:00:00Z", "doneAt": null},
-        ],
-        "posts": [
-            {"id": "p2", "author": "Linus", "project": "Murmur", "kind": "update", "message": "Reworked the feed", "links": [{"url": "https://murmur.example/p/p2"}, {"url": "https://murmur.example/other"}], "createdAt": "2026-11-08T10:00:00Z", "doneAt": null},
-            {"id": "p1", "author": "Grace", "project": null, "kind": "shipped", "message": "Released 0.30", "links": [], "createdAt": "2026-11-08T08:00:00Z", "doneAt": null},
-            {"id": "n0", "author": "Ada", "project": null, "kind": "needs_you", "message": "Picked a name", "links": [], "createdAt": "2026-11-08T07:00:00Z", "doneAt": "2026-11-08T07:30:00Z"},
-        ],
-    })
-}
-
-async fn handle(State(murmur): State<Murmur>, headers: HeaderMap, Json(body): Json<Value>) -> Response {
-    if body.get("id").is_none() {
-        return StatusCode::ACCEPTED.into_response();
-    }
-
-    if murmur.failing.load(Ordering::SeqCst) && body["method"] == "tools/call" {
-        return StatusCode::BAD_GATEWAY.into_response();
-    }
-
-    if let Some(key) = headers.get("authorization").and_then(|value| value.to_str().ok()) {
-        murmur.keys.lock().unwrap().push(key.to_string());
-    }
-
-    let result = match body["method"].as_str().unwrap_or_default() {
-        "initialize" => json!({"protocolVersion": "2025-11-25", "capabilities": {"tools": {}}, "serverInfo": {"name": "murmur", "version": "1"}}),
-        "tools/list" => json!({"tools": [{"name": "list_updates", "description": "List updates.", "inputSchema": {"type": "object"}}]}),
-        "tools/call" => json!({"content": [{"type": "text", "text": updates().to_string()}]}),
-        _ => return StatusCode::NOT_FOUND.into_response(),
-    };
-
-    Json(json!({"jsonrpc": "2.0", "id": body["id"], "result": result})).into_response()
-}
-
-async fn add_murmur(server: &Server, murmur: &Murmur) {
-    let base = serve(Router::new().route("/mcp", post(handle)).with_state(murmur.clone())).await;
-    let (status, added) = server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Murmur", "kind": "murmur", "url": format!("{base}/mcp"), "bearer_token": "murmur-key"}))).await;
-    assert_eq!(status, 201, "{added}");
-}
-
-#[tokio::test]
-async fn the_feed_is_not_configured_without_a_murmur_integration() {
-    let server = Server::start().await;
-
+async fn posts(server: &Server) -> Vec<Value> {
     let (status, feed) = server.user.json(server.user.get("/api/v1/inbox/feed")).await;
+    assert_eq!(status, 200, "{feed}");
 
-    assert_eq!(status, 200);
-    assert_eq!(feed["configured"], false);
+    feed["posts"].as_array().unwrap().clone()
+}
+
+#[tokio::test]
+async fn a_post_appears_in_the_feed_with_the_conversations_author_project_and_link() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    let id = conversation.id;
+    let project: Uuid = sqlx::query_scalar("insert into projects (owner, node_id, name, path) select owner, node_id, 'harbour', '/work/harbour' from conversations where id = $1 returning id").bind(id).fetch_one(&server.pool).await.unwrap();
+    sqlx::query("update conversations set project_id = $1 where id = $2").bind(project).bind(id).execute(&server.pool).await.unwrap();
+
+    let reply = post(&server, &link.token, id, "  Search now finds conversations by branch name.  ").await;
+
+    assert_eq!(reply["isError"], false, "{reply}");
+    let listed = posts(&server).await;
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["message"], "Search now finds conversations by branch name.");
+    assert_eq!(listed[0]["author"], "Claude Code");
+    assert_eq!(listed[0]["project"], "harbour");
+    assert_eq!(listed[0]["conversation_id"], json!(id));
+    assert_eq!(listed[0]["conversation_title"], json!(conversation.title));
+    assert!(listed[0]["created_at"].is_string());
+}
+
+#[tokio::test]
+async fn a_post_from_an_assistants_conversation_is_authored_by_the_assistant() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    let assistant: Uuid = sqlx::query_scalar("insert into assistants (owner, name) select owner, 'Archivist' from conversations where id = $1 returning id").bind(conversation.id).fetch_one(&server.pool).await.unwrap();
+    sqlx::query("update conversations set assistant_id = $1 where id = $2").bind(assistant).bind(conversation.id).execute(&server.pool).await.unwrap();
+
+    post(&server, &link.token, conversation.id, "The restore flow copy is live.").await;
+
+    assert_eq!(posts(&server).await[0]["author"], "Archivist");
+}
+
+#[tokio::test]
+async fn the_feed_lists_the_newest_post_first() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+
+    post(&server, &link.token, conversation.id, "The first release is out.").await;
+    post(&server, &link.token, conversation.id, "The second release is out.").await;
+
+    let listed = posts(&server).await;
+    assert_eq!(listed[0]["message"], "The second release is out.");
+    assert_eq!(listed[1]["message"], "The first release is out.");
+}
+
+#[tokio::test]
+async fn a_post_over_the_limit_is_refused_and_stores_nothing() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+
+    let reply = post(&server, &link.token, conversation.id, &"x".repeat(281)).await;
+
+    assert_eq!(reply["isError"], true, "{reply}");
+    assert_eq!(reply["content"][0]["text"], "Message must be 280 characters or fewer.");
+    assert!(posts(&server).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_post_at_the_limit_is_accepted() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+
+    let reply = post(&server, &link.token, conversation.id, &"é".repeat(280)).await;
+
+    assert_eq!(reply["isError"], false, "{reply}");
+    assert_eq!(posts(&server).await.len(), 1);
+}
+
+#[tokio::test]
+async fn an_empty_post_is_refused_and_says_what_to_enter() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+
+    let reply = post(&server, &link.token, conversation.id, "   ").await;
+
+    assert_eq!(reply["isError"], true, "{reply}");
+    assert_eq!(reply["content"][0]["text"], "Enter a message to post to the feed.");
+    assert!(posts(&server).await.is_empty());
+}
+
+#[tokio::test]
+async fn one_person_never_sees_anothers_posts() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    let other = server.second_user("sam@example.com").await;
+
+    post(&server, &link.token, conversation.id, "The billing guide is published.").await;
+
+    let (status, feed) = other.json(other.get("/api/v1/inbox/feed")).await;
+    assert_eq!(status, 200, "{feed}");
     assert_eq!(feed["posts"], json!([]));
+    assert_eq!(posts(&server).await.len(), 1);
 }
 
 #[tokio::test]
-async fn the_feed_shows_only_murmurs_posts_and_sends_the_key_as_a_bearer() {
+async fn a_post_is_streamed_to_its_owner_as_it_is_made() {
     let server = Server::start().await;
-    let murmur = Murmur::default();
-    add_murmur(&server, &murmur).await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    let mut stream = server.user.stream().await;
 
-    let (_, feed) = server.user.json(server.user.get("/api/v1/inbox/feed")).await;
+    post(&server, &link.token, conversation.id, "The restore flow is live.").await;
 
-    let ids: Vec<&str> = feed["posts"].as_array().unwrap().iter().map(|post| post["id"].as_str().unwrap()).collect();
-    assert_eq!(feed["configured"], true);
-    assert_eq!(feed["error"], Value::Null);
-    assert_eq!(ids, ["p2", "p1", "n0"]);
-    assert_eq!(feed["posts"][0]["url"], "https://murmur.example/p/p2");
-    assert_eq!(feed["posts"][1]["url"], Value::Null);
-    assert_eq!(feed["posts"][1]["project"], Value::Null);
-    assert_eq!(feed["posts"][1]["created_at"], "2026-11-08T08:00:00Z");
-    assert!(!murmur.keys.lock().unwrap().is_empty());
-    assert!(murmur.keys.lock().unwrap().iter().all(|key| key == "Bearer murmur-key"));
+    let streamed = stream.until(|message| match message {
+        StreamMessage::FeedPost(post) => Some(post),
+        _ => None,
+    }).await;
+    assert_eq!(streamed.message, "The restore flow is live.");
+    assert_eq!(streamed.conversation_id, conversation.id);
 }
 
 #[tokio::test]
-async fn when_murmur_stops_answering_the_last_posts_come_back_with_when_they_were_fetched() {
+async fn a_post_goes_when_its_conversation_is_deleted() {
     let server = Server::start().await;
-    let murmur = Murmur::default();
-    add_murmur(&server, &murmur).await;
-    server.user.json(server.user.get("/api/v1/inbox/feed")).await;
-    murmur.failing.store(true, Ordering::SeqCst);
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    post(&server, &link.token, conversation.id, "The nightly backup now runs on orion.").await;
 
-    let (status, feed) = server.user.json(server.user.get("/api/v1/inbox/feed?refresh=true")).await;
+    sqlx::query("delete from conversations where id = $1").bind(conversation.id).execute(&server.pool).await.unwrap();
 
-    assert_eq!(status, 200);
-    assert_eq!(feed["posts"].as_array().unwrap().len(), 3);
-    assert_eq!(feed["error"], "Murmur did not answer.");
-    assert!(feed["stale_since"].is_string());
+    assert!(posts(&server).await.is_empty());
 }

@@ -2,6 +2,9 @@ package mycelium.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -51,14 +54,13 @@ import androidx.compose.ui.unit.dp
 import kotlin.time.Clock
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import mycelium.api.InboxFeed
+import mycelium.api.Project
 import mycelium.state.AppState
 import mycelium.state.Store
 import mycelium.state.ThreadItem
 import mycelium.api.ConversationStatus
 import mycelium.state.agentAccounts
-import mycelium.state.ago
-import mycelium.state.usageClockTime
+import mycelium.state.relativeTime
 import mycelium.state.compactWindowUsage
 import mycelium.state.formatCount
 import mycelium.state.formatTokens
@@ -73,7 +75,6 @@ private val GaugeWidth = 120.dp
 private val GaugeStroke = 8.dp
 private val FocusOutline = 2.dp
 private const val PollMillis = 15_000L
-private const val FeedPollMillis = 30_000L
 private const val ResolvedLingerMillis = 4_000L
 private const val RecentMessages = 3
 
@@ -81,22 +82,15 @@ private const val NeedsYouTab = "Needs you"
 private const val FeedTab = "Feed"
 private const val StatsTab = "Stats"
 
-enum class FeedPostKind(val word: String) {
-    Update("Update"),
-    Shipped("Shipped"),
-    Blocked("Blocked"),
-}
-
 data class FeedPost(
     val author: String,
     val avatarLetter: String,
-    val kind: FeedPostKind,
     val time: String,
     val text: String,
-    val conversationId: String? = null,
-    val projectName: String? = null,
-    val conversationTitle: String? = null,
-    val url: String? = null,
+    val conversationId: String,
+    val projectName: String?,
+    val conversationTitle: String,
+    val project: Project?,
 )
 
 private data class InboxStats(val rate: TokenRate?, val now: kotlin.time.Instant)
@@ -111,20 +105,12 @@ fun InboxScreen(store: Store, state: AppState, onOpenConversation: (String) -> U
     var showingStats by remember { mutableStateOf(false) }
     var tab by remember { mutableStateOf(NeedsYouTab) }
     val scope = rememberCoroutineScope()
-    var feed by remember { mutableStateOf(InboxFeed(configured = false)) }
-    val platform = LocalPlatform.current
     val voice by store.voice.state.collectAsState()
-    val posts = feed.posts.map { post ->
-        val kind = when (post.kind) {
-            "shipped" -> FeedPostKind.Shipped
-            "blocked" -> FeedPostKind.Blocked
-            else -> FeedPostKind.Update
-        }
+    val posts = state.feedPosts.map { post ->
+        val project = state.conversations[post.conversationId]?.projectId?.let { state.projects[it] }
 
-        FeedPost(post.author, post.author.take(1).uppercase(), kind, ago(post.createdAt), post.message, projectName = post.project, url = post.url)
+        FeedPost(post.author, post.author.take(1).uppercase(), relativeTime(post.createdAt), post.message, post.conversationId, post.project, post.conversationTitle, project)
     }
-    val staleTime = feed.staleSince?.let { usageClockTime(it, { millis -> platform?.localDateTime(millis) }) }
-    val notice = feed.error?.let { error -> if (staleTime == null) error else "$error Showing posts from $staleTime." }
 
     LaunchedEffect(items) {
         val present = items.map { it.key }.toSet()
@@ -143,12 +129,8 @@ fun InboxScreen(store: Store, state: AppState, onOpenConversation: (String) -> U
         previous = items
     }
 
-    LaunchedEffect(store) {
-        while (true) {
-            attempt { feed = store.api.inboxFeed() }
-
-            delay(FeedPollMillis)
-        }
+    LaunchedEffect(store, state.connected) {
+        store.refreshFeed()
     }
 
     LaunchedEffect(store) {
@@ -172,7 +154,7 @@ fun InboxScreen(store: Store, state: AppState, onOpenConversation: (String) -> U
 
     val shown = (items + lingering.values.filter { lingered -> items.none { it.key == lingered.key } }).sortedByDescending { it.waitingSince }
     val needsYou: @Composable (Modifier, Boolean) -> Unit = { modifier, headed -> NeedsYouColumn(store, state, shown, state.needsYouFocus, voice.open && voice.privacy.voiceEnabled, onOpenConversation, onOpenWorkflow, modifier, headed) }
-    val feedColumn: @Composable (Modifier) -> Unit = { modifier -> FeedColumn(posts, notice, { scope.launch { attempt { feed = store.api.inboxFeed(refresh = true) } } }, onOpenConversation, modifier) }
+    val feedColumn: @Composable (Modifier) -> Unit = { modifier -> FeedColumn(posts, onOpenConversation, modifier) }
     val statsColumn: @Composable (Modifier) -> Unit = { modifier -> StatsColumn(store, state, stats, onOpenConversation, onOpenUsageHistory, modifier) }
 
     Column(Modifier.fillMaxSize()) {
@@ -295,7 +277,7 @@ private fun InboxItemRow(store: Store, state: AppState, item: InboxItem, focused
                 Label(conversation.title, Modifier.weight(1f), maxLines = 1)
             }
 
-            Label(ago(item.waitingSince), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+            Label(relativeTime(item.waitingSince), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
             MyButton({ expanded = !expanded }, icon = if (expanded) MyIcon.ChevronUp else MyIcon.ChevronDown, description = if (expanded) "Show less of ${conversation.title}" else "Show more of ${conversation.title}", size = ButtonSize.Sm, muted = true)
         }
 
@@ -362,13 +344,9 @@ private fun FlagCard(text: String, onReply: (String) -> Unit) {
 }
 
 @Composable
-private fun FeedColumn(posts: List<FeedPost>, notice: String?, onRetry: () -> Unit, onOpenConversation: (String) -> Unit, modifier: Modifier) {
+private fun FeedColumn(posts: List<FeedPost>, onOpenConversation: (String) -> Unit, modifier: Modifier) {
     Column(modifier) {
         ColumnHeading("Feed")
-
-        if (notice != null) {
-            FeedNotice(notice, onRetry)
-        }
 
         if (posts.isEmpty()) {
             Label("No posts yet", Modifier.padding(horizontal = Tokens.Space.S4), Tokens.Type.Ui, MyTheme.colors.textMuted)
@@ -381,53 +359,33 @@ private fun FeedColumn(posts: List<FeedPost>, notice: String?, onRetry: () -> Un
 }
 
 @Composable
-private fun FeedNotice(text: String, onRetry: () -> Unit) {
-    val colors = MyTheme.colors
-
-    Row(
-        Modifier.fillMaxWidth().padding(start = Tokens.Space.S3, end = Tokens.Space.S3, bottom = Tokens.Space.S1).border(Tokens.Size.Hairline, colors.border, BlockShape).padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1_5),
-        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(MyIcon.Alert, colors.statusAttention, Tokens.Size.IconSm)
-        Label(text, Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted)
-        MyButton(onRetry, text = "Retry", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
-    }
-}
-
-@Composable
 private fun FeedPostRow(post: FeedPost, onOpenConversation: (String) -> Unit) {
     val colors = MyTheme.colors
-    val (icon, tint) = when (post.kind) {
-        FeedPostKind.Update -> MyIcon.Activity to colors.textMuted
-        FeedPostKind.Shipped -> MyIcon.Check to colors.statusDone
-        FeedPostKind.Blocked -> MyIcon.Failed to colors.statusFailed
-    }
-    val platform = LocalPlatform.current
+    val place = listOfNotNull(post.projectName, post.conversationTitle).joinToString(", ")
 
     Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S4), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-        Box(Modifier.size(Tokens.Size.Avatar), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(Tokens.Size.Avatar).clip(CircleShape).background(colors.bgSelected), contentAlignment = Alignment.Center) {
             Label(post.avatarLetter, style = Tokens.Type.MetaStrong, color = colors.textMuted)
         }
 
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                Label(post.author, style = Tokens.Type.UiStrong, maxLines = 1)
-                Icon(icon, tint, Tokens.Size.IconSm)
-                Label(post.kind.word, Modifier.weight(1f), Tokens.Type.Meta, tint, maxLines = 1)
+                Label(post.author, Modifier.weight(1f), Tokens.Type.UiStrong, maxLines = 1)
                 Label(post.time, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
             }
 
             Label(post.text)
 
-            if (post.url != null) {
-                Label(post.url, Modifier.pressable({ platform?.openUrl(post.url) }, description = "Open ${post.url}", shape = ControlShape), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
-            }
+            Row(
+                Modifier.heightIn(min = touchMin(Tokens.Size.ControlSm + Tokens.Space.S0_5)).pressable({ onOpenConversation(post.conversationId) }, description = "Open chat: $place", shape = ControlShape),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (post.projectName != null) {
+                    ProjectIcon(post.project)
+                }
 
-            if (post.conversationId != null) {
-                val place = listOfNotNull(post.projectName, post.conversationTitle).joinToString(", ")
-
-                Label(place, Modifier.pressable({ onOpenConversation(post.conversationId) }, description = "Open $place", shape = ControlShape), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+                Label(place, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
             }
         }
     }

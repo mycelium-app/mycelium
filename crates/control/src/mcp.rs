@@ -8,6 +8,7 @@ mod conversations;
 mod decide;
 mod earlier_turns;
 mod environment;
+mod feed;
 mod goal_and_usage;
 mod inbox;
 mod instructions;
@@ -74,6 +75,7 @@ enum Area {
     BrowserTask,
     Terminals,
     Inbox,
+    Feed,
 }
 
 fn area_of(tool: &str) -> Option<Area> {
@@ -101,6 +103,7 @@ fn area_of(tool: &str) -> Option<Area> {
         "browser_task" => Some(Area::BrowserTask),
         "terminal_list" | "terminal_read" | "terminal_type" => Some(Area::Terminals),
         "list_needs_you" | "resolve_needs_you" | "focus_needs_you" => Some(Area::Inbox),
+        "post_to_feed" => Some(Area::Feed),
         name if name.contains("__") => Some(Area::ServerTools),
         _ => None,
     }
@@ -132,6 +135,7 @@ async fn call_area(area: Area, call: ToolCall<'_>) -> ApiResult<ToolReply> {
         Area::BrowserTask => browser_task::call(call).await,
         Area::Terminals => terminals::call(call).await,
         Area::Inbox => inbox::call(call).await,
+        Area::Feed => feed::call(call).await,
     }
 }
 
@@ -172,6 +176,7 @@ pub fn tool_definitions() -> Value {
         browser_task::definitions(),
         terminals::definitions(),
         inbox::definitions(),
+        feed::definitions(),
     ];
 
     Value::Array(areas.into_iter().flat_map(|definitions| definitions.as_array().cloned().unwrap_or_default()).collect())

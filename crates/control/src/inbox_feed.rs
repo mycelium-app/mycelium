@@ -1,120 +1,62 @@
 use crate::auth::AuthUser;
-use crate::chat_tool_servers::{ServerRow, bearer, list_owned, refreshable_after_rejection, renew};
 use crate::error::ApiResult;
-use crate::mcp_client::{McpConnection, McpError};
 use crate::state::AppState;
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use chrono::{DateTime, Utc};
 use mycelium_proto::api::{InboxFeed, InboxPost};
-use serde::Deserialize;
-use serde_json::{Value, json};
-use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
-use std::time::{Duration, Instant};
+use mycelium_proto::stream::StreamMessage;
+use serde_json::Value;
 use uuid::Uuid;
 
-const FEED_LIMIT: u32 = 30;
-const FRESH_FOR: Duration = Duration::from_secs(30);
+const FEED_LIMIT: i64 = 30;
+pub const LONGEST_POST: usize = 280;
+const POST_SELECT: &str = "select f.id, a.name as assistant, c.agent, c.model, f.message, p.name as project, f.conversation_id, c.title as conversation_title, f.created_at
+     from feed_posts f join conversations c on c.id = f.conversation_id left join assistants a on a.id = c.assistant_id left join projects p on p.id = c.project_id";
 
-struct Cached {
-    posts: Vec<InboxPost>,
-    fetched: Instant,
-    fetched_at: DateTime<Utc>,
-}
-
-static CACHE: LazyLock<Mutex<HashMap<Uuid, Cached>>> = LazyLock::new(Default::default);
-
-#[derive(Deserialize)]
-pub struct FeedQuery {
-    #[serde(default)]
-    refresh: bool,
-}
-
-#[derive(Deserialize)]
-struct Updates {
-    #[serde(default)]
-    posts: Vec<Update>,
-}
-
-#[derive(Deserialize)]
-struct Update {
-    id: String,
-    author: String,
-    kind: String,
+#[derive(sqlx::FromRow)]
+struct PostRow {
+    id: Uuid,
+    assistant: Option<String>,
+    agent: String,
+    model: Option<String>,
     message: String,
     project: Option<String>,
-    #[serde(default)]
-    links: Vec<Link>,
-    #[serde(rename = "createdAt")]
+    conversation_id: Uuid,
+    conversation_title: String,
     created_at: DateTime<Utc>,
 }
 
-#[derive(Deserialize)]
-struct Link {
-    url: String,
-}
-
-impl Update {
+impl PostRow {
     fn into_post(self) -> InboxPost {
-        InboxPost { id: self.id, author: self.author, kind: self.kind, message: self.message, project: self.project, url: self.links.into_iter().next().map(|link| link.url), created_at: self.created_at }
+        let chat_model = self.model.filter(|_| self.agent == "chat");
+        let author = self.assistant.or(chat_model).unwrap_or_else(|| crate::goals::agent_name(&self.agent).to_string());
+
+        InboxPost { id: self.id, author, message: self.message, project: self.project, conversation_id: self.conversation_id, conversation_title: self.conversation_title, created_at: self.created_at }
     }
 }
 
-async fn fetch(state: &AppState, server: &ServerRow) -> Result<Vec<InboxPost>, String> {
-    let token = bearer(state, server).await.map_err(|error| error.message().to_string())?;
-    let mut connection = McpConnection::new(&state.http, &server.url, token.as_deref(), server.key_header());
-    let arguments = json!({"limit": FEED_LIMIT});
-    let mut called = connection.call_tool("list_updates", &arguments).await;
+pub async fn post_from_agent(state: &AppState, owner: Uuid, conversation_id: Uuid, arguments: &Value) -> ApiResult<Result<(), String>> {
+    let message = arguments.get("message").and_then(Value::as_str).map(str::trim).unwrap_or_default();
 
-    if matches!(called, Err(McpError::Rejected)) && refreshable_after_rejection(server) {
-        let renewed = renew(state, server).await.map_err(|error| error.message().to_string())?;
-        connection.set_token(renewed.as_deref());
-        called = connection.call_tool("list_updates", &arguments).await;
+    if message.is_empty() {
+        return Ok(Err("Enter a message to post to the feed.".to_string()));
     }
 
-    let output = called.map_err(|error| error.describe(&server.name))?;
-
-    if output.is_error {
-        return Err(output.text);
+    if message.chars().count() > LONGEST_POST {
+        return Ok(Err(format!("Message must be {LONGEST_POST} characters or fewer.")));
     }
 
-    let parsed: Value = serde_json::from_str(&output.text).map_err(|_| "Murmur sent an answer Mycelium could not read.".to_string())?;
-    let updates: Updates = serde_json::from_value(parsed).map_err(|_| "Murmur sent an answer Mycelium could not read.".to_string())?;
+    let id = sqlx::query_scalar::<_, Uuid>("insert into feed_posts (owner, conversation_id, message) values ($1, $2, $3) returning id").bind(owner).bind(conversation_id).bind(message).fetch_one(&state.pool).await?;
+    let row = sqlx::query_as::<_, PostRow>(sqlx::AssertSqlSafe(format!("{POST_SELECT} where f.id = $1"))).bind(id).fetch_one(&state.pool).await?;
 
-    Ok(updates.posts.into_iter().map(Update::into_post).collect())
+    state.publish(Some(owner), StreamMessage::FeedPost(row.into_post()));
+
+    Ok(Ok(()))
 }
 
-pub async fn feed(State(state): State<AppState>, user: AuthUser, Query(query): Query<FeedQuery>) -> ApiResult<Json<InboxFeed>> {
-    let servers = list_owned(&state, user.id).await?;
-    let murmur = servers.iter().find(|server| server.enabled && server.settings["app"].as_str() == Some("murmur"));
-    let Some(server) = murmur else {
-        return Ok(Json(InboxFeed { configured: false, posts: Vec::new(), error: None, stale_since: None }));
-    };
+pub async fn feed(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<InboxFeed>> {
+    let rows = sqlx::query_as::<_, PostRow>(sqlx::AssertSqlSafe(format!("{POST_SELECT} where f.owner = $1 order by f.created_at desc, f.id desc limit $2"))).bind(user.id).bind(FEED_LIMIT).fetch_all(&state.pool).await?;
 
-    let fresh = CACHE.lock().map_err(crate::error::ApiError::internal)?.get(&user.id).filter(|cached| !query.refresh && cached.fetched.elapsed() < FRESH_FOR).map(|cached| cached.posts.clone());
-
-    if let Some(posts) = fresh {
-        return Ok(Json(InboxFeed { configured: true, posts, error: None, stale_since: None }));
-    }
-
-    match fetch(&state, server).await {
-        Ok(posts) => {
-            CACHE.lock().map_err(crate::error::ApiError::internal)?.insert(user.id, Cached { posts: posts.clone(), fetched: Instant::now(), fetched_at: Utc::now() });
-
-            Ok(Json(InboxFeed { configured: true, posts, error: None, stale_since: None }))
-        }
-        Err(cause) => {
-            tracing::warn!(%cause, "Murmur feed failed");
-            let cache = CACHE.lock().map_err(crate::error::ApiError::internal)?;
-            let stale = cache.get(&user.id);
-
-            Ok(Json(InboxFeed {
-                configured: true,
-                posts: stale.map(|cached| cached.posts.clone()).unwrap_or_default(),
-                error: Some("Murmur did not answer.".to_string()),
-                stale_since: stale.map(|cached| cached.fetched_at),
-            }))
-        }
-    }
+    Ok(Json(InboxFeed { posts: rows.into_iter().map(PostRow::into_post).collect() }))
 }

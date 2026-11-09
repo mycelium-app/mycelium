@@ -247,10 +247,10 @@ private val Calls = list(
     """{"id":"c4","server_id":"e1","server_name":"Email a","tool":"search_messages","kind":"read","surface":"chat","provider":"Anthropic","decision":"allowed","at":"${ago(days = 1)}"}""",
 )
 
-private val InboxFeedJson = """{"configured":true,"posts":[
-{"id":"f1","author":"Archivist","kind":"shipped","message":"The restore flow copy is live on staging.example.com.","project":"harbour","url":"https://example.com/restore","created_at":"${ago(minutes = 2)}"},
-{"id":"f2","author":"Scribe","kind":"update","message":"Drafted the release notes for v0.3.7. One line is still open.","project":"atlas","url":null,"created_at":"${ago(minutes = 11)}"},
-{"id":"f3","author":"Courier","kind":"blocked","message":"ci-2 ran out of disk during the integration run. It will not retry until the runner is cleaned.","project":"ledger","url":null,"created_at":"${ago(minutes = 24)}"}]}"""
+private val InboxFeedJson = """{"posts":[
+{"id":"f1","author":"Archivist","message":"The restore flow copy is live on staging.example.com.","project":"harbour","conversation_id":"$Main","conversation_title":"Release checklist","created_at":"${ago(minutes = 2)}"},
+{"id":"f2","author":"Scribe","message":"Release notes for v0.3.7 are published.","project":"atlas","conversation_id":"$Main","conversation_title":"Release checklist","created_at":"${ago(minutes = 11)}"},
+{"id":"f3","author":"Courier","message":"The integration run now passes on a fresh runner.","project":"ledger","conversation_id":"$Main","conversation_title":"Release checklist","created_at":"${ago(minutes = 24)}"}]}"""
 
 private val Extra = linkedMapOf(
     "/experiments" to EnabledExperiments,

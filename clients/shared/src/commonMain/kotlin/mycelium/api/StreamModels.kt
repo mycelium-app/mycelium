@@ -36,6 +36,7 @@ sealed interface StreamMessage {
     data class ActionProposalChanged(val proposal: ActionProposal) : StreamMessage
 
     data class AssistantChangeChanged(val change: AssistantChange) : StreamMessage
+    data class FeedPosted(val post: InboxPost) : StreamMessage
 
     data class ScheduleRemoved(val scheduleId: String) : StreamMessage
 
@@ -130,6 +131,7 @@ fun parseStreamMessage(text: String): StreamMessage? {
         "assistant_actions_changed" -> StreamMessage.AssistantActionsChanged(element.requireString("assistant_id"))
         "action_proposal" -> StreamMessage.ActionProposalChanged(MyceliumJson.decodeFromJsonElement(ActionProposal.serializer(), element))
         "assistant_change" -> StreamMessage.AssistantChangeChanged(MyceliumJson.decodeFromJsonElement(AssistantChange.serializer(), element))
+        "feed_post" -> StreamMessage.FeedPosted(MyceliumJson.decodeFromJsonElement(InboxPost.serializer(), element))
         "schedule" -> StreamMessage.ScheduleChanged(MyceliumJson.decodeFromJsonElement(Schedule.serializer(), element))
         "schedule_removed" -> StreamMessage.ScheduleRemoved(element.requireString("schedule_id"))
         "artifact" -> StreamMessage.ArtifactChanged(

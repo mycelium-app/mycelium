@@ -3149,6 +3149,22 @@ pub struct EnvironmentTarget {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InboxPost {
+    pub id: Uuid,
+    pub author: String,
+    pub message: String,
+    pub project: Option<String>,
+    pub conversation_id: Uuid,
+    pub conversation_title: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InboxFeed {
+    pub posts: Vec<InboxPost>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EnvironmentAction {
     pub at: chrono::DateTime<chrono::Utc>,
     pub label: String,
@@ -3204,25 +3220,4 @@ pub struct SpeechRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpeechVoices {
     pub voices: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct InboxPost {
-    pub id: String,
-    pub author: String,
-    pub kind: String,
-    pub message: String,
-    pub project: Option<String>,
-    pub url: Option<String>,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct InboxFeed {
-    pub configured: bool,
-    pub posts: Vec<InboxPost>,
-    #[serde(default)]
-    pub error: Option<String>,
-    #[serde(default)]
-    pub stale_since: Option<chrono::DateTime<chrono::Utc>>,
 }

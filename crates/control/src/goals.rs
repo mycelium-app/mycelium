@@ -235,7 +235,7 @@ async fn enqueue(state: &AppState, owner: Uuid, conversation_id: Uuid, text: &st
     publish_queue(state, owner, conversation_id).await
 }
 
-fn agent_name(agent: &str) -> &str {
+pub fn agent_name(agent: &str) -> &str {
     match agent {
         "claude" => "Claude Code",
         "codex" => "Codex",

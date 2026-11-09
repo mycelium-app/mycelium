@@ -64,6 +64,7 @@ data class AppState(
     val assistantActions: Map<String, List<mycelium.api.AssistantAction>> = emptyMap(),
     val actionProposals: Map<String, mycelium.api.ActionProposal> = emptyMap(),
     val assistantChanges: Map<String, mycelium.api.AssistantChange> = emptyMap(),
+    val feedPosts: List<mycelium.api.InboxPost> = emptyList(),
     val artifacts: Map<String, Artifact> = emptyMap(),
     val artifactAccessRequests: Map<String, ArtifactAccessRequest> = emptyMap(),
     val scheduleRuns: List<ScheduleRun> = emptyList(),
@@ -128,6 +129,7 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 
         state.copy(
             conversations = state.conversations - id,
+            feedPosts = state.feedPosts.filterNot { it.conversationId == id },
             events = state.events - id,
             sessionUpdates = state.sessionUpdates - id,
             openedConversations = state.openedConversations - id,
@@ -185,6 +187,7 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.ActionProposalChanged -> state.copy(actionProposals = state.actionProposals + (message.proposal.id to message.proposal))
 
     is StreamMessage.AssistantChangeChanged -> state.copy(assistantChanges = state.assistantChanges + (message.change.id to message.change))
+    is StreamMessage.FeedPosted -> state.copy(feedPosts = mergedFeed(listOf(message.post), state.feedPosts))
 
     is StreamMessage.ScheduleRemoved -> state.copy(schedules = state.schedules - message.scheduleId)
 
@@ -272,6 +275,11 @@ fun AppState.hasOlderEvents(id: String): Boolean {
 
     return id !in completeHistories && oldest > 1
 }
+
+private const val FeedLength = 30
+
+fun mergedFeed(arrived: List<mycelium.api.InboxPost>, held: List<mycelium.api.InboxPost>): List<mycelium.api.InboxPost> =
+    (arrived + held).distinctBy { it.id }.sortedByDescending { it.createdAt }.take(FeedLength)
 
 fun projectsOfRepository(projects: Collection<Project>, repository: Repository): List<Project> =
     projects.filter { it.forgeId == repository.forgeId && it.repository == repository.fullName }

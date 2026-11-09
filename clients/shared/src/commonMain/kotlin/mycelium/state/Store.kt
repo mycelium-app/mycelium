@@ -504,6 +504,12 @@ class Store(
         mutableState.update { it.copy(actionProposals = it.actionProposals + proposals.associateBy { proposal -> proposal.id }) }
     }
 
+    suspend fun refreshFeed() {
+        val feed = orNull { api.inboxFeed() } ?: return
+
+        mutableState.update { it.copy(feedPosts = mergedFeed(feed.posts, it.feedPosts)) }
+    }
+
     suspend fun refreshAssistantChanges() {
         val changes = orNull { api.assistantChanges() } ?: return
 

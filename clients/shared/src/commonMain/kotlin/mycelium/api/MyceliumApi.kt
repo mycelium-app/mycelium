@@ -779,7 +779,7 @@ class MyceliumApi(
     suspend fun declineMessageProposal(id: String): MessageProposal =
         call("/message-proposals/$id/decline") { client.post(it) { authorise() } }.body()
 
-    suspend fun inboxFeed(refresh: Boolean = false): InboxFeed = call("/inbox/feed") { client.get(it) { authorise(); if (refresh) parameter("refresh", "true") } }.body()
+    suspend fun inboxFeed(): InboxFeed = call("/inbox/feed") { client.get(it) { authorise() } }.body()
 
     suspend fun startProposals(): List<StartProposal> = call("/start-proposals") { client.get(it) { authorise() } }.body()
 
