@@ -857,6 +857,10 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
     }
 
     if row.status == "failed" {
+        for step in steps.iter_mut().filter(|step| matches!(step.status.as_str(), "waiting" | "gate")) {
+            step.status = "not_run".into();
+        }
+
         let failed = steps.iter().find(|step| step.status == "failed");
         end_reason = Some(WorkflowEndReason {
             reason: "failed".into(),
