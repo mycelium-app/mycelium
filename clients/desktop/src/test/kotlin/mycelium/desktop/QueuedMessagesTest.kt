@@ -3,6 +3,9 @@ package mycelium.desktop
 import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.getBoundsInRoot
@@ -99,14 +102,15 @@ class QueuedMessagesTest {
         node.config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult].action?.invoke(results)
 
         assertEquals(2, results.single().lineCount)
-        assertTrue(results.single().isLineEllipsized(1))
+        assertTrue(results.single().multiParagraph.didExceedMaxLines)
+        assertEquals(androidx.compose.ui.text.style.TextOverflow.Ellipsis, results.single().layoutInput.overflow)
     }
 
     @Test
     fun sendingPreviewsRenderInlineLinks() {
         show(queued = emptyList(), sending = listOf("[the **docs**](https://example.com/docs)"))
 
-        rule.onNodeWithText("the docs").performClick()
+        rule.onNode(hasAnyAncestor(hasText("the docs")) and hasClickAction(), useUnmergedTree = true).performClick()
         assertEquals(listOf("https://example.com/docs"), platform.opened)
         rule.onNodeWithContentDescription("Sending").assertIsDisplayed()
     }

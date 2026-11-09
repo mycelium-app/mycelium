@@ -179,7 +179,8 @@ class InboxTest {
         }
 
         assertEquals(listOf(2, 4), layouts.map { it.lineCount }.sorted())
-        assertTrue(layouts.all { it.isLineEllipsized(it.lineCount - 1) })
+        assertTrue(layouts.all { it.multiParagraph.didExceedMaxLines })
+        assertTrue(layouts.all { it.layoutInput.overflow == androidx.compose.ui.text.style.TextOverflow.Ellipsis })
     }
 
     @Test
