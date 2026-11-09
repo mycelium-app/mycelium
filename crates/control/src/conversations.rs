@@ -480,13 +480,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     }
 
     if request.archived == Some(true) {
-        state.stop_terminals_of_conversation(id);
-    }
-
-    if request.archived == Some(true) && before.is_idle() {
-        state.hub.send(row.node_id, ControlToNode::CloseSession { conversation_id: id });
-        state.remove_session(row.node_id, id).await?;
-        crate::environments::stop_with_conversation(&state, id, false).await;
+        put_away(&state, &before).await?;
     }
 
     let conversation = row.to_proto()?;
@@ -497,6 +491,32 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     }
 
     Ok(Json(conversation))
+}
+
+pub async fn archive_for(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<ConversationRow> {
+    let before = find_owned(&state.pool, id, owner).await?;
+    let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
+        "update conversations set archived_at = coalesce(archived_at, now()), agent_active = false where id = $1 returning {CONVERSATION_COLUMNS}"
+    )))
+    .bind(id)
+    .fetch_one(&state.pool)
+    .await?;
+    put_away(state, &before).await?;
+    state.publish(Some(owner), StreamMessage::Conversation(row.to_proto()?));
+
+    Ok(row)
+}
+
+pub async fn put_away(state: &AppState, before: &ConversationRow) -> ApiResult<()> {
+    state.stop_terminals_of_conversation(before.id);
+
+    if before.is_idle() {
+        state.hub.send(before.node_id, ControlToNode::CloseSession { conversation_id: before.id });
+        state.remove_session(before.node_id, before.id).await?;
+        crate::environments::stop_with_conversation(state, before.id, false).await;
+    }
+
+    Ok(())
 }
 
 pub async fn wake_regularly(state: AppState) {
