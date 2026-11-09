@@ -1389,6 +1389,8 @@ pub struct WorkflowStep {
     pub model: Option<String>,
     #[serde(default)]
     pub difficulty: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<crate::routing::Routing>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

@@ -150,6 +150,25 @@ pub async fn start_pick(state: &AppState, owner: Uuid, node_id: Uuid, routing: R
     })
 }
 
+pub async fn for_agent_start(state: &AppState, owner: Uuid, node_id: Uuid, asked: Option<Routing>, account: Option<&str>, kept_agent: Option<AgentId>) -> ApiResult<Option<Routing>> {
+    if asked.is_some() {
+        return Ok(asked);
+    }
+
+    if account.is_some() {
+        return Ok(None);
+    }
+
+    let routing = match kept_agent {
+        Some(AgentId::Claude) => Routing::ClaudeAny,
+        Some(AgentId::Codex) => Routing::CodexAny,
+        None => Routing::AnyModel,
+    };
+    let pickable = start_pick(state, owner, node_id, routing).await.is_ok();
+
+    Ok(pickable.then_some(routing))
+}
+
 fn matches_current(entry: &ModelChoice, row: &ConversationRow) -> bool {
     match (entry.agent, entry.provider_id) {
         (Some(agent), _) => agent.as_str() == row.agent && entry.account.as_ref().is_none_or(|account| row.account.as_ref() == Some(account)),

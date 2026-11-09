@@ -818,8 +818,8 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
                             prompt: None,
                             parent_id: None,
                             side_kind: None,
-                        model: None,
-                        routing: None,
+                            model: spec.model.clone(),
+                            routing: crate::routing::for_agent_start(state, row.owner, node_id, spec.routing, spec.account.as_deref(), spec.model.as_ref().map(|_| agent)).await?,
                         },
                     )
                     .await?;

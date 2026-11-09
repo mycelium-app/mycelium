@@ -520,6 +520,71 @@ async fn a_conversation_whose_starter_was_renamed_becomes_managed_by_it_and_one_
     assert_eq!(managed, expected);
 }
 
+async fn signed_in(fleet: &mut Fleet) {
+    let login = mycelium_proto::conversation::LoginInfo { managed: false, agent: mycelium_proto::conversation::AgentId::Claude, account: Some("sam@example.com".into()), method: "oauth_token".into(), state: mycelium_proto::conversation::LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None };
+    fleet.link.send(mycelium_proto::link::NodeToControl::Logins { logins: vec![login] }).await;
+    let user = fleet.server.user.clone();
+    crate::common::eventually("the account", || async {
+        let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;
+
+        nodes.as_array().unwrap().iter().any(|node| !node["logins"].as_array().unwrap().is_empty()).then_some(())
+    })
+    .await;
+    let (status, saved) = fleet.server.user.json(fleet.server.user.put("/api/v1/agent-settings").json(&json!({"default_modes": {}, "any_model": [{"agent": "claude"}]}))).await;
+    assert_eq!(status, 200, "{saved}");
+}
+
+#[tokio::test]
+async fn a_conversation_started_by_an_agent_with_nothing_named_uses_any_model() {
+    let mut fleet = fleet().await;
+    signed_in(&mut fleet).await;
+
+    let new_chat = started_chat(&mut fleet).await;
+
+    let started = conversation(&fleet.server, new_chat).await;
+    assert_eq!((started["routing"].clone(), started["account"].clone()), (json!("any_model"), json!("sam@example.com")));
+}
+
+#[tokio::test]
+async fn a_conversation_started_by_an_agent_keeps_its_place_when_nothing_can_be_picked() {
+    let mut fleet = fleet().await;
+
+    let new_chat = started_chat(&mut fleet).await;
+
+    assert_eq!(conversation(&fleet.server, new_chat).await.get("routing"), None);
+}
+
+#[tokio::test]
+async fn an_agent_can_name_the_routing_of_a_conversation_it_starts() {
+    let mut fleet = fleet().await;
+    signed_in(&mut fleet).await;
+    connect(&fleet.server, fleet.yucca, fleet.immich).await;
+    project_in(&fleet, "billing", Some(fleet.immich)).await;
+    let mut arguments = start_arguments("Immich", "billing");
+    arguments["routing"] = json!("claude_any");
+
+    let started = text(&call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_conversation", arguments).await);
+    let new_chat: Uuid = started.split('(').nth(1).unwrap().split(')').next().unwrap().parse().unwrap();
+
+    assert_eq!(conversation(&fleet.server, new_chat).await["routing"], "claude_any");
+}
+
+#[tokio::test]
+async fn a_workflow_step_that_names_a_model_keeps_it() {
+    let mut fleet = fleet().await;
+    signed_in(&mut fleet).await;
+
+    let (status, workflow) = fleet.server.user.json(fleet.server.user.post("/api/v1/workflows").json(&json!({"title": "Build", "steps": [{"key": "work", "title": "Build", "prompt": "Build", "node_id": fleet.link.id, "agent": "claude", "cwd": "/work/yucca/app", "model": "opus"}]}))).await;
+    assert_eq!(status, 200, "{workflow}");
+    let started = match fleet.link.next().await {
+        mycelium_proto::link::ControlToNode::StartSession { conversation_id, .. } => conversation_id,
+        other => panic!("expected start, got {other:?}"),
+    };
+
+    let step = conversation(&fleet.server, started).await;
+    assert_eq!((step["routing"].clone(), step["model"].clone()), (json!("claude_any"), json!("opus")));
+}
+
 async fn answered(server: &Server, link: &mut NodeLink, conversation: Uuid, answer: &str) {
     link.send(mycelium_proto::link::NodeToControl::AcpUpdate { conversation_id: conversation, seq: 3, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": answer}}}) }).await;
     link.send(mycelium_proto::link::NodeToControl::TurnEnd { conversation_id: conversation, seq: 4, stop_reason: "end_turn".into(), usage: None }).await;
