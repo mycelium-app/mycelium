@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.34.10
+
+- Voice mode in any conversation: one control in the composer listens, then reads the reply aloud. The agent is told when voice mode starts and stops, and can add a short spoken version of its answer, which is the only part read aloud and is never shown in the thread.
+- The subagents card also lists the subagents a conversation started itself, with the reply field when one is waiting, and a subagent that fails tells the conversation that started it.
+- A group connection can work one way or both ways. Agent connections shows each connection's direction and can change it, and the approval card connects only the direction asked for.
+- A conversation whose finished turn asked you a question moves straight away instead of waiting for a turn end that never comes.
+
 ## v0.34.9
 
 - Action items: an agent can add things for you to do, such as an update only you can run. Each stays in Needs you, even after you write in the conversation, until you mark it done or the agent sees it has happened and resolves it. A conversation can hold several, adding one raises a notification, and a conversation with an open item is not archived when idle. Agents use the add_action_item and resolve_action_item tools.
