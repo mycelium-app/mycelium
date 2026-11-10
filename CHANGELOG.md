@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.34.8
+
+- Opening a chat that runs an agent in a scratch folder keeps the sidebar on Chats instead of switching to Workspaces.
+- A workflow step or subagent that names a model starts on that model, checked against the models its node reported, instead of failing with "none reported yet".
+- Each release publishes the local speech runner image as ghcr.io/mycelium-app/mycelium-local-speech.
+
 ## v0.34.7
 
 - Settings has a Voice section holding every voice setting: how you talk, how speech becomes text, how replies are spoken and what leaves the machine, with Try it for speech to text and reading aloud. It replaces Privacy and takes the Speech table from Providers, the voice and speed from the Voice assistant and dictation from Experiments.
