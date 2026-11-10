@@ -1260,6 +1260,7 @@ pub struct GroupConnection {
     pub target_group_id: Uuid,
     pub source_name: String,
     pub target_name: String,
+    pub both_ways: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub revoked_at: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -1268,6 +1269,12 @@ pub struct GroupConnection {
 pub struct CreateGroupConnectionRequest {
     pub source_group_id: Uuid,
     pub target_group_id: Uuid,
+    #[serde(default = "both_ways_by_default")]
+    pub both_ways: bool,
+}
+
+fn both_ways_by_default() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

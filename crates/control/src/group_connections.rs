@@ -9,7 +9,7 @@ use mycelium_proto::api::{CreateGroupConnectionRequest, GroupConnection};
 use mycelium_proto::stream::StreamMessage;
 use uuid::Uuid;
 
-const COLUMNS: &str = "c.id, c.source_group_id, c.target_group_id, s.name as source_name, t.name as target_name, c.created_at, c.revoked_at";
+const COLUMNS: &str = "c.id, c.source_group_id, c.target_group_id, s.name as source_name, t.name as target_name, c.both_ways, c.created_at, c.revoked_at";
 const JOINS: &str = "group_connections c join groups s on s.id = c.source_group_id join groups t on t.id = c.target_group_id";
 
 #[derive(sqlx::FromRow)]
@@ -19,6 +19,7 @@ struct ConnectionRow {
     target_group_id: Uuid,
     source_name: String,
     target_name: String,
+    both_ways: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     revoked_at: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -31,17 +32,29 @@ impl ConnectionRow {
             target_group_id: self.target_group_id,
             source_name: self.source_name,
             target_name: self.target_name,
+            both_ways: self.both_ways,
             created_at: self.created_at,
             revoked_at: self.revoked_at,
         }
     }
 }
 
-pub async fn active(state: &AppState, owner: Uuid, source: Uuid, target: Uuid) -> ApiResult<bool> {
-    let found = sqlx::query_scalar("select exists(select 1 from group_connections where owner = $1 and source_group_id = least($2, $3) and target_group_id = greatest($2, $3) and revoked_at is null)")
-        .bind(owner).bind(source).bind(target).fetch_one(&state.pool).await?;
+pub async fn active(state: &AppState, owner: Uuid, from_group: Uuid, to_group: Uuid) -> ApiResult<bool> {
+    let found = sqlx::query_scalar("select exists(select 1 from group_connections where owner = $1 and revoked_at is null and ((source_group_id = $2 and target_group_id = $3) or (both_ways and source_group_id = $3 and target_group_id = $2)))")
+        .bind(owner).bind(from_group).bind(to_group).fetch_one(&state.pool).await?;
 
     Ok(found)
+}
+
+pub async fn reverse_only(state: &AppState, owner: Uuid, from_group: Uuid, to_group: Uuid) -> ApiResult<Option<String>> {
+    if active(state, owner, from_group, to_group).await? || !active(state, owner, to_group, from_group).await? {
+        return Ok(None);
+    }
+
+    let from_name = sqlx::query_scalar::<_, String>("select name from groups where id = $1").bind(from_group).fetch_one(&state.pool).await?;
+    let to_name = sqlx::query_scalar::<_, String>("select name from groups where id = $1").bind(to_group).fetch_one(&state.pool).await?;
+
+    Ok(Some(format!("{from_name} is not allowed to reach {to_name}. Ask the person to connect it that way in Settings, Agent connections.")))
 }
 
 pub async fn group_of(state: &AppState, conversation: Uuid) -> ApiResult<Option<Uuid>> {
@@ -77,7 +90,7 @@ async fn publish(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<GroupConn
     Ok(connection)
 }
 
-pub async fn connect(state: &AppState, owner: Uuid, source: Uuid, target: Uuid) -> ApiResult<GroupConnection> {
+pub async fn connect(state: &AppState, owner: Uuid, source: Uuid, target: Uuid, both_ways: bool) -> ApiResult<GroupConnection> {
     if source == target {
         return Err(ApiError::bad_request("connection_self", "Choose two different groups."));
     }
@@ -85,8 +98,8 @@ pub async fn connect(state: &AppState, owner: Uuid, source: Uuid, target: Uuid) 
     crate::groups::find_owned(state, source, owner).await?;
     crate::groups::find_owned(state, target, owner).await?;
 
-    let id = sqlx::query_scalar::<_, Uuid>("insert into group_connections (owner, source_group_id, target_group_id) values ($1, least($2, $3), greatest($2, $3)) on conflict (owner, source_group_id, target_group_id) do update set revoked_at = null returning id")
-        .bind(owner).bind(source).bind(target).fetch_one(&state.pool).await?;
+    let id = sqlx::query_scalar::<_, Uuid>("insert into group_connections (owner, source_group_id, target_group_id, both_ways) values ($1, $2, $3, $4) on conflict (owner, least(source_group_id, target_group_id), greatest(source_group_id, target_group_id)) do update set source_group_id = excluded.source_group_id, target_group_id = excluded.target_group_id, both_ways = excluded.both_ways, revoked_at = null returning id")
+        .bind(owner).bind(source).bind(target).bind(both_ways).fetch_one(&state.pool).await?;
 
     publish(state, owner, id).await
 }
@@ -103,7 +116,7 @@ pub async fn create(
     Json(request): Json<CreateGroupConnectionRequest>,
 ) -> ApiResult<(StatusCode, Json<GroupConnection>)> {
     user.require_full_access()?;
-    let connection = connect(&state, user.id, request.source_group_id, request.target_group_id).await?;
+    let connection = connect(&state, user.id, request.source_group_id, request.target_group_id, request.both_ways).await?;
 
     Ok((StatusCode::CREATED, Json(connection)))
 }

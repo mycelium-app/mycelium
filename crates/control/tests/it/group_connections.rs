@@ -56,6 +56,12 @@ async fn connect(server: &Server, first: Uuid, second: Uuid) -> (u16, Value) {
     server.user.json(server.user.post("/api/v1/group-connections").json(&json!({"source_group_id": first, "target_group_id": second}))).await
 }
 
+async fn connect_one_way(server: &Server, source: Uuid, target: Uuid, both_ways: bool) -> (u16, Value) {
+    server.user.json(server.user.post("/api/v1/group-connections").json(&json!({"source_group_id": source, "target_group_id": target, "both_ways": both_ways}))).await
+}
+
+const IMMICH_CANNOT_REACH_YUCCA: &str = "Immich is not allowed to reach yucca. Ask the person to connect it that way in Settings, Agent connections.";
+
 struct Fleet {
     server: Server,
     link: NodeLink,
@@ -208,7 +214,114 @@ async fn sending_and_connecting_groups_sends_once_and_connects_the_groups() {
     assert_eq!(listed.as_array().unwrap().len(), 1);
 
     propose(&fleet.server, &fleet.link, fleet.immich_chat, fleet.yucca_chat).await;
+    assert_eq!(queue(&fleet.server, fleet.yucca_chat).await.len(), 0);
+}
+
+#[tokio::test]
+async fn connecting_groups_from_the_card_makes_it_two_way_when_the_reverse_connection_exists() {
+    let fleet = fleet().await;
+    connect_one_way(&fleet.server, fleet.immich, fleet.yucca, false).await;
+    propose(&fleet.server, &fleet.link, fleet.yucca_chat, fleet.immich_chat).await;
+    let id = proposals(&fleet.server).await[0]["id"].as_str().unwrap().to_string();
+
+    fleet.server.user.json(fleet.server.user.post(&format!("/api/v1/message-proposals/{id}/connect-groups"))).await;
+
+    let (_, listed) = fleet.server.user.json(fleet.server.user.get("/api/v1/group-connections")).await;
+    assert_eq!((listed.as_array().unwrap().len(), listed[0]["both_ways"].clone()), (1, json!(true)));
+}
+
+#[tokio::test]
+async fn connecting_groups_from_the_card_makes_a_one_way_connection_in_the_messages_direction() {
+    let fleet = fleet().await;
+    propose(&fleet.server, &fleet.link, fleet.yucca_chat, fleet.immich_chat).await;
+    let id = proposals(&fleet.server).await[0]["id"].as_str().unwrap().to_string();
+
+    fleet.server.user.json(fleet.server.user.post(&format!("/api/v1/message-proposals/{id}/connect-groups"))).await;
+
+    let (_, listed) = fleet.server.user.json(fleet.server.user.get("/api/v1/group-connections")).await;
+    assert_eq!((listed[0]["source_name"].clone(), listed[0]["target_name"].clone(), listed[0]["both_ways"].clone()), (json!("yucca"), json!("Immich"), json!(false)));
+}
+
+#[tokio::test]
+async fn a_message_from_the_source_of_a_one_way_connection_is_sent_without_approval() {
+    let fleet = fleet().await;
+    connect_one_way(&fleet.server, fleet.yucca, fleet.immich, false).await;
+
+    let sent = propose(&fleet.server, &fleet.link, fleet.yucca_chat, fleet.immich_chat).await;
+
+    assert_eq!(sent["isError"], false, "{sent}");
+    assert_eq!(queue(&fleet.server, fleet.immich_chat).await.len(), 1);
+    assert!(proposals(&fleet.server).await.iter().all(|proposal| proposal["state"] == "sent"));
+}
+
+#[tokio::test]
+async fn a_message_against_a_one_way_connection_waits_for_approval_and_says_which_way_is_allowed() {
+    let fleet = fleet().await;
+    connect_one_way(&fleet.server, fleet.yucca, fleet.immich, false).await;
+
+    let waiting = propose(&fleet.server, &fleet.link, fleet.immich_chat, fleet.yucca_chat).await;
+
+    assert!(text(&waiting).contains(IMMICH_CANNOT_REACH_YUCCA), "{waiting}");
+    assert_eq!(queue(&fleet.server, fleet.yucca_chat).await.len(), 0);
+    assert!(proposals(&fleet.server).await.iter().all(|proposal| proposal["state"] == "proposed"));
+}
+
+#[tokio::test]
+async fn reading_and_starting_against_a_one_way_connection_are_refused_with_the_direction_sentence() {
+    let mut fleet = fleet().await;
+    connect_one_way(&fleet.server, fleet.yucca, fleet.immich, false).await;
+    project_in(&fleet, "billing", Some(fleet.yucca)).await;
+    answered(&fleet.server, &mut fleet.link, fleet.yucca_chat, "Release planned.").await;
+
+    let refused = read(&fleet, fleet.immich_chat, fleet.yucca_chat, json!({})).await;
+    assert_eq!((refused["isError"].clone(), text(&refused)), (json!(true), format!("Nothing was read. {IMMICH_CANNOT_REACH_YUCCA}")));
+
+    let not_started = call(&fleet.server, &fleet.link, fleet.immich_chat, "start_conversation", start_arguments("yucca", "billing")).await;
+    assert_eq!((not_started["isError"].clone(), text(&not_started)), (json!(true), format!("Nothing was started. {IMMICH_CANNOT_REACH_YUCCA}")));
+    let (_, conversations) = fleet.server.user.json(fleet.server.user.get("/api/v1/conversations")).await;
+    assert_eq!(conversations.as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn posting_the_pair_again_changes_the_direction_of_the_one_connection() {
+    let fleet = fleet().await;
+    let (_, created) = connect_one_way(&fleet.server, fleet.yucca, fleet.immich, false).await;
+
+    let (status, flipped) = connect_one_way(&fleet.server, fleet.immich, fleet.yucca, false).await;
+
+    assert_eq!(status, 201, "{flipped}");
+    assert_eq!(flipped["id"], created["id"]);
+    let (_, listed) = fleet.server.user.json(fleet.server.user.get("/api/v1/group-connections")).await;
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    propose(&fleet.server, &fleet.link, fleet.yucca_chat, fleet.immich_chat).await;
+    assert_eq!(queue(&fleet.server, fleet.immich_chat).await.len(), 0);
+    propose(&fleet.server, &fleet.link, fleet.immich_chat, fleet.yucca_chat).await;
     assert_eq!(queue(&fleet.server, fleet.yucca_chat).await.len(), 1);
+
+    let (_, both) = connect_one_way(&fleet.server, fleet.yucca, fleet.immich, true).await;
+    assert_eq!((both["id"].clone(), both["both_ways"].clone()), (created["id"].clone(), json!(true)));
+    propose(&fleet.server, &fleet.link, fleet.yucca_chat, fleet.immich_chat).await;
+    assert_eq!(queue(&fleet.server, fleet.immich_chat).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_connection_made_before_directions_existed_is_two_way_after_the_migration() {
+    let fleet = fleet().await;
+    let (low, high) = if fleet.yucca < fleet.immich { (fleet.yucca, fleet.immich) } else { (fleet.immich, fleet.yucca) };
+    let pool = &fleet.server.pool;
+    sqlx::query("drop index group_connections_owner_pair").execute(pool).await.unwrap();
+    sqlx::query("alter table group_connections drop column both_ways").execute(pool).await.unwrap();
+    sqlx::query("alter table group_connections add constraint group_connections_check check (source_group_id < target_group_id)").execute(pool).await.unwrap();
+    sqlx::query("alter table group_connections add constraint group_connections_owner_source_group_id_target_group_id_key unique (owner, source_group_id, target_group_id)").execute(pool).await.unwrap();
+    sqlx::query("insert into group_connections (owner, source_group_id, target_group_id) values ((select owner from groups where id = $1), $1, $2)").bind(low).bind(high).execute(pool).await.unwrap();
+
+    sqlx::raw_sql(include_str!("../../migrations/0175_one_way_group_connections.sql")).execute(pool).await.unwrap();
+
+    let both_ways: bool = sqlx::query_scalar("select both_ways from group_connections").fetch_one(pool).await.unwrap();
+    assert!(both_ways);
+    propose(&fleet.server, &fleet.link, fleet.yucca_chat, fleet.immich_chat).await;
+    propose(&fleet.server, &fleet.link, fleet.immich_chat, fleet.yucca_chat).await;
+    assert_eq!((queue(&fleet.server, fleet.immich_chat).await.len(), queue(&fleet.server, fleet.yucca_chat).await.len()), (1, 1));
 }
 
 fn text(result: &Value) -> String {

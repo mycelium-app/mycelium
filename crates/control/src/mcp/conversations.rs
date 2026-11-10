@@ -215,6 +215,14 @@ async fn refusal(state: &crate::state::AppState, owner: Uuid, from: Uuid, to: Uu
             None => Ok(None),
         }
     };
+    if let (Some(own), Some(target)) = (own_group, target_group) {
+        let reverse = group_connections::reverse_only(state, owner, own, target).await?;
+
+        if reverse.is_some() {
+            return Ok(reverse);
+        }
+    }
+
     let message = match (group_name(own_group).await?, group_name(target_group).await?) {
         (Some(own_name), Some(target_name)) => format!("The {own_name} and {target_name} groups are not connected. Ask the person to connect them in Settings, Agent connections."),
         (None, Some(target_name)) => format!("This conversation is not in a group, so it cannot read {label}. Ask the person to put it in a group and connect that group to {target_name} in Settings, Agent connections."),
@@ -336,13 +344,18 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             };
 
             if !allowed {
-                let message = match caller_group {
-                    Some(own) => {
+                let reverse = match caller_group {
+                    Some(own) => group_connections::reverse_only(state, owner, own, target_group).await?,
+                    None => None,
+                };
+                let message = match (caller_group, reverse) {
+                    (_, Some(sentence)) => sentence,
+                    (Some(own), None) => {
                         let own_name = sqlx::query_scalar::<_, String>("select name from groups where id = $1").bind(own).fetch_one(&state.pool).await?;
 
                         format!("The {own_name} and {target_name} groups are not connected. Ask the person to connect them in Settings, Agent connections.")
                     }
-                    None => format!("This conversation is not in a group, so it cannot start one in {target_name}. Ask the person to put it in a group and connect that group to {target_name} in Settings, Agent connections."),
+                    (None, None) => format!("This conversation is not in a group, so it cannot start one in {target_name}. Ask the person to put it in a group and connect that group to {target_name} in Settings, Agent connections."),
                 };
 
                 return Ok(nothing(message));
@@ -682,7 +695,20 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                         Some(crate::prompts::Sent::Delivered) => format!("Sent to {} (message {}).", proposal.target_title, proposal.id),
                         Some(crate::prompts::Sent::QueuedWhileBusy) => format!("Queued for {} (message {}). It is in the middle of a turn, so the message goes when that turn ends.", proposal.target_title, proposal.id),
                         Some(crate::prompts::Sent::QueuedForOfflineNode) => format!("Queued for {} (message {}). Its node is offline, so the message goes when the node reconnects.", proposal.target_title, proposal.id),
-                        None => format!("Waiting for the person to approve sending this to {} (proposal {}).", proposal.target_title, proposal.id),
+                        None => {
+                            let waiting = format!("Waiting for the person to approve sending this to {} (proposal {}).", proposal.target_title, proposal.id);
+                            let owner = caller.owner().await?;
+                            let (own_group, target_group) = (group_connections::group_of(state, conversation_id).await?, group_connections::group_of(state, proposal.target_id).await?);
+                            let reverse = match (own_group, target_group) {
+                                (Some(own), Some(target)) => group_connections::reverse_only(state, owner, own, target).await?,
+                                _ => None,
+                            };
+
+                            match reverse {
+                                Some(sentence) => format!("{waiting} {sentence}"),
+                                None => waiting,
+                            }
+                        }
                     };
 
                     ToolReply::text(&message, false)
