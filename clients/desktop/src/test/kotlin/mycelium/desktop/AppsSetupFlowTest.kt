@@ -128,6 +128,7 @@ class AppsSetupFlowTest {
         waitForText("Connected to the Home space as sam. Found 214 recipes.")
         rule.onNodeWithText("Meal plans").assertExists()
         rule.onNodeWithText("Shopping list").assertExists()
+        rule.onNodeWithText("Searching and reading run straight away. Adding, changing and deleting recipes and meal plans, setting food nutrition and changing the shopping list ask first.").assertExists()
         rule.onNodeWithText("Continue").performClick()
         rule.onNodeWithText("Add integration").performClick()
 

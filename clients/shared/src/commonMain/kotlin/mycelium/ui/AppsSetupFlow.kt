@@ -296,7 +296,7 @@ internal fun AppsSetupFlow(
                         Tag("Shopping list")
                     }
 
-                    Label("Searching and reading run straight away. Adding recipes, planning meals and changing the shopping list ask first.", style = Tokens.Type.Meta, color = colors.textMuted)
+                    Label("Searching and reading run straight away. Adding, changing and deleting recipes and meal plans, setting food nutrition and changing the shopping list ask first.", style = Tokens.Type.Meta, color = colors.textMuted)
                 }
 
                 is AppsTest.Failed -> Column(
