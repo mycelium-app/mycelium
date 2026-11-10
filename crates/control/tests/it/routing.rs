@@ -169,6 +169,66 @@ async fn any_model_at_a_limit_moves_to_the_first_favourite_with_usage_even_one_a
     assert_eq!(started_on(&mut link).await.as_deref(), Some("sam@example.com"));
 }
 
+async fn running_on_codex_before_claude(server: &Server, claude: mycelium_proto::conversation::LoginInfo) -> (NodeLink, Uuid) {
+    save_any_model(server, json!([{"agent": "codex"}, {"agent": "claude"}])).await;
+    let codex = mycelium_proto::conversation::LoginInfo { agent: mycelium_proto::conversation::AgentId::Codex, ..with_usage("alex@example.com", 70) };
+    let mut link = node_with_accounts(server, "v0.11.0", vec![codex, claude]).await;
+    let (status, created) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "codex", "cwd": "/work/app", "prompt": "Build it", "routing": "any_model"}))).await;
+    assert_eq!(status, 201, "{created}");
+    let id: Uuid = serde_json::from_value(created["id"].clone()).unwrap();
+    assert_eq!(started_on(&mut link).await.as_deref(), Some("alex@example.com"));
+    link.start_session(id, "codex-1").await;
+    expect_prompt(&mut link).await;
+
+    (link, id)
+}
+
+async fn expect_carried_on_with_claude(server: &Server, link: &mut NodeLink, id: Uuid) {
+    assert!(matches!(next_command(link).await, ControlToNode::CloseSession { .. }));
+    assert_eq!(started_on(link).await.as_deref(), Some("work@example.org"));
+    link.start_session(id, "acp-2").await;
+    assert!(expect_prompt(link).await.ends_with("The usage limit was reached on alex@example.com. Continue from where you stopped."));
+    assert_eq!(server.conversation(id).await["status"], "working");
+}
+
+#[tokio::test]
+async fn any_model_carries_on_the_interrupted_turn_on_claude_when_the_codex_workspace_runs_out_of_credits() {
+    let server = Server::start().await;
+    let (mut link, id) = running_on_codex_before_claude(&server, with_usage("work@example.org", 60)).await;
+
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: "Your workspace is out of credits. Add credits to keep going.".into() }).await;
+
+    expect_carried_on_with_claude(&server, &mut link, id).await;
+}
+
+#[tokio::test]
+async fn exhausted_credits_with_every_other_account_at_its_limit_resume_when_one_resets() {
+    let server = Server::start_with(|config| config.scheduler_tick = std::time::Duration::from_millis(50)).await;
+    let resets = chrono::Utc::now() + chrono::Duration::hours(2);
+    let spent = mycelium_proto::conversation::UsageWindow { name: "five_hour".into(), used_percent: 100.0, resets_at: Some(resets), rate_per_hour: None, runs_out_at: None };
+    let claude = mycelium_proto::conversation::LoginInfo { windows: vec![spent], ..with_usage("work@example.org", 0) };
+    let (mut link, id) = running_on_codex_before_claude(&server, claude).await;
+
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: "Your workspace is out of credits. Add credits to keep going.".into() }).await;
+
+    let resume_at = common::eventually("a resume to be scheduled", || async { server.conversation(id).await["resume_at"].as_str().map(|at| at.parse::<chrono::DateTime<chrono::Utc>>().unwrap()) }).await;
+    assert_eq!(server.conversation(id).await["status"], "failed");
+    assert!(resume_at > resets && resume_at <= resets + chrono::Duration::minutes(2), "{resume_at} against {resets}");
+
+    let codex = mycelium_proto::conversation::LoginInfo { agent: mycelium_proto::conversation::AgentId::Codex, ..with_usage("alex@example.com", 0) };
+    report(&server, &mut link, vec![codex, with_usage("work@example.org", 80)], "work@example.org", 80).await;
+    sqlx::query("update conversations set resume_at = now() - interval '1 second' where id = $1").bind(id).execute(&server.pool).await.unwrap();
+
+    common::next_matching(&mut link, |message| matches!(message, ControlToNode::StartSession { account: Some(account), .. } if account == "work@example.org").then_some(())).await;
+    link.start_session(id, "acp-2").await;
+    let carried_on = common::next_matching(&mut link, |message| match message {
+        ControlToNode::Prompt { text, .. } => Some(text.clone()),
+        _ => None,
+    })
+    .await;
+    assert!(carried_on.ends_with("Continue from where you stopped."), "{carried_on}");
+}
+
 #[tokio::test]
 async fn continuing_on_a_named_account_pins_the_conversation() {
     let server = Server::start().await;

@@ -492,6 +492,7 @@ async fn runs_on_node(state: &AppState, node_id: Uuid, conversation_id: Uuid) ->
 
 async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid, owner: Option<Uuid>, seq: Option<i64>, message: &str, limit: Option<crate::usage_limits::Detected>) -> ApiResult<()> {
     let resume_at = limit.as_ref().and_then(|limit| limit.resume_at);
+    let automatic = limit.as_ref().is_some_and(|limit| limit.automatic);
     let limited_account = limit.as_ref().and_then(|limit| limit.account.clone());
     let limited_window = limit.as_ref().and_then(|limit| limit.payload["usage_limit"]["window"].as_str().map(str::to_string));
 
@@ -537,7 +538,12 @@ async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid
         }
     }
 
-    if let Some(at) = resume_at.filter(|_| recorded && !switched) {
+    let freed_at = match owner.filter(|_| recorded && automatic && !switched) {
+        Some(owner) => crate::routing::next_free_at(state, owner, conversation_id).await?.map(|at| at + chrono::Duration::seconds(crate::usage_limits::RESUME_DELAY_SECONDS)),
+        None => None,
+    };
+
+    if let Some(at) = resume_at.into_iter().chain(freed_at).min().filter(|_| recorded && !switched) {
         crate::usage_limits::schedule(state, conversation_id, at).await?;
     }
 

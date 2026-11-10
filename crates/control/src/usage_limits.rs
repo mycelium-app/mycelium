@@ -16,7 +16,7 @@ use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-const RESUME_DELAY_SECONDS: i64 = 60;
+pub const RESUME_DELAY_SECONDS: i64 = 60;
 const AUTOMATIC_RESUME_CAP: i32 = 3;
 const DUE_BATCH: i64 = 20;
 const LIMIT_REPLY_LENGTH: usize = 400;
@@ -133,6 +133,7 @@ fn zoned(zone: Tz, date: NaiveDate, time: NaiveTime) -> Option<DateTime<Utc>> {
 pub struct Detected {
     pub payload: Value,
     pub resume_at: Option<DateTime<Utc>>,
+    pub automatic: bool,
     pub account: Option<String>,
 }
 
@@ -175,7 +176,7 @@ pub async fn inspect(state: &AppState, node_id: Uuid, conversation_id: Uuid, mes
     let automatic = on_usage_limit == "resume" && !side_chat && resumes < AUTOMATIC_RESUME_CAP;
     let resume_at = limit.resets_at.filter(|_| automatic).map(|at| at + Duration::seconds(RESUME_DELAY_SECONDS));
 
-    Ok(Some(Detected { payload: json!({"message": message, "usage_limit": {"window": limit.window, "resets_at": limit.resets_at}}), resume_at, account }))
+    Ok(Some(Detected { payload: json!({"message": message, "usage_limit": {"window": limit.window, "resets_at": limit.resets_at}}), resume_at, automatic, account }))
 }
 
 pub async fn inspect_reply(state: &AppState, node_id: Uuid, conversation_id: Uuid) -> ApiResult<Option<(String, Detected)>> {

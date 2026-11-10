@@ -23,6 +23,7 @@ pub struct Usage {
     pub five_left: Option<f64>,
     pub week_left: Option<f64>,
     pub week_resets: Option<DateTime<Utc>>,
+    pub frees_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -45,13 +46,15 @@ pub fn usage_of(windows: &[UsageWindow], now: DateTime<Utc>) -> Usage {
     let five_left = left(FIVE_HOUR);
     let week_left = left(SEVEN_DAY);
     let week_resets = windows.iter().find(|window| window.name == SEVEN_DAY).and_then(|window| window.resets_at).filter(|reset| *reset > now);
+    let limiting = windows.iter().filter(|window| [FIVE_HOUR, SEVEN_DAY].contains(&window.name.as_str()) && window.used_percent >= FULL);
+    let frees_at = limiting.filter_map(|window| window.resets_at).filter(|reset| *reset > now).max();
 
-    Usage { limited: [five_left, week_left].into_iter().flatten().any(|remaining| remaining <= 0.0), five_left, week_left, week_resets }
+    Usage { limited: [five_left, week_left].into_iter().flatten().any(|remaining| remaining <= 0.0), five_left, week_left, week_resets, frees_at }
 }
 
 fn usage_with_fallback(windows: &[UsageWindow], usage_left: Option<i16>, now: DateTime<Utc>) -> Usage {
     match usage_left.filter(|_| windows.is_empty()) {
-        Some(left) => Usage { limited: left <= 0, five_left: Some(f64::from(left)), week_left: None, week_resets: None },
+        Some(left) => Usage { limited: left <= 0, five_left: Some(f64::from(left)), week_left: None, week_resets: None, frees_at: None },
         None => usage_of(windows, now),
     }
 }
@@ -363,6 +366,28 @@ pub async fn switch_after_limit(state: &AppState, owner: Uuid, conversation_id: 
             false
         }
     }
+}
+
+pub async fn next_free_at(state: &AppState, owner: Uuid, conversation_id: Uuid) -> ApiResult<Option<DateTime<Utc>>> {
+    let row = find_owned(&state.pool, conversation_id, owner).await?;
+    let Some(routing) = row.routing.as_deref().and_then(Routing::parse) else {
+        return Ok(None);
+    };
+    let here = state.hub.is_online(row.node_id).then_some(row.node_id);
+    let mut earliest: Option<DateTime<Utc>> = None;
+
+    for entry in entries_of(state, owner, routing).await? {
+        let Some(agent) = entry.agent else {
+            continue;
+        };
+        let found = candidates(state, owner, agent, here).await?;
+        let others = found.iter().filter(|candidate| !(agent.as_str() == row.agent && row.account.as_ref() == Some(&candidate.account)));
+        let frees = others.filter(|candidate| entry.account.as_ref().is_none_or(|account| &candidate.account == account)).filter_map(|candidate| candidate.usage.frees_at);
+
+        earliest = earliest.into_iter().chain(frees).min();
+    }
+
+    Ok(earliest)
 }
 
 pub async fn carry_on(state: &AppState, owner: Uuid, id: Uuid, text: &str) -> ApiResult<()> {
