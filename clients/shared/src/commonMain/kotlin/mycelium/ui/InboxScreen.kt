@@ -163,7 +163,7 @@ fun InboxScreen(store: Store, state: AppState, onOpenConversation: (String) -> U
 
     val shown = (items + lingering.values.filter { lingered -> items.none { it.key == lingered.key } }).sortedByDescending { it.waitingSince }
     val needsYou: @Composable (Modifier, Boolean) -> Unit = { modifier, headed -> NeedsYouColumn(store, state, shown, state.needsYouFocus, voice.open, onOpenConversation, modifier, headed) }
-    val feedColumn: @Composable (Modifier) -> Unit = { modifier -> FeedColumn(posts, onOpenConversation, modifier) }
+    val feedColumn: @Composable (Modifier) -> Unit = { modifier -> FeedColumn(posts, state.projects.values, onOpenConversation, modifier) }
     val statsColumn: @Composable (Modifier) -> Unit = { modifier -> StatsColumn(store, state, stats, onOpenConversation, onOpenUsageHistory, modifier) }
 
     Column(Modifier.fillMaxSize()) {
@@ -387,7 +387,7 @@ private fun ActionItemCard(request: InboxRequest.ActionItem, onDone: () -> Unit)
 }
 
 @Composable
-private fun FeedColumn(posts: List<FeedPost>, onOpenConversation: (String) -> Unit, modifier: Modifier) {
+private fun FeedColumn(posts: List<FeedPost>, projects: Collection<Project>, onOpenConversation: (String) -> Unit, modifier: Modifier) {
     Column(modifier) {
         ColumnHeading("Feed")
 
@@ -395,7 +395,11 @@ private fun FeedColumn(posts: List<FeedPost>, onOpenConversation: (String) -> Un
             Label("No posts yet", Modifier.padding(horizontal = Tokens.Space.S4), Tokens.Type.Ui, MyTheme.colors.textMuted)
         } else {
             LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-                items(posts) { post -> FeedPostRow(post, onOpenConversation) }
+                items(posts) { post ->
+                    CompositionLocalProvider(LocalFeedProjects provides projects) {
+                        FeedPostRow(post, onOpenConversation)
+                    }
+                }
             }
         }
     }
@@ -405,6 +409,7 @@ private fun FeedColumn(posts: List<FeedPost>, onOpenConversation: (String) -> Un
 private fun FeedPostRow(post: FeedPost, onOpenConversation: (String) -> Unit) {
     val colors = MyTheme.colors
     val place = listOfNotNull(post.projectName, post.conversationTitle).joinToString(", ")
+    val shownProject = post.projectName?.takeIf { name -> feedBadges(post.text).none { it.kind == FeedBadgeKind.Project && it.label.equals(name, ignoreCase = true) } }
 
     Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S4), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
         Box(Modifier.size(Tokens.Size.Avatar).clip(CircleShape).background(colors.bgSelected), contentAlignment = Alignment.Center) {
@@ -412,23 +417,19 @@ private fun FeedPostRow(post: FeedPost, onOpenConversation: (String) -> Unit) {
         }
 
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                Label(post.author, Modifier.weight(1f), Tokens.Type.UiStrong, maxLines = 1)
-                Label(post.time, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-            }
-
             MarkdownBlocks(parsedMarkdown(post.text), textStyle = Tokens.Type.Ui, blockSpacing = Tokens.Space.S0_5)
 
-            Row(
-                Modifier.heightIn(min = touchMin(Tokens.Size.ControlSm + Tokens.Space.S0_5)).pressable({ onOpenConversation(post.conversationId) }, description = "Open chat: $place", shape = ControlShape),
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (post.projectName != null) {
-                    ProjectIcon(post.project)
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+                    Label(post.author, Modifier.weight(1f, fill = false), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+
+                    if (shownProject != null) {
+                        Label(shownProject, Modifier.weight(1f, fill = false), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+                    }
                 }
 
-                Label(place, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                Label(post.time, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                MyButton({ onOpenConversation(post.conversationId) }, icon = MyIcon.Chat, description = "Open chat: $place", size = ButtonSize.Sm, muted = true)
             }
         }
     }

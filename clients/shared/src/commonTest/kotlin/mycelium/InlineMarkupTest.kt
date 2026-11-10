@@ -8,7 +8,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import mycelium.state.isFilePath
 import mycelium.state.parentFolder
+import mycelium.ui.FeedBadge
+import mycelium.ui.FeedBadgeKind
+import mycelium.ui.MyIcon
 import mycelium.ui.PathBadges
+import mycelium.ui.feedBadgeIcon
+import mycelium.ui.parseFeedBadge
 import mycelium.ui.inlineMarkup
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -114,5 +119,43 @@ class InlineMarkupTest {
         assertTrue(!isFilePath("https://example.com/a.html"))
         assertTrue(!isFilePath("foo.bar"))
         assertEquals("/work/src", parentFolder("/work/src/main.rs:4"))
+    }
+
+    @Test
+    fun feedBadgesParseEachKindAndCustomBadgesTheirLabelAndIcon() {
+        assertEquals(FeedBadge("[[project:Mycelium]]", FeedBadgeKind.Project, "Mycelium"), parseFeedBadge("[[project:Mycelium]]", 0))
+        assertEquals(FeedBadge("[[type:release]]", FeedBadgeKind.Type, "release"), parseFeedBadge("[[type:release]]", 0))
+        assertEquals(FeedBadge("[[outcome:live]]", FeedBadgeKind.Outcome, "live"), parseFeedBadge("[[outcome:live]]", 0))
+        assertEquals(FeedBadge("[[custom:Nightly|moon]]", FeedBadgeKind.Custom, "Nightly", "moon"), parseFeedBadge("[[custom:Nightly|moon]]", 0))
+        assertEquals(FeedBadge("[[custom:Beta]]", FeedBadgeKind.Custom, "Beta"), parseFeedBadge("[[custom:Beta]]", 0))
+    }
+
+    @Test
+    fun feedBadgesUseThePredefinedIconsAndADefaultForAnythingElse() {
+        assertEquals(MyIcon.Tag, feedBadgeIcon(FeedBadge("", FeedBadgeKind.Type, "release")))
+        assertEquals(MyIcon.Failed, feedBadgeIcon(FeedBadge("", FeedBadgeKind.Outcome, "Failed")))
+        assertEquals(MyIcon.Moon, feedBadgeIcon(FeedBadge("", FeedBadgeKind.Custom, "Nightly", "moon")))
+        assertEquals(MyIcon.Star, feedBadgeIcon(FeedBadge("", FeedBadgeKind.Custom, "Nightly", "not-an-icon")))
+        assertEquals(MyIcon.Star, feedBadgeIcon(FeedBadge("", FeedBadgeKind.Custom, "Nightly")))
+    }
+
+    @Test
+    fun malformedFeedBadgeMarkupIsNotABadge() {
+        for (text in listOf("[[nonsense:label]]", "[[type:]]", "[[type:   ]]", "[[type:release", "[[type]]", "[[type:release|tag]]", "[[custom:Beta|Bad Icon]]", "[[custom:${"x".repeat(33)}]]", "[type:release]")) {
+            assertEquals(null, parseFeedBadge(text, 0), text)
+        }
+    }
+
+    @Test
+    fun feedPostMarkupRendersBadgesInlineAndLeavesEverythingElseAsText() {
+        val text = inlineMarkup("[[type:release]] v1 is **[[outcome:live]]** and [[nope:x]]", Color.Black, Color.Blue, null, feedBadges = true)
+
+        assertEquals("release v1 is live and [[nope:x]]", text.text)
+    }
+
+    @Test
+    fun plainPostsAndOtherMarkdownNeverTurnIntoBadges() {
+        assertEquals("[[type:release]]", render("[[type:release]]").text)
+        assertEquals("Search now finds branches.", inlineMarkup("Search now finds branches.", Color.Black, Color.Blue, null, feedBadges = true).text)
     }
 }

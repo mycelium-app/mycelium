@@ -91,6 +91,48 @@ async fn a_post_at_the_limit_is_accepted() {
 }
 
 #[tokio::test]
+async fn badge_markup_is_stored_as_written_and_counts_only_its_label() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    let badge = "[[custom:Nightly|moon]]";
+    let message = format!("{badge}{}", "x".repeat(280 - "Nightly".len()));
+
+    let reply = post(&server, &link.token, conversation.id, &message).await;
+
+    assert_eq!(reply["isError"], false, "{reply}");
+    assert_eq!(posts(&server).await[0]["message"], message);
+}
+
+#[tokio::test]
+async fn text_that_is_not_badge_markup_counts_every_character() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    let message = format!("[[nonsense:Nightly]]{}", "x".repeat(261));
+
+    let reply = post(&server, &link.token, conversation.id, &message).await;
+
+    assert_eq!(reply["isError"], true, "{reply}");
+    assert!(posts(&server).await.is_empty());
+}
+
+#[tokio::test]
+async fn post_to_feed_teaches_the_badge_markup() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+
+    let reply = server.agent_mcp(&link.token, conversation.id, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})).await;
+
+    let tools = reply["result"]["tools"].as_array().unwrap();
+    let tool = tools.iter().find(|tool| tool["name"] == "post_to_feed").unwrap();
+    let description = tool["description"].as_str().unwrap();
+    assert!(description.contains("[[project:Mycelium]]"), "{description}");
+    assert!(description.contains("[[custom:Nightly|moon]]"), "{description}");
+}
+
+#[tokio::test]
 async fn an_empty_post_is_refused_and_says_what_to_enter() {
     let server = Server::start().await;
     let link = server.online_node("laptop").await;

@@ -42,6 +42,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -527,14 +528,14 @@ internal fun MarkdownBlocks(blocks: List<MarkdownBlock>, textStyle: TextStyle = 
         for (block in blocks.filterNot { it is MarkdownBlock.Code && it.language == SpokenLanguage }) {
             when (block) {
                 is MarkdownBlock.Paragraph -> Prose(block.text, textStyle)
-                is MarkdownBlock.Heading -> BasicText(
-                    inlineText(block.text, colors.text),
+                is MarkdownBlock.Heading -> MarkdownText(
+                    block.text,
                     Modifier.semantics { heading() },
                     style = when {
                         block.level <= 2 -> Tokens.Type.Display
                         block.level <= 4 -> Tokens.Type.Title
                         else -> Tokens.Type.UiStrong
-                    }.themed(),
+                    },
                 )
                 is MarkdownBlock.Code -> {
                     val generated = remember(block.text) { if (block.language == GeneratedUiLanguage) parseUiBlock(block.text) else null }
@@ -668,7 +669,7 @@ internal fun highlighted(language: String, code: String): AnnotatedString {
 }
 
 @Composable
-internal fun inlineText(text: String, color: Color): AnnotatedString {
+internal fun inlineText(text: String, color: Color, feedBadges: Boolean = false): AnnotatedString {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
 
@@ -676,7 +677,7 @@ internal fun inlineText(text: String, color: Color): AnnotatedString {
 
     val openPath = LocalPathOpener.current
 
-    return remember(text, color, colors.accent, colors.bgSelected, mono, platform, openPath) { inlineMarkup(text, color, colors.accent, mono, platform?.let { { url -> it.openUrl(url) } }, PathBadges(colors.bgSelected, openPath)) }
+    return remember(text, color, colors.accent, colors.bgSelected, mono, platform, openPath, feedBadges) { inlineMarkup(text, color, colors.accent, mono, platform?.let { { url -> it.openUrl(url) } }, PathBadges(colors.bgSelected, openPath), feedBadges) }
 }
 
 @Composable
@@ -688,7 +689,14 @@ internal fun MarkdownText(
     maxLines: Int = Int.MAX_VALUE,
     overflow: TextOverflow = if (maxLines == 1) TextOverflow.Ellipsis else TextOverflow.Clip,
 ) {
-    BasicText(inlineText(text, color), modifier, style.themed(), maxLines = maxLines, overflow = overflow)
+    val feedProjects = LocalFeedProjects.current
+
+    if (feedProjects == null) {
+        BasicText(inlineText(text, color), modifier, style.themed(), maxLines = maxLines, overflow = overflow)
+        return
+    }
+
+    BasicText(inlineText(text, color, feedBadges = true), modifier, style.themed(), maxLines = maxLines, overflow = overflow, inlineContent = feedBadgeContent(text, feedProjects))
 }
 
 @Composable
@@ -769,10 +777,10 @@ class PathBadges(val background: Color, val open: ((String) -> Unit)?)
 
 val LocalPathOpener = staticCompositionLocalOf<((String) -> Unit)?> { null }
 
-fun inlineMarkup(text: String, color: Color, codeColor: Color, codeFont: FontFamily? = Tokens.Type.Code.fontFamily, open: ((String) -> Unit)? = null, badges: PathBadges? = null): AnnotatedString =
+fun inlineMarkup(text: String, color: Color, codeColor: Color, codeFont: FontFamily? = Tokens.Type.Code.fontFamily, open: ((String) -> Unit)? = null, badges: PathBadges? = null, feedBadges: Boolean = false): AnnotatedString =
     buildAnnotatedString {
         withStyle(SpanStyle(color = color)) {
-            appendInline(text, codeColor, codeFont, open, badges)
+            appendInline(text, codeColor, codeFont, open, badges, feedBadges)
         }
     }
 
@@ -783,7 +791,7 @@ private fun AnnotatedString.Builder.appendLink(url: String, codeColor: Color, op
     withLink(annotation) { label() }
 }
 
-private fun AnnotatedString.Builder.appendInline(text: String, codeColor: Color, codeFont: FontFamily?, open: ((String) -> Unit)?, badges: PathBadges? = null) {
+private fun AnnotatedString.Builder.appendInline(text: String, codeColor: Color, codeFont: FontFamily?, open: ((String) -> Unit)?, badges: PathBadges? = null, feedBadges: Boolean = false) {
     var index = 0
 
     while (index < text.length) {
@@ -796,6 +804,14 @@ private fun AnnotatedString.Builder.appendInline(text: String, codeColor: Color,
         if (text[index] == '\\' && index + 1 < text.length && !text[index + 1].isLetterOrDigit()) {
             append(text[index + 1])
             index += 2
+            continue
+        }
+
+        val feedBadge = if (feedBadges) parseFeedBadge(text, index) else null
+
+        if (feedBadge != null) {
+            appendInlineContent(feedBadge.token, feedBadge.label)
+            index += feedBadge.token.length
             continue
         }
 
@@ -856,12 +872,12 @@ private fun AnnotatedString.Builder.appendInline(text: String, codeColor: Color,
             } else {
                 withStyle(SpanStyle(color = codeColor, fontFamily = codeFont, fontSize = Tokens.Type.Code.fontSize)) { append(inner) }
             }
-            "~~" -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { appendInline(inner, codeColor, codeFont, open) }
-            "^" -> withStyle(SpanStyle(baselineShift = BaselineShift.Superscript, fontSize = 0.75.em)) { appendInline(inner, codeColor, codeFont, open) }
-            "~" -> withStyle(SpanStyle(baselineShift = BaselineShift.Subscript, fontSize = 0.75.em)) { appendInline(inner, codeColor, codeFont, open) }
-            "*", "_" -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { appendInline(inner, codeColor, codeFont, open) }
-            "***" -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, fontStyle = FontStyle.Italic)) { appendInline(inner, codeColor, codeFont, open) }
-            else -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { appendInline(inner, codeColor, codeFont, open) }
+            "~~" -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { appendInline(inner, codeColor, codeFont, open, feedBadges = feedBadges) }
+            "^" -> withStyle(SpanStyle(baselineShift = BaselineShift.Superscript, fontSize = 0.75.em)) { appendInline(inner, codeColor, codeFont, open, feedBadges = feedBadges) }
+            "~" -> withStyle(SpanStyle(baselineShift = BaselineShift.Subscript, fontSize = 0.75.em)) { appendInline(inner, codeColor, codeFont, open, feedBadges = feedBadges) }
+            "*", "_" -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { appendInline(inner, codeColor, codeFont, open, feedBadges = feedBadges) }
+            "***" -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, fontStyle = FontStyle.Italic)) { appendInline(inner, codeColor, codeFont, open, feedBadges = feedBadges) }
+            else -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { appendInline(inner, codeColor, codeFont, open, feedBadges = feedBadges) }
         }
 
         index = close + marker.length

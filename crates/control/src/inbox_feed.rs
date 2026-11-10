@@ -11,6 +11,9 @@ use uuid::Uuid;
 
 const FEED_LIMIT: i64 = 30;
 pub const LONGEST_POST: usize = 280;
+const BADGE_KINDS: [&str; 4] = ["project", "type", "outcome", "custom"];
+const LONGEST_BADGE_LABEL: usize = 32;
+const LONGEST_BADGE_ICON: usize = 32;
 const POST_SELECT: &str = "select f.id, a.name as assistant, c.agent, c.model, f.message, p.name as project, f.conversation_id, c.title as conversation_title, f.created_at
      from feed_posts f join conversations c on c.id = f.conversation_id left join assistants a on a.id = c.assistant_id left join projects p on p.id = c.project_id";
 
@@ -36,6 +39,38 @@ impl PostRow {
     }
 }
 
+fn shown_length(message: &str) -> usize {
+    let mut rest = message;
+    let mut shown = 0;
+
+    while let Some(start) = rest.find("[[") {
+        shown += rest[..start].chars().count();
+        let after = &rest[start + 2..];
+        let badge = after.find("]]").and_then(|end| {
+            let (kind, value) = after[..end].split_once(':')?;
+            let (label, icon) = value.split_once('|').map_or((value, None), |(label, icon)| (label, Some(icon)));
+            let label_chars = label.trim().chars().count();
+            let icon_fits = icon.is_none_or(|icon| kind == "custom" && (1..=LONGEST_BADGE_ICON).contains(&icon.len()) && icon.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'));
+            let label_fits = (1..=LONGEST_BADGE_LABEL).contains(&label_chars) && !label.contains(['[', ']', '\n']);
+
+            (BADGE_KINDS.contains(&kind) && icon_fits && label_fits).then_some((label_chars, end))
+        });
+
+        match badge {
+            Some((label_chars, end)) => {
+                shown += label_chars;
+                rest = &after[end + 2..];
+            }
+            None => {
+                shown += 1;
+                rest = &rest[start + 1..];
+            }
+        }
+    }
+
+    shown + rest.chars().count()
+}
+
 pub async fn post_from_agent(state: &AppState, owner: Uuid, conversation_id: Uuid, arguments: &Value) -> ApiResult<Result<(), String>> {
     let message = arguments.get("message").and_then(Value::as_str).map(str::trim).unwrap_or_default();
 
@@ -43,7 +78,7 @@ pub async fn post_from_agent(state: &AppState, owner: Uuid, conversation_id: Uui
         return Ok(Err("Enter a message to post to the feed.".to_string()));
     }
 
-    if message.chars().count() > LONGEST_POST {
+    if shown_length(message) > LONGEST_POST {
         return Ok(Err(format!("Message must be {LONGEST_POST} characters or fewer.")));
     }
 

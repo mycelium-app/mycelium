@@ -248,8 +248,8 @@ private val Calls = list(
 )
 
 private val InboxFeedJson = """{"posts":[
-{"id":"f1","author":"Archivist","message":"The restore flow copy is live on staging.example.com.","project":"harbour","conversation_id":"$Main","conversation_title":"Release checklist","created_at":"${ago(minutes = 2)}"},
-{"id":"f2","author":"Scribe","message":"Release notes for v0.3.7 are published.","project":"atlas","conversation_id":"$Main","conversation_title":"Release checklist","created_at":"${ago(minutes = 11)}"},
+{"id":"f1","author":"Archivist","message":"[[project:harbour]] [[type:release]] The restore flow copy is [[outcome:live]] on staging.example.com.","project":"harbour","conversation_id":"$Main","conversation_title":"Release checklist","created_at":"${ago(minutes = 2)}"},
+{"id":"f2","author":"Scribe","message":"[[project:atlas]] Release notes for v0.3.7 are [[outcome:shipped]], with [[custom:Nightly|moon]] builds to follow once every part of the product has moved across.","project":"atlas","conversation_id":"$Main","conversation_title":"Release checklist","created_at":"${ago(minutes = 11)}"},
 {"id":"f3","author":"Courier","message":"The integration run now passes on a fresh runner.","project":"ledger","conversation_id":"$Main","conversation_title":"Release checklist","created_at":"${ago(minutes = 24)}"}]}"""
 
 private val Extra = linkedMapOf(

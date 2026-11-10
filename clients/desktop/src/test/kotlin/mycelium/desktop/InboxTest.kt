@@ -1,5 +1,10 @@
 package mycelium.desktop
 
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -295,6 +300,39 @@ class InboxTest {
         rule.onNodeWithContentDescription("Open chat: harbour, Restore flow copy").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("The restore flow copy is live.").fetchSemanticsNodes().isEmpty() }
+    }
+
+    @Test
+    fun aPostDrawsItsInlineBadgesWithAccessibleNames() {
+        show("done", """{"posts":[${feedPost("p1", "[[project:Mycelium]] [[type:release]] v1 is [[outcome:live]] with [[custom:Nightly|moon]] and [[nope:x]].", project = "Mycelium")}]}""")
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Outcome: live").fetchSemanticsNodes().isNotEmpty() }
+        for (name in listOf("Project: Mycelium", "Type: release", "Outcome: live", "Nightly")) {
+            rule.onNode(hasContentDescription(name) and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Image)).assertExists()
+        }
+
+        rule.onNodeWithText("Mycelium release v1 is live with Nightly and [[nope:x]].").assertExists()
+        rule.onNodeWithContentDescription("Open chat: Mycelium, Restore flow copy").assertHasClickAction()
+    }
+
+    @Test
+    fun aProjectBadgeReplacesTheProjectNameOnThePostRow() {
+        show("done", """{"posts":[${feedPost("p1", "[[project:harbour]] The copy is out.")}, ${feedPost("p2", "The guide is out.", project = "atlas")}]}""")
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Project: harbour").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("harbour").assertDoesNotExist()
+        rule.onNodeWithText("atlas").assertExists()
+    }
+
+    @Test
+    fun theChatTitleIsNotShownOnAPostButItsChatStillOpens() {
+        show("done", """{"posts":[${feedPost("p1", "[[type:release]] The copy is out.")}]}""")
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open chat: harbour, Restore flow copy").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithText("Restore flow copy").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Open chat: harbour, Restore flow copy").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Type: release").fetchSemanticsNodes().isEmpty() }
     }
 
     @Test
