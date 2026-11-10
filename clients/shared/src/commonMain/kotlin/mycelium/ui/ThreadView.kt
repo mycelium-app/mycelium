@@ -46,7 +46,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.runtime.staticCompositionLocalOf
 import mycelium.state.isFilePath
-import mycelium.state.subagentsOf
+import mycelium.state.threadSubagentsOf
 import mycelium.state.BadgeGap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.buildAnnotatedString
@@ -231,7 +231,7 @@ fun ThreadView(
                         }
                     }
 
-                    if (subagents != null && subagentsOf(subagents.state.conversations.values, subagents.conversationId).isNotEmpty()) {
+                    if (subagents != null && threadSubagentsOf(subagents.state.conversations.values, subagents.conversationId).isNotEmpty()) {
                         item(key = "subagents") {
                             SubagentCards(subagents)
                         }

@@ -1,5 +1,7 @@
 package mycelium.state
 
+import kotlin.time.Clock
+import kotlin.time.Duration.Companion.hours
 import kotlin.time.Instant
 import mycelium.api.Artifact
 import mycelium.api.ArtifactAccessRequest
@@ -421,6 +423,19 @@ fun subagentSections(conversations: Collection<Conversation>, conversationId: St
 
 fun subagentsOf(conversations: Collection<Conversation>, parentId: String): List<Conversation> =
     conversations.filter { it.archivedAt == null && it.parentId == parentId && it.isSubagent }.sortedByDescending { it.createdAt }
+
+private val SubagentRecentWindow = 1.hours
+
+fun threadSubagentsOf(conversations: Collection<Conversation>, parentId: String, now: Instant = Clock.System.now()): List<Conversation> {
+    val subagents = subagentsOf(conversations, parentId)
+    val waiting = subagents.filter { it.status == ConversationStatus.Input }
+    val running = subagents.filter { it.status == ConversationStatus.Working }
+    val recentlyFinished = (subagents - waiting.toSet() - running.toSet())
+        .filter { subagent -> instantOrNull(subagent.updatedAt)?.let { now - it < SubagentRecentWindow } == true }
+        .sortedByDescending { it.updatedAt }
+
+    return waiting + running + recentlyFinished
+}
 
 internal fun Map<String, List<String>>.withoutFirst(conversationId: String, text: String?): Map<String, List<String>> {
     val current = this[conversationId] ?: return this

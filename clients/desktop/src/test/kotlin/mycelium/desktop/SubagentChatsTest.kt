@@ -31,6 +31,8 @@ import kotlin.test.assertTrue
 
 private const val Parent = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Review the change","status":"review","acp_session_id":"s","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
 private const val Subagent = """{"id":"c2","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Check the build","status":"review","created_at":"2026-10-22T10:01:00Z","updated_at":"2026-10-22T10:02:00Z","parent_id":"c1","side_kind":"subagent"}"""
+private const val DoneSubagent = """{"id":"c3","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Audit the lockfile for drift","status":"done","created_at":"2026-10-22T10:03:00Z","updated_at":"2026-10-22T10:04:00Z","parent_id":"c1","side_kind":"subagent"}"""
+private const val FailedSubagent = """{"id":"c4","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Dry run the migration","status":"failed","created_at":"2026-10-22T10:05:00Z","updated_at":"2026-10-22T10:06:00Z","parent_id":"c1","side_kind":"subagent"}"""
 
 private object SubagentPlatform : Platform {
     override val originUrl: String? = null
@@ -52,12 +54,12 @@ class SubagentChatsTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private fun shell() {
+    private fun shell(conversations: String = "[$Parent,$Subagent]") {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             val body = when {
                 path.endsWith("/experiments") -> EnabledExperiments
-                path.endsWith("/conversations") && request.url.parameters["archived"] != "true" -> "[$Parent,$Subagent]"
+                path.endsWith("/conversations") && request.url.parameters["archived"] != "true" -> conversations
                 path.endsWith("/conversations/c1") -> Parent
                 path.endsWith("/conversations/c2") -> Subagent
                 path.endsWith("/events") || path.endsWith("/queue") || path.endsWith("/nodes") || path.endsWith("/conversations") -> "[]"
@@ -87,6 +89,17 @@ class SubagentChatsTest {
 
         assertEquals(0, rule.onAllNodesWithContentDescription(", subagent", substring = true).fetchSemanticsNodes().size)
         assertEquals(1, rule.onAllNodes(hasContentDescription("Check the build, ", substring = true) and hasAnyAncestor(hasContentDescription("Subagents and workflows"))).fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun subagentsFinishedOverAnHourAgoLeaveTheThreadAndStayInThePanelHistory() {
+        shell("[$Parent,$Subagent,$DoneSubagent,$FailedSubagent]")
+
+        openSubagentsOfTheParent()
+
+        assertEquals(1, rule.onAllNodes(hasContentDescription("Audit the lockfile for drift, Done, ", substring = true) and hasAnyAncestor(hasContentDescription("Subagents and workflows"))).fetchSemanticsNodes().size)
+        assertEquals(1, rule.onAllNodes(hasContentDescription("Dry run the migration, Failed, ", substring = true) and hasAnyAncestor(hasContentDescription("Subagents and workflows"))).fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithContentDescription("Subagents").fetchSemanticsNodes().size)
     }
 
     @Test

@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
@@ -29,8 +30,9 @@ import mycelium.state.agentName
 import mycelium.state.relativeTime
 import mycelium.state.buildThread
 import mycelium.state.statusSectionName
-import mycelium.state.subagentsOf
+import mycelium.state.threadSubagentsOf
 
+private val SubagentListMaxHeight = Tokens.Size.Row * 5
 private val SubagentPlaceWidth = 184.dp
 private val SubagentStatusWidth = 76.dp
 private val SubagentAgeWidth = 32.dp
@@ -41,7 +43,7 @@ val LocalThreadSubagents = compositionLocalOf<ThreadSubagents?> { null }
 
 @Composable
 fun SubagentCards(actions: ThreadSubagents) {
-    val subagents = subagentsOf(actions.state.conversations.values, actions.conversationId)
+    val subagents = threadSubagentsOf(actions.state.conversations.values, actions.conversationId)
 
     if (subagents.isEmpty()) {
         return
@@ -71,25 +73,27 @@ fun SubagentCards(actions: ThreadSubagents) {
             }
 
             if (expanded) {
-                for (subagent in subagents) {
-                    val status = statusSectionName(subagent.status)
-                    val place = listOfNotNull(subagent.model?.ifEmpty { null }, actions.state.nodes[subagent.nodeId]?.name?.let { "on $it" }).joinToString(" ")
-                    val age = relativeTime(subagent.createdAt)
+                Column(Modifier.fillMaxWidth().heightIn(max = SubagentListMaxHeight).verticalScrollWithBar()) {
+                    for (subagent in subagents) {
+                        val status = statusSectionName(subagent.status)
+                        val place = listOfNotNull(subagent.model?.ifEmpty { null }, actions.state.nodes[subagent.nodeId]?.name?.let { "on $it" }).joinToString(" ")
+                        val age = relativeTime(subagent.createdAt)
 
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .pressable({ actions.onOpen(subagent.id) }, description = listOf(subagent.title, agentName(subagent.agent).substringBefore(" "), place, status, age).filter { it.isNotEmpty() }.joinToString(", "))
-                            .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1_5),
-                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(iconOf(subagent.status), toneOf(subagent.status).color(), Tokens.Size.IconSm)
-                        Label(subagent.title, Modifier.weight(1f), maxLines = 1)
-                        Icon(agentIcon(subagent.agent), colors.textMuted, Tokens.Size.IconSm)
-                        Label(place, Modifier.width(SubagentPlaceWidth), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
-                        Label(status, Modifier.width(SubagentStatusWidth), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
-                        Label(age, Modifier.width(SubagentAgeWidth), Tokens.Type.Meta.copy(textAlign = TextAlign.End), colors.textFaint, maxLines = 1)
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .pressable({ actions.onOpen(subagent.id) }, description = listOf(subagent.title, agentName(subagent.agent).substringBefore(" "), place, status, age).filter { it.isNotEmpty() }.joinToString(", "))
+                                .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1_5),
+                            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(iconOf(subagent.status), toneOf(subagent.status).color(), Tokens.Size.IconSm)
+                            Label(subagent.title, Modifier.weight(1f), maxLines = 1)
+                            Icon(agentIcon(subagent.agent), colors.textMuted, Tokens.Size.IconSm)
+                            Label(place, Modifier.width(SubagentPlaceWidth), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+                            Label(status, Modifier.width(SubagentStatusWidth), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+                            Label(age, Modifier.width(SubagentAgeWidth), Tokens.Type.Meta.copy(textAlign = TextAlign.End), colors.textFaint, maxLines = 1)
+                        }
                     }
                 }
             }
