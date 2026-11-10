@@ -230,6 +230,22 @@ async fn exhausted_credits_with_every_other_account_at_its_limit_resume_when_one
 }
 
 #[tokio::test]
+async fn an_approval_review_refused_for_lack_of_credits_carries_the_turn_on_another_account() {
+    let server = Server::start().await;
+    let (mut link, id) = running_on_codex_before_claude(&server, with_usage("work@example.org", 60)).await;
+    let review = json!({"update": {
+        "sessionUpdate": "tool_call_update", "toolCallId": "guardian_assessment:r-1", "status": "failed",
+        "content": [{"type": "content", "content": {"type": "text", "text": "Status: Denied\nAction: shell git commit -m wip\nRationale: The review could not run because your workspace is out of credits. The action was not executed; do not bypass review."}}],
+    }});
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 3, update: review }).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 4, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "The commit was not executed because the review was refused. Ask the owner to add credits so I can finish."}}}) }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 5, stop_reason: "end_turn".into(), usage: None }).await;
+
+    expect_carried_on_with_claude(&server, &mut link, id).await;
+}
+
+#[tokio::test]
 async fn continuing_on_a_named_account_pins_the_conversation() {
     let server = Server::start().await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 90), with_usage("work@example.org", 40)]).await;

@@ -198,6 +198,40 @@ pub async fn inspect_reply(state: &AppState, node_id: Uuid, conversation_id: Uui
     Ok(limit.map(|limit| (message, limit)))
 }
 
+pub async fn inspect_refused_review(state: &AppState, node_id: Uuid, conversation_id: Uuid) -> ApiResult<Option<(String, Detected)>> {
+    let refusals = sqlx::query_scalar::<_, sqlx::types::Json<Value>>(
+        "select payload->'update' from events
+         where conversation_id = $1 and kind = 'acp_update' and payload->'update'->>'toolCallId' like 'guardian_assessment:%' and payload->'update'->>'status' = 'failed'
+           and seq > coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message'), 0)
+         order by seq",
+    )
+    .bind(conversation_id)
+    .fetch_all(&state.pool)
+    .await?;
+    let mut texts = Vec::new();
+
+    for refusal in &refusals {
+        texts_in(&refusal.0, &mut texts);
+    }
+
+    for text in texts {
+        if let Some(limit) = inspect(state, node_id, conversation_id, &text).await? {
+            return Ok(Some((text, limit)));
+        }
+    }
+
+    Ok(None)
+}
+
+fn texts_in(value: &Value, found: &mut Vec<String>) {
+    match value {
+        Value::String(text) => found.push(text.clone()),
+        Value::Array(items) => items.iter().for_each(|item| texts_in(item, found)),
+        Value::Object(fields) => fields.values().for_each(|field| texts_in(field, found)),
+        _ => {}
+    }
+}
+
 pub async fn inspect_workflow_line(state: &AppState, node_id: Uuid, conversation_id: Uuid, line: &Value) -> ApiResult<Option<Value>> {
     if !matches!(line["type"].as_str(), Some("failed" | "result")) {
         return Ok(None);

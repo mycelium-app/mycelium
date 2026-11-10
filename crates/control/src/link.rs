@@ -1078,9 +1078,15 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
 
     crate::conversations::spawn_branch_refresh(state, conversation_id);
 
-    if stop_reason != "cancelled"
-        && let Some((message, limit)) = crate::usage_limits::inspect_reply(state, node_id, conversation_id).await?
-    {
+    let limited = match stop_reason.as_str() {
+        "cancelled" => None,
+        _ => match crate::usage_limits::inspect_reply(state, node_id, conversation_id).await? {
+            Some(limited) => Some(limited),
+            None => crate::usage_limits::inspect_refused_review(state, node_id, conversation_id).await?,
+        },
+    };
+
+    if let Some((message, limit)) = limited {
         let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?;
 
         state.hub.forget_prompts_of(conversation_id);
