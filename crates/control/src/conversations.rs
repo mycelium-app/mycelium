@@ -354,6 +354,16 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<U
     Ok(Json(row.to_proto()?))
 }
 
+pub async fn resolve_action_item(State(state): State<AppState>, user: AuthUser, Path((id, item_id)): Path<(Uuid, Uuid)>) -> ApiResult<Json<Conversation>> {
+    let Some(row) = crate::store::resolve_action_item(&state.pool, id, item_id, user.id).await? else {
+        return Err(ApiError::not_found("That action item"));
+    };
+    let conversation = row.to_proto()?;
+    state.publish(Some(user.id), StreamMessage::Conversation(conversation.clone()));
+
+    Ok(Json(conversation))
+}
+
 pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchConversationRequest>) -> ApiResult<Json<Conversation>> {
     let title = request.title.as_deref().map(str::trim);
 

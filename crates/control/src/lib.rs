@@ -225,6 +225,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/logins/{login_id}", delete(nodes::stop_login))
         .route("/api/v1/conversations", get(conversations::list).post(conversations::create))
         .route("/api/v1/conversations/{id}", get(conversations::get).patch(conversations::patch).delete(conversations::delete))
+        .route("/api/v1/conversations/{id}/action-items/{item_id}", delete(conversations::resolve_action_item))
         .route("/api/v1/conversations/{id}/close", post(conversations::close))
         .route("/api/v1/conversations/{id}/opened", post(conversations::opened))
         .route("/api/v1/conversations/{id}/side", post(conversations::side))

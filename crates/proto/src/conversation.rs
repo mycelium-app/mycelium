@@ -106,6 +106,13 @@ pub enum DeviceState {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActionItem {
+    pub id: Uuid,
+    pub text: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Conversation {
     pub id: Uuid,
     pub owner: Uuid,
@@ -152,6 +159,8 @@ pub struct Conversation {
     pub flagged_at: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flag_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub action_items: Vec<ActionItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

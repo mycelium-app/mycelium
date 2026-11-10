@@ -122,6 +122,7 @@ const COVERED: &[(&str, &str, &str)] = &[
     ("GET", "/api/v1/conversations/{id}/environment", "environment_screenshot"),
     ("POST", "/api/v1/conversations/{id}/environment/apps", "environment_launch"),
     ("POST", "/api/v1/conversations/{id}/prompt", "send_to_conversation"),
+    ("DELETE", "/api/v1/conversations/{id}/action-items/{item_id}", "resolve_action_item"),
     ("POST", "/api/v1/chats", "start_subagent"),
     ("GET", "/api/v1/assistants", "assistant_list"),
     ("POST", "/api/v1/assistants", "assistant_create"),

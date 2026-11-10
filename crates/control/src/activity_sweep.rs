@@ -55,6 +55,7 @@ async fn sweep(state: &AppState) -> ApiResult<()> {
                select 1 from events request where request.conversation_id = c.id and request.kind in ('permission_request', 'review_request')
                  and not exists (select 1 from events resolved where resolved.conversation_id = c.id and resolved.kind = replace(request.kind, '_request', '_resolved') and resolved.payload->>'request_id' = request.payload->>'request_id'))
            and not exists (select 1 from queued_prompts where conversation_id = c.id)
+           and not exists (select 1 from conversation_action_items where conversation_id = c.id and done_at is null)
            and not exists (select 1 from message_proposals where conversation_id = c.id and state = 'proposed')
            and not exists (select 1 from start_proposals where conversation_id = c.id and state = 'proposed')
            and not exists (select 1 from instruction_proposals where conversation_id = c.id and state = 'proposed')

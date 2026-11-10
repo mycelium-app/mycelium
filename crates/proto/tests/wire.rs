@@ -80,6 +80,7 @@ fn conversation() -> Conversation {
         managed_by: None,
         flagged_at: None,
         flag_reason: None,
+        action_items: vec![],
         branch: None,
         pull_request_label: None,
         pull_request_url: None,

@@ -2,7 +2,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use crate::versions::newer;
 use mycelium_proto::api::{HarnessModel, HarnessModels, KubernetesNode, NodeSummary};
-use mycelium_proto::conversation::{AgentId, AgentInfo, Attachment, Conversation, ConversationStatus, Event, EventKind, LoginInfo, QueuedPrompt, ResetCredits, UsageWindow};
+use mycelium_proto::conversation::{ActionItem, AgentId, AgentInfo, Attachment, Conversation, ConversationStatus, Event, EventKind, LoginInfo, QueuedPrompt, ResetCredits, UsageWindow};
 use mycelium_proto::stream::StreamMessage;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -19,7 +19,7 @@ macro_rules! conversation_group_sql {
 }
 
 pub const CONVERSATION_GROUP_SQL: &str = conversation_group_sql!();
-pub const CONVERSATION_COLUMNS: &str = concat!("id, owner, node_id, agent, cwd, title, title_user_set, status, agent_active, acp_session_id, mode, model, account, options, parent_id, side_kind, imported_from, provider_id, project_id, ", conversation_group_sql!(), " as group_id, created_at, updated_at, archived_at, pinned_at, resume_at, snoozed_until, managed_by, flagged_at, flag_reason, branch, pull_request_label, pull_request_url, pull_request_state, pull_request_number, assistant_id, teach_me, routing, scratch, last_message_seq > coalesce((select r.seq from conversation_reads r where r.conversation_id = id and r.user_id = owner), 0) as unread");
+pub const CONVERSATION_COLUMNS: &str = concat!("id, owner, node_id, agent, cwd, title, title_user_set, status, agent_active, acp_session_id, mode, model, account, options, parent_id, side_kind, imported_from, provider_id, project_id, ", conversation_group_sql!(), " as group_id, created_at, updated_at, archived_at, pinned_at, resume_at, snoozed_until, managed_by, flagged_at, flag_reason, branch, pull_request_label, pull_request_url, pull_request_state, pull_request_number, assistant_id, teach_me, routing, scratch, last_message_seq > coalesce((select r.seq from conversation_reads r where r.conversation_id = id and r.user_id = owner), 0) as unread, conversation_action_items(id) as action_items");
 pub const TURN_HAS_ENDED: &str = "coalesce((select max(seq) from events where conversation_id = $1 and kind = 'turn_end'), 0) >= coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message'), 0)";
 
 pub const WORKFLOW_AGENT_QUIET_SECONDS: i32 = 15 * 60;
@@ -107,6 +107,7 @@ pub struct ConversationRow {
     pub routing: Option<String>,
     pub scratch: bool,
     pub unread: bool,
+    pub action_items: sqlx::types::Json<Vec<ActionItem>>,
 }
 
 impl ConversationRow {
@@ -141,6 +142,7 @@ impl ConversationRow {
             managed_by: self.managed_by,
             flagged_at: self.flagged_at,
             flag_reason: self.flag_reason.clone(),
+            action_items: self.action_items.0.clone(),
             branch: self.branch.clone(),
             pull_request_label: self.pull_request_label.clone(),
             pull_request_url: self.pull_request_url.clone(),
@@ -171,6 +173,23 @@ pub async fn find_owned(pool: &PgPool, id: Uuid, owner: Uuid) -> ApiResult<Conve
         .await?;
 
     row.ok_or_else(|| ApiError::not_found("That conversation"))
+}
+
+pub async fn resolve_action_item(pool: &PgPool, conversation_id: Uuid, item_id: Uuid, owner: Uuid) -> ApiResult<Option<ConversationRow>> {
+    let resolved = sqlx::query_scalar::<_, Uuid>(
+        "update conversation_action_items i set done_at = now() from conversations c where i.id = $1 and i.conversation_id = $2 and i.done_at is null and c.id = i.conversation_id and c.owner = $3 returning i.id",
+    )
+    .bind(item_id)
+    .bind(conversation_id)
+    .bind(owner)
+    .fetch_optional(pool)
+    .await?;
+
+    if resolved.is_none() {
+        return Ok(None);
+    }
+
+    find_owned(pool, conversation_id, owner).await.map(Some)
 }
 
 pub async fn lock_owned(tx: &mut Tx<'_>, id: Uuid, owner: Uuid) -> ApiResult<ConversationRow> {

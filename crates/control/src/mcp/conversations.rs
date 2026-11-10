@@ -4,7 +4,7 @@ use crate::error::ApiResult;
 use crate::forge_watches::{self, Target};
 use crate::group_connections;
 use crate::message_proposals;
-use crate::store::{CONVERSATION_COLUMNS, CONVERSATION_GROUP_SQL, ConversationRow, append_event};
+use crate::store::{CONVERSATION_COLUMNS, CONVERSATION_GROUP_SQL, ConversationRow, append_event, find_owned, resolve_action_item};
 use mycelium_proto::conversation::EventKind;
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
@@ -58,6 +58,28 @@ pub fn definitions() -> Value {
                     "reason": {"type": "string", "description": "What the person needs to do, written so it makes sense on its own."},
                 },
                 "required": ["reason"],
+            },
+        },
+        {
+            "name": "add_action_item",
+            "description": "Put something the person must do themselves in their Needs you list, for example an update only they can run. It stays there until they mark it done or you resolve it with resolve_action_item; writing in this conversation does not clear it. A conversation can have several. Use flag_for_person instead when you need an answer in this conversation.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "One short sentence of what the person must do, written so it makes sense on its own."},
+                },
+                "required": ["text"],
+            },
+        },
+        {
+            "name": "resolve_action_item",
+            "description": "Mark an action item of this conversation done once it has happened, so it leaves the person's Needs you list.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "item": {"type": "string", "description": "The id add_action_item returned."},
+                },
+                "required": ["item"],
             },
         },
         {
@@ -426,6 +448,43 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             state.publish(Some(owner), StreamMessage::Conversation(flagged.to_proto()?));
 
             ToolReply::text(&format!("Flagged {label} ({}) for the person.", flagged.id), false)
+        }
+        "add_action_item" => {
+            let Some(text) = arguments.get("text").and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty()) else {
+                return Ok(ToolReply::invalid("add_action_item needs text, a string."));
+            };
+            let Some((conversation_id, _)) = caller.conversation().await? else {
+                return Ok(ToolReply::text("Nothing was added. An action item comes from a conversation, and this call did not come from one.", true));
+            };
+            let owner = caller.owner().await?;
+            let item_id = sqlx::query_scalar::<_, Uuid>("insert into conversation_action_items (conversation_id, text) select id, $2 from conversations where id = $1 and owner = $3 returning id")
+                .bind(conversation_id)
+                .bind(text)
+                .bind(owner)
+                .fetch_one(&state.pool)
+                .await?;
+            let row = find_owned(&state.pool, conversation_id, owner).await?;
+            state.publish(Some(owner), StreamMessage::Conversation(row.to_proto()?));
+
+            ToolReply::text(&format!("Added action item {item_id} for the person. Mark it done with resolve_action_item once it has happened."), false)
+        }
+        "resolve_action_item" => {
+            let Some(item) = arguments.get("item").and_then(Value::as_str).map(str::trim).filter(|item| !item.is_empty()) else {
+                return Ok(ToolReply::invalid("resolve_action_item needs item, a string."));
+            };
+            let Some((conversation_id, _)) = caller.conversation().await? else {
+                return Ok(ToolReply::text("Nothing was resolved. An action item belongs to a conversation, and this call did not come from one.", true));
+            };
+            let owner = caller.owner().await?;
+            let Ok(item_id) = Uuid::parse_str(item) else {
+                return Ok(ToolReply::text("Nothing was resolved. That is not an action item id. Use the id add_action_item returned.", true));
+            };
+            let Some(row) = resolve_action_item(&state.pool, conversation_id, item_id, owner).await? else {
+                return Ok(ToolReply::text("Nothing was resolved. This conversation has no open action item with that id.", true));
+            };
+            state.publish(Some(owner), StreamMessage::Conversation(row.to_proto()?));
+
+            ToolReply::text(&format!("Marked action item {item_id} done."), false)
         }
         "archive_conversation" => {
             let target = match readable_target(&caller, &arguments, "archive_conversation", "archived").await? {
