@@ -1,5 +1,7 @@
 use crate::auth::{AuthUser, client_token};
+use crate::conversation_connections;
 use crate::error::{ApiError, ApiResult};
+use crate::group_connections;
 use crate::integration_proxy;
 use crate::prompts;
 use crate::state::{AppState, hash_token, new_token};
@@ -102,18 +104,26 @@ pub async fn gate_scoped_tokens(State(state): State<AppState>, request: Request,
     let Some(token) = client_token(request.headers()) else {
         return next.run(request).await;
     };
-    let grant = sqlx::query_as::<_, (Uuid, Option<Vec<String>>, Option<Uuid>)>("select id, scopes, conversation_id from client_tokens where token_hash = $1 and revoked_at is null and (expires_at is null or expires_at > now())")
+    let grant = sqlx::query_as::<_, (Uuid, Uuid, Option<Vec<String>>, Option<Uuid>)>("select id, user_id, scopes, conversation_id from client_tokens where token_hash = $1 and revoked_at is null and (expires_at is null or expires_at > now())")
         .bind(hash_token(token))
         .fetch_optional(&state.pool)
         .await;
-    let Ok(Some((token_id, Some(scopes), bound_conversation))) = grant else {
+    let Ok(Some((token_id, owner, Some(scopes), bound_conversation))) = grant else {
         return next.run(request).await;
     };
 
     let method = request.method().clone();
     let path = request.uri().path().to_string();
     let route = request.extensions().get::<MatchedPath>().map(|matched| matched.as_str().to_string()).unwrap_or_else(|| request.uri().path().to_string());
-    let other_conversation = bound_conversation.is_some_and(|bound| conversation_in(&path).is_some_and(|asked| asked != bound));
+    let other_conversation = match (bound_conversation, conversation_in(&path)) {
+        (Some(bound), Some(asked)) if asked != bound => {
+            let linked = conversation_connections::active(&state, owner, bound, asked).await.unwrap_or(false);
+            let reachable = linked || group_connections::connected(&state, owner, bound, asked).await.unwrap_or(false);
+
+            !reachable
+        }
+        _ => false,
+    };
     let allowed = !other_conversation && match integration_proxy::server_of(&path) {
         Some(server_id) => scopes.iter().any(|granted| granted.starts_with(&integration_proxy::token_scope(server_id, ""))),
         None => match need(&method, &route) {

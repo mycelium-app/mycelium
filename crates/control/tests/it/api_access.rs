@@ -188,6 +188,40 @@ async fn a_token_granted_for_one_conversation_is_refused_on_another() {
     assert_eq!((on_its_own, on_another), (200, 403));
 }
 
+async fn grouped(server: &Server, link: &mut NodeLink, name: &str, folder: &str) -> Uuid {
+    let conversation = working_conversation(server, link).await;
+    sqlx::query("update conversations set cwd = $2 where id = $1").bind(conversation).bind(folder).execute(&server.pool).await.unwrap();
+    let (status, created) = server.user.json(server.user.post("/api/v1/groups").json(&json!({"name": name}))).await;
+    assert_eq!(status, 201, "{created}");
+    let group = created["id"].as_str().unwrap();
+    let (status, claimed) = server.user.json(server.user.post(&format!("/api/v1/groups/{group}/folders")).json(&json!({"prefix": folder}))).await;
+    assert_eq!(status, 201, "{claimed}");
+
+    conversation
+}
+
+#[tokio::test]
+async fn a_token_granted_for_one_conversation_reads_and_writes_others_in_its_group_and_nothing_outside_it() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let own = grouped(&server, &mut link, "Mycelium", "/srv/atlas").await;
+    let sibling = working_conversation(&server, &mut link).await;
+    sqlx::query("update conversations set cwd = '/srv/atlas/docs' where id = $1").bind(sibling).execute(&server.pool).await.unwrap();
+    let outside = grouped(&server, &mut link, "Orion", "/srv/orion").await;
+    let (token_id, token) = insert_token(&server, Some(&["conversations:read", "conversations:write"]), None).await;
+    sqlx::query("update client_tokens set conversation_id = $2 where id = $1").bind(token_id).bind(own).execute(&server.pool).await.unwrap();
+
+    let mut statuses = Vec::new();
+
+    for conversation in [sibling, outside] {
+        statuses.push(status_with(&server, &token, "GET", &format!("/api/v1/conversations/{conversation}")).await);
+        statuses.push(status_with(&server, &token, "GET", &format!("/api/v1/conversations/{conversation}/events")).await);
+        statuses.push(u16::from(status_with(&server, &token, "POST", &format!("/api/v1/conversations/{conversation}/prompt")).await == 403));
+    }
+
+    assert_eq!(statuses, vec![200, 200, 0, 403, 403, 1]);
+}
+
 #[tokio::test]
 async fn an_expired_token_is_refused_and_a_running_one_is_not() {
     let server = Server::start().await;
