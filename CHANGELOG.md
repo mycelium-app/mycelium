@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.9
+
+- Action items: an agent can add things for you to do, such as an update only you can run. Each stays in Needs you, even after you write in the conversation, until you mark it done or the agent sees it has happened and resolves it. A conversation can hold several, adding one raises a notification, and a conversation with an open item is not archived when idle. Agents use the add_action_item and resolve_action_item tools.
+- A chat turn's token usage is saved together with the end of the turn, so the Activity page never shows a finished turn with no tokens.
+
 ## v0.34.8
 
 - Opening a chat that runs an agent in a scratch folder keeps the sidebar on Chats instead of switching to Workspaces.
