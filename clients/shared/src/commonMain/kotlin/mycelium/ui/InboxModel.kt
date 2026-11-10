@@ -30,6 +30,8 @@ sealed interface InboxRequest {
     data class Gate(val workflow: Workflow) : InboxRequest
 
     data class Flag(val text: String) : InboxRequest
+
+    data class ActionItem(val item: mycelium.api.ActionItem, val done: Boolean = false) : InboxRequest
 }
 
 data class InboxItem(
@@ -48,13 +50,17 @@ fun InboxItem.resolved(): InboxItem? = when (request) {
     is InboxRequest.Approval -> copy(request = InboxRequest.Approval(request.permission.copy(resolved = true)))
     is InboxRequest.Mycelium, is InboxRequest.Gate -> this
     is InboxRequest.Flag -> null
+    is InboxRequest.ActionItem -> copy(request = request.copy(done = true))
 }
+
+private fun waitsOnPerson(conversation: Conversation) =
+    (conversation.status == ConversationStatus.Input && conversation.managedBy == null) || conversation.flaggedAt != null
 
 fun inboxConversations(state: AppState): List<Conversation> =
     state.conversations.values.filter { conversation ->
         val voice = state.assistants[conversation.assistantId]?.builtinKey == VoiceAssistantKey
 
-        conversation.archivedAt == null && !voice && ((conversation.status == ConversationStatus.Input && conversation.managedBy == null) || conversation.flaggedAt != null)
+        conversation.archivedAt == null && !voice && (waitsOnPerson(conversation) || conversation.actionItems.isNotEmpty())
     }
 
 fun pendingRequest(item: ThreadItem, state: AppState): InboxRequest? {
@@ -108,13 +114,18 @@ fun inboxItems(state: AppState): List<InboxItem> {
         fun item(key: String, context: String?, request: InboxRequest) =
             InboxItem("${conversation.id}/$key", conversation, project, project?.name ?: projectName(conversation.cwd), assistant, waitingSince, context, request, thread)
 
-        if (pending.isEmpty()) {
+        val waiting = if (!waitsOnPerson(conversation)) {
+            emptyList()
+        } else if (pending.isEmpty()) {
             val text = conversation.flagReason?.takeIf { it.isNotBlank() } ?: thread.filterIsInstance<ThreadItem.AgentMessage>().lastOrNull()?.text.orEmpty()
 
             listOf(item("flag", null, InboxRequest.Flag(text)))
         } else {
             pending.map { item(it.key, it.context, it.request) }
         }
+        val actionItems = conversation.actionItems.map { item("action-${it.id}", null, InboxRequest.ActionItem(it)).copy(waitingSince = it.createdAt) }
+
+        waiting + actionItems
     }
     val fromGates = workflowGates(state)
         .mapNotNull { workflow ->

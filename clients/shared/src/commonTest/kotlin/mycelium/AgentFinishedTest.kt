@@ -208,6 +208,17 @@ class AgentFinishedTest {
     }
 
     @Test
+    fun anActionItemAddedForThePersonNotifiesWithItsText() = runTest {
+        val platform = RecordingPlatform()
+        val store = storeWith(platform, backgroundScope)
+        store.receive(StreamMessage.ConversationChanged(conversation("c1", ConversationStatus.Done)))
+
+        store.receive(StreamMessage.ConversationChanged(conversation("c1", ConversationStatus.Done).copy(actionItems = listOf(mycelium.api.ActionItem("i1", "Update Mycelium on atlas", "2026-10-23T10:05:00Z")))))
+
+        assertEquals(listOf("notify Fix login c1 | Update Mycelium on atlas | c1", "chime"), platform.calls)
+    }
+
+    @Test
     fun aConversationWhoseManagerIsArchivedNotifiesAgain() = runTest {
         val platform = RecordingPlatform()
         val store = storeWith(platform, backgroundScope)

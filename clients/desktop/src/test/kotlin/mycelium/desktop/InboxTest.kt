@@ -34,8 +34,14 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-private fun conversation(status: String) = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/harbour","title":"Bump the UI kit","status":"$status",
-"acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:05:00Z","archived_at":null}"""
+private fun conversation(status: String, actionItems: List<Pair<String, String>> = emptyList()): String {
+    val items = actionItems.joinToString(",") { (id, text) -> """{"id":"$id","text":"$text","created_at":"2026-10-22T10:0${id.last()}:00Z"}""" }
+
+    val itemsField = if (items.isEmpty()) "" else ",\"action_items\":[$items]"
+
+    return """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/harbour","title":"Bump the UI kit","status":"$status",
+"acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:05:00Z","archived_at":null$itemsField}"""
+}
 
 private const val PermissionEvents = """[{"conversation_id":"c1","seq":1,"kind":"permission_request","payload":{"request_id":"r1","toolCall":{"title":"pnpm db:migrate"},
 "options":[{"optionId":"approve","name":"Approve","kind":"allow_once"},{"optionId":"deny","name":"Deny","kind":"reject_once"}]}}]"""
@@ -61,7 +67,10 @@ class InboxTest {
 
     private val feedRequests = java.util.concurrent.CopyOnWriteArrayList<String>()
 
-    private fun show(status: String, feed: String = NoFeed, privacy: String = VoiceOff, events: String? = null): Store {
+    private val deletes = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+    private fun show(status: String, feed: String = NoFeed, privacy: String = VoiceOff, events: String? = null, actionItems: List<Pair<String, String>> = emptyList()): Store {
+        val open = actionItems.toMutableList()
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
 
@@ -69,10 +78,16 @@ class InboxTest {
                 posts += path to String(request.body.toByteArray())
             }
 
+            if (request.method == HttpMethod.Delete) {
+                deletes += path
+                open.removeAll { path.endsWith("/action-items/${it.first}") }
+            }
+
             val body = when {
                 path.endsWith("/inbox/feed") -> feed
                 path.endsWith("/privacy") -> privacy
-                path.endsWith("/conversations") -> "[${conversation(status)}]"
+                request.method == HttpMethod.Delete -> conversation(status, open)
+                path.endsWith("/conversations") -> "[${conversation(status, open)}]"
                 path.endsWith("/conversations/c1/events") -> events ?: if (status == "input") PermissionEvents else "[]"
                 path.endsWith("/nodes") || path.endsWith("/groups") || path.endsWith("/workflows") || path.endsWith("/queue") || path.endsWith("/session-updates") -> "[]"
                 else -> "{}"
@@ -115,6 +130,46 @@ class InboxTest {
         rule.waitForIdle()
 
         rule.onNodeWithText("Nothing needs you").assertExists()
+    }
+
+    @Test
+    fun actionItemsShowAsSeparateItemsEvenWhenTheConversationIsNotWaiting() {
+        show("done", actionItems = listOf("i1" to "Update Mycelium on atlas", "i2" to "Check the harbour backups"))
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Update Mycelium on atlas").fetchSemanticsNodes().isNotEmpty() }
+
+        assertEquals(2, rule.onAllNodesWithText("For you to do").fetchSemanticsNodes().size)
+        rule.onNodeWithText("Check the harbour backups").assertExists()
+    }
+
+    @Test
+    fun markingAnActionItemDoneDeletesItThenItLeaves() {
+        show("done", actionItems = listOf("i1" to "Update Mycelium on atlas"))
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Mark as done: Update Mycelium on atlas").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithContentDescription("Mark as done: Update Mycelium on atlas").performClick()
+        rule.waitUntil(5_000) { deletes.isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Done").fetchSemanticsNodes().isNotEmpty() }
+
+        assertEquals(listOf("/api/v1/conversations/c1/action-items/i1"), deletes.toList())
+        rule.onNodeWithText("Marked as done. It leaves Needs you.").assertExists()
+
+        rule.mainClock.advanceTimeBy(5_000)
+        rule.waitForIdle()
+
+        rule.onNodeWithText("Nothing needs you").assertExists()
+    }
+
+    @Test
+    fun anActionItemStaysWhenTheConversationChangesStatus() {
+        val store = show("input", actionItems = listOf("i1" to "Update Mycelium on atlas"))
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Update Mycelium on atlas").fetchSemanticsNodes().isNotEmpty() }
+
+        store.receive(mycelium.api.StreamMessage.ConversationChanged(MyceliumJson.decodeFromString(mycelium.api.Conversation.serializer(), conversation("working", listOf("i1" to "Update Mycelium on atlas")))))
+        rule.mainClock.advanceTimeBy(5_000)
+        rule.waitForIdle()
+
+        rule.onNodeWithText("For you to do").assertExists()
+        rule.onNodeWithText("Update Mycelium on atlas").assertExists()
     }
 
     @Test

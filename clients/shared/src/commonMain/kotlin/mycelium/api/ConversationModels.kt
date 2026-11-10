@@ -170,6 +170,9 @@ data class ConfigRequest(
 )
 
 @Serializable
+data class ActionItem(val id: String, val text: String, @SerialName("created_at") val createdAt: String)
+
+@Serializable
 data class Conversation(
     val id: String,
     val owner: String,
@@ -191,6 +194,7 @@ data class Conversation(
     @SerialName("managed_by") val managedBy: String? = null,
     @SerialName("flagged_at") val flaggedAt: String? = null,
     @SerialName("flag_reason") val flagReason: String? = null,
+    @SerialName("action_items") val actionItems: List<ActionItem> = emptyList(),
     val branch: String? = null,
     @SerialName("pull_request_label") val pullRequestLabel: String? = null,
     @SerialName("pull_request_url") val pullRequestUrl: String? = null,

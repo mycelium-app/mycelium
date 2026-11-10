@@ -315,11 +315,12 @@ class Store(
         val updated = message.conversation
         val previous = before.conversations[updated.id] ?: return
         val flagged = previous.flaggedAt == null && updated.flaggedAt != null
+        val addedItem = updated.actionItems.firstOrNull { added -> previous.actionItems.none { it.id == added.id } }
 
         val queued = !before.queues[updated.id].isNullOrEmpty()
 
         val finished = finishedWording(updated.status).takeIf { previous.status == ConversationStatus.Working && updated.sideKind == null && !queued && !isManaged(updated, before.conversations) }
-        val outcome = if (flagged) updated.flagReason else finished
+        val outcome = if (flagged) updated.flagReason else addedItem?.text ?: finished
 
         if (outcome == null) {
             return
@@ -1310,6 +1311,13 @@ class Store(
     fun pin(conversation: Conversation, pinned: Boolean) {
         act {
             val updated = api.patchConversation(conversation.id, PatchConversationRequest(pinned = pinned))
+            mutableState.update { it.copy(conversations = it.conversations + (updated.id to updated)) }
+        }
+    }
+
+    fun completeActionItem(conversation: Conversation, itemId: String) {
+        act {
+            val updated = api.completeActionItem(conversation.id, itemId)
             mutableState.update { it.copy(conversations = it.conversations + (updated.id to updated)) }
         }
     }

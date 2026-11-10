@@ -174,6 +174,17 @@ class ScreensRenderTest {
     }
 
     @Test
+    fun inboxWithActionItemsAndAFlaggedConversationRenders() {
+        val flagged = conversation("22222222-2222-2222-2222-222222222222", "Restore flow copy", "done").removeSuffix("}") + ""","flagged_at":"2026-10-22T11:30:00Z","flag_reason":"Alex, which export format should the harbour report use?"}"""
+        val withItems = conversation(ConversationId, "Roll out the atlas update", "done").removeSuffix("}") + ""","action_items":[{"id":"i1","text":"Update Mycelium on atlas: `docker compose pull && docker compose up -d`","created_at":"2026-10-22T11:40:00Z"},{"id":"i2","text":"Approve the example.com certificate renewal","created_at":"2026-10-22T11:20:00Z"}]}"""
+        val store = Store(fakeApi(extra = mapOf("/conversations" to "[$withItems,$flagged]", "/events" to "[]")), scopes.create())
+
+        runBlocking { store.refresh() }
+
+        assertTrue(renderAt("inbox-action-items", true, false) { Shell(store, PlatformStub, me, onSignOut = {}, initialRoute = Route.Inbox) }.length() > 10_000)
+    }
+
+    @Test
     fun conversationRendersInBothThemes() {
         for (dark in listOf(true, false)) {
             assertTrue(render("conversation", dark, shell(Route.Chat(ConversationId))).length() > 10_000)

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
@@ -42,7 +43,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -317,6 +320,7 @@ fun RequestCard(store: Store, state: AppState, conversationId: String, request: 
             }
         }
         is InboxRequest.Flag -> FlagCard(request.text, onReply = { store.send(conversationId, it) })
+        is InboxRequest.ActionItem -> ActionItemCard(request, onDone = { store.completeActionItem(state.conversations.getValue(conversationId), request.item.id) })
     }
 }
 
@@ -347,6 +351,35 @@ private fun FlagCard(text: String, onReply: (String) -> Unit) {
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 MyButton(::send, text = "Send reply", variant = ButtonVariant.Outline)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionItemCard(request: InboxRequest.ActionItem, onDone: () -> Unit) {
+    val colors = MyTheme.colors
+
+    Card {
+        CardHead {
+            StatusMark(if (request.done) "Done" else "For you to do", if (request.done) Tone.Muted else Tone.Attention, if (request.done) MyIcon.Check else MyIcon.Clipboard)
+
+            if (!request.done) {
+                Spacer(Modifier.weight(1f))
+                Icon(MyIcon.Clock, colors.textMuted, Tokens.Size.IconSm)
+                Label("Stays until you mark it done", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+            }
+        }
+
+        Column(Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+            MarkdownBlocks(parsedMarkdown(request.item.text), textStyle = Tokens.Type.Ui, blockSpacing = Tokens.Space.S2)
+
+            if (request.done) {
+                Label("Marked as done. It leaves Needs you.", Modifier.semantics { liveRegion = LiveRegionMode.Polite }, Tokens.Type.Meta, colors.textMuted)
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    MyButton(onDone, text = "Mark as done", variant = ButtonVariant.Primary, description = "Mark as done: ${request.item.text}")
+                }
             }
         }
     }
