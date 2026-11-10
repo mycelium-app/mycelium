@@ -593,7 +593,7 @@ async fn start_run(state: &AppState, row: &ScheduleRow) -> ApiResult<Uuid> {
         }
     }
 
-    let request = CreateConversationRequest { mode: None, config: None, account: row.account.clone(), node_id, agent: parse_enum(agent)?, cwd: row.cwd.clone(), project_id: row.project_id, branch: None, title: None, prompt: Some(row.prompt.clone()), parent_id: None, side_kind: None, model: row.model.clone(), routing: row.routing.as_deref().and_then(mycelium_proto::routing::Routing::parse) };
+    let request = CreateConversationRequest { mode: None, config: None, account: row.account.clone(), node_id, agent: parse_enum(agent)?, cwd: row.cwd.clone(), project_id: row.project_id, branch: None, worktree_path: None, title: None, prompt: Some(row.prompt.clone()), parent_id: None, side_kind: None, model: row.model.clone(), routing: row.routing.as_deref().and_then(mycelium_proto::routing::Routing::parse) };
     let conversation = conversations::start(state, row.owner, request).await?;
 
     Ok(conversation.id)

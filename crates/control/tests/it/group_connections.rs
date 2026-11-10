@@ -1,3 +1,4 @@
+use crate::common;
 use crate::common::{NodeLink, Server};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
@@ -814,4 +815,63 @@ async fn reading_another_conversation_pages_back_and_searches() {
 
     let searched = text(&read(&fleet, fleet.yucca_chat, sibling, json!({"query": "second"})).await);
     assert!(searched.contains("role=\"user\">\nSecond pass") && !searched.contains("role=\"user\">\nThird pass"), "{searched}");
+}
+
+const WORKTREE_READY_NODE: &str = "v0.35.0";
+
+async fn apps_group_with_a_working_chat() -> (Server, NodeLink, Uuid, Uuid) {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", WORKTREE_READY_NODE).await;
+    let group = group(&server, "Apps", "/work/app").await;
+    let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+    sqlx::query("insert into projects (owner, node_id, name, path, group_id) values ($1, $2, 'app', '/work/app', $3)").bind(owner).bind(link.id).bind(group).execute(&server.pool).await.unwrap();
+    let caller = working_conversation(&server, &mut link, "Manager", "/work/app").await;
+
+    (server, link, caller, group)
+}
+
+fn start_in_worktree(path: &str) -> Value {
+    json!({"group": "Apps", "project": "app", "worktree": path, "title": "Finish the import", "prompt": "Finish the import", "reason": "The manager asked"})
+}
+
+fn git_worktrees() -> Value {
+    json!([{"path": "/elsewhere/app-spike", "branch": "spike", "head": "bbbb222"}])
+}
+
+#[tokio::test]
+async fn start_conversation_opens_an_existing_worktree_under_its_project_and_group() {
+    let (server, mut link, caller, group) = apps_group_with_a_working_chat().await;
+    let token = link.token.clone();
+
+    let (started, ()) = tokio::join!(common::call_tool(&server, &token, caller, "start_conversation", start_in_worktree("/elsewhere/app-spike")), common::answer_existing_worktrees(&mut link, git_worktrees()));
+
+    assert_eq!(started["isError"], Value::Null, "{started}");
+    let (_, listed) = server.user.json(server.user.get("/api/v1/conversations")).await;
+    let opened = listed.as_array().unwrap().iter().find(|conversation| conversation["title"] == "Finish the import").unwrap();
+    assert_eq!((opened["cwd"].clone(), opened["branch"].clone()), (json!("/elsewhere/app-spike"), json!("spike")));
+    assert_eq!(opened["group_id"], json!(group));
+    assert_eq!(opened["project_id"].is_null(), false);
+}
+
+#[tokio::test]
+async fn start_conversation_refuses_a_path_that_is_not_a_worktree_of_the_project() {
+    let (server, mut link, caller, _) = apps_group_with_a_working_chat().await;
+    let token = link.token.clone();
+
+    let (refused, ()) = tokio::join!(common::call_tool(&server, &token, caller, "start_conversation", start_in_worktree("/home/sam/private")), common::answer_existing_worktrees(&mut link, git_worktrees()));
+
+    assert_eq!(refused["isError"], json!(true), "{refused}");
+    assert!(text(&refused).contains("/home/sam/private is not a worktree of app"), "{refused}");
+    let (_, listed) = server.user.json(server.user.get("/api/v1/conversations")).await;
+    assert!(listed.as_array().unwrap().iter().all(|conversation| conversation["title"] != "Finish the import"));
+}
+
+#[tokio::test]
+async fn start_conversation_needs_the_project_a_worktree_belongs_to() {
+    let (server, link, caller, _) = apps_group_with_a_working_chat().await;
+
+    let refused = common::call_tool(&server, &link.token, caller, "start_conversation", json!({"group": "Apps", "worktree": "/elsewhere/app-spike", "prompt": "Finish", "reason": "Asked"})).await;
+
+    assert_eq!(refused["isError"], json!(true), "{refused}");
+    assert!(text(&refused).contains("Name the project the worktree belongs to"), "{refused}");
 }

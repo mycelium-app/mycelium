@@ -71,6 +71,9 @@ data class CreateProjectRequest(
 data class CreateDirectoryRequest(val path: String, val name: String)
 
 @Serializable
+data class ExistingWorktree(val path: String, val branch: String? = null, val head: String = "")
+
+@Serializable
 data class Worktree(
     val id: String,
     @SerialName("project_id") val projectId: String,

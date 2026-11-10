@@ -31,14 +31,15 @@ pub fn definitions() -> Value {
         },
         {
             "name": "start_conversation",
-            "description": "Start a new conversation in a project of another group and give it a first message. The person must have connected your group to that group in Settings, Agent connections; starting in your own group needs no connection. The new conversation is connected to this one, so it can reply with send_to_conversation, and this one is told each time its turn ends and it has finished, failed or is waiting on the person. This conversation manages it: it stays out of the person's way under Managed by assistant, with no notifications, until you bring it to them with flag_for_person or they take it over. Name the project, or a folder together with its node.",
+            "description": "Start a new conversation in a project of another group and give it a first message. The person must have connected your group to that group in Settings, Agent connections; starting in your own group needs no connection. The new conversation is connected to this one, so it can reply with send_to_conversation, and this one is told each time its turn ends and it has finished, failed or is waiting on the person. This conversation manages it: it stays out of the person's way under Managed by assistant, with no notifications, until you bring it to them with flag_for_person or they take it over. Name the project, or a folder together with its node. To open a worktree the project already has, name the project and give worktree.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "group": {"type": "string", "description": "The name of the group to start the conversation in."},
                     "project": {"type": "string", "description": "The name or id of a project in that group."},
                     "folder": {"type": "string", "description": "A folder in that group, instead of a project. Needs node."},
-                    "node": {"type": "string", "description": "The name of the node the folder is on."},
+                    "worktree": {"type": "string", "description": "The path of a git worktree of the project named in project. The conversation works there and stays under that project and its group."},
+                    "node": {"type": "string", "description": "The name of the node the folder is on, or the project and its worktree are on."},
                     "prompt": {"type": "string", "description": "The first message. Write it so it makes sense without this conversation."},
                     "title": {"type": "string", "description": "A title for the new conversation."},
                     "agent": {"type": "string", "description": "claude or codex. Defaults to this conversation's agent."},
@@ -361,9 +362,13 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 return Ok(nothing(message));
             }
 
+            if field("worktree").is_some() && field("project").is_none() {
+                return Ok(nothing("Name the project the worktree belongs to.".to_string()));
+            }
+
             let place = match (field("project"), field("folder"), field("node")) {
-                (Some(project), _, _) => {
-                    let found = sqlx::query_as::<_, (Uuid, Uuid, Option<Uuid>)>("select id, node_id, group_id from projects where owner = $1 and (id::text = lower($2) or name = $2)").bind(owner).bind(project).fetch_optional(&state.pool).await?;
+                (Some(project), _, node) => {
+                    let found = sqlx::query_as::<_, (Uuid, Uuid, Option<Uuid>)>("select id, node_id, group_id from projects where owner = $1 and (id::text = lower($2) or name = $2) and ($3::text is null or node_id = (select id from nodes where created_by = $1 and name = $3 and revoked_at is null))").bind(owner).bind(project).bind(node).fetch_optional(&state.pool).await?;
 
                     match found {
                         None => return Ok(nothing(format!("None of the person's projects is {project}."))),
@@ -410,6 +415,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 cwd: place.1,
                 project_id: place.2,
                 branch: None,
+                worktree_path: field("worktree").map(String::from),
                 title: field("title").map(String::from),
                 prompt: Some(format!("From {}:\n\n{prompt}", message_proposals::label(conversation_id, &caller_title))),
                 parent_id: None,

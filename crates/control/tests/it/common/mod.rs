@@ -571,3 +571,26 @@ pub fn session_cookie(response: &reqwest::Response) -> String {
         .map(|value| value.split(';').next().unwrap().to_string())
         .expect("no session cookie was set")
 }
+
+pub async fn call_tool(server: &Server, token: &str, conversation: Uuid, tool: &str, arguments: Value) -> Value {
+    let anonymous = server.anonymous();
+    let request = anonymous
+        .post("/api/v1/mcp")
+        .header("authorization", format!("Bearer {token}"))
+        .header("x-mycelium-conversation", conversation.to_string())
+        .json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": arguments}}));
+    let (status, body) = anonymous.json(request).await;
+    assert_eq!(status, 200, "{body}");
+
+    body["result"].clone()
+}
+
+pub async fn answer_existing_worktrees(link: &mut NodeLink, worktrees: Value) {
+    loop {
+        if let ControlToNode::Git { request_id, command: mycelium_proto::link::GitCommand::ExistingWorktrees, .. } = link.next().await {
+            link.send(NodeToControl::GitResult { request_id, ok: true, output: json!({"worktrees": worktrees}), error: None }).await;
+
+            return;
+        }
+    }
+}

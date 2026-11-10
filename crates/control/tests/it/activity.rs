@@ -116,6 +116,21 @@ async fn usage_is_broken_down_by_node_agent_project_and_model() {
 }
 
 #[tokio::test]
+async fn usage_in_a_worktree_outside_the_project_folder_counts_for_the_recorded_project() {
+    let server = Server::start().await;
+    let mut laptop = server.online_node("laptop").await;
+    let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+    let project = sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path) values ($1, $2, 'backups', '/work/backups') returning id").bind(owner).bind(laptop.id).fetch_one(&server.pool).await.unwrap();
+    let conversation = conversation_on(&server, &mut laptop, "/elsewhere/backups-spike").await;
+    sqlx::query("update conversations set project_id = $2 where id = $1").bind(conversation).bind(project).execute(&server.pool).await.unwrap();
+
+    finish_turn(&mut laptop, conversation, 1, Some(usage(100, 0, 0, 0)), Some(1.0), Some("claude-opus-5-5")).await;
+
+    let body = activity(&server, "?range=7d").await;
+    assert_eq!(body["projects"][0]["name"], "backups");
+}
+
+#[tokio::test]
 async fn an_agent_that_reports_no_usage_still_counts_turns_and_is_named_as_unreported() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

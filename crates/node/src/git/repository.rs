@@ -82,6 +82,25 @@ pub(super) fn add_remote_worktree(project: &Path, branch: &str) -> Result<Value>
     Ok(json!({"path": folder_text, "branch": branch}))
 }
 
+pub(super) fn existing_worktrees(project: &Path) -> Result<Value> {
+    let project = project.canonicalize().map_err(|cause| anyhow!("Could not read {}: {cause}.", project.display()))?;
+    let listing = git(&project, &["worktree", "list", "--porcelain"], &[])?;
+    let listing = String::from_utf8_lossy(&listing);
+    let worktrees: Vec<Value> = listing
+        .split("\n\n")
+        .filter(|record| !record.lines().any(|line| line == "bare"))
+        .filter_map(|record| {
+            let field = |name: &str| record.lines().find_map(|line| line.strip_prefix(name));
+            let path = field("worktree ")?;
+            let outside_project = Path::new(path).canonicalize().is_ok_and(|folder| !project.starts_with(&folder));
+
+            outside_project.then(|| json!({"path": path, "branch": field("branch refs/heads/"), "head": field("HEAD ").unwrap_or_default()}))
+        })
+        .collect();
+
+    Ok(json!({"worktrees": worktrees}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,6 +227,53 @@ mod tests {
         assert_eq!((added["path"].as_str(), added["branch"].as_str()), (folder.to_str(), Some("issue/12-fix")));
         assert_eq!(std::fs::read_to_string(folder.join("a.txt")).unwrap(), "one\n");
         assert_eq!(run(&folder, GitCommand::Status).unwrap()["branch"], "issue/12-fix");
+    }
+
+    fn worktrees_of(root: &Path, project: &Path) -> Vec<Value> {
+        run_in(root, project.to_str().unwrap(), GitCommand::ExistingWorktrees).unwrap()["worktrees"].as_array().unwrap().clone()
+    }
+
+    #[test]
+    fn existing_worktrees_include_those_made_with_plain_git_and_leave_out_the_checkout() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("projects/app");
+        let plain = root.path().join("elsewhere/app-spike");
+        let detached = root.path().join("elsewhere/app-bisect");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(plain.parent().unwrap()).unwrap();
+        init(&project);
+        std::fs::write(project.join("a.txt"), "one\n").unwrap();
+        run(&project, GitCommand::StageAll).unwrap();
+        run(&project, GitCommand::Commit { message: "first".into(), options: CommitOptions::default() }).unwrap();
+        run_in(root.path(), project.to_str().unwrap(), GitCommand::AddWorktree { branch: "made/by-mycelium".into() }).unwrap();
+        git(&project, &["worktree", "add", "-b", "spike", plain.to_str().unwrap()], &[]).unwrap();
+        git(&project, &["worktree", "add", "--detach", detached.to_str().unwrap()], &[]).unwrap();
+
+        let listed = worktrees_of(root.path(), &project);
+
+        let found = |folder: &Path| listed.iter().find(|worktree| worktree["path"] == folder.canonicalize().unwrap().to_str().unwrap()).unwrap_or_else(|| panic!("{} missing from {listed:?}", folder.display())).clone();
+        assert_eq!(listed.len(), 3, "{listed:?}");
+        assert_eq!(found(&plain)["branch"], "spike");
+        assert_eq!(found(&detached)["branch"], Value::Null);
+        assert_eq!(found(&detached)["head"].as_str().unwrap().len(), 40);
+        assert!(listed.iter().all(|worktree| worktree["path"] != project.canonicalize().unwrap().to_str().unwrap()));
+    }
+
+    #[test]
+    fn a_worktree_whose_folder_is_gone_is_not_offered() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("projects/app");
+        let plain = root.path().join("elsewhere/app-spike");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(plain.parent().unwrap()).unwrap();
+        init(&project);
+        std::fs::write(project.join("a.txt"), "one\n").unwrap();
+        run(&project, GitCommand::StageAll).unwrap();
+        run(&project, GitCommand::Commit { message: "first".into(), options: CommitOptions::default() }).unwrap();
+        git(&project, &["worktree", "add", "-b", "spike", plain.to_str().unwrap()], &[]).unwrap();
+        std::fs::remove_dir_all(&plain).unwrap();
+
+        assert!(worktrees_of(root.path(), &project).is_empty());
     }
 
     #[test]

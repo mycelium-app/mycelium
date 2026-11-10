@@ -112,6 +112,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
             cwd: String::new(),
             project_id: None,
             branch: None,
+            worktree_path: None,
             title: None,
             prompt: request.prompt,
             parent_id: None,

@@ -1,6 +1,6 @@
 use crate::common;
 use crate::common::{NodeLink, Server};
-use mycelium_proto::link::{ControlToNode, NodeToControl};
+use mycelium_proto::link::{ControlToNode, GitCommand, NodeToControl};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::json;
 use uuid::Uuid;
@@ -2137,4 +2137,117 @@ async fn one_persons_read_position_does_not_clear_unread_for_another() {
     sqlx::query("insert into conversation_reads (user_id, conversation_id, seq) values ($1, $2, 1000)").bind(other_id).bind(id).execute(&server.pool).await.unwrap();
 
     assert!(is_unread(&server.conversation(id).await));
+}
+
+const WORKTREE_READY_NODE: &str = "v0.35.0";
+
+async fn project_with_group(server: &Server, node: Uuid) -> (Uuid, Uuid) {
+    let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+    let group = sqlx::query_scalar::<_, Uuid>("insert into groups (owner, name) values ($1, 'Backend') returning id").bind(owner).fetch_one(&server.pool).await.unwrap();
+    let project = sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path, group_id) values ($1, $2, 'app', '/work/app', $3) returning id").bind(owner).bind(node).bind(group).fetch_one(&server.pool).await.unwrap();
+
+    (project, group)
+}
+
+async fn answer_with_two_worktrees(link: &mut NodeLink) {
+    common::answer_existing_worktrees(link, json!([
+        {"path": "/work/app-worktrees/feature-login", "branch": "feature/login", "head": "aaaa111"},
+        {"path": "/elsewhere/app-spike", "branch": "spike", "head": "bbbb222"},
+    ])).await;
+}
+
+async fn start_in_existing_worktree(server: &Server, link: &mut NodeLink, project: Uuid, path: &str) -> (u16, serde_json::Value) {
+    let user = server.user.clone();
+    let body = json!({"node_id": link.id, "agent": "claude", "project_id": project, "worktree_path": path});
+    let starting = tokio::spawn(async move { user.json(user.post("/api/v1/conversations").json(&body)).await });
+
+    answer_with_two_worktrees(link).await;
+
+    starting.await.unwrap()
+}
+
+#[tokio::test]
+async fn the_existing_worktrees_of_a_project_come_from_git_on_its_node() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", WORKTREE_READY_NODE).await;
+    let (project, _) = project_with_group(&server, link.id).await;
+    let user = server.user.clone();
+    let listing = tokio::spawn(async move { user.json(user.get(&format!("/api/v1/projects/{project}/worktrees"))).await });
+
+    answer_with_two_worktrees(&mut link).await;
+    let (status, listed) = listing.await.unwrap();
+
+    assert_eq!(status, 200, "{listed}");
+    assert_eq!(listed[1], json!({"path": "/elsewhere/app-spike", "branch": "spike", "head": "bbbb222"}));
+}
+
+#[tokio::test]
+async fn a_chat_in_an_existing_worktree_has_that_cwd_and_keeps_its_project_and_group() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", WORKTREE_READY_NODE).await;
+    let (project, group) = project_with_group(&server, link.id).await;
+
+    let (status, conversation) = start_in_existing_worktree(&server, &mut link, project, "/elsewhere/app-spike/").await;
+    let started_in = common::next_matching(&mut link, |message| if let ControlToNode::StartSession { cwd, .. } = message { Some(cwd.clone()) } else { None }).await;
+
+    assert_eq!(status, 201, "{conversation}");
+    assert_eq!(started_in, "/elsewhere/app-spike");
+    assert_eq!((conversation["cwd"].clone(), conversation["branch"].clone()), (json!("/elsewhere/app-spike"), json!("spike")));
+    assert_eq!((conversation["project_id"].clone(), conversation["group_id"].clone()), (json!(project), json!(group)));
+}
+
+#[tokio::test]
+async fn two_chats_can_share_an_existing_worktree_as_they_share_a_checkout() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", WORKTREE_READY_NODE).await;
+    let (project, _) = project_with_group(&server, link.id).await;
+
+    let (first_status, first) = start_in_existing_worktree(&server, &mut link, project, "/work/app-worktrees/feature-login").await;
+    let (second_status, second) = start_in_existing_worktree(&server, &mut link, project, "/work/app-worktrees/feature-login").await;
+
+    assert_eq!((first_status, second_status), (201, 201), "{first} {second}");
+    assert_eq!(first["cwd"], second["cwd"]);
+    assert_ne!(first["id"], second["id"]);
+}
+
+#[tokio::test]
+async fn a_path_that_is_not_a_worktree_of_the_project_is_refused() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", WORKTREE_READY_NODE).await;
+    let (project, _) = project_with_group(&server, link.id).await;
+
+    let (status, refused) = start_in_existing_worktree(&server, &mut link, project, "/home/sam/private").await;
+
+    assert_eq!((status, refused["error"].clone()), (400, json!("worktree_not_found")), "{refused}");
+    assert!(refused["message"].as_str().unwrap().contains("/home/sam/private is not a worktree of app"), "{refused}");
+    assert_eq!(sqlx::query_scalar::<_, i64>("select count(*) from conversations").fetch_one(&server.pool).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn an_existing_worktree_needs_its_project_its_node_and_no_new_branch() {
+    let server = Server::start().await;
+    let link = server.online_node_as("laptop", WORKTREE_READY_NODE).await;
+    let (project, _) = project_with_group(&server, link.id).await;
+    let path = "/work/app-worktrees/feature-login";
+
+    let (status, without_project) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": path, "worktree_path": path}))).await;
+    assert_eq!((status, without_project["error"].clone()), (400, json!("project_required")), "{without_project}");
+
+    let (status, with_branch) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "project_id": project, "branch": "topic", "worktree_path": path}))).await;
+    assert_eq!((status, with_branch["error"].clone()), (400, json!("worktree_or_branch")), "{with_branch}");
+
+    let (status, any_node) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": mycelium_proto::routing::ANY_NODE, "agent": "claude", "project_id": project, "worktree_path": path}))).await;
+    assert_eq!((status, any_node["error"].clone()), (400, json!("node_required")), "{any_node}");
+}
+
+#[tokio::test]
+async fn an_outdated_node_says_it_needs_updating_for_existing_worktrees() {
+    let server = Server::start().await;
+    let link = server.online_node_as("laptop", "v0.34.10").await;
+    let (project, _) = project_with_group(&server, link.id).await;
+
+    let (status, refused) = server.user.json(server.user.get(&format!("/api/v1/projects/{project}/worktrees"))).await;
+
+    assert_eq!((status, refused["error"].clone()), (409, json!("node_outdated")), "{refused}");
+    assert!(refused["message"].as_str().unwrap().contains("laptop needs Mycelium v0.34.11 or newer"), "{refused}");
 }

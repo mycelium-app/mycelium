@@ -268,6 +268,8 @@ pub struct CreateConversationRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
@@ -1402,6 +1404,8 @@ pub struct WorkflowStep {
     pub project_id: Option<Uuid>,
     #[serde(default)]
     pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_path: Option<String>,
     #[serde(default)]
     pub account: Option<String>,
     #[serde(default)]
@@ -1641,6 +1645,14 @@ pub struct Worktree {
     pub path: String,
     pub issue_number: Option<i64>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExistingWorktree {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    pub head: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -814,6 +814,7 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
                             cwd: spec.cwd.clone(),
                             project_id: spec.project_id,
                             branch: spec.branch.clone(),
+                            worktree_path: spec.worktree_path.clone(),
                             title: Some(spec.title.clone()),
                             prompt: None,
                             parent_id: None,

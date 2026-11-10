@@ -52,6 +52,7 @@ data class CreateConversationRequest(
     val cwd: String? = null,
     @SerialName("project_id") val projectId: String? = null,
     val branch: String? = null,
+    @SerialName("worktree_path") val worktreePath: String? = null,
     val title: String? = null,
     val prompt: String? = null,
     val model: String? = null,

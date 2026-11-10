@@ -1,3 +1,4 @@
+use crate::common;
 use crate::common::{NodeLink, Server, eventually};
 use crate::watches::{end_turn, fast, messages, prompt_for, say, told};
 use mycelium_proto::link::{ControlToNode, NodeToControl};
@@ -427,4 +428,45 @@ async fn a_native_subagent_waiting_for_an_answer_accepts_a_reply() {
 
     assert!(status < 300, "{status} {body}");
     assert_eq!(prompt_for(&mut link, started).await, "Yes, add it");
+}
+
+const WORKTREE_READY_NODE: &str = "v0.35.0";
+
+fn subagent_in_worktree(project: Uuid, path: &str) -> Value {
+    json!({"step": {"title": "Finish the import", "prompt": "Finish the import", "node": "laptop", "agent": "claude", "project_id": project, "worktree_path": path}})
+}
+
+async fn app_project(server: &Server, node: Uuid) -> Uuid {
+    let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+
+    sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path) values ($1, $2, 'app', '/work/app') returning id").bind(owner).bind(node).fetch_one(&server.pool).await.unwrap()
+}
+
+#[tokio::test]
+async fn start_subagent_proposes_an_existing_worktree_and_shows_it_on_the_card() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", WORKTREE_READY_NODE).await;
+    let conversation = caller(&server, &mut link).await;
+    let project = app_project(&server, link.id).await;
+    let token = link.token.clone();
+
+    let (result, ()) = tokio::join!(common::call_tool(&server, &token, conversation, "start_subagent", subagent_in_worktree(project, "/elsewhere/app-spike")), common::answer_existing_worktrees(&mut link, json!([{"path": "/elsewhere/app-spike", "branch": "spike", "head": "bbbb222"}])));
+
+    assert_eq!(result["isError"], Value::Null, "{result}");
+    assert_eq!(proposals(&server).await[0]["steps"][0]["folder"], json!("/elsewhere/app-spike"));
+}
+
+#[tokio::test]
+async fn start_subagent_refuses_a_path_that_is_not_a_worktree_of_the_project() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", WORKTREE_READY_NODE).await;
+    let conversation = caller(&server, &mut link).await;
+    let project = app_project(&server, link.id).await;
+    let token = link.token.clone();
+
+    let (result, ()) = tokio::join!(common::call_tool(&server, &token, conversation, "start_subagent", subagent_in_worktree(project, "/home/sam/private")), common::answer_existing_worktrees(&mut link, json!([])));
+
+    assert_eq!(result["isError"], json!(true), "{result}");
+    assert!(text(&result).contains("/home/sam/private is not a worktree of app"), "{result}");
+    assert!(proposals(&server).await.is_empty());
 }

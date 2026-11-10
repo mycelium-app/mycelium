@@ -49,7 +49,7 @@ async fn to_proto(state: &AppState, row: ProposalRow) -> ApiResult<StartProposal
             let node_choices = choice["node"].as_array().cloned().unwrap_or_default().iter().filter_map(|node| node["id"].as_str().and_then(|id| id.parse().ok())).map(|id| node_of(state, &names, id)).collect();
             let account_choices = choice["account"].as_array().cloned().unwrap_or_default().iter().filter_map(|account| account.as_str().map(String::from)).collect();
             let model_choices = choice["model"].as_array().cloned().unwrap_or_default().iter().filter_map(|model| Some(HarnessModel { id: model["id"].as_str()?.to_string(), name: model["name"].as_str()?.to_string() })).collect();
-            let folder = step.project_id.and_then(|id| projects.iter().find(|(project, _)| *project == id).map(|(_, name)| name.clone())).or_else(|| Some(step.cwd.clone()).filter(|cwd| !cwd.is_empty()));
+            let folder = step.worktree_path.clone().or_else(|| step.project_id.and_then(|id| projects.iter().find(|(project, _)| *project == id).map(|(_, name)| name.clone())).or_else(|| Some(step.cwd.clone()).filter(|cwd| !cwd.is_empty())));
 
             StartProposalStep {
                 key: step.key.clone(),
@@ -125,6 +125,18 @@ pub async fn propose(state: &AppState, owner: Uuid, conversation_id: Uuid, kind:
         let chosen = ordered[0].0;
         step.insert("node_id".into(), json!(chosen));
         step.remove("node");
+
+        if let Some(path) = step.get("worktree_path").and_then(Value::as_str) {
+            let project_id = step.get("project_id").and_then(Value::as_str).and_then(|id| id.parse::<Uuid>().ok());
+            let Some(project_id) = project_id else {
+                return Ok(Err("Nothing was proposed. Give the project_id of the project the worktree belongs to.".to_string()));
+            };
+            let project = crate::projects::find_owned(state, project_id, owner).await?;
+
+            if let Err(error) = crate::worktrees::find_existing(state, &project, path).await {
+                return Ok(Err(format!("Nothing was proposed. {}", error.message())));
+            }
+        }
 
         let mut step_choices = serde_json::Map::new();
 

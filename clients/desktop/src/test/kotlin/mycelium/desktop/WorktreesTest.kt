@@ -48,6 +48,7 @@ class WorktreesTest {
 
     private val bodies = CopyOnWriteArrayList<String>()
     private var conversationAnswer: Pair<HttpStatusCode, String> = HttpStatusCode.Created to ConversationJson
+    private var existingWorktrees = """[{"path":"/elsewhere/app-spike","branch":"spike","head":"bbbb2222"},{"path":"/p/app-worktrees/bisect","branch":null,"head":"4f2a91c000"}]"""
 
     private fun store(): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -59,6 +60,7 @@ class WorktreesTest {
                     bodies += String(request.body.toByteArray())
                     respond(conversationAnswer.second, conversationAnswer.first, json)
                 }
+                path.endsWith("/projects/p1/worktrees") -> respond(existingWorktrees, HttpStatusCode.OK, json)
                 path.endsWith("/projects") -> respond(ProjectJson, HttpStatusCode.OK, json)
                 path.endsWith("/nodes") -> respond(LaptopJson, HttpStatusCode.OK, json)
                 path.endsWith("/conversations") -> respond("[]", HttpStatusCode.OK, json)
@@ -80,6 +82,11 @@ class WorktreesTest {
                 NewConversationScreen(store, state, onCreated = { onCreated() }, projectId = "p1")
             }
         }
+    }
+
+    private fun chooseExistingWorktree() {
+        rule.onNodeWithContentDescription("Work in the existing checkout").performClick()
+        rule.onNodeWithText("Existing worktree").performClick()
     }
 
     private fun chooseNewWorktree() {
@@ -110,6 +117,49 @@ class WorktreesTest {
 
         rule.waitUntil(5_000) { created }
         assertEquals("""{"node_id":"$LaptopId","agent":"claude","project_id":"p1","branch":"feature/restore"}""", bodies.single())
+    }
+
+    @Test
+    fun anExistingWorktreeMadeWithPlainGitIsListedAndItsPathIsSent() {
+        val store = store()
+        var created = false
+        show(store) { created = true }
+
+        chooseExistingWorktree()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("spike").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("elsewhere/app-spike").assertExists()
+        rule.onNodeWithText("Detached at 4f2a91c").assertExists()
+        rule.onNodeWithText("spike").performClick()
+
+        rule.onNodeWithContentDescription("Work in the worktree spike").assertExists()
+        rule.onNodeWithContentDescription("Send").performClick()
+
+        rule.waitUntil(5_000) { created }
+        assertEquals("""{"node_id":"$LaptopId","agent":"claude","project_id":"p1","worktree_path":"/elsewhere/app-spike"}""", bodies.single())
+    }
+
+    @Test
+    fun aWorktreeHasToBeChosenBeforeAnythingIsSent() {
+        show(store())
+
+        chooseExistingWorktree()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("spike").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Send").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("spike").fetchSemanticsNodes().isEmpty() }
+        rule.onNodeWithContentDescription("Send").performClick()
+
+        rule.onNodeWithText("Choose a worktree to work in.").assertExists()
+        assertEquals(0, bodies.size)
+    }
+
+    @Test
+    fun aProjectWithNoOtherWorktreesSaysSo() {
+        existingWorktrees = "[]"
+        show(store())
+
+        chooseExistingWorktree()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("No other worktrees of app on laptop").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test

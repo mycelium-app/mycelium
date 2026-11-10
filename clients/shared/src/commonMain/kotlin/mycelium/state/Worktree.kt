@@ -1,6 +1,7 @@
 package mycelium.state
 
 import mycelium.api.Conversation
+import mycelium.api.ExistingWorktree
 import mycelium.api.Project
 
 fun worktreeFolder(projectPath: String, branch: String): String {
@@ -8,6 +9,10 @@ fun worktreeFolder(projectPath: String, branch: String): String {
 
     return "$name-worktrees/${branch.replace('/', '-')}"
 }
+
+fun existingWorktreeName(worktree: ExistingWorktree): String = worktree.branch ?: "Detached at ${worktree.head.take(7)}"
+
+fun existingWorktreeFolder(worktree: ExistingWorktree): String = worktree.path.trimEnd('/').split('/').takeLast(2).joinToString("/")
 
 fun checkedOutBranch(project: Project, conversations: Collection<Conversation>): String? =
     conversations.filter { it.cwd.trimEnd('/') == project.path.trimEnd('/') && !it.branch.isNullOrBlank() }.maxByOrNull { it.updatedAt }?.branch

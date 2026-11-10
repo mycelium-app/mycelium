@@ -1,11 +1,11 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::git::relay;
-use crate::projects::ProjectRow;
+use crate::projects::{ProjectRow, find_owned};
 use crate::state::AppState;
 use axum::Json;
-use axum::extract::State;
-use mycelium_proto::api::Worktree;
+use axum::extract::{Path, State};
+use mycelium_proto::api::{ExistingWorktree, Worktree};
 use mycelium_proto::link::GitCommand;
 use uuid::Uuid;
 
@@ -60,6 +60,28 @@ async fn record(state: &AppState, project: &ProjectRow, branch: &str, path: &str
     .await?;
 
     Ok(row)
+}
+
+async fn existing_on_node(state: &AppState, project: &ProjectRow) -> ApiResult<Vec<ExistingWorktree>> {
+    let answer = relay(state, project.node_id, project.path.clone(), GitCommand::ExistingWorktrees).await?;
+
+    serde_json::from_value(answer["worktrees"].clone()).map_err(|_| ApiError::internal("The node answered with a worktree list that could not be read."))
+}
+
+pub async fn existing(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<ExistingWorktree>>> {
+    let project = find_owned(&state, id, user.id).await?;
+
+    Ok(Json(existing_on_node(&state, &project).await?))
+}
+
+pub async fn find_existing(state: &AppState, project: &ProjectRow, path: &str) -> ApiResult<ExistingWorktree> {
+    let wanted = path.trim().trim_end_matches('/');
+
+    existing_on_node(state, project)
+        .await?
+        .into_iter()
+        .find(|worktree| worktree.path.trim_end_matches('/') == wanted)
+        .ok_or_else(|| ApiError::bad_request("worktree_not_found", format!("{wanted} is not a worktree of {} on this node. Choose one of the project's worktrees.", project.name)))
 }
 
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<Worktree>>> {

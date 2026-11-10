@@ -83,6 +83,14 @@ pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConvers
     };
     let any_node = request.node_id == ANY_NODE;
 
+    if request.worktree_path.is_some() && request.branch.is_some() {
+        return Err(ApiError::bad_request("worktree_or_branch", "Choose an existing worktree or a new branch, not both."));
+    }
+
+    if request.worktree_path.is_some() && any_node {
+        return Err(ApiError::bad_request("node_required", "Choose the node the worktree is on."));
+    }
+
     if any_node {
         let holding = match &project {
             Some(project) => Some(projects::nodes_holding(state, owner, project).await?),
@@ -103,7 +111,7 @@ pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConvers
         return Err(ApiError::bad_request("project_not_on_node", "This project is not set up on that node. Choose a node it is set up on."));
     }
 
-    if project.is_none() && request.branch.is_some() {
+    if project.is_none() && (request.branch.is_some() || request.worktree_path.is_some()) {
         return Err(ApiError::bad_request("project_required", "Choose a project to start a worktree from."));
     }
 
@@ -157,6 +165,13 @@ pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConvers
 
         cwd = worktree.path;
         worktree_branch = Some(worktree.branch);
+    }
+
+    if let (Some(project), Some(path)) = (&project, &request.worktree_path) {
+        let existing = worktrees::find_existing(state, project, path).await?;
+
+        cwd = existing.path;
+        worktree_branch = existing.branch;
     }
 
     if request.side_kind == Some(SideKind::Subagent) {
@@ -321,6 +336,7 @@ pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<
         cwd: parent.cwd.clone(),
         project_id: None,
         branch: None,
+        worktree_path: None,
         title,
         prompt,
         parent_id: Some(id),

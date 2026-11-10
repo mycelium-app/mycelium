@@ -17,6 +17,7 @@ data class WorkflowStep(
     val cwd: String? = null,
     @SerialName("project_id") val projectId: String? = null,
     val branch: String? = null,
+    @SerialName("worktree_path") val worktreePath: String? = null,
     val account: String? = null,
     val model: String? = null,
     val difficulty: String? = null,

@@ -832,6 +832,8 @@ class MyceliumApi(
 
     suspend fun worktrees(): List<Worktree> = call("/worktrees") { client.get(it) { authorise() } }.body()
 
+    suspend fun existingWorktrees(projectId: String): List<ExistingWorktree> = call("/projects/$projectId/worktrees") { client.get(it) { authorise() } }.body()
+
     suspend fun artifacts(): List<Artifact> = call("/artifacts") { client.get(it) { authorise() } }.body()
 
     suspend fun artifactLinks(id: String): List<ArtifactLink> = call("/artifacts/$id/links") { client.get(it) { authorise() } }.body()

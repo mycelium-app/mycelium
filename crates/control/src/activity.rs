@@ -15,7 +15,7 @@ use uuid::Uuid;
 const BREAKDOWN_LIMIT: i64 = 50;
 const SERIES_LIMIT: i64 = 24 * 30 + 1;
 const HOUR_KEY: &str = "to_char(date_trunc('hour', u.ended_at at time zone 'utc'), 'YYYY-MM-DD\"T\"HH24')";
-const PROJECT_OF_CONVERSATION: &str = "(select p.id from projects p where p.node_id = c.node_id and (c.cwd = p.path or starts_with(c.cwd, p.path || '/') or starts_with(c.cwd, p.path || '-worktrees/')) order by length(p.path) desc limit 1)";
+const PROJECT_OF_CONVERSATION: &str = "coalesce(c.project_id, (select p.id from projects p where p.node_id = c.node_id and (c.cwd = p.path or starts_with(c.cwd, p.path || '/') or starts_with(c.cwd, p.path || '-worktrees/')) order by length(p.path) desc limit 1))";
 
 #[derive(Deserialize)]
 pub struct ActivityQuery {

@@ -400,6 +400,7 @@ const NOT_YET_COVERED: &[(&str, &str)] = &[
     ("POST", "/api/v1/nodes/{id}/processes/{pid}/stop"),
     ("DELETE", "/api/v1/nodes/{id}/logins/{agent}/{account}"),
     ("GET", "/api/v1/worktrees"),
+    ("GET", "/api/v1/projects/{id}/worktrees"),
     ("GET", "/api/v1/workflows"),
     ("POST", "/api/v1/workflows/{id}/control"),
     ("POST", "/api/v1/workflows/{id}/rerun"),

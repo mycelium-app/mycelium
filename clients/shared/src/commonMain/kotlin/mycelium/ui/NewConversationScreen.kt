@@ -37,6 +37,7 @@ import mycelium.api.AnyNodeId
 import mycelium.api.AnyNodePick
 import mycelium.api.AgentSettings
 import mycelium.api.Conversation
+import mycelium.api.ExistingWorktree
 import mycelium.api.CreateProjectRequest
 import mycelium.api.Forge
 import mycelium.api.NodeSummary
@@ -62,6 +63,8 @@ import mycelium.state.inGroup
 import mycelium.state.switchableAccounts
 import mycelium.state.checkedOutBranch
 import mycelium.state.worktreeHint
+import mycelium.state.existingWorktreeFolder
+import mycelium.state.existingWorktreeName
 import mycelium.state.isLaptop
 import mycelium.state.randomFolderName
 
@@ -105,6 +108,10 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var browsing by remember { mutableStateOf(false) }
     var worktree by remember { mutableStateOf(false) }
     var branch by remember { mutableStateOf("") }
+    var inExistingWorktree by remember { mutableStateOf(false) }
+    var existingWorktrees by remember { mutableStateOf<List<ExistingWorktree>?>(null) }
+    var existingWorktreesError by remember { mutableStateOf<String?>(null) }
+    var chosenWorktree by remember { mutableStateOf<ExistingWorktree?>(null) }
     var branchError by remember { mutableStateOf<String?>(null) }
     var pinnedAccount by remember { mutableStateOf<String?>(null) }
     var signIn by remember { mutableStateOf<LoginSession?>(null) }
@@ -135,6 +142,26 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val entries = projectEntries(projects, nodes, newestConversations, keptNodeId)
     val recent = newestConversations.mapNotNull { conversation -> state.projects[conversation.projectId]?.let { held -> entries.firstOrNull { repositoryKey(it) == repositoryKey(held) } } }.distinct().take(RecentProjects)
     val project = if (withoutProject || newProjectChosen) null else chosenCheckout ?: recent.firstOrNull()
+
+    LaunchedEffect(inExistingWorktree, project?.id) {
+        if (inExistingWorktree && project != null) {
+            existingWorktrees = null
+            existingWorktreesError = attempt { existingWorktrees = store.api.existingWorktrees(project.id) }
+        }
+    }
+
+    LaunchedEffect(project?.id) {
+        inExistingWorktree = false
+        chosenWorktree = null
+    }
+
+    LaunchedEffect(anyNode) {
+        if (anyNode) {
+            inExistingWorktree = false
+            chosenWorktree = null
+        }
+    }
+
     val projectNode = project?.let { held -> nodes.firstOrNull { it.id == held.nodeId } }
     val choosingNode = project != null && !anyNode && setup == null && nodes.isNotEmpty() && projectNode == null
     val creatingProject = !withoutProject && project == null && (newProjectChosen || cwd.isBlank())
@@ -253,6 +280,11 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
             return
         }
 
+        if (project != null && inExistingWorktree && chosenWorktree == null) {
+            branchError = "Choose a worktree to work in."
+            return
+        }
+
         cwdError = null
         branchError = null
         val files = attached.drafts.map { it.file }
@@ -276,6 +308,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                     cwd = if (target == null) cwd.trim() else null,
                     projectId = target?.id,
                     branch = if (project != null && worktree) branch.trim() else null,
+                    worktreePath = chosenWorktree?.path?.takeIf { project != null && inExistingWorktree },
                     prompt = text.ifEmpty { null }.takeIf { files.isEmpty() },
                     model = chosenModel.ifEmpty { null },
                     mode = pickedMode?.takeIf { it == chosenMode },
@@ -409,6 +442,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                     project == null && cwd.isBlank() -> "Choose a folder"
                                     project == null -> cwd.trim().trimEnd('/').substringAfterLast('/').ifEmpty { cwd.trim() }
                                     worktree -> from?.let { "From $it" } ?: "New worktree"
+                                    inExistingWorktree -> chosenWorktree?.let(::existingWorktreeName) ?: "Choose a worktree"
                                     else -> "Checkout"
                                 }
                                 val description = when {
@@ -416,6 +450,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                     project == null && cwd.isBlank() -> "Folder: choose a folder"
                                     project == null -> "Folder: ${cwd.trim()}"
                                     worktree -> "Work in a new worktree${from?.let { ", from $it" }.orEmpty()}"
+                                    inExistingWorktree -> chosenWorktree?.let { "Work in the worktree ${existingWorktreeName(it)}" } ?: "Work in an existing worktree, choose one"
                                     else -> "Work in the existing checkout"
                                 }
 
@@ -495,7 +530,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                             text = where,
                                             icon = when {
                                                 creatingProject -> MyIcon.FolderPlus
-                                                project != null && worktree -> MyIcon.Branch
+                                                project != null && (worktree || inExistingWorktree) -> MyIcon.Branch
                                                 else -> MyIcon.Folder
                                             },
                                             description = description,
@@ -509,8 +544,25 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                             MenuPopup(onDismiss = { workInMenuOpen = false }, width = PlaceMenuWidth) {
                                                 if (project != null) {
                                                     MenuLabel("Work in")
-                                                    MenuItem("Existing checkout", onClick = { worktree = false }, checked = !worktree, leading = MyIcon.Folder)
-                                                    MenuItem("New worktree", onClick = { worktree = true }, checked = worktree, leading = MyIcon.Branch)
+                                                    MenuItem("Existing checkout", onClick = { worktree = false; inExistingWorktree = false; branchError = null }, checked = !worktree && !inExistingWorktree, leading = MyIcon.Folder)
+                                                    MenuItem("Existing worktree", onClick = { worktree = false; inExistingWorktree = true; anyNode = false; branchError = null }, checked = inExistingWorktree, leading = MyIcon.Branch)
+
+                                                    if (inExistingWorktree) {
+                                                        Column(Modifier.padding(start = Tokens.Space.S6)) {
+                                                            val listed = existingWorktrees
+
+                                                            when {
+                                                                existingWorktreesError != null -> Label(existingWorktreesError.orEmpty(), Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1), Tokens.Type.Meta, colors.statusFailed)
+                                                                listed == null -> MenuLabel("Finding worktrees")
+                                                                listed.isEmpty() -> MenuLabel("No other worktrees of ${project.name} on ${placed.name}")
+                                                                else -> for (option in listed) {
+                                                                    MenuItem(existingWorktreeName(option), onClick = { chosenWorktree = option; branchError = null; workInMenuOpen = false }, checked = option.path == chosenWorktree?.path, hint = existingWorktreeFolder(option), checkSlot = true)
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    MenuItem("New worktree", onClick = { worktree = true; inExistingWorktree = false; branchError = null }, checked = worktree, leading = MyIcon.Branch)
 
                                                     if (worktree) {
                                                         TextInput(

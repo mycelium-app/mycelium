@@ -344,7 +344,12 @@ fun inGroup(groupId: String?, filter: String): Boolean = when {
 
 fun inGroupFilter(conversation: Conversation, filter: String): Boolean = inGroup(conversation.groupId, filter)
 
-fun isWorktree(conversation: Conversation, project: Project?): Boolean = project != null && conversation.cwd.startsWith(project.path.trimEnd('/') + "-worktrees/")
+fun isWorktree(conversation: Conversation, project: Project?): Boolean {
+    val folder = project?.path?.trimEnd('/') ?: return false
+    val cwd = conversation.cwd.trimEnd('/')
+
+    return cwd != folder && !cwd.startsWith("$folder/")
+}
 
 private fun topLevel(conversations: Collection<Conversation>, filter: String): List<Conversation> {
     val active = conversations.filter { it.archivedAt == null && !it.inChatList && !it.isAssistantSession && !it.isSubagent && inGroupFilter(it, filter) }

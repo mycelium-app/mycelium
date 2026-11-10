@@ -193,6 +193,7 @@ fn git_commands_are_tagged_snake_case() {
     assert_eq!(round_trip(&GitCommand::CreateDirectory { name: "quiet-otter".into() }), json!({"type": "create_directory", "name": "quiet-otter"}));
     assert_eq!(round_trip(&GitCommand::Directories), json!({"type": "directories"}));
     assert_eq!(round_trip(&GitCommand::AddWorktree { branch: "b".into() }), json!({"type": "add_worktree", "branch": "b"}));
+    assert_eq!(round_trip(&GitCommand::ExistingWorktrees), json!({"type": "existing_worktrees"}));
     assert_eq!(
         round_trip(&GitCommand::Clone { url: "https://x/y.git".into(), credentials: Some(mycelium_proto::link::GitCredentials { username: "u".into(), password: "p".into() }) }),
         json!({"type": "clone", "url": "https://x/y.git", "credentials": {"username": "u", "password": "p"}})

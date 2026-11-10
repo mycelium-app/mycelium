@@ -103,9 +103,10 @@ pub struct PushRequest {
 }
 
 const CREATE_DIRECTORY_SINCE: (u64, u64, u64) = (0, 20, 0);
+const EXISTING_WORKTREES_SINCE: (u64, u64, u64) = (0, 34, 11);
 
-fn node_outdated_for_folders(name: &str) -> ApiError {
-    ApiError::conflict("node_outdated", format!("{name} needs Mycelium v0.20.0 or newer to create folders. Update the node, then try again."))
+fn node_outdated(name: &str, since: (u64, u64, u64), doing: &str) -> ApiError {
+    ApiError::conflict("node_outdated", format!("{name} needs Mycelium v{}.{}.{} or newer to {doing}. Update the node, then try again.", since.0, since.1, since.2))
 }
 
 pub async fn relay(state: &AppState, node_id: Uuid, cwd: String, command: GitCommand) -> ApiResult<Value> {
@@ -121,23 +122,27 @@ pub async fn relay(state: &AppState, node_id: Uuid, cwd: String, command: GitCom
         return Err(node_offline());
     }
 
-    let creates_folder = matches!(command, GitCommand::CreateDirectory { .. });
+    let needs_recent_node = match command {
+        GitCommand::CreateDirectory { .. } => Some((CREATE_DIRECTORY_SINCE, "create folders")),
+        GitCommand::ExistingWorktrees => Some((EXISTING_WORKTREES_SINCE, "list existing worktrees")),
+        _ => None,
+    };
 
-    if creates_folder {
+    if let Some((since, doing)) = needs_recent_node {
         let (name, version) = sqlx::query_as::<_, (String, String)>("select name, version from nodes where id = $1").bind(node_id).fetch_one(&state.pool).await?;
 
-        if !node_has(&version, CREATE_DIRECTORY_SINCE) {
-            return Err(node_outdated_for_folders(&name));
+        if !node_has(&version, since) {
+            return Err(node_outdated(&name, since, doing));
         }
     }
 
     let asked =state.ask_node::<GitAnswer>(node_id, timeout, |request_id| ControlToNode::Git { request_id, cwd, command }).await;
 
     let Some(answer) = asked else {
-        if creates_folder {
+        if let Some((since, doing)) = needs_recent_node {
             let name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(node_id).fetch_one(&state.pool).await?;
 
-            return Err(node_outdated_for_folders(&name));
+            return Err(node_outdated(&name, since, doing));
         }
 
         return Err(ApiError::new(StatusCode::GATEWAY_TIMEOUT, "git_timeout", "The node did not answer in time. Try again in a moment."));

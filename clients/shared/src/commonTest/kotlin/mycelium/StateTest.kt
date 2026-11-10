@@ -94,6 +94,7 @@ class StateTest {
         val project = Project("p1", "n", "app", "/work/app", createdAt = "2026-10-22T10:00:00Z")
 
         assertEquals(true, isWorktree(conversation("a", ConversationStatus.Done).copy(cwd = "/work/app-worktrees/feature"), project))
+        assertEquals(true, isWorktree(conversation("d", ConversationStatus.Done).copy(cwd = "/elsewhere/app-spike"), project))
         assertEquals(false, isWorktree(conversation("b", ConversationStatus.Done).copy(cwd = "/work/app/crates"), project))
         assertEquals(false, isWorktree(conversation("c", ConversationStatus.Done).copy(cwd = "/work/app-worktrees/feature"), null))
     }

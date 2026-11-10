@@ -1,5 +1,7 @@
 package mycelium.desktop
 
+import androidx.compose.runtime.CompositionLocalProvider
+import mycelium.ui.LocalTouch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -46,6 +48,8 @@ private const val NodeJson = """[{"id":"n1","name":"atlas-box","hostname":"atlas
 "harness_models":[{"agent":"claude","models":[{"id":"opus","name":"Opus 5.5"},{"id":"sonnet","name":"Sonnet 5.5"}],"default_model":"opus","reported_at":"2026-10-22T08:00:00Z"}]}]"""
 
 private const val ProjectJson = """[{"id":"p1","node_id":"n1","name":"harbour","path":"/home/you/harbour","created_at":"2026-10-22T10:00:00Z"}]"""
+
+private const val ExistingWorktreesJson = """[{"path":"/home/you/harbour-worktrees/restore-copy","branch":"restore-copy","head":"aaaa111"},{"path":"/home/you/scratch/harbour-sqlite","branch":"spike/sqlite","head":"bbbb222"},{"path":"/home/you/harbour-worktrees/bisect","branch":null,"head":"4f2a91c000"}]"""
 
 @OptIn(androidx.compose.ui.InternalComposeUiApi::class)
 class ConversationAreaRenderTest {
@@ -95,6 +99,7 @@ class ConversationAreaInteractionTest {
             val path = request.url.encodedPath
 
             when {
+                path.endsWith("/projects/p1/worktrees") -> respond(ExistingWorktreesJson, HttpStatusCode.OK, json)
                 path.endsWith("/projects") -> respond(ProjectJson, HttpStatusCode.OK, json)
                 path.endsWith("/nodes") -> respond(NodeJson, HttpStatusCode.OK, json)
                 path.endsWith("/conversations") -> respond("[]", HttpStatusCode.OK, json)
@@ -115,18 +120,26 @@ class ConversationAreaInteractionTest {
         out.writeBytes(png)
     }
 
-    private fun showNewConversation() {
+    private fun showNewConversation(phone: Boolean = false) {
         val store = store()
 
         rule.setContent {
             MyceliumTheme(true) {
-                Box(Modifier.width(900.dp).fillMaxSize().background(MyTheme.colors.bgContent)) {
-                    val state by store.state.collectAsState()
+                CompositionLocalProvider(LocalTouch provides phone) {
+                    Box(Modifier.width(if (phone) 390.dp else 900.dp).fillMaxSize().background(MyTheme.colors.bgContent)) {
+                        val state by store.state.collectAsState()
 
-                    NewConversationScreen(store, state, onCreated = {}, projectId = "p1")
+                        NewConversationScreen(store, state, onCreated = {}, projectId = "p1")
+                    }
                 }
             }
         }
+    }
+
+    private fun openExistingWorktrees() {
+        rule.onNodeWithContentDescription("Work in the existing checkout").performClick()
+        rule.onNodeWithText("Existing worktree").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("spike/sqlite").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -139,6 +152,24 @@ class ConversationAreaInteractionTest {
 
         rule.onNodeWithText("Folder harbour-worktrees/fix-restore-copy", substring = true).assertExists()
         capture("new-conversation-branch")
+    }
+
+    @Test
+    fun theWorkInMenuListsExistingWorktrees() {
+        showNewConversation()
+
+        openExistingWorktrees()
+
+        capture("new-conversation-existing-worktree")
+    }
+
+    @Test
+    fun theWorkInSheetListsExistingWorktreesOnAPhone() {
+        showNewConversation(phone = true)
+
+        openExistingWorktrees()
+
+        capture("new-conversation-existing-worktree-phone")
     }
 
     @Test
