@@ -318,6 +318,8 @@ pub struct PatchConversationRequest {
     pub clear_project: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub teach_me: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice_mode: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

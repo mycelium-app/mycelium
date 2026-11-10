@@ -19,7 +19,7 @@ macro_rules! conversation_group_sql {
 }
 
 pub const CONVERSATION_GROUP_SQL: &str = conversation_group_sql!();
-pub const CONVERSATION_COLUMNS: &str = concat!("id, owner, node_id, agent, cwd, title, title_user_set, status, agent_active, acp_session_id, mode, model, account, options, parent_id, side_kind, imported_from, provider_id, project_id, ", conversation_group_sql!(), " as group_id, created_at, updated_at, archived_at, pinned_at, resume_at, snoozed_until, managed_by, flagged_at, flag_reason, branch, pull_request_label, pull_request_url, pull_request_state, pull_request_number, assistant_id, teach_me, routing, scratch, last_message_seq > coalesce((select r.seq from conversation_reads r where r.conversation_id = id and r.user_id = owner), 0) as unread, conversation_action_items(id) as action_items");
+pub const CONVERSATION_COLUMNS: &str = concat!("id, owner, node_id, agent, cwd, title, title_user_set, status, agent_active, acp_session_id, mode, model, account, options, parent_id, side_kind, imported_from, provider_id, project_id, ", conversation_group_sql!(), " as group_id, created_at, updated_at, archived_at, pinned_at, resume_at, snoozed_until, managed_by, flagged_at, flag_reason, branch, pull_request_label, pull_request_url, pull_request_state, pull_request_number, assistant_id, teach_me, voice_mode, routing, scratch, last_message_seq > coalesce((select r.seq from conversation_reads r where r.conversation_id = id and r.user_id = owner), 0) as unread, conversation_action_items(id) as action_items");
 pub const TURN_HAS_ENDED: &str = "coalesce((select max(seq) from events where conversation_id = $1 and kind = 'turn_end'), 0) >= coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message'), 0)";
 
 pub const WORKFLOW_AGENT_QUIET_SECONDS: i32 = 15 * 60;
@@ -104,6 +104,7 @@ pub struct ConversationRow {
     pub pull_request_number: Option<i64>,
     pub assistant_id: Option<Uuid>,
     pub teach_me: bool,
+    pub voice_mode: bool,
     pub routing: Option<String>,
     pub scratch: bool,
     pub unread: bool,
@@ -150,6 +151,7 @@ impl ConversationRow {
             pull_request_number: self.pull_request_number,
             assistant_id: self.assistant_id,
             teach_me: self.teach_me,
+            voice_mode: self.voice_mode,
             routing: self.routing.as_deref().and_then(mycelium_proto::routing::Routing::parse),
             scratch: self.scratch,
             unread: self.unread,

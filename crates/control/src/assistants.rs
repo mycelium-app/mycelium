@@ -524,13 +524,7 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
     };
 
     if spoken {
-        sqlx::query(
-            "update events set payload = payload || jsonb_build_object('spoken', true, 'spoken_at', to_jsonb(created_at))
-             where id = (select id from events where conversation_id = $1 and kind = 'user_message' order by seq desc limit 1)",
-        )
-        .bind(conversation.id)
-        .execute(&state.pool)
-        .await?;
+        prompts::mark_spoken(state, conversation.id).await?;
     }
 
     publish(state, owner, id).await?;

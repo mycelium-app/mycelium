@@ -84,6 +84,7 @@ mod usage_history;
 mod usage_limits;
 mod versions;
 mod voice;
+mod voice_mode;
 mod walkthroughs;
 mod watches;
 mod wellness;

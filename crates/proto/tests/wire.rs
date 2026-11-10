@@ -88,6 +88,7 @@ fn conversation() -> Conversation {
         pull_request_number: None,
         assistant_id: None,
         teach_me: false,
+        voice_mode: false,
         routing: None,
         scratch: false,
         unread: false,

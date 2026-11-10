@@ -436,6 +436,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
              pinned_at = case when $9::bool is null then pinned_at when $9 then coalesce(pinned_at, now()) else null end,
              project_id = case when $10 then null else coalesce($11, project_id) end,
              teach_me = coalesce($12, teach_me),
+             voice_mode = coalesce($16, voice_mode),
              snoozed_until = case when $13 then null else coalesce($14, snoozed_until) end,
              managed_by = case when $15 then null else managed_by end,
              flagged_at = case when $15 then null else flagged_at end,
@@ -463,10 +464,15 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .bind(request.clear_snooze == Some(true))
     .bind(request.snoozed_until)
     .bind(request.take_over == Some(true))
+    .bind(request.voice_mode)
     .fetch_one(&mut *tx)
     .await?;
     let teach_change = match request.teach_me {
         Some(on) if on != before.teach_me => append_event(&mut tx, id, EventKind::TeachMode, &json!({"on": on}), None).await?,
+        _ => None,
+    };
+    let voice_change = match request.voice_mode {
+        Some(on) if on != before.voice_mode => append_event(&mut tx, id, EventKind::VoiceMode, &json!({"on": on}), None).await?,
         _ => None,
     };
     let model_change = match &switched_to {
@@ -477,12 +483,16 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     };
     tx.commit().await?;
 
-    for event in model_change.into_iter().chain(teach_change) {
+    for event in model_change.into_iter().chain(teach_change).chain(voice_change) {
         state.publish(Some(user.id), StreamMessage::Event(event));
     }
 
     if request.teach_me.is_some_and(|on| on != before.teach_me) {
         state.hub.mark_secrets_stale(id);
+    }
+
+    if let Some(on) = request.voice_mode.filter(|on| *on != before.voice_mode && !chats::is_chat(&row)) {
+        state.hub.note_for_agent(id, if on { instructions::VOICE_MODE_INSTRUCTIONS } else { instructions::VOICE_MODE_OFF_NOTE }.to_string());
     }
 
     if title.is_some() && chats::is_chat(&row) {

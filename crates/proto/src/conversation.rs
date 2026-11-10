@@ -73,6 +73,7 @@ pub enum EventKind {
     ModelChanged,
     Continued,
     TeachMode,
+    VoiceMode,
     OpenOutline,
     BroughtInConversation,
     GoalReport,
@@ -175,6 +176,8 @@ pub struct Conversation {
     pub assistant_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub teach_me: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub voice_mode: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing: Option<Routing>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

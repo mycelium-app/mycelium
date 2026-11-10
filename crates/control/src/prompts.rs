@@ -172,7 +172,13 @@ pub enum Sent {
 }
 
 pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PromptRequest>) -> ApiResult<Response> {
+    let spoken = request.spoken;
     let sent = send(&state, user.id, id, request).await?;
+
+    if spoken && matches!(sent, Sent::Delivered) {
+        mark_spoken(&state, id).await?;
+    }
+
     let attended = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set flagged_at = null, flag_reason = null where id = $1 and owner = $2 and flagged_at is not null returning {CONVERSATION_COLUMNS}"))).bind(id).bind(user.id).fetch_optional(&state.pool).await?;
 
     if let Some(attended) = attended {
@@ -248,6 +254,18 @@ pub async fn send_reopening(state: &AppState, owner: Uuid, id: Uuid, request: Pr
     }
 
     Ok(Sent::Delivered)
+}
+
+pub async fn mark_spoken(state: &AppState, conversation_id: Uuid) -> ApiResult<()> {
+    sqlx::query(
+        "update events set payload = payload || jsonb_build_object('spoken', true, 'spoken_at', to_jsonb(created_at))
+         where id = (select id from events where conversation_id = $1 and kind = 'user_message' order by seq desc limit 1)",
+    )
+    .bind(conversation_id)
+    .execute(&state.pool)
+    .await?;
+
+    Ok(())
 }
 
 pub async fn reopen(tx: &mut sqlx::PgConnection, owner: Uuid, id: Uuid, manager: Option<Uuid>) -> ApiResult<Conversation> {

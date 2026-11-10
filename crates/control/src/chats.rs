@@ -6,7 +6,7 @@ use crate::activity::record_turn;
 use crate::chat_tools::{self, Toolbox};
 use crate::conversations::{self, derived_title};
 use crate::error::{ApiError, ApiResult};
-use crate::instructions::{assistant_chat_layers, extensions_of, teach_me_layer};
+use crate::instructions::{assistant_chat_layers, extensions_of, teach_me_layer, voice_mode_layer};
 use crate::model_providers::{self, ChatImage, ChatMessage, ProviderError, ProviderRow, ReportedUsage, ToolCall, ToolResult};
 use crate::state::AppState;
 use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enqueue, enum_text, find_owned, lock_owned, publish_queue, set_status};
@@ -495,6 +495,10 @@ async fn relay(state: &AppState, owner: Uuid, id: Uuid, provider: &ProviderRow, 
 
     if let Some(teach_me) = teach_me_layer(state, id).await? {
         base_instructions = format!("{base_instructions}\n\n{teach_me}");
+    }
+
+    if let Some(voice_mode) = voice_mode_layer(state, id).await? {
+        base_instructions = format!("{base_instructions}\n\n{voice_mode}");
     }
 
     let mut toolbox = Toolbox::open(state, owner, id).await?;

@@ -247,6 +247,16 @@ pub async fn teach_me_layer(state: &AppState, conversation_id: Uuid) -> ApiResul
     Ok(on.then(|| TEACH_ME_INSTRUCTIONS.to_string()))
 }
 
+pub const SPOKEN_LANGUAGE: &str = "mycelium-spoken";
+pub const VOICE_MODE_INSTRUCTIONS: &str = "Voice mode is on for this conversation: the person is talking to you and hears your replies read aloud. Answer as you normally would, with the full text, code and lists in the thread. Then end every reply with one fenced block whose language is mycelium-spoken, holding a concise spoken version of the reply: one to three plain sentences written to be heard, with no Markdown, code, file paths or links. Only that block is read aloud, and it is never shown in the thread, so point to the thread for detail rather than reading it out.";
+pub const VOICE_MODE_OFF_NOTE: &str = "Voice mode is off for this conversation: the person is reading again, so stop adding mycelium-spoken blocks.";
+
+pub async fn voice_mode_layer(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<String>> {
+    let on = sqlx::query_scalar::<_, bool>("select voice_mode from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?.unwrap_or(false);
+
+    Ok(on.then(|| VOICE_MODE_INSTRUCTIONS.to_string()))
+}
+
 pub async fn session_layer(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<String>> {
     let revision = current_revision(state).await?;
 
@@ -255,6 +265,7 @@ pub async fn session_layer(state: &AppState, conversation_id: Uuid) -> ApiResult
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     let extensions = extensions_of(state, owner).await?;
     let teach_me = teach_me_layer(state, conversation_id).await?;
+    let voice_mode = voice_mode_layer(state, conversation_id).await?;
     let layers: Vec<String> = conversation_layers(state, conversation_id, false)
         .await?
         .into_iter()
@@ -262,6 +273,7 @@ pub async fn session_layer(state: &AppState, conversation_id: Uuid) -> ApiResult
         .chain(extensions.rich_markdown.then(|| RICH_MARKDOWN_INSTRUCTIONS.to_string()))
         .chain(extensions.mycelium_tools.then(tools_instructions))
         .chain(teach_me)
+        .chain(voice_mode)
         .collect();
 
     Ok((!layers.is_empty()).then(|| layers.join("\n\n")))
