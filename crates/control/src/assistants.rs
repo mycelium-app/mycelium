@@ -7,7 +7,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::groups;
 use crate::prompts;
 use crate::state::{AppState, FolderAnswer};
-use crate::store::{self, ConversationRow, enum_text, parse_enum};
+use crate::store::{self, ConversationRow, TURN_HAS_ENDED, enum_text, parse_enum};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::body::Bytes;
@@ -469,7 +469,9 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
         }
         Some(row) if chats::is_chat(&row) => chats::send(state, owner, row.id, text, request.attachments).await?,
         Some(row) => {
-            if let Some(reason) = unavailable_reason(state, &row).await? {
+            let turn_ended = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!("select {TURN_HAS_ENDED}"))).bind(row.id).fetch_one(&state.pool).await?;
+
+            if turn_ended && let Some(reason) = unavailable_reason(state, &row).await? {
                 fall_back(state, owner, row.id, reason, None).await;
             }
 

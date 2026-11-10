@@ -618,6 +618,38 @@ async fn a_session_whose_node_went_offline_moves_on_before_the_next_prompt() {
     assert_eq!((moved["agent"].clone(), continued["payload"]["reason"].clone()), (json!("chat"), json!("offline")));
 }
 
+#[tokio::test]
+async fn a_prompt_while_the_session_waits_mid_turn_queues_into_it_even_when_its_node_went_offline() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let node_id = link.id;
+    let (provider, _) = chat_provider(&server).await;
+    let assistant = create(&server.user, json!({"name": "War room", "preferences": {"chat_first": false, "nodes": [node_id], "models": [{"agent": "claude"}, {"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let id = assistant["id"].as_str().unwrap();
+    let started = prompt(&server.user, id, "Read the release conversation").await;
+    let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
+
+    next_matching(&mut link, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
+    link.start_session(conversation, "acp-1").await;
+    link.expect_prompt().await;
+    sqlx::query("update conversations set status = 'input' where id = $1").bind(conversation).execute(&server.pool).await.unwrap();
+    drop(link);
+    common::eventually("the node to go offline", || async {
+        let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
+
+        nodes.as_array().unwrap().iter().any(|node| node["id"] == json!(node_id) && node["online"] == false).then_some(())
+    })
+    .await;
+
+    let again = prompt(&server.user, id, "hi").await;
+
+    let (_, queue) = server.user.json(server.user.get(&format!("/api/v1/conversations/{conversation}/queue"))).await;
+    let queued: Vec<Value> = queue.as_array().unwrap().iter().map(|item| item["text"].clone()).collect();
+    let events = server.events(conversation).await;
+    assert_eq!((again["id"].clone(), server.conversation(conversation).await["agent"].clone(), queued), (json!(conversation), json!("claude"), vec![json!("hi")]));
+    assert!(!events.iter().any(|event| event["kind"] == "continued"));
+}
+
 fn events_text(events: &[Value]) -> String {
     serde_json::to_string(events).unwrap()
 }
