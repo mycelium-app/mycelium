@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.34.5
+
+- Tandoor: edit and delete recipes with their steps and ingredients, set recipe images, import a recipe from a page, find foods, units and keywords, set food nutrition, change and delete meal plans, and uncheck or remove shopping list entries. search_recipes takes filters, and get_recipe returns everything update_recipe takes. check_off_item no longer takes checked; use uncheck_item.
+- A conversation that hits a limit with no free account resumes when another account in its routing resets.
+- An approval review refused for exhausted credits counts as the account's limit, so the conversation moves to another account.
+
 ## v0.34.4
 
 - A message sent while an assistant's session is mid-turn queues into that session instead of starting a new one.
