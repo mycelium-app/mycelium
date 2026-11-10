@@ -58,6 +58,8 @@ private const val StoatJson = """{"id":"s5","name":"Stoat","kind":"stoat","url":
 
 private const val LastFmJson = """{"id":"s8","name":"Last.fm","kind":"lastfm","url":"https://ws.audioscrobbler.com/2.0/","account":"ada","settings":{"api_key":"key-1"},"token_hint":"••••5678","enabled":true,"always_allow":false,"tools":[{"name":"get_recent_tracks","description":"Recent"}],"created_at":"2026-10-22T16:00:00Z"}"""
 
+private const val OutlineJson = """{"id":"s9","name":"Docs","kind":"mcp","url":"https://docs.example.com/mcp","settings":{"app":"outline"},"oauth":true,"enabled":true,"always_allow":false,"tools":[{"name":"search","description":"Search"}],"created_at":"2026-10-22T17:00:00Z"}"""
+
 private const val GitHubJson = """{"id":"s2","name":"GitHub","url":"https://gh.test/mcp","enabled":true,"always_allow":false,"tools":[],"created_at":"2026-10-22T11:00:00Z"}"""
 
 @Composable
@@ -241,5 +243,21 @@ class ChatToolsSettingsTest {
         store.receive(StreamMessage.IntegrationsChanged)
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Signed in to Last.fm").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun reauthenticatingAnOAuthIntegrationSignsInAgainToTheSameAccount() {
+        listed = OutlineJson
+        postAnswer = HttpStatusCode.OK to """{"authorize_url":"https://docs.example.com/authorize"}"""
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { Scrolling { ChatToolsSettings(store) } } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Outline").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Outline").performClick()
+        rule.onNodeWithContentDescription("Open docs.example.com/mcp").performClick()
+        rule.onNodeWithText("Re-authenticate").performScrollTo().performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/chat-tool-servers/oauth") } }
+        assertTrue(bodies.any { it.contains("\"name\":\"Docs\"") && it.contains("\"server_id\":\"s9\"") }, bodies.toString())
     }
 }

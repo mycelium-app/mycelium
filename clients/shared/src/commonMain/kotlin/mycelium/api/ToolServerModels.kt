@@ -76,7 +76,7 @@ data class ChatToolServer(
 data class CreateChatToolServerRequest(val name: String, val url: String, @SerialName("bearer_token") val bearerToken: String? = null, val kind: String? = null, val account: String? = null, val settings: JsonObject? = null, @SerialName("token_expires_at") val tokenExpiresAt: String? = null, @SerialName("app_from") val appFrom: String? = null)
 
 @Serializable
-data class StartChatToolServerOAuthRequest(val name: String, val url: String, val kind: String? = null, @SerialName("forge_id") val forgeId: String? = null)
+data class StartChatToolServerOAuthRequest(val name: String, val url: String, val kind: String? = null, @SerialName("forge_id") val forgeId: String? = null, @SerialName("server_id") val serverId: String? = null)
 
 @Serializable
 data class OAuthStart(@SerialName("authorize_url") val authorizeUrl: String)

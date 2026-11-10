@@ -157,7 +157,7 @@ fun ChatToolsSettings(store: Store, start: IntegrationStart? = null) {
             }
         } else if (target.oauth) {
             store.act {
-                val started = store.api.startChatToolServerOAuth(StartChatToolServerOAuthRequest(target.name, target.url, if (target.settings?.get("app")?.jsonPrimitive?.content == "outline") "outline" else null, forgeId = target.forgeId))
+                val started = store.api.startChatToolServerOAuth(StartChatToolServerOAuthRequest(target.name, target.url, if (target.settings?.get("app")?.jsonPrimitive?.content == "outline") "outline" else null, forgeId = target.forgeId, serverId = target.id))
                 platform?.openUrl(started.authorizeUrl)
             }
         }

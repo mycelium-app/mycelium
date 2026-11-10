@@ -77,6 +77,12 @@ async fn token(State(app): Shared, body: String) -> Json<Value> {
         return Json(json!({"access_token": "access-2", "refresh_token": "refresh-2", "expires_in": 3600}));
     }
 
+    let exchanges = app.token_requests.lock().unwrap().iter().filter(|form| form.iter().any(|(name, value)| name == "grant_type" && value == "authorization_code")).count();
+
+    if exchanges > 1 {
+        return Json(json!({"access_token": "access-3", "refresh_token": "refresh-3", "expires_in": 3600}));
+    }
+
     Json(json!({"access_token": "access-1", "refresh_token": "refresh-1", "expires_in": app.token_lifetime}))
 }
 
@@ -247,4 +253,53 @@ async fn a_rejected_oauth_token_with_no_known_expiry_is_refreshed_and_the_tools_
 
     assert!(tools.iter().any(|tool| tool["name"] == "docs__search"), "{tools:?}");
     assert_eq!(app.mcp_authorisations.lock().unwrap().last().map(String::as_str), Some("Bearer access-2"));
+}
+
+#[tokio::test]
+async fn signing_in_again_updates_the_existing_integration_and_keeps_its_tool_names() {
+    let server = Server::start().await;
+    let (_, node_token) = server.join("node", "laptop").await;
+    let (base, app) = start_app(false, 3600).await;
+    let query = sign_in(&server, &base).await;
+    callback(&server, &param(&query, "state")).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
+    let id = listed[0]["id"].as_str().unwrap().to_string();
+    server.user.json(server.user.patch(&format!("/api/v1/chat-tool-servers/{id}")).json(&json!({"name": "Work docs"}))).await;
+    sqlx::query("update chat_tool_servers set bearer_token = 'stale', oauth_refresh_token = null, oauth_expires_at = null").execute(&server.pool).await.unwrap();
+
+    let (status, started) = begin(&server, json!({"name": "Work docs", "url": base, "kind": "outline", "server_id": id})).await;
+    assert_eq!(status, 200, "{started}");
+    let (status, page) = callback(&server, &param(&query_of(started["authorize_url"].as_str().unwrap()), "state")).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
+    let tools = listed_tools(&server, &node_token).await;
+
+    assert_eq!(status, 200, "{page}");
+    assert_eq!(listed.as_array().map(Vec::len), Some(1), "{listed}");
+    assert_eq!((listed[0]["id"].as_str(), listed[0]["name"].as_str(), listed[0]["settings"].clone()), (Some(id.as_str()), Some("Work docs"), json!({"app": "outline"})));
+    assert!(tools.iter().any(|tool| tool["name"] == "docs__search"), "{tools:?}");
+    assert_eq!(app.mcp_authorisations.lock().unwrap().last().map(String::as_str), Some("Bearer access-3"));
+    let tool_prefix: String = sqlx::query_scalar("select tool_prefix from chat_tool_servers").fetch_one(&server.pool).await.unwrap();
+    assert_eq!(tool_prefix, "docs");
+}
+
+#[tokio::test]
+async fn adding_an_oauth_integration_with_a_name_already_taken_is_refused() {
+    let server = Server::start().await;
+    let (base, _) = start_app(false, 3600).await;
+    let query = sign_in(&server, &base).await;
+    callback(&server, &param(&query, "state")).await;
+
+    let (status, refused) = begin(&server, json!({"name": "Docs", "url": base, "kind": "outline"})).await;
+
+    assert_eq!((status, refused["error"].as_str(), refused["message"].as_str()), (409, Some("name_taken"), Some("Enter a different name. Another tool server already has this one.")));
+}
+
+#[tokio::test]
+async fn signing_in_again_to_someone_elses_integration_is_refused() {
+    let server = Server::start().await;
+    let (base, _) = start_app(false, 3600).await;
+
+    let (status, refused) = begin(&server, json!({"name": "Docs", "url": base, "kind": "outline", "server_id": "00000000-0000-0000-0000-000000000001"})).await;
+
+    assert_eq!(status, 404, "{refused}");
 }

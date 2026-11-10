@@ -86,6 +86,7 @@ pub struct PendingOAuth {
     pub token_endpoint: String,
     pub verifier: String,
     pub forge_id: Option<Uuid>,
+    pub server: Option<Uuid>,
     pub created: std::time::Instant,
 }
 

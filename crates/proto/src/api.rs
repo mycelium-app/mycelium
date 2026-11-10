@@ -941,6 +941,8 @@ pub struct StartChatToolServerOAuthRequest {
     pub kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forge_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
