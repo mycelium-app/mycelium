@@ -2042,6 +2042,21 @@ pub struct Goal {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TodoItem {
+    pub content: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SaveTodosRequest {
+    pub todos: Vec<TodoItem>,
+    #[serde(default)]
+    pub tell_agent: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetGoalRequest {
     pub text: String,
     #[serde(default)]

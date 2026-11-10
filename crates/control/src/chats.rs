@@ -318,6 +318,10 @@ async fn history(state: &AppState, id: Uuid) -> ApiResult<Vec<ChatMessage>> {
         let content = continuation::handoff(state, id, marker).await?;
 
         messages.push(ChatMessage { role: "user", content, ..ChatMessage::default() });
+    } else if crate::todos::carried(state, id).await?
+        && let Some(content) = continuation::todo_section(state, id).await?
+    {
+        messages.push(ChatMessage { role: "user", content, ..ChatMessage::default() });
     }
 
     let mut said = String::new();

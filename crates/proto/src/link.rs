@@ -69,14 +69,6 @@ pub enum NodeToControl {
         seq: i64,
         message: String,
     },
-    SessionNotice {
-        conversation_id: Uuid,
-        seq: i64,
-        setting: String,
-        requested: String,
-        current: Option<String>,
-        message: String,
-    },
     Logins {
         logins: Vec<LoginInfo>,
     },

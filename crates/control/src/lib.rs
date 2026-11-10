@@ -95,6 +95,7 @@ mod open_outline;
 mod ssh_access;
 mod start_proposals;
 mod state;
+mod todos;
 mod store;
 mod stream;
 mod terminals;
@@ -234,6 +235,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/goal/send", post(goals::send_again))
         .route("/api/v1/conversations/{id}/goal/nudge", post(goals::nudge_now))
         .route("/api/v1/conversations/{id}/goal/continue", post(goals::continue_goal))
+        .route("/api/v1/conversations/{id}/todos", put(todos::save))
         .route("/api/v1/conversations/{id}/walkthrough", get(walkthroughs::get))
         .route("/api/v1/walkthroughs/{id}/uncovered", get(walkthroughs::uncovered))
         .route("/api/v1/walkthroughs/{id}/notes", get(walkthroughs::notes).post(walkthroughs::add_note))

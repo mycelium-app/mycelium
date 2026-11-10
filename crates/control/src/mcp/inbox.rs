@@ -16,10 +16,6 @@ const PERMISSION_RULE: &str = "That one runs a command, so it is never resolved 
 
 const GATE_RULE: &str = "A workflow gate is never resolved by voice. It is outlined in the Inbox. Tell the person: \"That workflow is waiting for your tap on Approve. I have outlined it.\"";
 
-const APPROVAL_RULE: &str = "That one grants access or changes instructions, so it is never resolved by voice. It is outlined in the Inbox. Tell the person: \"That one needs your tap on Approve. I have outlined it.\"";
-
-const UNARCHIVED_OWNER: &str = "c.owner = $1 and c.archived_at is null";
-
 const WAITING_CONVERSATION: &str = "c.owner = $1 and c.archived_at is null and ((c.status = 'input' and c.managed_by is null) or c.flagged_at is not null) and not exists (select 1 from assistants a where a.id = c.assistant_id and a.builtin_key = 'voice')";
 
 enum Target {
@@ -28,8 +24,6 @@ enum Target {
     Flagged,
     MessageProposal(Uuid),
     StartProposal(Uuid),
-    AccessRequest,
-    InstructionProposal,
     WorkflowGate,
 }
 
@@ -52,8 +46,6 @@ impl Target {
             Target::Flagged => "flagged",
             Target::MessageProposal(_) => "message_proposal",
             Target::StartProposal(_) => "start_proposal",
-            Target::AccessRequest => "access_request",
-            Target::InstructionProposal => "instruction_proposal",
             Target::WorkflowGate => "workflow_gate",
         }
     }
@@ -63,7 +55,7 @@ pub fn definitions() -> Value {
     json!([
         {
             "name": "list_needs_you",
-            "description": "List what is waiting on the person in the Inbox, newest first: permission requests, questions, message and start proposals, access requests, instruction proposals, workflow gates and flagged conversations. Each has a key, a kind, the conversation title and project, the text and any options. The first item becomes the outlined one in the app. Only the Voice assistant may call it.",
+            "description": "List what is waiting on the person in the Inbox, newest first: permission requests, questions, message and start proposals, workflow gates and flagged conversations. Each has a key, a kind, the conversation title and project, the text and any options. The first item becomes the outlined one in the app. Only the Voice assistant may call it.",
             "inputSchema": {"type": "object", "properties": {}},
         },
         {
@@ -142,9 +134,9 @@ async fn needs_you(state: &AppState, owner: Uuid) -> ApiResult<Vec<Item>> {
     }
 
     let messages = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>, String, String, DateTime<Utc>)>(sqlx::AssertSqlSafe(format!(
-        "select m.id, m.conversation_id, c.title, p.name, m.message, t.title, m.created_at
+        "select m.id, m.conversation_id, c.title, p.name, m.message, t.title, coalesce(c.flagged_at, c.updated_at)
          from message_proposals m join conversations c on c.id = m.conversation_id join conversations t on t.id = m.target_id left join projects p on p.id = c.project_id
-         where {UNARCHIVED_OWNER} and m.owner = $1 and m.state = 'proposed'"
+         where {WAITING_CONVERSATION} and m.owner = $1 and m.state = 'proposed'"
     )))
     .bind(owner)
     .fetch_all(&state.pool)
@@ -156,9 +148,9 @@ async fn needs_you(state: &AppState, owner: Uuid) -> ApiResult<Vec<Item>> {
     }
 
     let starts = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>, Option<String>, DateTime<Utc>)>(sqlx::AssertSqlSafe(format!(
-        "select s.id, s.conversation_id, c.title, p.name, s.plan->>'title', s.created_at
+        "select s.id, s.conversation_id, c.title, p.name, s.plan->>'title', coalesce(c.flagged_at, c.updated_at)
          from start_proposals s join conversations c on c.id = s.conversation_id left join projects p on p.id = c.project_id
-         where {UNARCHIVED_OWNER} and s.owner = $1 and s.state = 'proposed'"
+         where {WAITING_CONVERSATION} and s.owner = $1 and s.state = 'proposed'"
     )))
     .bind(owner)
     .fetch_all(&state.pool)
@@ -167,34 +159,6 @@ async fn needs_you(state: &AppState, owner: Uuid) -> ApiResult<Vec<Item>> {
     for (id, conversation_id, title, project, plan_title, waiting_since) in starts {
         busy.push(conversation_id);
         items.push(Item { key: proposal_key(state, conversation_id, id).await?, target: Target::StartProposal(id), conversation_id, title, project, text: format!("Start {}", plan_title.unwrap_or_default()), options: Vec::new(), waiting_since });
-    }
-
-    let approvals = sqlx::query_as::<_, (String, Uuid, Uuid, String, Option<String>, String, DateTime<Utc>)>(sqlx::AssertSqlSafe(format!(
-        "select 'access', r.id, r.conversation_id, c.title, p.name, 'Allow API access: ' || r.reason, r.created_at
-         from api_access_requests r join conversations c on c.id = r.conversation_id left join projects p on p.id = c.project_id
-         where {UNARCHIVED_OWNER} and r.owner = $1 and r.state = 'requested'
-         union all
-         select 'access', r.id, r.conversation_id, c.title, p.name, 'Allow SSH access to ' || n.name || ': ' || r.reason, r.created_at
-         from ssh_access_requests r join nodes n on n.id = r.node_id join conversations c on c.id = r.conversation_id left join projects p on p.id = c.project_id
-         where {UNARCHIVED_OWNER} and r.owner = $1 and r.state = 'requested'
-         union all
-         select 'access', r.id, r.conversation_id, c.title, p.name, 'Allow ' || r.permission || ' access to ' || a.title || ': ' || r.reason, r.created_at
-         from artifact_access_requests r join artifacts a on a.id = r.artifact_id join conversations c on c.id = r.conversation_id left join projects p on p.id = c.project_id
-         where {UNARCHIVED_OWNER} and r.owner = $1 and r.state = 'requested'
-         union all
-         select 'instructions', i.id, i.conversation_id, c.title, p.name, 'Edit the ' || i.layer_name || ' instructions: ' || i.reason, i.created_at
-         from instruction_proposals i join conversations c on c.id = i.conversation_id left join projects p on p.id = c.project_id
-         where {UNARCHIVED_OWNER} and i.owner = $1 and i.state = 'proposed'"
-    )))
-    .bind(owner)
-    .fetch_all(&state.pool)
-    .await?;
-
-    for (kind, id, conversation_id, title, project, text, waiting_since) in approvals {
-        let target = if kind == "access" { Target::AccessRequest } else { Target::InstructionProposal };
-
-        busy.push(conversation_id);
-        items.push(Item { key: format!("{conversation_id}/{kind}-{id}"), target, conversation_id, title, project, text, options: Vec::new(), waiting_since });
     }
 
     let gates = sqlx::query_as::<_, (Uuid, Uuid, String, Option<String>, Value, DateTime<Utc>)>(
@@ -253,7 +217,6 @@ async fn resolve(state: &AppState, owner: Uuid, item: &Item, action: &str, answe
     match (&item.target, action) {
         (Target::Permission, _) => Ok(PERMISSION_RULE.to_string()),
         (Target::WorkflowGate, _) => Ok(GATE_RULE.to_string()),
-        (Target::AccessRequest | Target::InstructionProposal, _) => Ok(APPROVAL_RULE.to_string()),
         (Target::Question | Target::Flagged, "answer" | "approve" | "decline") => {
             let word = match action {
                 "approve" => Some("Approve".to_string()),
@@ -331,7 +294,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
         Err(error) => return Ok(ToolReply::text(error.message(), true)),
     };
 
-    if matches!(item.target, Target::Permission | Target::WorkflowGate | Target::AccessRequest | Target::InstructionProposal) {
+    if matches!(item.target, Target::Permission | Target::WorkflowGate) {
         return Ok(ToolReply::text(&text, true));
     }
 

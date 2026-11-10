@@ -78,7 +78,6 @@ pub enum EventKind {
     BroughtInConversation,
     GoalReport,
     Environment,
-    SessionNotice,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -506,6 +506,7 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
                     let started = chats::start(state, owner, CreateChatRequest { provider_id: Some(provider_id), agent: None, account: None, node_id: None, model, prompt: None, parent_id: None }, None, Some(id)).await?;
 
                     sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started.id).execute(&state.pool).await?;
+                    crate::todos::carry(state, owner, id, started.id).await?;
 
                     chats::send(state, owner, started.id, text, request.attachments).await?
                 }
@@ -515,6 +516,7 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
                     let started = conversations::start_for(state, owner, started, Some(id), false).await?;
 
                     sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started.id).execute(&state.pool).await?;
+                    crate::todos::carry(state, owner, id, started.id).await?;
                     prompts::send(state, owner, started.id, request.clone()).await?;
 
                     store::find_owned(&state.pool, started.id, owner).await?.to_proto()?

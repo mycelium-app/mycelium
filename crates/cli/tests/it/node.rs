@@ -245,7 +245,6 @@ fn seq_of(message: &NodeToControl) -> Option<i64> {
         NodeToControl::AcpUpdate { seq, .. }
         | NodeToControl::PermissionRequest { seq, .. }
         | NodeToControl::TurnEnd { seq, .. }
-        | NodeToControl::SessionNotice { seq, .. }
         | NodeToControl::SessionFailed { seq, .. } => Some(*seq),
         _ => None,
     }

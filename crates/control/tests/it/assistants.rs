@@ -235,6 +235,30 @@ async fn clear_starts_a_new_session_and_keeps_instructions_and_group() {
 }
 
 #[tokio::test]
+async fn the_to_do_list_survives_clear_and_the_new_session_is_given_it() {
+    let server = Server::start().await;
+    let (provider, fake) = chat_provider(&server).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let id = assistant["id"].as_str().unwrap();
+    let first = prompt(&server.user, id, "Hello").await;
+    finished_turns(&server, first["id"].as_str().unwrap(), 1).await;
+    let todos = json!([{"content": "Book the venue", "status": "in_progress", "description": "Somewhere near the station."}, {"content": "Send the invites", "status": "pending"}]);
+    let (status, _) = server.user.json(server.user.put(&format!("/api/v1/conversations/{}/todos", first["id"].as_str().unwrap())).json(&json!({"todos": todos}))).await;
+    assert_eq!(status, 204);
+    server.user.json(server.user.post(&format!("/api/v1/assistants/{id}/clear"))).await;
+
+    let second = prompt(&server.user, id, "Where were we?").await;
+    finished_turns(&server, second["id"].as_str().unwrap(), 1).await;
+
+    assert_ne!(first["id"], second["id"]);
+    let events = server.events(second["id"].as_str().unwrap().parse().unwrap()).await;
+    let plan = events.iter().rev().find(|event| event["payload"]["update"]["sessionUpdate"] == "plan").expect("the carried list");
+    assert_eq!(plan["payload"]["update"]["entries"], todos);
+    let sent = fake.requests.lock().unwrap().last().unwrap()["messages"].to_string();
+    assert!(sent.contains("- [in_progress] Book the venue\\n  Somewhere near the station."), "{sent}");
+}
+
+#[tokio::test]
 async fn assistant_sessions_take_the_assistants_group_and_its_agents_md_as_instructions() {
     let server = Server::start().await;
     let (provider, fake) = chat_provider(&server).await;

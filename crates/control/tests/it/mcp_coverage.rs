@@ -91,6 +91,7 @@ async fn every_covering_tool_exists() {
 }
 
 const COVERED: &[(&str, &str, &str)] = &[
+    ("PUT", "/api/v1/conversations/{id}/todos", "set_todos"),
     ("GET", "/api/v1/projects", "list_places"),
     ("POST", "/api/v1/projects", "create_project"),
     ("PATCH", "/api/v1/projects/{id}", "update_project"),

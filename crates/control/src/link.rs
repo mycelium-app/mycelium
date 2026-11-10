@@ -246,35 +246,6 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             stop_for_failure(state, node_id, conversation_id, owner, Some(seq), &message, limit).await
         }
-        NodeToControl::SessionNotice { conversation_id, seq, setting, requested, current, message } => {
-            let payload = json!({"setting": setting, "requested": requested, "message": message});
-            let recorded = record(state, node_id, conversation_id, Some(seq), EventKind::SessionNotice, payload, None).await?;
-
-            if !recorded {
-                return Ok(());
-            }
-
-            let Some(current) = current else {
-                return Ok(());
-            };
-            let column = match setting.as_str() {
-                "model" => "model",
-                "mode" => "mode",
-                _ => return Ok(()),
-            };
-            let reverted = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set {column} = $3 where id = $1 and {column} = $2 returning {CONVERSATION_COLUMNS}")))
-                .bind(conversation_id)
-                .bind(&requested)
-                .bind(&current)
-                .fetch_optional(&state.pool)
-                .await?;
-
-            if let Some(reverted) = reverted {
-                state.publish(Some(reverted.owner), StreamMessage::Conversation(reverted.to_proto()?));
-            }
-
-            Ok(())
-        }
         NodeToControl::Workflow { conversation_id, run_id, line } => {
             if !runs_on_node(state, node_id, conversation_id).await? {
                 return Ok(());
@@ -866,6 +837,10 @@ impl UpdateBatch {
         let mut stored = Vec::with_capacity(updates.len());
 
         for (seq, update) in updates {
+            let update = match update["update"]["sessionUpdate"] == "plan" {
+                true => crate::todos::from_harness(&mut tx, conversation_id, update).await?,
+                false => update,
+            };
             let event = append_event(&mut tx, conversation_id, EventKind::AcpUpdate, &update, Some(seq)).await?;
 
             if let Some(event) = event {

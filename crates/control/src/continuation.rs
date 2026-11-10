@@ -276,6 +276,25 @@ fn side_label(agent: &str, account: Option<&str>, provider_name: Option<&str>, m
     }
 }
 
+pub async fn todo_section(state: &AppState, id: Uuid) -> ApiResult<Option<String>> {
+    let todos = sqlx::query_scalar::<_, sqlx::types::Json<Value>>("select payload->'update'->'entries' from events where conversation_id = $1 and kind = 'acp_update' and payload->'update'->>'sessionUpdate' = 'plan' order by seq desc limit 1").bind(id).fetch_optional(&state.pool).await?;
+    let todo_lines: Vec<String> = todos
+        .iter()
+        .filter_map(|todos| todos.0.as_array())
+        .flatten()
+        .filter_map(|entry| {
+            let line = format!("- [{}] {}", entry["status"].as_str().unwrap_or("pending"), entry["content"].as_str()?);
+
+            Some(match entry["description"].as_str() {
+                Some(description) => format!("{line}\n  {description}"),
+                None => line,
+            })
+        })
+        .collect();
+
+    Ok((!todo_lines.is_empty()).then(|| format!("The current to-do list. Keep it up to date with set_todos:\n{}", todo_lines.join("\n"))))
+}
+
 pub async fn handoff(state: &AppState, id: Uuid, before_seq: i64) -> ApiResult<String> {
     let marker = sqlx::query_scalar::<_, sqlx::types::Json<Value>>("select payload from events where conversation_id = $1 and seq = $2").bind(id).bind(before_seq).fetch_optional(&state.pool).await?.map(|found| found.0).unwrap_or(Value::Null);
     let from = &marker["from"];
@@ -283,7 +302,6 @@ pub async fn handoff(state: &AppState, id: Uuid, before_seq: i64) -> ApiResult<S
     let from_label = side_label(from["agent"].as_str().unwrap_or_default(), text_of(&from["account"]).as_deref(), text_of(&from["provider_name"]).as_deref(), text_of(&from["model"]).as_deref());
     let title = sqlx::query_as::<_, (String, String, String)>("select c.title, c.cwd, n.name from conversations c join nodes n on n.id = c.node_id where c.id = $1").bind(id).fetch_one(&state.pool).await?;
     let goal = sqlx::query_scalar::<_, String>("select text from goals where conversation_id = $1").bind(id).fetch_optional(&state.pool).await?;
-    let todos = sqlx::query_scalar::<_, sqlx::types::Json<Value>>("select payload->'update'->'entries' from events where conversation_id = $1 and kind = 'acp_update' and payload->'update'->>'sessionUpdate' = 'plan' order by seq desc limit 1").bind(id).fetch_optional(&state.pool).await?;
     let first = sqlx::query_scalar::<_, String>(
         "select s.text from search_entries s join events e on e.conversation_id = s.conversation_id and e.seq = s.seq
          where s.conversation_id = $1 and s.seq < $2 and e.kind = 'user_message' order by s.seq limit 1",
@@ -325,15 +343,8 @@ pub async fn handoff(state: &AppState, id: Uuid, before_seq: i64) -> ApiResult<S
         parts.push(format!("The original request:\n{}", first.chars().take(SUMMARY_MESSAGE_LIMIT).collect::<String>()));
     }
 
-    let todo_lines: Vec<String> = todos
-        .iter()
-        .filter_map(|todos| todos.0.as_array())
-        .flatten()
-        .filter_map(|entry| Some(format!("- [{}] {}", entry["status"].as_str().unwrap_or("pending"), entry["content"].as_str()?)))
-        .collect();
-
-    if !todo_lines.is_empty() {
-        parts.push(format!("The current to-do list. Keep it up to date with set_todos:\n{}", todo_lines.join("\n")));
+    if let Some(todos) = todo_section(state, id).await? {
+        parts.push(todos);
     }
 
     if !files.is_empty() {
