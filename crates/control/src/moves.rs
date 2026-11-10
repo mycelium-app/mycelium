@@ -477,6 +477,10 @@ async fn copy_transcript(state: &AppState, source: &ConversationRow, target_node
 
             format!(".claude/projects/{folder}/{file}")
         }
+        Ok(AgentId::Codex) => match path.rsplit_once("/sessions/") {
+            Some((_, dated)) => format!(".codex/sessions/{dated}"),
+            None => path.to_string(),
+        },
         _ => path.to_string(),
     };
     let engine = base64::engine::general_purpose::STANDARD;
