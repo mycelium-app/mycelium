@@ -131,6 +131,7 @@ import mycelium.state.closedNotice
 import mycelium.state.groupChoiceOf
 import mycelium.state.groupScope
 import mycelium.state.hoursNotice
+import mycelium.state.inChatList
 import mycelium.state.isChat
 import mycelium.state.isLaptop
 import mycelium.state.isSubagent
@@ -727,11 +728,11 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         }
     }
 
-    var mode by remember { mutableStateOf(if (route == Route.NewChat || (route as? Route.Chat)?.let { state.conversations[it.id]?.isChat } == true) ChatsMode else WorkspacesMode) }
+    var mode by remember { mutableStateOf(if (route == Route.NewChat || (route as? Route.Chat)?.let { state.conversations[it.id]?.inChatList } == true) ChatsMode else WorkspacesMode) }
     var lastOpened by remember { mutableStateOf(mapOf(WorkspacesMode to Route.New, ChatsMode to Route.NewChat)) }
     val openedMode = when (route) {
         Route.NewChat -> ChatsMode
-        is Route.Chat -> state.conversations[route.id]?.let { if (it.isChat) ChatsMode else WorkspacesMode }
+        is Route.Chat -> state.conversations[route.id]?.let { if (it.inChatList) ChatsMode else WorkspacesMode }
         Route.Settings, Route.Activity, Route.UsageHistory, Route.Empty -> null
         Route.Assistants, is Route.Assistant, Route.NewAssistant, is Route.AssistantSettings -> null
         else -> WorkspacesMode
@@ -1004,7 +1005,7 @@ private fun LazyListScope.conversationRows(
                 store.act { store.api.patchConversation(row.conversation.id, PatchConversationRequest(archived = true)) }
 
                 if (row.conversation.id == (route as? Route.Chat)?.id) {
-                    onRoute(if (row.conversation.isChat) Route.NewChat else Route.New)
+                    onRoute(if (row.conversation.inChatList) Route.NewChat else Route.New)
                 }
             },
             onCancelResume = { store.act { store.api.cancelResume(row.conversation.id) } },

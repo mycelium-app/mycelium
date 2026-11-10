@@ -1,6 +1,7 @@
 package mycelium.desktop
 
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -93,5 +94,31 @@ class SidebarModeTest {
 
         rule.onNodeWithText("Workspaces").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Fix the build").fetchSemanticsNodes().size == 2 }
+    }
+
+    @Test
+    fun openingAnAgentChatInAScratchFolderStaysInChats() {
+        val conversation = """{"id":"s1","owner":"u","node_id":"n1","agent":"claude","cwd":"/tmp/scratch-s1","title":"Plan the trip","status":"review",
+"acp_session_id":null,"mode":null,"model":"claude-opus-5-5","scratch":true,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}"""
+        val engine = MockEngine { request ->
+            val path = request.url.encodedPath
+            val body = when {
+                path.endsWith("/conversations") -> "[$conversation]"
+                path.endsWith("/conversations/s1") -> conversation
+                path.endsWith("/nodes") || path.endsWith("/events") || path.endsWith("/groups") -> "[]"
+                else -> "{}"
+            }
+
+            respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
+        runBlocking { store.refresh() }
+        rule.setContent { MyceliumTheme(true) { Shell(store, ModePlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}) } }
+
+        rule.onNodeWithText("Chats").performClick()
+        rule.onNodeWithText("Plan the trip").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Plan the trip").fetchSemanticsNodes().size == 2 }
+
+        rule.onNodeWithText("Chats").assertIsSelected()
     }
 }
