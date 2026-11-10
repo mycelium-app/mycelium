@@ -596,6 +596,9 @@ async fn finish(state: &AppState, owner: Uuid, id: Uuid, stop_reason: &str, usag
     }
 
     let review = set_status(&mut tx, id, ConversationStatus::Review).await?;
+    let reported = usage.filter(ReportedUsage::is_reported).map(|usage| json!({"inputTokens": usage.input.unwrap_or(0), "outputTokens": usage.output.unwrap_or(0), "cachedReadTokens": usage.cache_read.unwrap_or(0), "cachedWriteTokens": usage.cache_write.unwrap_or(0)}));
+
+    record_turn(&mut tx, id, reported.as_ref()).await?;
     tx.commit().await?;
 
     if let Some(event) = event {
@@ -603,10 +606,6 @@ async fn finish(state: &AppState, owner: Uuid, id: Uuid, stop_reason: &str, usag
     }
 
     state.publish(Some(owner), StreamMessage::Conversation(review.to_proto()?));
-
-    let reported = usage.filter(ReportedUsage::is_reported).map(|usage| json!({"inputTokens": usage.input.unwrap_or(0), "outputTokens": usage.output.unwrap_or(0), "cachedReadTokens": usage.cache_read.unwrap_or(0), "cachedWriteTokens": usage.cache_write.unwrap_or(0)}));
-
-    record_turn(state, id, reported.as_ref()).await?;
 
     if crate::assistants::chat_turn_ended(state, owner, id, stop_reason).await {
         return Ok(());

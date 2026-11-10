@@ -1072,7 +1072,12 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
         return Ok(());
     }
 
-    if let Err(error) = record_turn(state, conversation_id, usage.as_ref()).await {
+    let recorded = match state.pool.acquire().await {
+        Ok(mut connection) => record_turn(&mut connection, conversation_id, usage.as_ref()).await,
+        Err(error) => Err(error.into()),
+    };
+
+    if let Err(error) = recorded {
         tracing::warn!("could not record the turn of {conversation_id}: {}", error.message());
     }
 

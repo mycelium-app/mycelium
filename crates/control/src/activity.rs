@@ -9,6 +9,7 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use mycelium_proto::api::{Activity, ActivityRow, ConversationUsage};
 use serde::Deserialize;
 use serde_json::Value;
+use sqlx::PgConnection;
 use uuid::Uuid;
 
 const BREAKDOWN_LIMIT: i64 = 50;
@@ -62,20 +63,20 @@ fn token_count(usage: &Value, field: &str) -> i64 {
     usage.get(field).and_then(Value::as_i64).unwrap_or(0).max(0)
 }
 
-pub async fn record_turn(state: &AppState, conversation_id: Uuid, usage: Option<&Value>) -> ApiResult<()> {
+pub async fn record_turn(connection: &mut PgConnection, conversation_id: Uuid, usage: Option<&Value>) -> ApiResult<()> {
     let latest_update = sqlx::query_as::<_, (Option<String>, Option<String>)>(
         "select payload->'update'->'cost'->>'amount', payload->'update'->'_meta'->>'_claude/model' from events
          where conversation_id = $1 and kind = 'acp_update' and payload->'update'->>'sessionUpdate' = 'usage_update'
          order by seq desc limit 1",
     )
     .bind(conversation_id)
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *connection)
     .await?;
     let (cost_total, reported_model) = match latest_update {
         Some((cost, model)) => (cost.and_then(|cost| cost.parse::<f64>().ok()), model.filter(|model| !model.is_empty())),
         None => (None, None),
     };
-    let previous_total = sqlx::query_scalar::<_, f64>("select cost_total from usage_turns where conversation_id = $1 and cost_total is not null order by id desc limit 1").bind(conversation_id).fetch_optional(&state.pool).await?;
+    let previous_total = sqlx::query_scalar::<_, f64>("select cost_total from usage_turns where conversation_id = $1 and cost_total is not null order by id desc limit 1").bind(conversation_id).fetch_optional(&mut *connection).await?;
     let cost = cost_total.map(|total| match previous_total {
         Some(previous) if total >= previous => total - previous,
         _ => total,
@@ -101,7 +102,7 @@ pub async fn record_turn(state: &AppState, conversation_id: Uuid, usage: Option<
     .bind(token_count(usage, "cachedWriteTokens"))
     .bind(cost)
     .bind(cost_total)
-    .execute(&state.pool)
+    .execute(&mut *connection)
     .await?;
 
     Ok(())
