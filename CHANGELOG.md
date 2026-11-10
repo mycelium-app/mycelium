@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.34.4
+
+- A message sent while an assistant's session is mid-turn queues into that session instead of starting a new one.
+- An API token granted to a conversation reaches conversations in its group and connected ones, with the same limits as reading another conversation.
+- Re-authenticating an OAuth integration such as Outline signs the same account in again, keeping its name and tool names.
+- The start proposal test for a call with no conversation runs again.
+
 ## v0.34.3
 
 - The Outline side panel shows the collection's document tree above the document, with an account and collection picker, on desktop, Android and the web.
