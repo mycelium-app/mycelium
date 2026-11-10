@@ -108,7 +108,9 @@ pub async fn privacy_of(state: &AppState, owner: Uuid) -> ApiResult<PrivacySetti
     let speech_to_text_provider = model_providers::speech_model(state, owner).await?.map(|(provider, model)| SpeechProvider { provider_id: provider.id, name: provider.name, model });
     let text_to_speech_provider = model_providers::tts_model(state, owner).await?.map(|(provider, model)| SpeechProvider { provider_id: provider.id, name: provider.name, model });
 
-    Ok(PrivacySettings { voice_enabled: enabled(state, owner).await?, speech_to_text_provider, text_to_speech_provider })
+    let speech_to_text_local = crate::local_speech::local_of(state, owner).await?;
+
+    Ok(PrivacySettings { voice_enabled: enabled(state, owner).await?, speech_to_text_provider, text_to_speech_provider, speech_to_text_local })
 }
 
 pub async fn get_privacy(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<PrivacySettings>> {
@@ -138,7 +140,7 @@ pub async fn voices(State(state): State<AppState>, user: AuthUser) -> ApiResult<
 }
 
 fn speech_failed() -> ApiError {
-    ApiError::new(StatusCode::BAD_GATEWAY, "speech_failed", "The speech provider could not read that aloud. Try again, or check the provider in Settings, Providers.")
+    ApiError::new(StatusCode::BAD_GATEWAY, "speech_failed", "The speech provider could not read that aloud. Try again, or check the provider in Settings, Voice.")
 }
 
 fn speed_of(name: Option<&str>) -> f64 {
@@ -164,7 +166,7 @@ pub async fn speak(State(state): State<AppState>, user: AuthUser, Json(request):
 
     let found = model_providers::tts_model(&state, user.id).await?;
     let Some((provider, model)) = found else {
-        return Err(ApiError::conflict("no_tts_provider", "Add a provider with a text-to-speech model in Settings, Providers to have replies read aloud."));
+        return Err(ApiError::conflict("no_tts_provider", "Choose a text-to-speech model in Settings, Voice to have replies read aloud."));
     };
     let voice = request.voice.as_deref().map(str::trim).filter(|voice| !voice.is_empty()).unwrap_or(DEFAULT_VOICE).to_string();
     let body = json!({"model": model, "input": text, "voice": voice, "speed": speed_of(request.speed.as_deref()), "response_format": "wav"});

@@ -46,6 +46,7 @@ mod issues;
 mod lastfm;
 mod learning;
 mod live;
+mod local_speech;
 mod managed_archiving;
 mod mcp_coverage;
 mod mcp_inbox;

@@ -158,7 +158,7 @@ async fn speech_without_a_tts_provider_says_how_to_add_one() {
     let (status, _, body) = speak(&server, json!({"text": "Hello"})).await;
     let refused: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!((status, refused["error"].clone()), (409, json!("no_tts_provider")));
-    assert!(refused["message"].as_str().unwrap().contains("Settings, Providers"));
+    assert!(refused["message"].as_str().unwrap().contains("Settings, Voice"));
 }
 
 #[tokio::test]

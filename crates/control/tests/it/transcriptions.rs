@@ -92,7 +92,7 @@ async fn transcription_without_a_speech_provider_says_how_to_add_one() {
     add_provider(&server, speech_server(Arc::default(), vec!["gpt-4o-mini"]), "Chat only").await;
     let (status, refused) = transcribe(&server, RECORDING).await;
     assert_eq!((status, refused["error"].clone()), (409, json!("no_speech_provider")));
-    assert!(refused["message"].as_str().unwrap().contains("Settings, Providers"));
+    assert!(refused["message"].as_str().unwrap().contains("Settings, Voice"));
 }
 
 #[tokio::test]

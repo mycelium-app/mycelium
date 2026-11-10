@@ -140,6 +140,8 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/speech",
     "PUT /api/v1/privacy",
     "PUT /api/v1/speech/choices/{purpose}",
+    "PUT /api/v1/speech/local",
+    "DELETE /api/v1/speech/local",
     "POST /api/v1/conversations/{id}/git/hunk",
     "POST /api/v1/conversations/{id}/git/file",
     "POST /api/v1/conversations/{id}/git/stage",

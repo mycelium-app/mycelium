@@ -392,6 +392,8 @@ impl Server {
             device_code_lifetime: mycelium_control::DEVICE_CODE_LIFETIME,
             release_url: "http://127.0.0.1:1/latest".into(),
             npm_registry_url: "http://127.0.0.1:1".into(),
+            huggingface_url: "http://127.0.0.1:1".into(),
+            local_speech_url: None,
             nyt_games_url: "http://127.0.0.1:1".into(),
             exchange_rates_url: "http://127.0.0.1:1".into(),
             releases_url: "http://127.0.0.1:1".into(),

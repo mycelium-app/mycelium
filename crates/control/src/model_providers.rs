@@ -264,7 +264,7 @@ impl ProviderRow {
             let lowered = model.to_lowercase();
 
             match purpose {
-                SpeechUse::SpeechToText => lowered.contains("whisper") || lowered.contains("transcribe"),
+                SpeechUse::SpeechToText => lowered.contains("whisper") || lowered.contains("transcribe") || lowered.ends_with("-stt"),
                 SpeechUse::TextToSpeech => lowered.contains("tts"),
             }
         }).cloned().collect()
@@ -280,37 +280,58 @@ impl ProviderRow {
         })
     }
 
+    fn model_listings(&self) -> ApiResult<Vec<String>> {
+        let address = self.address()?;
+        let mut listings = vec![format!("{address}/models?limit=1000")];
+
+        if self.is_openrouter() {
+            listings.push(format!("{address}/models?output_modalities=transcription"));
+        }
+
+        Ok(listings)
+    }
+
     pub async fn list_models(&self, http: &reqwest::Client) -> ApiResult<Result<Vec<String>, ProviderError>> {
-        let request = self.authorised(http.get(format!("{}/models?limit=1000", self.address()?)).timeout(LISTING_TIMEOUT))?;
-        let Ok(response) = request.send().await else {
-            return Ok(Err(ProviderError::Unreachable));
-        };
-        let status = response.status();
+        let mut models = Vec::new();
 
-        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-            return Ok(Err(ProviderError::Rejected));
+        for listing in self.model_listings()? {
+            let request = self.authorised(http.get(listing).timeout(LISTING_TIMEOUT))?;
+            let Ok(response) = request.send().await else {
+                return Ok(Err(ProviderError::Unreachable));
+            };
+            let status = response.status();
+
+            if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+                return Ok(Err(ProviderError::Rejected));
+            }
+
+            if !status.is_success() {
+                return Ok(Err(ProviderError::Failed(status.as_u16())));
+            }
+
+            let Ok(raw) = read_limited(response, BODY_LIMIT).await else {
+                return Ok(Err(ProviderError::Failed(status.as_u16())));
+            };
+            let Ok(body) = serde_json::from_slice::<Value>(&raw) else {
+                return Ok(Err(ProviderError::Failed(status.as_u16())));
+            };
+            models.extend(body["data"].as_array().map(|items| items.iter().filter_map(|item| item["id"].as_str().map(str::to_string)).collect::<Vec<_>>()).unwrap_or_default());
         }
 
-        if !status.is_success() {
-            return Ok(Err(ProviderError::Failed(status.as_u16())));
-        }
-
-        let Ok(raw) = read_limited(response, BODY_LIMIT).await else {
-            return Ok(Err(ProviderError::Failed(status.as_u16())));
-        };
-        let Ok(body) = serde_json::from_slice::<Value>(&raw) else {
-            return Ok(Err(ProviderError::Failed(status.as_u16())));
-        };
-        let mut models: Vec<String> = body["data"].as_array().map(|items| items.iter().filter_map(|item| item["id"].as_str().map(str::to_string)).collect()).unwrap_or_default();
         models.sort();
+        models.dedup();
 
         Ok(Ok(models))
     }
 
-    fn caches_through_content_parts(&self, model: &str) -> bool {
+    pub fn is_openrouter(&self) -> bool {
         let host = self.base_url.as_deref().and_then(|base| reqwest::Url::parse(base).ok()).and_then(|url| url.host_str().map(str::to_string));
 
-        host.as_deref() == Some("openrouter.ai") && (model.starts_with("anthropic/") || model.starts_with("google/"))
+        host.as_deref() == Some("openrouter.ai")
+    }
+
+    fn caches_through_content_parts(&self, model: &str) -> bool {
+        self.is_openrouter() && (model.starts_with("anthropic/") || model.starts_with("google/"))
     }
 
     fn request_body(&self, kind: ModelProviderKind, model: &str, system: &str, messages: &[ChatMessage], tools: &[ToolDefinition]) -> Value {
@@ -562,6 +583,10 @@ pub async fn choose_speech_model(State(state): State<AppState>, user: AuthUser, 
         return Err(ApiError::bad_request("speech_model_unknown", format!("{} does not offer {}. Choose one of its models, or refresh its models in Chat models.", provider.name, request.model)));
     }
 
+    if purpose == SpeechUse::SpeechToText {
+        crate::local_speech::clear_choice(&state, user.id).await?;
+    }
+
     sqlx::query("insert into speech_choices (owner, purpose, provider_id, model) values ($1, $2, $3, $4) on conflict (owner, purpose) do update set provider_id = excluded.provider_id, model = excluded.model")
         .bind(user.id)
         .bind(enum_text(&purpose))
@@ -754,6 +779,28 @@ mod tests {
         let body = row.request_body(ModelProviderKind::OpenaiCompatible, "openai/gpt-5", "sys", &[user("one")], &[]);
 
         assert_eq!(body, json!({"model": "openai/gpt-5", "messages": [{"role": "system", "content": "sys"}, {"role": "user", "content": "one"}], "stream": true, "stream_options": {"include_usage": true}}));
+    }
+
+    #[test]
+    fn openrouter_also_lists_its_transcription_models() {
+        let listings = provider(ModelProviderKind::OpenaiCompatible, "https://openrouter.ai/api/v1").model_listings().unwrap();
+
+        assert_eq!(listings, ["https://openrouter.ai/api/v1/models?limit=1000", "https://openrouter.ai/api/v1/models?output_modalities=transcription"]);
+    }
+
+    #[test]
+    fn other_providers_list_their_models_once() {
+        let listings = provider(ModelProviderKind::OpenaiCompatible, "https://speech.example.com/v1").model_listings().unwrap();
+
+        assert_eq!(listings, ["https://speech.example.com/v1/models?limit=1000"]);
+    }
+
+    #[test]
+    fn voxtral_transcription_models_are_recognised_for_speech_to_text() {
+        let mut openrouter = provider(ModelProviderKind::OpenaiCompatible, "https://openrouter.ai/api/v1");
+        openrouter.models = ["mistralai/voxtral-mini-transcribe-3-0", "mistralai/voxtral-small-24b-2507-stt", "mistralai/voxtral-small-24b-2507", "anthropic/claude-sonnet-5.5"].map(str::to_string).to_vec();
+
+        assert_eq!(openrouter.recognised_models(SpeechUse::SpeechToText), ["mistralai/voxtral-mini-transcribe-3-0", "mistralai/voxtral-small-24b-2507-stt"]);
     }
 
     #[test]

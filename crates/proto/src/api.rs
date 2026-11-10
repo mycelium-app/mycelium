@@ -3213,6 +3213,27 @@ pub struct PrivacySettings {
     pub speech_to_text_provider: Option<SpeechProvider>,
     #[serde(default)]
     pub text_to_speech_provider: Option<SpeechProvider>,
+    #[serde(default)]
+    pub speech_to_text_local: Option<LocalSpeechModel>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalSpeechState {
+    Downloading,
+    Ready,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LocalSpeechModel {
+    pub model_id: String,
+    pub state: LocalSpeechState,
+    pub downloaded_bytes: u64,
+    #[serde(default)]
+    pub total_bytes: Option<u64>,
+    #[serde(default)]
+    pub failure: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -3226,6 +3247,11 @@ pub enum SpeechUse {
 pub struct ChooseSpeechModelRequest {
     pub provider_id: Uuid,
     pub model: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChooseLocalSpeechRequest {
+    pub model_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -116,6 +116,7 @@ pub mod secrets;
 mod freeagent;
 mod discord;
 mod actual;
+mod local_speech;
 mod paperless;
 mod paging;
 mod stoat;
@@ -352,6 +353,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/speech", post(voice::speak))
         .route("/api/v1/speech/voices", get(voice::voices))
         .route("/api/v1/speech/choices/{purpose}", put(model_providers::choose_speech_model))
+        .route("/api/v1/speech/local", put(local_speech::choose).delete(local_speech::remove))
         .route("/api/v1/transcriptions", post(transcriptions::create).layer(DefaultBodyLimit::max(transcriptions::MAX_AUDIO_BYTES + 1024)))
         .route("/api/v1/decision-providers", get(decision_providers::list).post(decision_providers::create))
         .route("/api/v1/decision-providers/test", post(decision_providers::test))

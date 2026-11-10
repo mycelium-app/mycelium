@@ -148,6 +148,24 @@ Then approve the node once with `mycelium node join https://mycelium.example.com
 
 The desktop and Android apps sign in with a device code, the same way a node joins.
 
+### Local speech to text (optional)
+
+Settings, Voice can turn speech into text on your own server instead of a provider. The control
+plane downloads the Hugging Face model you name there into `speech-models/` in its data
+directory, and a small runner beside it does the transcription, so audio never leaves the server.
+Build the runner from `deploy/local-speech`, give it the control plane's data volume, and point the
+control plane at it:
+
+```sh
+docker build -t mycelium-speech deploy/local-speech
+docker run -d --name mycelium-speech -v mycelium-data:/var/lib/mycelium:ro mycelium-speech
+# on the control plane
+MYCELIUM_LOCAL_SPEECH_URL=http://mycelium-speech:8090
+```
+
+The runner loads the model with Transformers and allows the model's own code to run, so only
+choose a model you trust.
+
 ---
 
 ## Development
