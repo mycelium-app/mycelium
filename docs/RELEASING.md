@@ -27,6 +27,7 @@ and publishes each `vX.Y.Z` tag. Never push to GitHub directly: the next mirror 
 | `desktop-web` | `mycelium-desktop-linux-x86_64.deb` and `.tar.gz`, `mycelium-web.tar.gz` |
 | `android`, `sign-android` | `mycelium-android.apk`, signed with the key in the `release` environment. The signing job fails when the APK's versionCode or versionName does not match the tag or does not exceed the previous tag. |
 | `image` | `ghcr.io/mycelium-app/mycelium:X.Y.Z`, and `:latest` when the tag is the newest release. It reuses the `binary` and web builds. |
+| `local-speech-image` | `ghcr.io/mycelium-app/mycelium-local-speech:X.Y.Z`, and `:latest` when the tag is the newest release. The optional speech to text runner from `deploy/local-speech`. |
 | `flake` | `mycelium-flake.tar.gz` for NixOS and home-manager |
 | `release` | A GitHub release with every file, its `.sha256`, `install.sh` and a `latest` file holding the tag. The release stays a draft until every upload succeeds. |
 

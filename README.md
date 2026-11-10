@@ -153,12 +153,11 @@ The desktop and Android apps sign in with a device code, the same way a node joi
 Settings, Voice can turn speech into text on your own server instead of a provider. The control
 plane downloads the Hugging Face model you name there into `speech-models/` in its data
 directory, and a small runner beside it does the transcription, so audio never leaves the server.
-Build the runner from `deploy/local-speech`, give it the control plane's data volume, and point the
+Run the published runner image, give it the control plane's data volume, and point the
 control plane at it:
 
 ```sh
-docker build -t mycelium-speech deploy/local-speech
-docker run -d --name mycelium-speech -v mycelium-data:/var/lib/mycelium:ro mycelium-speech
+docker run -d --name mycelium-speech -v mycelium-data:/var/lib/mycelium:ro ghcr.io/mycelium-app/mycelium-local-speech:latest
 # on the control plane
 MYCELIUM_LOCAL_SPEECH_URL=http://mycelium-speech:8090
 ```
