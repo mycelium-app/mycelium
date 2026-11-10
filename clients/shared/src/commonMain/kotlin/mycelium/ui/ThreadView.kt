@@ -234,7 +234,7 @@ fun ThreadView(
                         }
                     }
 
-                    if (subagents != null && threadSubagentsOf(subagents.state.conversations.values, subagents.conversationId).isNotEmpty()) {
+                    if (subagents != null && threadSubagentsOf(subagents.state.conversations.values, subagents.conversationId, subagents.state.workflows.values).isNotEmpty()) {
                         item(key = "subagents") {
                             SubagentCards(subagents)
                         }

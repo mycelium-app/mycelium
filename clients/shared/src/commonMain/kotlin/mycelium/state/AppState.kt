@@ -7,6 +7,7 @@ import mycelium.api.Artifact
 import mycelium.api.ArtifactAccessRequest
 import mycelium.api.Conversation
 import mycelium.api.Workflow
+import mycelium.api.WorkflowKinds
 import mycelium.api.ConversationStatus
 import kotlin.io.encoding.Base64
 import kotlinx.serialization.json.JsonObject
@@ -421,13 +422,17 @@ fun subagentSections(conversations: Collection<Conversation>, conversationId: St
         .toList()
 }
 
-fun subagentsOf(conversations: Collection<Conversation>, parentId: String): List<Conversation> =
-    conversations.filter { it.archivedAt == null && it.parentId == parentId && it.isSubagent }.sortedByDescending { it.createdAt }
+fun subagentsOf(conversations: Collection<Conversation>, parentId: String, startedHere: Set<String> = emptySet()): List<Conversation> =
+    conversations.filter { it.archivedAt == null && it.parentId == parentId && (it.isSubagent || it.id in startedHere) }.sortedByDescending { it.createdAt }
 
 private val SubagentRecentWindow = 1.hours
 
-fun threadSubagentsOf(conversations: Collection<Conversation>, parentId: String, now: Instant = Clock.System.now()): List<Conversation> {
-    val subagents = subagentsOf(conversations, parentId)
+fun threadSubagentsOf(conversations: Collection<Conversation>, parentId: String, workflows: Collection<Workflow>, now: Instant = Clock.System.now()): List<Conversation> {
+    val startedHere = workflows
+        .filter { it.conversationId == parentId && it.kind == WorkflowKinds.Mycelium && it.plan.steps.singleOrNull()?.key == StartedSubagentStepKey }
+        .flatMap { workflow -> workflow.steps.mapNotNull { it.conversationId } }
+        .toSet()
+    val subagents = subagentsOf(conversations, parentId, startedHere)
     val waiting = subagents.filter { it.status == ConversationStatus.Input }
     val running = subagents.filter { it.status == ConversationStatus.Working }
     val recentlyFinished = (subagents - waiting.toSet() - running.toSet())

@@ -47,10 +47,18 @@ private const val Working = """{"id":"c3","owner":"u","node_id":"n1","agent":"cl
 private const val Finished = """{"id":"c4","owner":"u","node_id":"n1","agent":"codex","cwd":"/work/harbour","title":"Audit the lockfile for drift","status":"done","parent_id":"c1","side_kind":"subagent","acp_session_id":"s","created_at":"2026-10-22T10:03:00Z","updated_at":"2026-10-22T10:05:00Z"}"""
 private const val Failed = """{"id":"c5","owner":"u","node_id":"n1","agent":"codex","cwd":"/work/harbour","title":"Dry run the migration","status":"failed","parent_id":"c1","side_kind":"subagent","acp_session_id":"s","created_at":"2026-10-22T10:03:30Z","updated_at":"2026-10-22T10:05:00Z"}"""
 private const val ReadyToReview = """{"id":"c6","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/harbour","title":"Tidy the release notes","status":"review","parent_id":"c1","side_kind":"subagent","acp_session_id":"s","created_at":"2026-10-22T10:04:00Z","updated_at":"2026-10-22T10:05:00Z"}"""
-private fun subagent(id: String, title: String, status: String, minutesAgo: Long): String {
+private fun subagent(id: String, title: String, status: String, minutesAgo: Long, sideKind: String = "subagent"): String {
     val at = Clock.System.now() - minutesAgo.minutes
 
-    return """{"id":"$id","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/harbour","title":"$title","status":"$status","parent_id":"c1","side_kind":"subagent","acp_session_id":"s","created_at":"$at","updated_at":"$at"}"""
+    return """{"id":"$id","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/harbour","title":"$title","status":"$status","parent_id":"c1","side_kind":"$sideKind","acp_session_id":"s","created_at":"$at","updated_at":"$at"}"""
+}
+
+private fun native(id: String, title: String, status: String, minutesAgo: Long) = subagent(id, title, status, minutesAgo, sideKind = "side")
+
+private fun started(id: String, conversation: String, title: String, keys: List<String> = listOf("subagent")): String {
+    val plan = keys.joinToString(",") { """{"key":"$it","title":"$title","agent":"claude","prompt":"Do it."}""" }
+
+    return """{"id":"$id","conversation_id":"c1","title":"$title","status":"running","round":1,"created_at":"2026-10-22T10:02:00Z","updated_at":"2026-10-22T10:03:00Z","plan":{"steps":[$plan]},"steps":[{"key":"${keys.first()}","status":"running","conversation_id":"$conversation"}]}"""
 }
 
 private const val WaitingEvents = """[{"conversation_id":"c2","seq":1,"kind":"acp_update","payload":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"31 of 48 specs pass. Should I install Chromium so the whole suite can run?"}}}}]"""
@@ -71,7 +79,7 @@ class SubagentReplyTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Reply to Run the e2e suite on the new kit").fetchSemanticsNodes().isNotEmpty() }
     }
 
-    private fun render(conversations: String) {
+    private fun render(conversations: String, workflows: String = "[]") {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             val body = String(request.body.toByteArray())
@@ -83,7 +91,8 @@ class SubagentReplyTest {
             val response = when {
                 path.endsWith("/conversations") -> conversations
                 path.endsWith("/conversations/c2/events") -> WaitingEvents
-                path.endsWith("/events") || path.endsWith("/queue") || path.endsWith("/nodes") || path.endsWith("/groups") || path.endsWith("/workflows") -> "[]"
+                path.endsWith("/workflows") -> workflows
+                path.endsWith("/events") || path.endsWith("/queue") || path.endsWith("/nodes") || path.endsWith("/groups") -> "[]"
                 else -> "{}"
             }
 
@@ -91,7 +100,10 @@ class SubagentReplyTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
 
-        runBlocking { store.refresh() }
+        runBlocking {
+            store.refresh()
+            store.refreshWorkflows()
+        }
         rule.setContent {
             MyceliumTheme(true) {
                 val state by store.state.collectAsState()
@@ -192,6 +204,66 @@ class SubagentReplyTest {
         renderRunning(titles)
 
         assertTrue(height(rule.onNodeWithContentDescription("Subagents")) < height(row(titles.first())) * 4)
+    }
+
+    @Test
+    fun aSubagentThisConversationStartedIsListedUnderTheSameRule() {
+        render(
+            "[$Parent,${native("c7", "Review the schema", "working", 3)},${native("c8", "Draft the migration", "done", 10)},${native("c9", "Check the indexes", "done", 120)}]",
+            "[${started("w7", "c7", "Review the schema")},${started("w8", "c8", "Draft the migration")},${started("w9", "c9", "Check the indexes")}]",
+        )
+        waitForRow("Review the schema")
+
+        rule.onNodeWithContentDescription("2 subagents, hide them").assertExists()
+        row("Draft the migration").assertExists()
+        assertEquals(0, rule.onAllNodes(hasContentDescription("Check the indexes, ", substring = true)).fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun aRowOpensTheSubagentThisConversationStarted() {
+        render("[$Parent,${native("c7", "Review the schema", "working", 3)}]", "[${started("w7", "c7", "Review the schema")}]")
+        waitForRow("Review the schema")
+
+        row("Review the schema").performClick()
+
+        assertEquals(listOf("c7"), opened.toList())
+    }
+
+    @Test
+    fun aReplyToAStartedSubagentWaitingForAnAnswerGoesToItsConversation() {
+        render("[$Parent,${native("c7", "Review the schema", "input", 3)}]", "[${started("w7", "c7", "Review the schema")}]")
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Reply to Review the schema").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithContentDescription("Reply to Review the schema").performTextInput("Use the new index")
+        rule.onNodeWithContentDescription("Send to Review the schema").performClick()
+        rule.waitUntil(5_000) { posts.any { it.first.endsWith("/conversations/c7/prompt") } }
+
+        assertTrue(posts.single { it.first.endsWith("/conversations/c7/prompt") }.second.contains("\"text\":\"Use the new index\""))
+    }
+
+    @Test
+    fun aChatThatMatchesBothKindsHasOneRow() {
+        render("[$Parent,${subagent("c7", "Review the schema", "working", 3)}]", "[${started("w7", "c7", "Review the schema")}]")
+        waitForRow("Review the schema")
+
+        rule.onNodeWithContentDescription("1 subagent, hide them").assertExists()
+        assertEquals(1, rule.onAllNodes(hasContentDescription("Review the schema, ", substring = true) and hasClickAction()).fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun aSideChatThePersonOpenedIsNotASubagent() {
+        render("[$Parent,${native("c7", "Ask about the schema", "working", 3)}]")
+        rule.waitForIdle()
+
+        assertEquals(0, rule.onAllNodesWithContentDescription("Subagents").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun aStepOfAWorkflowWithSeveralStepsIsNotASubagent() {
+        render("[$Parent,${native("c7", "Find the pins", "working", 3)}]", "[${started("w7", "c7", "Find the pins", listOf("find", "fix"))}]")
+        rule.waitForIdle()
+
+        assertEquals(0, rule.onAllNodesWithContentDescription("Subagents").fetchSemanticsNodes().size)
     }
 
     @Test

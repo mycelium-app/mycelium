@@ -43,7 +43,7 @@ val LocalThreadSubagents = compositionLocalOf<ThreadSubagents?> { null }
 
 @Composable
 fun SubagentCards(actions: ThreadSubagents) {
-    val subagents = threadSubagentsOf(actions.state.conversations.values, actions.conversationId)
+    val subagents = threadSubagentsOf(actions.state.conversations.values, actions.conversationId, actions.state.workflows.values)
 
     if (subagents.isEmpty()) {
         return

@@ -1,4 +1,6 @@
 use crate::common::{NodeLink, Server, eventually};
+use crate::watches::{end_turn, fast, messages, prompt_for, say, told};
+use mycelium_proto::link::{ControlToNode, NodeToControl};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -349,4 +351,80 @@ async fn list_places_names_the_models_each_agent_last_offered_on_a_node() {
     let places: Value = serde_json::from_str(&text(&call(&server, &link, conversation, "list_places", json!({})).await)).unwrap();
 
     assert_eq!(places["nodes"][0]["agent_models"]["claude"], json!([{"model": "opus", "name": "Opus 5.5"}, {"model": "sonnet", "name": "Sonnet 5.5"}]));
+}
+
+async fn started_subagent(server: &Server, link: &mut NodeLink, parent: Uuid) -> Uuid {
+    call(server, link, parent, "start_subagent", subagent("laptop")).await;
+    let proposal = proposals(server).await[0]["id"].as_str().unwrap().to_string();
+    let (status, approved) = server.user.json(server.user.post(&format!("/api/v1/start-proposals/{proposal}/approve")).json(&json!({}))).await;
+    assert_eq!(status, 200, "{approved}");
+    let started = loop {
+        if let ControlToNode::StartSession { conversation_id, .. } = link.next().await {
+            break conversation_id;
+        }
+    };
+    link.start_session(started, &format!("acp-{started}")).await;
+    prompt_for(link, started).await;
+
+    started
+}
+
+#[tokio::test]
+async fn a_native_subagent_that_fails_tells_the_conversation_that_started_it() {
+    let server = fast().await;
+    let mut link = server.online_node("laptop").await;
+    let parent = caller(&server, &mut link).await;
+    end_turn(&mut link, parent, 1).await;
+    let started = started_subagent(&server, &mut link, parent).await;
+
+    link.send(NodeToControl::SessionFailed { conversation_id: started, seq: 1, message: "The agent stopped".into() }).await;
+
+    let wanted = format!("({started}) failed");
+    eventually("the parent to be told the subagent failed", || async { messages(&server, parent).await.iter().any(|text| text.contains(&wanted)).then_some(()) }).await;
+}
+
+#[tokio::test]
+async fn a_native_subagent_that_asks_a_question_tells_the_conversation_that_started_it() {
+    let server = fast().await;
+    let mut link = server.online_node("laptop").await;
+    let parent = caller(&server, &mut link).await;
+    end_turn(&mut link, parent, 1).await;
+    let started = started_subagent(&server, &mut link, parent).await;
+
+    say(&mut link, started, 1, "Should I add the index?").await;
+    end_turn(&mut link, started, 2).await;
+
+    let wanted = format!("({started}) is waiting on the person");
+    eventually("the parent to be told the subagent is waiting", || async { messages(&server, parent).await.iter().any(|text| text.contains(&wanted)).then_some(()) }).await;
+}
+
+#[tokio::test]
+async fn a_native_subagent_that_finishes_tells_its_parent_only_through_the_workflow_result() {
+    let server = fast().await;
+    let mut link = server.online_node("laptop").await;
+    let parent = caller(&server, &mut link).await;
+    end_turn(&mut link, parent, 1).await;
+    let started = started_subagent(&server, &mut link, parent).await;
+
+    say(&mut link, started, 1, "The schema is fine.").await;
+    end_turn(&mut link, started, 2).await;
+
+    let first = told(&server, parent, 1).await;
+    assert!(first.starts_with("Workflow "), "{first}");
+}
+
+#[tokio::test]
+async fn a_native_subagent_waiting_for_an_answer_accepts_a_reply() {
+    let server = fast().await;
+    let mut link = server.online_node("laptop").await;
+    let parent = caller(&server, &mut link).await;
+    end_turn(&mut link, parent, 1).await;
+    let started = started_subagent(&server, &mut link, parent).await;
+    say(&mut link, started, 1, "Should I add the index?").await;
+    end_turn(&mut link, started, 2).await;
+
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/conversations/{started}/prompt")).json(&json!({"text": "Yes, add it"}))).await;
+
+    assert!(status < 300, "{status} {body}");
+    assert_eq!(prompt_for(&mut link, started).await, "Yes, add it");
 }

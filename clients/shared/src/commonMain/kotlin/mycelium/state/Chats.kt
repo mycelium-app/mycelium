@@ -8,6 +8,7 @@ import mycelium.api.ConversationStatus
 const val ChatAgent = "chat"
 
 const val SubagentKind = "subagent"
+const val StartedSubagentStepKey = "subagent"
 
 const val TodayName = "Today"
 const val ThisWeekName = "This week"

@@ -78,9 +78,9 @@ pub async fn end(state: &AppState, owner: Uuid, watch: Uuid) -> ApiResult<()> {
     Ok(())
 }
 
-pub async fn watch_conversation(state: &AppState, owner: Uuid, watcher: Uuid, target: Uuid, only_waiting: bool) -> ApiResult<Uuid> {
+pub async fn watch_conversation(state: &AppState, owner: Uuid, watcher: Uuid, target: Uuid, skip_finished: bool) -> ApiResult<Uuid> {
     let mut tx = state.pool.begin().await?;
-    let (id, added) = record_conversation_watch(&mut tx, owner, watcher, target, only_waiting).await?;
+    let (id, added) = record_conversation_watch(&mut tx, owner, watcher, target, skip_finished).await?;
     tx.commit().await?;
 
     if added {
@@ -90,16 +90,16 @@ pub async fn watch_conversation(state: &AppState, owner: Uuid, watcher: Uuid, ta
     Ok(id)
 }
 
-pub async fn record_conversation_watch(tx: &mut sqlx::PgConnection, owner: Uuid, watcher: Uuid, target: Uuid, only_waiting: bool) -> sqlx::Result<(Uuid, bool)> {
+pub async fn record_conversation_watch(tx: &mut sqlx::PgConnection, owner: Uuid, watcher: Uuid, target: Uuid, skip_finished: bool) -> sqlx::Result<(Uuid, bool)> {
     let existing = sqlx::query_scalar::<_, Uuid>("select id from watches where watcher_id = $1 and target_id = $2 and kind = 'conversation' and ended_at is null").bind(watcher).bind(target).fetch_optional(&mut *tx).await?;
 
     if let Some(existing) = existing {
-        sqlx::query("update watches set only_waiting = only_waiting and $2 where id = $1").bind(existing).bind(only_waiting).execute(&mut *tx).await?;
+        sqlx::query("update watches set skip_finished = skip_finished and $2 where id = $1").bind(existing).bind(skip_finished).execute(&mut *tx).await?;
 
         return Ok((existing, false));
     }
 
-    let id = sqlx::query_scalar::<_, Uuid>("insert into watches (owner, watcher_id, kind, target_id, only_waiting) values ($1, $2, 'conversation', $3, $4) returning id").bind(owner).bind(watcher).bind(target).bind(only_waiting).fetch_one(&mut *tx).await?;
+    let id = sqlx::query_scalar::<_, Uuid>("insert into watches (owner, watcher_id, kind, target_id, skip_finished) values ($1, $2, 'conversation', $3, $4) returning id").bind(owner).bind(watcher).bind(target).bind(skip_finished).fetch_one(&mut *tx).await?;
 
     Ok((id, true))
 }
@@ -132,7 +132,7 @@ pub async fn conversation_ended(state: &AppState, conversation: Uuid, ending: En
     }
 
     let watches = sqlx::query_as::<_, (Uuid, Uuid, Uuid, bool)>(
-        "select w.id, w.owner, w.watcher_id, w.only_waiting from watches w join conversations target on target.id = w.target_id join conversations watcher on watcher.id = w.watcher_id
+        "select w.id, w.owner, w.watcher_id, w.skip_finished from watches w join conversations target on target.id = w.target_id join conversations watcher on watcher.id = w.watcher_id
          where w.target_id = $1 and w.kind = 'conversation' and w.ended_at is null and target.archived_at is null and watcher.archived_at is null",
     )
     .bind(conversation)
@@ -152,8 +152,8 @@ pub async fn conversation_ended(state: &AppState, conversation: Uuid, ending: En
         None => format!("From {label}:\n\n{label} ({conversation}) {}.", ending.words()),
     };
 
-    for (watch, owner, watcher, only_waiting) in watches {
-        if only_waiting && ending != Ending::Waiting {
+    for (watch, owner, watcher, skip_finished) in watches {
+        if skip_finished && ending == Ending::Done {
             continue;
         }
 
@@ -204,7 +204,7 @@ async fn tick(state: &AppState) -> ApiResult<()> {
 
 pub async fn listed(state: &AppState, owner: Uuid, watcher: Uuid) -> ApiResult<Vec<Value>> {
     let rows = sqlx::query_as::<_, (Uuid, String, Option<Uuid>, Option<String>, Option<String>, Option<String>, Option<String>, Option<chrono::DateTime<chrono::Utc>>, bool)>(
-        "select w.id, w.kind, w.target_id, t.title, w.repository, w.reference, w.note, w.due_at, w.only_waiting from watches w left join conversations t on t.id = w.target_id
+        "select w.id, w.kind, w.target_id, t.title, w.repository, w.reference, w.note, w.due_at, w.skip_finished from watches w left join conversations t on t.id = w.target_id
          where w.owner = $1 and w.watcher_id = $2 and w.ended_at is null order by coalesce(w.due_at, w.created_at)",
     )
     .bind(owner)
@@ -214,10 +214,10 @@ pub async fn listed(state: &AppState, owner: Uuid, watcher: Uuid) -> ApiResult<V
 
     Ok(rows
         .into_iter()
-        .map(|(id, kind, target, title, repository, reference, note, due_at, only_waiting)| {
+        .map(|(id, kind, target, title, repository, reference, note, due_at, skip_finished)| {
             let reference = reference.map(|reference| crate::forge_watches::Target::parse(&reference).map_or(reference, |target| target.label()));
 
-            json!({"id": id, "kind": kind, "conversation_id": target, "title": title, "repository": repository, "reference": reference, "note": note, "due_at": due_at, "only_waiting": only_waiting})
+            json!({"id": id, "kind": kind, "conversation_id": target, "title": title, "repository": repository, "reference": reference, "note": note, "due_at": due_at, "skip_finished": skip_finished})
         })
         .collect())
 }
