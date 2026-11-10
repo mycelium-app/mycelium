@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.6
+
+- The subagents card lists waiting and running subagents and those finished in the last hour, in a list that stops at about five rows and scrolls. It is not drawn when nothing qualifies; older subagents stay in the side panel's history.
+
 ## v0.34.5
 
 - Tandoor: edit and delete recipes with their steps and ingredients, set recipe images, import a recipe from a page, find foods, units and keywords, set food nutrition, change and delete meal plans, and uncheck or remove shopping list entries. search_recipes takes filters, and get_recipe returns everything update_recipe takes. check_off_item no longer takes checked; use uncheck_item.
