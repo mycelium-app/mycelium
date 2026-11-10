@@ -9,7 +9,7 @@ use crate::nodes::{node_has, node_offline};
 use crate::projects::{self, PROJECT_COLUMNS, ProjectRow};
 use crate::prompts::pump;
 use crate::state::AppState;
-use crate::store::{CONVERSATION_COLUMNS, ConversationRow, enum_text, find_owned, highest_node_seq, parse_enum};
+use crate::store::{CONVERSATION_COLUMNS, ConversationRow, TURN_HAS_ENDED, enum_text, find_owned, highest_node_seq, parse_enum};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -170,6 +170,20 @@ pub async fn plan(State(state): State<AppState>, user: AuthUser, Path(id): Path<
     }))
 }
 
+async fn between_turns(state: &AppState, id: Uuid, status: &str) -> ApiResult<bool> {
+    if matches!(status, "review" | "done" | "failed") {
+        return Ok(true);
+    }
+
+    if status != "input" {
+        return Ok(false);
+    }
+
+    let turn_ended = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!("select {TURN_HAS_ENDED}"))).bind(id).fetch_one(&state.pool).await?;
+
+    Ok(turn_ended)
+}
+
 pub async fn current(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Option<MoveProgress>>> {
     find_owned(&state.pool, id, user.id).await?;
 
@@ -178,7 +192,7 @@ pub async fn current(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 
 pub async fn request(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<MoveRequest>) -> ApiResult<(StatusCode, Json<MoveProgress>)> {
     let route = route(&state, user.id, id, request.node_id).await?;
-    let busy = matches!(route.source.status.as_str(), "working" | "input");
+    let busy = !between_turns(&state, id, &route.source.status).await?;
     let state_now = if busy { MoveState::Waiting } else { MoveState::Moving };
     let progress = MoveProgress { conversation_id: id, node_id: request.node_id, fork: request.fork, state: state_now, message: None, result_id: None };
 
@@ -255,7 +269,9 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
     let retry = format!("Nothing has changed: the conversation is still on {source_name}. Choose Move to try again.");
     let reason = |text: &str| format!("{text} {retry}");
 
-    if !matches!(route.source.status.as_str(), "review" | "done" | "failed") {
+    let idle = between_turns(state, conversation_id, &route.source.status).await.map_err(|error| reason(error.message()))?;
+
+    if !idle {
         return Err(reason("The conversation is not between turns."));
     }
 

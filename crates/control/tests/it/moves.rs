@@ -486,6 +486,19 @@ async fn a_failed_conversation_is_between_turns_and_moves() {
 }
 
 #[tokio::test]
+async fn a_conversation_whose_finished_turn_asks_the_person_a_question_moves_straight_away() {
+    let mut moving = start(true, false).await;
+    mirror_transcript(&mut moving).await;
+    sqlx::query("update conversations set status = 'input' where id = $1").bind(moving.conversation).execute(&moving.server.pool).await.unwrap();
+
+    let (status, accepted) = request_move(&moving, false).await;
+    assert_eq!((status, accepted["state"].clone()), (202, json!("moving")), "{accepted}");
+
+    let (_, command) = answer_next(&mut moving.source, Ok(snapshot())).await;
+    assert!(matches!(command, GitCommand::Snapshot { .. }));
+}
+
+#[tokio::test]
 async fn a_transcript_kept_in_a_signed_in_accounts_folder_is_restored_under_the_target_folder_for_the_agent_to_adopt() {
     let mut moving = start(true, false).await;
     let account_transcript = ".local/state/mycelium/accounts/claude/sam@example.com/projects/-w-acme-org-app/acp-1.jsonl";
