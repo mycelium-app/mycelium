@@ -582,6 +582,21 @@ pub async fn stop(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
         return chats::stop(state, owner, id).await;
     }
 
+    let turn_ended = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!("select {TURN_HAS_ENDED}"))).bind(id).fetch_one(&state.pool).await?;
+
+    if turn_ended {
+        let cleared = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set agent_active = false where id = $1 and agent_active returning {CONVERSATION_COLUMNS}")))
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?;
+
+        if let Some(cleared) = cleared {
+            state.publish(Some(owner), StreamMessage::Conversation(cleared.to_proto()?));
+        }
+
+        return Ok(());
+    }
+
     if !state.hub.send(row.node_id, ControlToNode::Cancel { conversation_id: id }) {
         return Err(node_offline());
     }

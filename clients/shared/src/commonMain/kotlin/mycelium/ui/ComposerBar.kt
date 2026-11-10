@@ -22,7 +22,7 @@ enum class ConversationKind {
     NewChat,
 }
 
-enum class BarGroup { Tools, Pickers, Usage, Turn }
+enum class BarGroup { Tools, Status, Pickers, Usage, Turn }
 
 enum class BarControl(val group: BarGroup) {
     Attach(BarGroup.Tools),
@@ -31,6 +31,7 @@ enum class BarControl(val group: BarGroup) {
     TeachMe(BarGroup.Tools),
     VoiceMode(BarGroup.Tools),
     Goal(BarGroup.Tools),
+    Stopping(BarGroup.Status),
     Model(BarGroup.Pickers),
     Mode(BarGroup.Pickers),
     Settings(BarGroup.Pickers),
@@ -45,6 +46,7 @@ data class HarnessReport(
     val inVoiceMode: Boolean = false,
     val teachMe: Boolean = false,
     val working: Boolean = false,
+    val stopping: Boolean = false,
     val models: Boolean = false,
     val modes: Boolean = false,
     val settings: Boolean = false,
@@ -73,12 +75,13 @@ fun barControls(kind: ConversationKind, harness: HarnessReport): List<BarControl
         BarControl.TeachMe.takeIf { harness.teachMe && !starting },
         BarControl.VoiceMode.takeIf { harness.voiceMode && !starting },
         BarControl.Goal.takeIf { workspace },
+        BarControl.Stopping.takeIf { harness.working && harness.stopping && !starting },
         BarControl.Mode.takeIf { harness.modes && kind == ConversationKind.NewConversation },
         BarControl.Model,
         BarControl.Mode.takeIf { harness.modes && configurable },
         BarControl.Settings.takeIf { harness.settings && configurable },
         BarControl.Usage.takeIf { !starting },
-        BarControl.Stop.takeIf { harness.working && !starting },
+        BarControl.Stop.takeIf { harness.working && !harness.stopping && !starting },
         BarControl.Send,
     )
 }
@@ -95,7 +98,7 @@ fun ComposerBar(controls: List<BarControl>, modifier: Modifier = Modifier, rende
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1, Alignment.End),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            controls.inGroups(BarGroup.Pickers).forEach { render(it) }
+            controls.inGroups(BarGroup.Status, BarGroup.Pickers).forEach { render(it) }
         }
 
         controls.inGroups(BarGroup.Usage, BarGroup.Turn).forEach { render(it) }
