@@ -428,15 +428,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val sideKind = { kind: String -> if (chat) "side" else kind }
     val threadBuilder = remember(id) { ThreadBuilder() }
     val thread = remember(state.events[id]) { threadBuilder.build(state.events[id].orEmpty()) }
-    val agentWorking = turnIsOpen(state.events[id].orEmpty()) || (conversation.agentActive && conversation.status == ConversationStatus.Working)
-    var stopping by remember(id) { mutableStateOf(false) }
-
-    LaunchedEffect(agentWorking) {
-        if (!agentWorking) {
-            stopping = false
-        }
-    }
-
+    val agentWorking = conversation.agentActive || (conversation.status == ConversationStatus.Working && turnIsOpen(state.events[id].orEmpty()))
     val sending = state.sending[id].orEmpty()
     val deliveredPrompts = state.events[id].orEmpty().filter { it.kind == mycelium.api.EventKinds.UserMessage }.mapNotNull { event ->
         val payload = event.payload as? kotlinx.serialization.json.JsonObject
@@ -772,7 +764,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             conversation = conversation,
                             usage = { ConversationUsageBar(api, id, state.events[id].orEmpty().count { it.kind == mycelium.api.EventKinds.TurnEnd }) },
                             working = agentWorking,
-                            stopping = stopping,
                             queue = shownQueue.map { if (it.id == queueEditing?.queueId) it.copy(editing = true) else it },
                             sending = sending.drop(delivering.size),
                             onSend = ::send,
@@ -786,17 +777,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             initialImages = draft.images,
                             onImagesChange = { held -> store.composerDrafts.update(id) { copy(images = held) } },
                             accountPicker = accountPicker,
-                        onStop = {
-                            stopping = true
-                            store.act {
-                                try {
-                                    api.cancel(id)
-                                } catch (failure: Exception) {
-                                    stopping = false
-                                    throw failure
-                                }
-                            }
-                        },
+                        onStop = { store.act { api.cancel(id) } },
                             onSendQueuedNow = { queueId -> store.act { api.sendQueuedNow(id, queueId) } },
                             onSendAllQueuedNow = { store.act { api.sendAllQueuedNow(id) } },
                             onEditQueued = { item ->
@@ -843,6 +824,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                                 )
                             },
                             todos = remember(thread, state.events[id]) { currentTodos(thread).takeIf { todosAreShown(it, turnIsOpen(state.events[id].orEmpty())) }.orEmpty() },
+                            onSaveTodos = { todos, tellAgent -> store.act { store.saveTodos(id, todos, tellAgent) } },
                             goal = GoalControls(
                                 goal = state.goals[id],
                                 onSet = { text, limits -> store.act { store.setGoal(id, text, limits) } },

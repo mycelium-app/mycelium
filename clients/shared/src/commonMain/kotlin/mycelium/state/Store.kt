@@ -56,7 +56,9 @@ import mycelium.api.MoveRequest
 import mycelium.api.MoveState
 import mycelium.api.PatchScheduleRequest
 import mycelium.api.Schedule
+import mycelium.api.SaveTodosRequest
 import mycelium.api.SetGoalRequest
+import mycelium.api.TodoItem
 import mycelium.api.ScheduleRun
 import mycelium.api.Project
 import mycelium.api.MyceliumApi
@@ -591,6 +593,20 @@ class Store(
         api.cancelMove(conversationId)
 
         mutableState.update { held -> held.moves[conversationId]?.let { held.copy(moves = held.moves + (conversationId to it.copy(state = MoveState.Cancelled))) } ?: held }
+    }
+
+    suspend fun saveTodos(conversationId: String, todos: List<PlanEntry>, tellAgent: Boolean) {
+        val items = todos.map { entry ->
+            val status = when (entry.status) {
+                PlanStatus.Done -> "completed"
+                PlanStatus.Running -> "in_progress"
+                PlanStatus.Pending -> "pending"
+            }
+
+            TodoItem(entry.content, status, entry.description)
+        }
+
+        api.saveTodos(conversationId, SaveTodosRequest(items, tellAgent))
     }
 
     suspend fun setGoal(conversationId: String, text: String, limits: GoalLimits) {

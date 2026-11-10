@@ -311,7 +311,6 @@ fun RequestCard(store: Store, state: AppState, conversationId: String, request: 
     when (request) {
         is InboxRequest.Approval -> ToolApprovalCard(request.permission, onAnswer = { requestId, option -> store.act { store.api.answerPermission(conversationId, requestId, option) } })
         is InboxRequest.Mycelium -> MyceliumCard(request.call, request.parsed)
-        is InboxRequest.Instructions -> ProposalCard(store, state.instructionProposals[request.proposal.id] ?: request.proposal, onOpenGroup = null)
         is InboxRequest.Gate -> {
             val workflow = state.workflows[request.workflow.id] ?: request.workflow
             val workflows = ConversationWorkflows(listOf(workflow), null, onControl = { workflowId, control -> store.act { store.controlWorkflow(workflowId, control) } })

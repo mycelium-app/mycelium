@@ -28,7 +28,7 @@ data class FileDiff(val path: String, val lines: List<DiffLine>) {
     val removed: Int get() = lines.count { it.kind == DiffLine.Kind.Removed }
 }
 
-data class PlanEntry(val content: String, val status: PlanStatus)
+data class PlanEntry(val content: String, val status: PlanStatus, val description: String? = null)
 
 data class PermissionOption(val id: String, val name: String, val kind: String)
 
@@ -181,8 +181,6 @@ sealed interface ThreadItem {
 
     data class ModelChanged(override val key: String, val provider: String, val model: String) : ThreadItem
 
-    data class Notice(override val key: String, val text: String) : ThreadItem
-
     data class Continued(override val key: String, val text: String, val from: ContinuedFrom? = null, val why: String? = null) : ThreadItem
 
     data class TeachMode(override val key: String, val on: Boolean) : ThreadItem
@@ -300,7 +298,6 @@ class ThreadBuilder {
             EventKinds.Error -> addFailure(key, payload)
             EventKinds.Workflow -> applyWorkflowLine(items, key, payload)
             EventKinds.ModelChanged -> items += ThreadItem.ModelChanged(key, payload.string("provider_name").orEmpty(), payload.string("model").orEmpty())
-            EventKinds.SessionNotice -> items += ThreadItem.Notice(key, payload.string("message").orEmpty())
             EventKinds.Continued -> items += continuedItem(key, payload)
             EventKinds.TeachMode -> items += ThreadItem.TeachMode(key, payload.boolean("on") ?: false)
             EventKinds.VoiceMode -> items += ThreadItem.VoiceMode(key, payload.boolean("on") ?: false)
@@ -590,6 +587,7 @@ private fun planEntries(update: JsonObject): List<PlanEntry> =
                 "in_progress" -> PlanStatus.Running
                 else -> PlanStatus.Pending
             },
+            description = entry.string("description"),
         )
     }
 

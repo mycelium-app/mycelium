@@ -83,6 +83,12 @@ data class Goal(
 )
 
 @Serializable
+data class TodoItem(val content: String, val status: String, val description: String? = null)
+
+@Serializable
+data class SaveTodosRequest(val todos: List<TodoItem>, @SerialName("tell_agent") val tellAgent: Boolean)
+
+@Serializable
 data class SetGoalRequest(
     val text: String,
     @SerialName("token_budget") val tokenBudget: Long? = null,

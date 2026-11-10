@@ -130,7 +130,6 @@ import mycelium.api.QueuedPrompt
 fun Composer(
     conversation: Conversation,
     working: Boolean,
-    stopping: Boolean = false,
     queue: List<QueuedPrompt>,
     sending: List<String>,
     onSend: (String) -> Unit,
@@ -152,6 +151,7 @@ fun Composer(
     onCitationPlaced: (Annotation) -> Unit = {},
     goal: GoalControls? = null,
     todos: List<PlanEntry> = emptyList(),
+    onSaveTodos: ((List<PlanEntry>, Boolean) -> Unit)? = null,
     attachments: AttachmentControls? = null,
     dictation: Dictation? = null,
     initialText: TextFieldValue = TextFieldValue(""),
@@ -443,7 +443,7 @@ fun Composer(
                     onKey = { key ->
                         when {
                             key == Key.Escape && matches.isEmpty() && queueEdit != null -> { queueEdit.onCancel(); true }
-                            key == Key.Escape && matches.isEmpty() && working && !stopping -> { onStop(); true }
+                            key == Key.Escape && matches.isEmpty() && working -> { onStop(); true }
                             key == Key.DirectionUp && matches.isEmpty() && queueEdit == null && text.text.isEmpty() && queue.isNotEmpty() -> { onEditQueued(queue.last()); true }
                             matches.isEmpty() -> false
                             key == Key.DirectionDown -> { highlighted = (highlighted + 1) % matches.size; true }
@@ -489,7 +489,7 @@ fun Composer(
 
     val controls = barControls(
         conversationKind(conversation, working),
-        HarnessReport(voice = dictation != null, voiceMode = voiceMode != null, inVoiceMode = voiceMode?.phase != null, teachMe = onTeachMe != null, working = working, stopping = stopping, models = options.models.isNotEmpty(), modes = modes.isNotEmpty(), settings = settings.isNotEmpty()),
+        HarnessReport(voice = dictation != null, voiceMode = voiceMode != null, inVoiceMode = voiceMode?.phase != null, teachMe = onTeachMe != null, working = working, models = options.models.isNotEmpty(), modes = modes.isNotEmpty(), settings = settings.isNotEmpty()),
     ).filterNot { it == BarControl.Send && queueEdit != null }
 
     var permissionsOpen by remember(conversation.id) { mutableStateOf(false) }
@@ -548,10 +548,6 @@ fun Composer(
             }
             BarControl.Usage -> usage()
             BarControl.Stop -> MyButton(onStop, icon = MyIcon.Stop, description = "Stop the agent", variant = ButtonVariant.Outline)
-            BarControl.Stopping -> Row(Modifier.padding(horizontal = Tokens.Space.S1).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-                Icon(MyIcon.Working, MyTheme.colors.statusWorking, Tokens.Size.IconSm)
-                Label("Stopping", Modifier, Tokens.Type.Meta, MyTheme.colors.textMuted)
-            }
             BarControl.Send -> MyButton(::submit, icon = MyIcon.Send, description = if (working) "Queue message" else "Send", muted = true)
         }
     }
@@ -575,7 +571,7 @@ fun Composer(
                     .padding(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S1),
             ) {
                 if (goal?.goal != null || todos.isNotEmpty()) {
-                    GoalAndTodoRegion(goal, todos, conversation.id)
+                    GoalAndTodoRegion(goal, todos, conversation.id, onSaveTodos = onSaveTodos)
                 }
 
                 if (queue.isNotEmpty() || sending.isNotEmpty()) {
@@ -588,7 +584,7 @@ fun Composer(
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                     field(Modifier.weight(1f).padding(start = Tokens.Space.S2))
-                    controls.inGroups(BarGroup.Status, BarGroup.Turn).forEach { control(it) }
+                    controls.inGroups(BarGroup.Turn).forEach { control(it) }
                 }
 
                 Row(Modifier.fillMaxWidth().horizontalScrollFaded(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
@@ -626,7 +622,7 @@ fun Composer(
         val measured = Modifier.widthIn(max = readingMeasure()).fillMaxWidth()
 
         if (goal?.goal != null || todos.isNotEmpty()) {
-            GoalAndTodoRegion(goal, todos, conversation.id, measured)
+            GoalAndTodoRegion(goal, todos, conversation.id, measured, onSaveTodos)
         }
 
         if (queue.isNotEmpty() || sending.isNotEmpty()) {

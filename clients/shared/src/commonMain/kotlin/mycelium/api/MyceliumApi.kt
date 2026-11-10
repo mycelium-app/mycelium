@@ -991,6 +991,10 @@ class MyceliumApi(
 
     suspend fun setGoal(id: String, request: SetGoalRequest): Goal = call("/conversations/$id/goal") { client.put(it) { authorise(); json(request) } }.body()
 
+    suspend fun saveTodos(id: String, request: SaveTodosRequest) {
+        call("/conversations/$id/todos") { client.put(it) { authorise(); json(request) } }
+    }
+
     suspend fun pauseGoal(id: String, paused: Boolean): Goal = call("/conversations/$id/goal") { client.patch(it) { authorise(); json(PatchGoalRequest(paused)) } }.body()
 
     suspend fun sendGoalAgain(id: String): Goal = call("/conversations/$id/goal/send") { client.post(it) { authorise() } }.body()

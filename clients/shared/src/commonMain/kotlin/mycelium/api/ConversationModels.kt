@@ -35,7 +35,6 @@ object EventKinds {
     const val Error = "error"
     const val Workflow = "workflow"
     const val ModelChanged = "model_changed"
-    const val SessionNotice = "session_notice"
     const val Continued = "continued"
     const val TeachMode = "teach_mode"
     const val VoiceMode = "voice_mode"
