@@ -772,7 +772,7 @@ pub async fn offered_models(state: &AppState, owner: Uuid, node_id: Uuid, agent:
 }
 
 pub async fn apply_model(state: &AppState, owner: Uuid, conversation: Uuid, model: Option<&str>, difficulty: Option<&str>) -> ApiResult<()> {
-    let options: Option<Value> = sqlx::query_scalar("select options from conversations where id=$1").bind(conversation).fetch_one(&state.pool).await?;
+    let (options, node_id, agent): (Option<Value>, Uuid, String) = sqlx::query_as("select options, node_id, agent from conversations where id=$1").bind(conversation).fetch_one(&state.pool).await?;
     let config_options = options.as_ref().and_then(|options| options.get("config_options")).and_then(Value::as_array);
     let effort = config_options
         .and_then(|options| {
@@ -784,9 +784,8 @@ pub async fn apply_model(state: &AppState, owner: Uuid, conversation: Uuid, mode
         .and_then(|option| option.get("id"))
         .and_then(Value::as_str);
 
-    let available = options.as_ref().and_then(|options| options.get("models")).and_then(|models| models.get("availableModels")).and_then(Value::as_array).cloned().unwrap_or_default();
     let model = match model {
-        Some(requested) => Some(resolve_model(&available, requested).map_err(|offered| {
+        Some(requested) => Some(resolve_model(&offered_models(state, owner, node_id, &agent).await?, requested).map_err(|offered| {
             ApiError::bad_request("workflow_model_unavailable", format!("The requested model is not offered by this agent. Choose one of its available models: {offered}."))
         })?),
         None => None,

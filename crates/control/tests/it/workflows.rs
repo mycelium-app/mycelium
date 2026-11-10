@@ -173,6 +173,33 @@ async fn a_native_agent_step_opens_an_ordinary_conversation_and_stops_it() {
 }
 
 #[tokio::test]
+async fn a_step_naming_a_model_its_new_session_has_not_listed_yet_starts_on_the_models_its_node_reported() {
+    use mycelium_proto::link::ControlToNode;
+    let server = Server::start().await;
+    let mut link = server.online_node("worker").await;
+    sqlx::query("insert into harness_models (node_id, agent, account, models) values ($1, 'claude', 'a@example.com', $2)")
+        .bind(link.id)
+        .bind(json!([{"id": "opus", "name": "Opus 5.5"}]))
+        .execute(&server.pool)
+        .await
+        .unwrap();
+    let (status, w) = server.user.json(server.user.post("/api/v1/workflows").json(&json!({"title":"Named model","steps":[{"key":"work","title":"Build","prompt":"Implement the change","node_id":link.id,"agent":"claude","cwd":"/work/app","model":"Opus 5.5"}]}))).await;
+    assert_eq!(status, 200, "{w}");
+    let id = w["id"].as_str().unwrap();
+    let conversation = match link.next().await {
+        ControlToNode::StartSession { conversation_id, .. } => conversation_id,
+        other => panic!("expected start, got {other:?}"),
+    };
+    sqlx::query("update conversations set acp_session_id = 'session-1' where id = $1").bind(conversation).execute(&server.pool).await.unwrap();
+
+    match link.next().await {
+        ControlToNode::SetConfig { model, .. } => assert_eq!(model.as_deref(), Some("opus")),
+        other => panic!("expected the model to be set, got {other:?}"),
+    }
+    assert_ne!(get(&server, id).await["status"], "failed");
+}
+
+#[tokio::test]
 async fn an_ambiguous_dispatch_stops_instead_of_starting_duplicate_work() {
     let server = Server::start().await;
     let link = server.online_node("worker").await;
