@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.34.3
+
+- The Outline side panel shows the collection's document tree above the document, with an account and collection picker, on desktop, Android and the web.
+- Clicking a Linux notification's body opens its conversation, break notifications open nothing, and a failing notify-send falls back to gdbus.
+- A Codex conversation on a signed-in account resumes after moving to another node. Only the control plane needs this version.
+- The unread dot sits in the row's trailing status slot, where the time or status icon goes.
+
 ## v0.34.2
 
 - The subagent proposal card lets you change the model, using the same model picker as the message box. A Claude agent that has offered no models in a conversation falls back to the models its node reported.
