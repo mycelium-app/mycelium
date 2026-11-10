@@ -42,7 +42,7 @@ import mycelium.api.Me
 enum class SettingsSection(val label: String, val icon: MyIcon, val summary: String? = null) {
     Appearance("Appearance", MyIcon.Sun),
     TimeAndFocus("Time and focus", MyIcon.Clock),
-    Privacy("Privacy", MyIcon.Mode, "Voice, wake phrase and where speech is processed"),
+    Voice("Voice", MyIcon.Microphone, "How you talk to Voice, how speech becomes text and how replies are spoken"),
     Experiments("Experiments", MyIcon.Sliders),
     Schedules("Schedules", MyIcon.Calendar, "Prompts that start conversations on a timetable"),
     Ides("IDEs", MyIcon.Code, "Where Open in IDE opens a folder"),
@@ -61,7 +61,7 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
 }
 
 internal val SettingsGroups = listOf(
-    "General" to listOf(SettingsSection.Appearance, SettingsSection.TimeAndFocus, SettingsSection.Privacy, SettingsSection.Experiments, SettingsSection.Ides),
+    "General" to listOf(SettingsSection.Appearance, SettingsSection.TimeAndFocus, SettingsSection.Voice, SettingsSection.Experiments, SettingsSection.Ides),
     "Agents and models" to listOf(SettingsSection.Accounts, SettingsSection.Agents, SettingsSection.Schedules, SettingsSection.Connections),
     "Knowledge" to listOf(SettingsSection.Groups, SettingsSection.Instructions, SettingsSection.Memories, SettingsSection.Import, SettingsSection.Indexing),
     "Services" to listOf(SettingsSection.ChatTools, SettingsSection.Forges),
@@ -196,13 +196,13 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
         when (section) {
             SettingsSection.Appearance -> AppearanceSettings()
             SettingsSection.TimeAndFocus -> TimeAndFocusSettings(store, links.openHours)
-            SettingsSection.Privacy -> PrivacySettings(store, LocalPlatform.current)
+            SettingsSection.Voice -> VoiceSettings(store, LocalPlatform.current)
             SettingsSection.Experiments -> ExperimentsSettings(store)
             SettingsSection.Schedules -> Unit
             SettingsSection.Ides -> LocalPlatform.current?.let { IdesSettings(it) }
             SettingsSection.Accounts -> {
                 AccountsSettings(store)
-                ModelProvidersSettings(store, revealSpeech = links.tab == SpeechAnchor)
+                ModelProvidersSettings(store, revealSpeech = links.tab == SpeechAnchor, addSpeechProvider = links.tab == AddSpeechProviderAnchor)
                 DecisionsSettings(store)
             }
             SettingsSection.Agents -> AgentsSettings(store)

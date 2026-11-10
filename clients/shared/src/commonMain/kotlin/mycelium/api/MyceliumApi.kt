@@ -1164,6 +1164,10 @@ class MyceliumApi(
 
     suspend fun chooseSpeechModel(purpose: String, request: ChooseSpeechModelRequest): PrivacySettings = call("/speech/choices/$purpose") { client.put(it) { authorise(); json(request) } }.body()
 
+    suspend fun chooseLocalSpeechModel(request: ChooseLocalSpeechModelRequest): PrivacySettings = call("/speech/local") { client.put(it) { authorise(); json(request) } }.body()
+
+    suspend fun removeLocalSpeechModel(): PrivacySettings = call("/speech/local") { client.delete(it) { authorise() } }.body()
+
     suspend fun speech(request: SpeechRequest): SpokenAudio {
         val response = call("/speech") { client.post(it) { authorise(); json(request) } }
 

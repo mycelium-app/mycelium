@@ -309,7 +309,7 @@ class VoiceTest {
 
         rule.onNodeWithContentDescription("Start listening (Ctrl+Shift+Space)").performClick()
 
-        rule.onNodeWithText("Add a provider with a speech-to-text model in Settings, Providers to dictate on this device.").assertExists()
+        rule.onNodeWithText("Choose speech to text in Settings, Voice to dictate on this device.").assertExists()
         rule.onNodeWithText("Set up speech to text").assertExists()
         assertTrue(voiceHeadings() == 1)
 

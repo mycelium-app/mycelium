@@ -36,10 +36,13 @@ private val ProviderKinds = mapOf("OpenAI-compatible" to "openai_compatible", "A
 
 private val DataHandling = listOf(Choice("cloud", "Cloud"), Choice("zdr", "Zero data retention"), Choice("private", "Private or on-device only"))
 
+const val SpeechAnchor = "speech"
+const val AddSpeechProviderAnchor = "add-speech-provider"
+
 private const val OpenRouterUrl = "https://openrouter.ai/api/v1"
 
 @Composable
-fun ModelProvidersSettings(store: Store, revealSpeech: Boolean = false) {
+fun ModelProvidersSettings(store: Store, revealSpeech: Boolean = false, addSpeechProvider: Boolean = false) {
     val colors = MyTheme.colors
     var providers by remember { mutableStateOf<List<ModelProvider>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
@@ -62,6 +65,14 @@ fun ModelProvidersSettings(store: Store, revealSpeech: Boolean = false) {
 
     LaunchedEffect(Unit) {
         load()
+    }
+
+    LaunchedEffect(addSpeechProvider) {
+        if (addSpeechProvider) {
+            adding = true
+            forSpeech = true
+            kind = "openai_compatible"
+        }
     }
 
     LaunchedEffect(revealSpeech, loaded) {
@@ -258,15 +269,13 @@ fun ModelProvidersSettings(store: Store, revealSpeech: Boolean = false) {
             }
         }
 
-        SpeechSettings(
-            store,
-            providers,
-            onAddProvider = {
-                adding = true
-                forSpeech = true
-                kind = "openai_compatible"
-            },
-            modifier = Modifier.bringIntoViewRequester(speech),
-        )
+        Column(Modifier.bringIntoViewRequester(speech), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+            Label("Speech", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                Label("Speech to text and reading aloud are chosen in Voice.", Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted)
+                MyButton({ store.openScreen("settings/voice") }, text = "Voice settings", description = "Open Voice settings", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+            }
+        }
     }
 }

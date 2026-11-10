@@ -27,9 +27,9 @@ import mycelium.api.MyceliumApi
 import mycelium.state.Store
 import mycelium.state.VoicePhase
 import mycelium.ui.MyceliumTheme
-import mycelium.ui.PrivacySettings
 import mycelium.ui.Route
 import mycelium.ui.Shell
+import mycelium.ui.VoiceSettings
 import org.junit.Assume
 import org.junit.Rule
 
@@ -103,7 +103,7 @@ class WakePhraseTest {
     private fun settings(privacy: String, saved: Map<String, String> = emptyMap(), hasListener: Boolean = true) {
         val (store, platform) = store(privacy, saved, hasListener)
 
-        rule.setContent { MyceliumTheme(true) { PrivacySettings(store, platform) } }
+        rule.setContent { MyceliumTheme(true) { VoiceSettings(store, platform) } }
     }
 
     @Test

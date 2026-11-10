@@ -97,6 +97,7 @@ import mycelium.state.messageWithAnnotations
 import mycelium.state.pathWithoutLine
 import mycelium.state.parentFolder
 import mycelium.state.Store
+import mycelium.state.hasSpeechToText
 import mycelium.state.ThreadItem
 import mycelium.state.continueAccountId
 import mycelium.state.pickerAccounts
@@ -330,7 +331,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
     val scope = rememberCoroutineScope()
     val voice by store.voice.state.collectAsState()
-    val speechProvided = voice.privacy.speechToTextProvider != null
+    val speechProvided = voice.privacy.hasSpeechToText()
     val dictation = remember(platform, state.experiments.voice, speechProvided) {
         when {
             !state.experiments.voice -> null

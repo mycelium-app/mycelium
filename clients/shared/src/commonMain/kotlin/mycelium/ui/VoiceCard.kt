@@ -82,7 +82,7 @@ fun voiceProblemMessage(problem: VoiceProblem, android: Boolean): String = when 
     }
 
     VoiceProblem.NoMicrophone -> "No microphone found. Connect one, then select Try again."
-    VoiceProblem.NoSpeechProvider -> "Add a provider with a speech-to-text model in Settings, Providers to dictate on this device."
+    VoiceProblem.NoSpeechProvider -> "Choose speech to text in Settings, Voice to dictate on this device."
     is VoiceProblem.Failed -> problem.message
 }
 
@@ -130,7 +130,7 @@ private fun voiceCardActions(store: Store, platform: Platform?) = VoiceCardActio
     onTryAgain = store.voice::startListening,
     onTypeInstead = store.voice::typeInstead,
     onOpenConversation = store.voice::openThread,
-    onOpenProviders = { store.voice.close(); store.openScreen("settings/providers/$SpeechAnchor") },
+    onOpenProviders = { store.voice.close(); store.openScreen("settings/voice") },
     onOpenAndroidSettings = platform?.takeIf { it.opensMicrophoneSettings }?.let { opener -> { opener.openMicrophoneSettings() } },
     onClose = store.voice::close,
 )

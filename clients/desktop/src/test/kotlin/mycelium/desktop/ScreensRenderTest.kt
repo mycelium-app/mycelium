@@ -121,8 +121,8 @@ internal fun fakeApi(nodes: String = Nodes, extra: Map<String, String> = emptyMa
 }
 
 @OptIn(InternalComposeUiApi::class)
-internal fun renderAt(name: String, dark: Boolean, phone: Boolean, tabs: Int = 0, interact: (ImageComposeScene) -> Unit = {}, content: @androidx.compose.runtime.Composable () -> Unit): File {
-    val scene = ImageComposeScene(if (phone) 390 else 1440, if (phone) 844 else 900, Density(1f)) {
+internal fun renderAt(name: String, dark: Boolean, phone: Boolean, tabs: Int = 0, height: Int = if (phone) 844 else 900, interact: (ImageComposeScene) -> Unit = {}, content: @androidx.compose.runtime.Composable () -> Unit): File {
+    val scene = ImageComposeScene(if (phone) 390 else 1440, height, Density(1f)) {
         MyceliumTheme(dark) { CompositionLocalProvider(LocalTouch provides phone, content = content) }
     }
     var image = scene.render(0)

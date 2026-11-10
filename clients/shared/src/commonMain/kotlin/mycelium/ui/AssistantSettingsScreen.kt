@@ -40,7 +40,6 @@ import mycelium.api.PutAssistantSecretRequest
 import mycelium.state.AppState
 import mycelium.state.Choice
 import mycelium.state.NoGroup
-import mycelium.state.SpeechSpeedNormal
 import mycelium.state.Store
 import mycelium.state.VoiceAssistantKey
 import mycelium.state.ago
@@ -135,8 +134,6 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String, 
     }
 }
 
-private val SpeechSpeeds = listOf("slower" to "Slower", SpeechSpeedNormal to "Normal", "faster" to "Faster")
-
 @Composable
 private fun SectionActions(onSave: () -> Unit, onCancel: () -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
@@ -157,9 +154,6 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
     val runner = rememberAction(assistant.id)
     val builtIn = assistant.builtinKey != null
     val isVoice = assistant.builtinKey == VoiceAssistantKey
-    val voices by store.voice.state.collectAsState()
-    var voiceName by remember(assistant.id, assistant.preferences) { mutableStateOf(assistant.preferences.voiceName) }
-    var speechSpeed by remember(assistant.id, assistant.preferences) { mutableStateOf(assistant.preferences.speechSpeed ?: SpeechSpeedNormal) }
     val groupName = state.groups[group]?.name
     val groupChoices = state.groups.values.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) } + Choice(NoGroup, "No group")
 
@@ -167,15 +161,7 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
         name = assistant.name
         description = assistant.description.orEmpty()
         group = assistant.groupId ?: NoGroup
-        voiceName = assistant.preferences.voiceName
-        speechSpeed = assistant.preferences.speechSpeed ?: SpeechSpeedNormal
         nameError = null
-    }
-
-    if (isVoice) {
-        LaunchedEffect(Unit) {
-            store.voice.loadVoices()
-        }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
@@ -223,18 +209,6 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
             OptionMenu("Group", groupChoices, group, { group = it }, title = "Group", icon = MyIcon.Group)
         }
 
-        if (isVoice) {
-            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                Label("Speaking voice", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                OptionMenu("Speaking voice", voices.voices.map { Choice(it, it) }, voiceName, { voiceName = it }, title = "Speaking voice", label = "Provider default", icon = MyIcon.Speaker)
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                Label("Speaking speed", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                Segmented(SpeechSpeeds.map { it.second }, SpeechSpeeds.first { it.first == speechSpeed }.second, { picked -> speechSpeed = SpeechSpeeds.first { it.second == picked }.first }, groupLabel = "Speaking speed")
-            }
-        }
-
         SectionActions(
             onSave = {
                 if (name.isBlank()) {
@@ -246,9 +220,7 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
                 runner {
                     val chosen = group.takeUnless { it == NoGroup }
 
-                    val preferences = assistant.preferences.copy(voiceName = voiceName, speechSpeed = speechSpeed).takeIf { isVoice }
-
-                    onChanged(store.patchAssistant(assistant, PatchAssistantRequest(name = name.takeUnless { builtIn }, description = description, groupId = chosen, clearGroup = chosen == null, preferences = preferences)))
+                    onChanged(store.patchAssistant(assistant, PatchAssistantRequest(name = name.takeUnless { builtIn }, description = description, groupId = chosen, clearGroup = chosen == null)))
                 }
             },
             onCancel = ::reset,
@@ -272,10 +244,10 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
             Hairline()
 
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                Label("Turn voice off", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                Label("Voice settings", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
                 Row {
-                    MyButton({ store.openScreen("settings/privacy") }, text = "Turn voice off", icon = MyIcon.Mode, variant = ButtonVariant.Outline)
+                    MyButton({ store.openScreen("settings/voice") }, text = "Voice settings", icon = MyIcon.Microphone, variant = ButtonVariant.Outline)
                 }
             }
         }

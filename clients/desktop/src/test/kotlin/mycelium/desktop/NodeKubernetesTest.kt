@@ -32,6 +32,7 @@ import mycelium.ui.ExperimentsSettings
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.NodePage
 import mycelium.ui.NodesScreen
+import mycelium.ui.VoiceSettings
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -130,11 +131,11 @@ class NodeKubernetesTest {
     }
 
     @Test
-    fun turningOnVoiceKeepsKubernetesNodesOn() {
+    fun turningOnDictationKeepsKubernetesNodesOn() {
         val store = store("""{"kubernetes_nodes":true}""", LaptopNode)
-        rule.setContent { MyceliumTheme(true) { ExperimentsSettings(store) } }
+        rule.setContent { MyceliumTheme(true) { VoiceSettings(store, QuietPlatform) } }
 
-        rule.onNodeWithContentDescription("Voice input").performClick()
+        rule.onNodeWithContentDescription("Dictate into the composer").performClick()
         rule.waitUntil(5_000) { saved.isNotEmpty() }
 
         assertTrue(saved.single().contains("\"voice\":true") && saved.single().contains("\"kubernetes_nodes\":true"), saved.single())

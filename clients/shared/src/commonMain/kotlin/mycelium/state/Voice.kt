@@ -18,6 +18,7 @@ import mycelium.DictationProblem
 import mycelium.Platform
 import mycelium.ProviderDictation
 import mycelium.api.ApiException
+import mycelium.api.ChooseLocalSpeechModelRequest
 import mycelium.api.ChooseSpeechModelRequest
 import mycelium.api.MyceliumApi
 import mycelium.api.PrivacySettings
@@ -37,9 +38,9 @@ private const val WakePhraseEnabledKey = "voice-wake-phrase-enabled"
 private const val WakePhraseKey = "voice-wake-phrase"
 private const val SpeechToTextKey = "voice-speech-to-text"
 private const val ReadAloudKey = "voice-read-aloud"
-private const val LevelPollMillis = 100L
-private const val PauseMillis = 1_500L
-private const val HeardLevel = 0.08f
+const val LevelPollMillis = 100L
+const val PauseMillis = 1_500L
+const val HeardLevel = 0.08f
 
 sealed interface VoiceProblem {
     data object MicrophoneDenied : VoiceProblem
@@ -102,6 +103,8 @@ private fun voiceDid(call: ThreadItem.ToolCall): VoiceDid? {
 
     return VoiceDid(text, key.substringBefore('/'))
 }
+
+fun PrivacySettings.hasSpeechToText(): Boolean = speechToTextProvider != null || speechToTextLocal != null
 
 fun wakePhraseName(phrase: String): String = if (phrase == WakePhraseOk) "OK Mycelium" else "Hey Mycelium"
 
@@ -171,7 +174,7 @@ class VoiceStore(private val api: MyceliumApi, private val scope: CoroutineScope
             !deviceAvailable -> SpeechToTextProvider
             !providerAvailable -> SpeechToTextDevice
             chosen != null -> chosen
-            mutableState.value.privacy.speechToTextProvider == null -> SpeechToTextDevice
+            !mutableState.value.privacy.hasSpeechToText() -> SpeechToTextDevice
             else -> SpeechToTextProvider
         }
     }
@@ -235,6 +238,18 @@ class VoiceStore(private val api: MyceliumApi, private val scope: CoroutineScope
         }
     }
 
+    suspend fun chooseLocalModel(modelId: String) {
+        val saved = api.chooseLocalSpeechModel(ChooseLocalSpeechModelRequest(modelId))
+
+        mutableState.update { it.copy(privacy = saved, loaded = true) }
+    }
+
+    suspend fun removeLocalModel() {
+        val saved = api.removeLocalSpeechModel()
+
+        mutableState.update { it.copy(privacy = saved, loaded = true) }
+    }
+
     suspend fun chooseSpeechModel(purpose: String, providerId: String, model: String) {
         val saved = api.chooseSpeechModel(purpose, ChooseSpeechModelRequest(providerId, model))
 
@@ -291,7 +306,7 @@ class VoiceStore(private val api: MyceliumApi, private val scope: CoroutineScope
         discarded = false
 
         val choice = speechToTextChoice()
-        val noProvider = choice == SpeechToTextProvider && mutableState.value.privacy.speechToTextProvider == null
+        val noProvider = choice == SpeechToTextProvider && !mutableState.value.privacy.hasSpeechToText()
         val route = when {
             choice == SpeechToTextDevice -> platform?.dictation()
             noProvider -> null
