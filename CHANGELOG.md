@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.34.7
+
+- Settings has a Voice section holding every voice setting: how you talk, how speech becomes text, how replies are spoken and what leaves the machine, with Try it for speech to text and reading aloud. It replaces Privacy and takes the Speech table from Providers, the voice and speed from the Voice assistant and dictation from Experiments.
+- Speech to text can run on the server with a Hugging Face model. The control plane downloads it once, shows its progress and size, reuses it and can remove it, so audio stays on the server.
+- An OpenRouter provider lists its transcription models, such as Voxtral, and transcribes with them.
+
 ## v0.34.6
 
 - The subagents card lists waiting and running subagents and those finished in the last hour, in a list that stops at about five rows and scrolls. It is not drawn when nothing qualifies; older subagents stay in the side panel's history.
