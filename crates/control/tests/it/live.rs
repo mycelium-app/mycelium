@@ -47,6 +47,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "PUT /api/v1/conversations/{id}/goal",
     "PATCH /api/v1/conversations/{id}/goal",
     "DELETE /api/v1/conversations/{id}/goal",
+    "DELETE /api/v1/conversations/{id}/action-items/{item_id}",
     "POST /api/v1/conversations/{id}/goal/send",
     "POST /api/v1/conversations/{id}/goal/nudge",
     "POST /api/v1/conversations/{id}/goal/continue",
@@ -1435,6 +1436,21 @@ async fn setting_pausing_and_clearing_a_goal_is_streamed() {
     server.user.json(server.user.delete(&url)).await;
     let cleared = stream.until(|message| match message { StreamMessage::GoalCleared { conversation_id } => Some(conversation_id), _ => None }).await;
     assert_eq!(cleared, conversation.id);
+}
+
+#[tokio::test]
+async fn marking_an_action_item_done_is_streamed() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, Some("Roll out the update")).await;
+    let added = server.agent_mcp(&link.token, conversation.id, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "add_action_item", "arguments": {"text": "Update Mycelium on atlas"}}})).await;
+    let item = added["result"]["content"][0]["text"].as_str().unwrap().split_whitespace().nth(3).unwrap().to_string();
+    let mut stream = server.user.stream().await;
+
+    server.user.json(server.user.delete(&format!("/api/v1/conversations/{}/action-items/{item}", conversation.id))).await;
+    let updated = stream.until(|message| match message { StreamMessage::Conversation(updated) if updated.id == conversation.id && updated.action_items.is_empty() => Some(updated), _ => None }).await;
+
+    assert_eq!(updated.id, conversation.id);
 }
 
 #[tokio::test]
