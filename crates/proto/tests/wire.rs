@@ -122,6 +122,7 @@ fn every_node_message_round_trips_under_its_tag() {
         (NodeToControl::PermissionRequest { conversation_id: id(), seq: 2, request_id: "r".into(), request: json!({}) }, "permission_request"),
         (NodeToControl::TurnEnd { conversation_id: id(), seq: 3, stop_reason: "end_turn".into(), usage: Some(json!({"inputTokens": 3})) }, "turn_end"),
         (NodeToControl::SessionFailed { conversation_id: id(), seq: 4, message: "x".into() }, "session_failed"),
+        (NodeToControl::SessionNotice { conversation_id: id(), seq: 5, setting: "model".into(), requested: "m".into(), current: Some("c".into()), message: "x".into() }, "session_notice"),
         (NodeToControl::Logins { logins: vec![LoginInfo { managed: false, agent: AgentId::Claude, account: None, method: "token".into(), state: LoginState::SignedOut, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }, "logins"),
         (NodeToControl::NodeStatus { kubernetes: None }, "node_status"),
         (NodeToControl::LoginOutput { login_id: id(), data: "hi".into() }, "login_output"),

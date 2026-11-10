@@ -2138,3 +2138,19 @@ async fn one_persons_read_position_does_not_clear_unread_for_another() {
 
     assert!(is_unread(&server.conversation(id).await));
 }
+
+#[tokio::test]
+async fn a_model_the_agent_refuses_leaves_a_notice_and_puts_the_real_model_back() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("first")).await;
+    link.expect_prompt().await;
+    sqlx::query("update conversations set model = 'opus-legacy' where id = $1").bind(id).execute(&server.pool).await.unwrap();
+    let message = "The agent could not switch to the model opus-legacy: Unknown model. Pick another model.";
+
+    link.send(NodeToControl::SessionNotice { conversation_id: id, seq: 4, setting: "model".into(), requested: "opus-legacy".into(), current: Some("sonnet".into()), message: message.into() }).await;
+
+    common::eventually("the notice to be stored", || async { server.events(id).await.iter().any(|event| event["kind"] == "session_notice" && event["payload"]["message"] == message).then_some(()) }).await;
+    common::eventually("the model to go back", || async { (server.conversation(id).await["model"] == "sonnet").then_some(()) }).await;
+    assert_ne!(status_of(&server, id).await, "failed");
+}

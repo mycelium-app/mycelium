@@ -104,6 +104,13 @@ class ThreadTest {
     }
 
     @Test
+    fun aSessionNoticeBecomesANoticeWithTheMessage() {
+        val thread = buildThread(listOf(event(1, EventKinds.SessionNotice, """{"setting":"model","requested":"opus-legacy","message":"The agent could not switch to the model opus-legacy: Unknown model. Pick another model."}""")))
+
+        assertEquals(ThreadItem.Notice("e1", "The agent could not switch to the model opus-legacy: Unknown model. Pick another model."), thread.single())
+    }
+
+    @Test
     fun startingOnAnyNodeSaysWhichNodeWasPicked() {
         val thread = buildThread(listOf(event(1, EventKinds.Continued, """{"kind":"any_node","node_name":"orion"}""")))
 
