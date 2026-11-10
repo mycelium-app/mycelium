@@ -1132,8 +1132,8 @@ class MyceliumApi(
             }
         }.body()
 
-    suspend fun sendPrompt(id: String, text: String, attachments: List<Attachment> = emptyList()): String? {
-        val response = call("/conversations/$id/prompt") { client.post(it) { authorise(); json(PromptRequest(text, attachments)) } }
+    suspend fun sendPrompt(id: String, text: String, attachments: List<Attachment> = emptyList(), spoken: Boolean = false): String? {
+        val response = call("/conversations/$id/prompt") { client.post(it) { authorise(); json(PromptRequest(text, attachments, spoken)) } }
 
         if (response.status != HttpStatusCode.Accepted) {
             return null

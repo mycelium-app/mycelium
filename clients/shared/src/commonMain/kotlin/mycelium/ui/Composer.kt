@@ -82,6 +82,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import mycelium.Dictation
+import mycelium.state.VoicePhase
 import mycelium.DictationProblem
 import mycelium.state.Choice
 import mycelium.state.PlanEntry
@@ -160,6 +161,7 @@ fun Composer(
     onMoveQueued: (String, Int) -> Unit = { _, _ -> },
     queueEdit: QueueEdit? = null,
     onTeachMe: ((Boolean) -> Unit)? = null,
+    voiceMode: VoiceModeControls? = null,
     assistantActions: AssistantActionControls? = null,
     usage: @Composable () -> Unit = {},
     onSearchReferences: suspend (String) -> List<ForgeReference> = { emptyList() },
@@ -277,6 +279,12 @@ fun Composer(
 
         if (queueEdit != null) {
             queueEdit.onSave(trimmed)
+
+            return
+        }
+
+        if (trimmed.isEmpty() && voiceMode?.phase == VoicePhase.Listening) {
+            voiceMode.onSendHeard()
 
             return
         }
@@ -414,6 +422,7 @@ fun Composer(
                 MessageField(
                     modifier = Modifier.focusRequester(fieldFocus),
                     text = text,
+                    placeholder = voiceMode?.phase?.let { phase -> voiceMode.heard.ifEmpty { if (phase == VoicePhase.Listening) "Listening" else LocalComposerPlaceholder.current } } ?: LocalComposerPlaceholder.current,
                     visualTransformation = remember(display, colors.textMuted) { PasteMarkerTransformation(display, colors.textMuted) },
                     badges = display.badgeRanges().values.toList(),
                     previews = display.badgeRanges().mapNotNull { (marker, range) -> images[marker]?.let { id -> drafts.firstOrNull { it.id == id } }?.takeIf { it.file.mediaType.startsWith("image/") }?.let { range to it.file.bytes } }.toMap(),
@@ -451,10 +460,10 @@ fun Composer(
                 }
             }
 
-            dictationProblem?.let { problem ->
+            (dictationProblem?.let(::dictationProblemText) ?: voiceMode?.problem)?.let { problem ->
                 Row(Modifier.semantics { liveRegion = LiveRegionMode.Assertive }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                     Icon(MyIcon.Failed, colors.statusFailed, Tokens.Size.IconSm)
-                    Label(dictationProblemText(problem), style = Tokens.Type.Meta, color = colors.statusFailed)
+                    Label(problem, style = Tokens.Type.Meta, color = colors.statusFailed)
                 }
             }
         }
@@ -479,7 +488,7 @@ fun Composer(
 
     val controls = barControls(
         conversationKind(conversation, working),
-        HarnessReport(voice = dictation != null, teachMe = onTeachMe != null, working = working, models = options.models.isNotEmpty(), modes = modes.isNotEmpty(), settings = settings.isNotEmpty()),
+        HarnessReport(voice = dictation != null, voiceMode = voiceMode != null, inVoiceMode = voiceMode?.phase != null, teachMe = onTeachMe != null, working = working, models = options.models.isNotEmpty(), modes = modes.isNotEmpty(), settings = settings.isNotEmpty()),
     ).filterNot { it == BarControl.Send && queueEdit != null }
 
     var permissionsOpen by remember(conversation.id) { mutableStateOf(false) }
@@ -493,6 +502,26 @@ fun Composer(
             BarControl.Attach -> MyButton({ attachments?.let { platform?.pickFiles(it.onAdd) } }, icon = MyIcon.Paperclip, description = "Attach files", muted = true)
             BarControl.Actions -> assistantActions?.let { ActionsButton(it) }
             BarControl.Dictate -> MyButton(::toggleDictation, icon = MyIcon.Microphone, description = if (listening) "Stop dictating" else "Dictate", selected = listening, muted = !listening)
+            BarControl.VoiceMode -> voiceMode?.let { held ->
+                val phase = held.phase
+
+                MyButton(
+                    {
+                        if (listening) {
+                            dictation?.stop()
+                        }
+
+                        held.onToggle()
+                    },
+                    text = phase?.let(::voiceModeLabel).takeIf { !LocalTouch.current },
+                    icon = MyIcon.AudioLines,
+                    description = "Voice mode",
+                    stateDescription = phase?.let { "On, ${voiceModeLabel(it)}" } ?: "Off",
+                    tooltip = if (phase == null) "Voice mode: talk, and hear replies read aloud" else "Leave voice mode",
+                    selected = phase != null,
+                    muted = phase == null,
+                )
+            }
             BarControl.TeachMe -> MyButton(
                 { onTeachMe?.invoke(!conversation.teachMe) },
                 icon = MyIcon.GraduationCap,
@@ -631,6 +660,16 @@ fun Composer(
 }
 
 private const val TeachMeShortcut = "Ctrl or Cmd+Shift+T"
+
+data class VoiceModeControls(val phase: VoicePhase?, val heard: String, val problem: String?, val onToggle: () -> Unit, val onSendHeard: () -> Unit)
+
+private fun voiceModeLabel(phase: VoicePhase) = when (phase) {
+    VoicePhase.Listening -> "Listening"
+    VoicePhase.Thinking -> "Thinking"
+    VoicePhase.Speaking -> "Speaking"
+    is VoicePhase.Problem -> "Not listening"
+    VoicePhase.Idle, VoicePhase.Ended -> "On"
+}
 
 private fun dictationProblemText(problem: DictationProblem) = when (problem) {
     DictationProblem.Denied -> "Allow microphone access for Mycelium to dictate."

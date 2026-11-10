@@ -37,6 +37,7 @@ object EventKinds {
     const val ModelChanged = "model_changed"
     const val Continued = "continued"
     const val TeachMode = "teach_mode"
+    const val VoiceMode = "voice_mode"
     const val OpenOutline = "open_outline"
     const val BroughtInConversation = "brought_in_conversation"
     const val GoalReport = "goal_report"
@@ -81,6 +82,7 @@ data class PatchConversationRequest(
     @SerialName("project_id") val projectId: String? = null,
     @SerialName("clear_project") val clearProject: Boolean? = null,
     @SerialName("teach_me") val teachMe: Boolean? = null,
+    @SerialName("voice_mode") val voiceMode: Boolean? = null,
 )
 
 @Serializable
@@ -211,6 +213,7 @@ data class Conversation(
     @SerialName("assistant_id") val assistantId: String? = null,
     @SerialName("agent_active") val agentActive: Boolean = false,
     @SerialName("teach_me") val teachMe: Boolean = false,
+    @SerialName("voice_mode") val voiceMode: Boolean = false,
     val routing: String? = null,
     val scratch: Boolean = false,
     val unread: Boolean = false,

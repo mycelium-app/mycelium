@@ -185,6 +185,8 @@ sealed interface ThreadItem {
 
     data class TeachMode(override val key: String, val on: Boolean) : ThreadItem
 
+    data class VoiceMode(override val key: String, val on: Boolean) : ThreadItem
+
     data class BroughtIn(override val key: String, val conversationId: String, val title: String) : ThreadItem
 }
 
@@ -298,6 +300,7 @@ class ThreadBuilder {
             EventKinds.ModelChanged -> items += ThreadItem.ModelChanged(key, payload.string("provider_name").orEmpty(), payload.string("model").orEmpty())
             EventKinds.Continued -> items += continuedItem(key, payload)
             EventKinds.TeachMode -> items += ThreadItem.TeachMode(key, payload.boolean("on") ?: false)
+            EventKinds.VoiceMode -> items += ThreadItem.VoiceMode(key, payload.boolean("on") ?: false)
             EventKinds.Environment -> items += environmentItem(key, payload)
             EventKinds.BroughtInConversation -> items += ThreadItem.BroughtIn(key, payload.string("conversation_id").orEmpty(), payload.string("title").orEmpty())
             EventKinds.GoalReport -> items += ThreadItem.GoalReport(key, payload.string("outcome").orEmpty(), payload.string("reason").orEmpty(), payload.string("at").orEmpty())

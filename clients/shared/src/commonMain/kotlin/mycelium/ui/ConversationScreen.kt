@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.semantics
 import mycelium.ProviderDictation
+import mycelium.state.VoicePhase
 import mycelium.api.Conversation
 import mycelium.api.Workflow
 import mycelium.api.WorkflowControlRequest
@@ -332,6 +333,14 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val scope = rememberCoroutineScope()
     val voice by store.voice.state.collectAsState()
     val speechProvided = voice.privacy.hasSpeechToText()
+
+    DisposableEffect(id) {
+        onDispose {
+            if (store.voice.state.value.voiceModeConversationId == id) {
+                store.voice.close()
+            }
+        }
+    }
     val dictation = remember(platform, state.experiments.voice, speechProvided) {
         when {
             !state.experiments.voice -> null
@@ -803,6 +812,17 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
                             onSideChat = { kind, text -> store.act { onOpenConversation(api.startSideChat(id, sideKind(kind), text.ifEmpty { null }).id) } },
                             onTeachMe = { on -> store.act { api.patchConversation(id, PatchConversationRequest(teachMe = on)) } },
+                            voiceMode = if (!voice.privacy.voiceEnabled) null else {
+                                val here = voice.voiceModeConversationId == id
+
+                                VoiceModeControls(
+                                    phase = voice.phase.takeIf { here },
+                                    heard = if (here) voice.heard else "",
+                                    problem = (voice.phase as? VoicePhase.Problem)?.takeIf { here }?.let { voiceProblemMessage(it.problem, platform?.opensMicrophoneSettings == true) },
+                                    onToggle = { if (here) store.voice.close() else store.voice.enterVoiceMode(id) },
+                                    onSendHeard = store.voice::stopListening,
+                                )
+                            },
                             todos = remember(thread, state.events[id]) { currentTodos(thread).takeIf { todosAreShown(it, turnIsOpen(state.events[id].orEmpty())) }.orEmpty() },
                             goal = GoalControls(
                                 goal = state.goals[id],

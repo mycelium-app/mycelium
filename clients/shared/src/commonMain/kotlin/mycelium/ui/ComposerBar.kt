@@ -29,6 +29,7 @@ enum class BarControl(val group: BarGroup) {
     Actions(BarGroup.Tools),
     Dictate(BarGroup.Tools),
     TeachMe(BarGroup.Tools),
+    VoiceMode(BarGroup.Tools),
     Goal(BarGroup.Tools),
     Model(BarGroup.Pickers),
     Mode(BarGroup.Pickers),
@@ -40,6 +41,8 @@ enum class BarControl(val group: BarGroup) {
 
 data class HarnessReport(
     val voice: Boolean = false,
+    val voiceMode: Boolean = false,
+    val inVoiceMode: Boolean = false,
     val teachMe: Boolean = false,
     val working: Boolean = false,
     val models: Boolean = false,
@@ -66,8 +69,9 @@ fun barControls(kind: ConversationKind, harness: HarnessReport): List<BarControl
     return listOfNotNull(
         BarControl.Attach,
         BarControl.Actions.takeIf { assistant },
-        BarControl.Dictate.takeIf { harness.voice && !starting },
+        BarControl.Dictate.takeIf { harness.voice && !harness.inVoiceMode && !starting },
         BarControl.TeachMe.takeIf { harness.teachMe && !starting },
+        BarControl.VoiceMode.takeIf { harness.voiceMode && !starting },
         BarControl.Goal.takeIf { workspace },
         BarControl.Mode.takeIf { harness.modes && kind == ConversationKind.NewConversation },
         BarControl.Model,

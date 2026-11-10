@@ -139,7 +139,7 @@ private fun voiceCardActions(store: Store, platform: Platform?) = VoiceCardActio
 fun OpenVoiceCard(store: Store, platform: Platform?, modifier: Modifier = Modifier) {
     val voice by store.voice.state.collectAsState()
 
-    if (!voice.open || !voice.privacy.voiceEnabled) {
+    if (!voice.open || !voice.privacy.voiceEnabled || voice.voiceModeConversationId != null) {
         return
     }
 

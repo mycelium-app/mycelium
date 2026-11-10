@@ -75,6 +75,9 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import mycelium.state.GeneratedUiLanguage
+import mycelium.state.SpokenLanguage
+import mycelium.state.spokenVersion
+import mycelium.state.withoutSpoken
 import mycelium.state.CalloutKind
 import mycelium.state.Token
 import mycelium.state.ColumnAlign
@@ -242,7 +245,7 @@ fun ThreadView(
 
                         if (item is ThreadItem.TurnEnd) {
                             val asked = items.subList(0, index).indexOfLast { it is ThreadItem.UserMessage }
-                            val answer = items.subList(asked + 1, index).filterIsInstance<ThreadItem.AgentMessage>().joinToString("\n\n") { it.text }
+                            val answer = items.subList(asked + 1, index).filterIsInstance<ThreadItem.AgentMessage>().joinToString("\n\n") { withoutSpoken(it.text) }
 
                             TurnEnd(
                                 item = item,
@@ -327,6 +330,7 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
         is ThreadItem.ModelChanged -> ModelChangedDivider("Switched to ${item.provider} · ${item.model}")
         is ThreadItem.Continued -> if (item.why != null) SwitchLine(item.text, item.why) else ModelChangedDivider(item.text)
         is ThreadItem.TeachMode -> ModelChangedDivider(if (item.on) "Teach me on" else "Teach me off")
+        is ThreadItem.VoiceMode -> ModelChangedDivider(if (item.on) "Voice mode on" else "Voice mode off")
         is ThreadItem.EnvironmentLine -> {
             val platform = LocalPlatform.current
             val time = item.at?.let { at -> clockTime(at) { millis -> platform?.localDateTime(millis) } }.orEmpty()
@@ -502,8 +506,8 @@ private fun AgentMessage(text: String) {
 
             if (readAloud != null) {
                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                    MyButton({ readAloud(text) }, text = "Read aloud", icon = MyIcon.Speaker, description = "Read this reply aloud", size = ButtonSize.Sm, muted = true)
-                    MyButton({ platform?.copyToClipboard(text) }, text = "Copy", icon = MyIcon.Copy, description = "Copy this reply", size = ButtonSize.Sm, muted = true)
+                    MyButton({ readAloud(spokenVersion(text)) }, text = "Read aloud", icon = MyIcon.Speaker, description = "Read this reply aloud", size = ButtonSize.Sm, muted = true)
+                    MyButton({ platform?.copyToClipboard(withoutSpoken(text)) }, text = "Copy", icon = MyIcon.Copy, description = "Copy this reply", size = ButtonSize.Sm, muted = true)
                 }
             }
         }
@@ -516,7 +520,7 @@ internal fun MarkdownBlocks(blocks: List<MarkdownBlock>, textStyle: TextStyle = 
     val clipboard = LocalClipboardManager.current
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(blockSpacing)) {
-        for (block in blocks) {
+        for (block in blocks.filterNot { it is MarkdownBlock.Code && it.language == SpokenLanguage }) {
             when (block) {
                 is MarkdownBlock.Paragraph -> Prose(block.text, textStyle)
                 is MarkdownBlock.Heading -> BasicText(

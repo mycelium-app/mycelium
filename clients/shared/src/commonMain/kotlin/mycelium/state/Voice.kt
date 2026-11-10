@@ -21,6 +21,7 @@ import mycelium.api.ApiException
 import mycelium.api.ChooseLocalSpeechModelRequest
 import mycelium.api.ChooseSpeechModelRequest
 import mycelium.api.MyceliumApi
+import mycelium.api.PatchConversationRequest
 import mycelium.api.PrivacySettings
 import mycelium.api.SavePrivacyRequest
 import mycelium.api.SpeechRequest
@@ -89,6 +90,7 @@ data class VoiceState(
     val voices: List<String> = emptyList(),
     val device: VoiceDevice = VoiceDevice(),
     val waitingForWakePhrase: Boolean = false,
+    val voiceModeConversationId: String? = null,
 )
 
 private fun VoiceState.withTurnKept(): List<VoiceTurn> = if (turn.said.isBlank()) earlier else earlier + turn
@@ -414,9 +416,17 @@ class VoiceStore(private val api: MyceliumApi, private val scope: CoroutineScope
     }
 
     private fun send(said: String) {
+        val inVoiceMode = mutableState.value.voiceModeConversationId
+
         mutableState.update { it.copy(open = true, phase = VoicePhase.Thinking, level = 0f, earlier = it.withTurnKept(), turn = VoiceTurn(said = said)) }
         scope.launch {
             try {
+                if (inVoiceMode != null) {
+                    api.sendPrompt(inVoiceMode, said, spoken = true)
+                    mutableState.update { it.copy(turn = it.turn.copy(conversationId = inVoiceMode)) }
+                    return@launch
+                }
+
                 val assistant = api.voiceAssistant()
                 val conversation = api.promptAssistant(assistant.id, said, spoken = true)
 
@@ -460,11 +470,26 @@ class VoiceStore(private val api: MyceliumApi, private val scope: CoroutineScope
     private fun finish(reply: String) {
         if (!readsAloud()) {
             mutableState.update { it.copy(phase = VoicePhase.Ended) }
+            listenAgainInVoiceMode()
             return
         }
 
         mutableState.update { it.copy(phase = VoicePhase.Speaking) }
-        speak(reply) { mutableState.update { state -> if (state.phase == VoicePhase.Speaking) state.copy(phase = VoicePhase.Ended) else state } }
+        speak(spokenVersion(reply)) {
+            val wasSpeaking = mutableState.value.phase == VoicePhase.Speaking
+
+            mutableState.update { state -> if (state.phase == VoicePhase.Speaking) state.copy(phase = VoicePhase.Ended) else state }
+
+            if (wasSpeaking) {
+                listenAgainInVoiceMode()
+            }
+        }
+    }
+
+    private fun listenAgainInVoiceMode() {
+        if (mutableState.value.voiceModeConversationId != null) {
+            startListening()
+        }
     }
 
     fun readAloud(text: String) {
@@ -528,11 +553,24 @@ class VoiceStore(private val api: MyceliumApi, private val scope: CoroutineScope
         openVoiceThread()
     }
 
+    fun enterVoiceMode(conversationId: String) {
+        close()
+        mutableState.update { it.copy(voiceModeConversationId = conversationId) }
+        scope.launch { catching { api.patchConversation(conversationId, PatchConversationRequest(voiceMode = true)) } }
+        startListening()
+    }
+
     fun close() {
+        val leaving = mutableState.value.voiceModeConversationId
+
         discarded = true
         meter?.cancel()
         stopRecording()
         stopSpeaking()
-        mutableState.update { it.copy(open = false, phase = VoicePhase.Idle, heard = "", level = 0f, earlier = emptyList()) }
+        mutableState.update { it.copy(open = false, phase = VoicePhase.Idle, heard = "", level = 0f, earlier = emptyList(), voiceModeConversationId = null) }
+
+        if (leaving != null) {
+            scope.launch { catching { api.patchConversation(leaving, PatchConversationRequest(voiceMode = false)) } }
+        }
     }
 }

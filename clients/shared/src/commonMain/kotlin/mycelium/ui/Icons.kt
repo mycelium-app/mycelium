@@ -87,6 +87,7 @@ enum class MyIcon(vararg val paths: String) {
     PanelLeft("M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z", "M9 3v18"),
     Send("M22 2 11 13", "M22 2 15 22l-4-9-9-4Z"),
     Microphone(rect(9f, 2f, 6f, 13f, 3f), "M19 10v2a7 7 0 0 1-14 0v-2", "M12 19v3"),
+    AudioLines("M2 10v3M6 6v11M10 3v18M14 8v7M18 5v13M22 10v3"),
     Speaker("M11 5 6 9H2v6h4l5 4Z", "M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"),
     Paperclip("m21.44 11.05-9.19 9.19a6.003 6.003 0 0 1-8.49-8.49l8.57-8.57A4.006 4.006 0 0 1 17.98 9.1l-8.59 8.57a2.002 2.002 0 0 1-2.83-2.83l8.49-8.48"),
     Image(rect(3f, 3f, 18f, 18f, 2f), circle(9f, 9f, 2f), "m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"),
