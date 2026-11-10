@@ -173,16 +173,12 @@ internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, 
                 when (assistant.state) {
                     "working" -> Icon(MyIcon.Working, MyTheme.colors.statusWorking, Tokens.Size.IconSm)
                     "input" -> Icon(MyIcon.Alert, MyTheme.colors.statusAttention, Tokens.Size.IconSm)
-                    else -> assistant.lastActiveAt?.let { Label(ago(it), style = Tokens.Type.Meta, color = MyTheme.colors.textFaint, maxLines = 1) }
+                    else -> if (unread) UnreadDot() else assistant.lastActiveAt?.let { Label(ago(it), style = Tokens.Type.Meta, color = MyTheme.colors.textFaint, maxLines = 1) }
                 }
 
                 if (assistant.pinnedAt != null) {
                     Icon(MyIcon.Pin, MyTheme.colors.textMuted, Tokens.Size.IconSm)
                 }
-            }
-
-            if (unread) {
-                UnreadDot()
             }
 
             RowMenuPopup(menu) { close ->

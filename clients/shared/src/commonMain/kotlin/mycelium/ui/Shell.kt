@@ -53,6 +53,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.focus.focusProperties
@@ -1217,7 +1218,15 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                     else -> badge
                 }
 
-                Box(Modifier.size(Tokens.Space.S2).background(waitingMark ?: Color.Transparent, CircleShape))
+                Box(Modifier.size(Tokens.Space.S2).background(waitingMark ?: Color.Transparent, CircleShape), contentAlignment = Alignment.Center) {
+                    if (unread && waitingMark == null) {
+                        UnreadDot()
+                    }
+                }
+            } else if (unread) {
+                Box(Modifier.size(Tokens.Size.IconSm), contentAlignment = Alignment.Center) {
+                    UnreadDot()
+                }
             } else {
                 Icon(agentIcon(row.agent), colors.textMuted, Tokens.Size.IconSm)
             }
@@ -1225,10 +1234,6 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
             if (node != null) {
                 Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconSm)
             }
-        }
-
-        if (unread) {
-            UnreadDot()
         }
 
         RowMenuPopup(menu) { close ->
@@ -1266,11 +1271,9 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
     }
 }
 
-private val UnreadDotOutset = 5.dp
-
 @Composable
 internal fun UnreadDot() {
-    Box(Modifier.offset(x = -UnreadDotOutset).size(Tokens.Size.Dot).background(MyTheme.colors.text, CircleShape))
+    Box(Modifier.testTag("unread-dot").size(Tokens.Size.Dot).background(MyTheme.colors.text, CircleShape))
 }
 
 val NodeColours = Accent.entries.filter { it != Accent.System && it != Accent.Neutral }

@@ -6,6 +6,8 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import io.ktor.client.engine.mock.MockEngine
@@ -25,6 +27,7 @@ import mycelium.ui.Shell
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 private class RowsPlatform : Platform {
     override val originUrl: String? = null
@@ -110,6 +113,30 @@ class ConversationRowStatusTest {
         rule.onNodeWithContentDescription("Pipeline Seen reply, Ready to review, Claude Code on Workbench").assertExists()
         rule.onNodeWithContentDescription("Pipeline Fresh question, unread, Needs input, Claude Code on Workbench").assertExists()
         rule.captureScreen("sidebar-unread")
+    }
+
+    @Test
+    fun theUnreadDotSitsAtTheRightEndOfTheRowAfterTheTitle() {
+        val assistants = """[{"id":"as1","name":"Archivist","group_id":null,"preferences":{"models":[],"nodes":[],"chat_first":true},"conversation_id":"w2","state":"idle","created_at":"2026-10-22T10:00:00Z"}]"""
+        show(listOf(unread(conversation("w1", "Fresh reply", "review")), unread(conversation("w2", "Archivist thread", "review"))), assistants)
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Pipeline Fresh reply").fetchSemanticsNodes().isNotEmpty() }
+
+        val dots = rule.onAllNodesWithTag("unread-dot", useUnmergedTree = true).fetchSemanticsNodes().map { it.boundsInRoot }
+
+        listOf(
+            rule.onNodeWithContentDescription("Pipeline Fresh reply, unread, Ready to review, Claude Code on Workbench") to rule.onNodeWithText("Pipeline Fresh reply", useUnmergedTree = true),
+            rule.onAllNodes(hasContentDescriptionStarting("Archivist, unread, ")).onFirst() to rule.onNodeWithText("Archivist", useUnmergedTree = true),
+        ).forEach { (row, title) ->
+            val rowBounds = row.fetchSemanticsNode().boundsInRoot
+            val titleBounds = title.fetchSemanticsNode().boundsInRoot
+            val dot = dots.single { it.center.y in rowBounds.top..rowBounds.bottom }
+
+            assertTrue(dot.left >= titleBounds.right, "the dot follows the title")
+            assertTrue(dot.right <= rowBounds.right && dot.left > rowBounds.center.x, "the dot is in the trailing slot")
+        }
+
+        rule.captureScreen("sidebar-unread-trailing")
     }
 
     @Test
