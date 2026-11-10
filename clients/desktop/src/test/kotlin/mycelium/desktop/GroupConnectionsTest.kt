@@ -26,7 +26,13 @@ private const val Yucca = """{"id":"g1","name":"yucca","folders":[],"created_at"
 
 private const val Immich = """{"id":"g2","name":"Immich","folders":[],"created_at":"2026-10-22T10:00:00Z"}"""
 
-private const val Connected = """{"id":"gc1","source_group_id":"g1","target_group_id":"g2","source_name":"yucca","target_name":"Immich","created_at":"2026-10-24T10:00:00Z"}"""
+private const val Connected = """{"id":"gc1","source_group_id":"g1","target_group_id":"g2","source_name":"yucca","target_name":"Immich","created_at":"2026-10-24T10:00:00Z","both_ways":true}"""
+
+private const val Home = """{"id":"g3","name":"Home","folders":[],"created_at":"2026-10-22T10:00:00Z"}"""
+
+private const val Studio = """{"id":"g4","name":"Studio","folders":[],"created_at":"2026-10-22T10:00:00Z"}"""
+
+private const val HomeToStudio = """{"id":"gc2","source_group_id":"g3","target_group_id":"g4","source_name":"Home","target_name":"Studio","created_at":"2026-10-24T10:00:00Z","both_ways":false}"""
 
 class GroupConnectionsTest {
     @get:Rule
@@ -68,8 +74,54 @@ class GroupConnectionsTest {
         rule.onNodeWithText("Connect").performClick()
         rule.waitUntil(5_000) { calls.any { it.startsWith("POST /api/v1/group-connections") } }
 
-        assertTrue(calls.any { it.startsWith("POST /api/v1/group-connections") && it.contains("\"source_group_id\":\"g2\"") && it.contains("\"target_group_id\":\"g1\"") })
+        assertTrue(calls.any { it.startsWith("POST /api/v1/group-connections") && it.contains("\"source_group_id\":\"g2\"") && it.contains("\"target_group_id\":\"g1\"") && it.contains("\"both_ways\":true") })
         rule.waitUntil(5_000) { rule.onAllNodesWithText("No groups are connected.").fetchSemanticsNodes().isEmpty() }
+    }
+
+    @Test
+    fun connectingWithTheReverseDirectionPostsTheGroupsSwappedAndOneWay() {
+        show(EnabledExperiments, groups = "[$Home,$Studio]")
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Connect groups").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Connect groups").performClick()
+        rule.onNodeWithContentDescription("Direction: Both ways").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
+        rule.onNodeWithText("Only Studio may reach Home").performClick()
+        rule.onNodeWithText("Connect").performClick()
+        rule.waitUntil(5_000) { calls.any { it.startsWith("POST /api/v1/group-connections") } }
+
+        assertTrue(calls.any { it.startsWith("POST /api/v1/group-connections") && it.contains("\"source_group_id\":\"g4\"") && it.contains("\"target_group_id\":\"g3\"") && it.contains("\"both_ways\":false") })
+    }
+
+    @Test
+    fun theDirectionMenuOffersEachWayBetweenTheChosenGroups() {
+        show(EnabledExperiments, groups = "[$Home,$Studio]")
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Connect groups").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Connect groups").performClick()
+        rule.onNodeWithContentDescription("Direction: Both ways").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
+        rule.waitForIdle()
+
+        rule.onNodeWithText("Only Home may reach Studio").assertExists()
+        rule.onNodeWithText("Only Studio may reach Home").assertExists()
+        rule.captureScreen("settings-agent-connections-direction")
+    }
+
+    @Test
+    fun eachGroupConnectionSaysWhichWayItWorks() {
+        show(EnabledExperiments, groups = "[$Home,$Studio,$Yucca,$Immich]", connections = "[$HomeToStudio,$Connected]", shown = "Immich")
+
+        rule.onNodeWithText("Only Home may reach Studio").assertExists()
+        rule.onNodeWithText("Both ways").assertExists()
+    }
+
+    @Test
+    fun aGroupConnectionChangesDirectionFromItsRowMenu() {
+        show(EnabledExperiments, groups = "[$Home,$Studio]", connections = "[$HomeToStudio]", shown = "Studio")
+        rule.onNodeWithContentDescription("More for Home and Studio").performClick()
+        rule.waitForIdle()
+        rule.captureScreen("settings-agent-connections-change-direction")
+        rule.onNodeWithText("Only Studio may reach Home").performClick()
+        rule.waitUntil(5_000) { calls.any { it.startsWith("POST /api/v1/group-connections") } }
+
+        assertTrue(calls.any { it.startsWith("POST /api/v1/group-connections") && it.contains("\"source_group_id\":\"g4\"") && it.contains("\"target_group_id\":\"g3\"") && it.contains("\"both_ways\":false") })
     }
 
     @Test

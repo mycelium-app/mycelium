@@ -31,12 +31,14 @@ data class GroupConnection(
     @SerialName("target_name") val targetName: String,
     @SerialName("created_at") val createdAt: String,
     @SerialName("revoked_at") val revokedAt: String? = null,
+    @SerialName("both_ways") val bothWays: Boolean = true,
 )
 
 @Serializable
 data class CreateGroupConnectionRequest(
     @SerialName("source_group_id") val sourceGroupId: String,
     @SerialName("target_group_id") val targetGroupId: String,
+    @SerialName("both_ways") val bothWays: Boolean,
 )
 
 @Serializable

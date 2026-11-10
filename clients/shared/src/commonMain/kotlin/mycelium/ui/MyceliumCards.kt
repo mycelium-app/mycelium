@@ -393,7 +393,7 @@ private fun SendToConversationBody(parsed: MyceliumCall.SendToConversation) {
         Label("Connecting allows messages in both directions until you revoke it in Settings.", style = Tokens.Type.Meta, color = colors.textMuted)
 
         if (betweenGroups) {
-            Label("Connecting groups lets every conversation in ${proposal.sourceGroup} and ${proposal.targetGroup} start and message the other without approval.", style = Tokens.Type.Meta, color = colors.textMuted)
+            Label("Connecting groups lets every conversation in ${proposal.sourceGroup} start and message ${proposal.targetGroup} without approval.", style = Tokens.Type.Meta, color = colors.textMuted)
         }
 
         androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
