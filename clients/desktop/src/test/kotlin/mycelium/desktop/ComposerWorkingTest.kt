@@ -3,6 +3,9 @@ package mycelium.desktop
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performClick
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
@@ -22,6 +25,8 @@ import kotlin.test.assertEquals
 private fun conversation(status: String, agentActive: Boolean) =
     """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Plan the rollout","status":"$status","acp_session_id":"s1","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","agent_active":$agentActive}"""
 
+private const val RunningTurn = """[{"conversation_id":"c1","seq":1,"kind":"user_message","payload":{"text":"go"}}]"""
+
 private const val EndedTurn = """[{"conversation_id":"c1","seq":1,"kind":"user_message","payload":{"text":"go"}},{"conversation_id":"c1","seq":2,"kind":"turn_end","payload":{"stopReason":"end_turn"}}]"""
 
 class ComposerWorkingTest {
@@ -31,13 +36,13 @@ class ComposerWorkingTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private fun show(conversation: String) {
+    private fun show(conversation: String, events: String = EndedTurn) {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             val body = when {
                 path.endsWith("/conversations") -> "[$conversation]"
                 path.endsWith("/conversations/c1") -> conversation
-                path.endsWith("/events") -> EndedTurn
+                path.endsWith("/events") -> events
                 path.endsWith("/queue") || path.endsWith("/nodes") -> "[]"
                 else -> "{}"
             }
@@ -51,7 +56,7 @@ class ComposerWorkingTest {
 
     @Test
     fun theComposerOffersStopWhileTheAgentStreamsAnUnpromptedReplyInAReviewConversation() {
-        show(conversation("review", agentActive = true))
+        show(conversation("working", agentActive = true))
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Stop the agent").fetchSemanticsNodes().isNotEmpty() }
     }
@@ -62,5 +67,28 @@ class ComposerWorkingTest {
 
         rule.waitUntil(5_000) { rule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
         assertEquals(0, rule.onAllNodesWithContentDescription("Stop the agent").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun theComposerDoesNotOfferStopWhenTheTurnHasEndedAndTheAgentWaitsForAnAnswer() {
+        show(conversation("input", agentActive = true))
+
+        rule.waitUntil(5_000) { rule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, rule.onAllNodesWithContentDescription("Stop the agent").fetchSemanticsNodes().size)
+        assertEquals(1, rule.onAllNodesWithContentDescription("Send").fetchSemanticsNodes().size)
+        rule.captureScreen("composer-ended")
+    }
+
+    @Test
+    fun pressingStopShowsStoppingAtOnce() {
+        show(conversation("working", agentActive = true), RunningTurn)
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Stop the agent").fetchSemanticsNodes().isNotEmpty() }
+        rule.captureScreen("composer-running")
+        rule.onNodeWithContentDescription("Stop the agent").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Stopping").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, rule.onAllNodesWithContentDescription("Stop the agent").fetchSemanticsNodes().size)
+        rule.captureScreen("composer-stopping")
     }
 }

@@ -155,6 +155,31 @@ async fn a_cancelled_turn_stays_stopped_even_with_a_live_workflow_agent() {
 }
 
 #[tokio::test]
+async fn stopping_after_the_turn_has_ended_clears_agent_active_even_with_the_node_offline() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = prompted_conversation(&server, &mut link).await;
+    end_turn(&mut link, id, 1).await;
+    wait_for(&server, id, "review", false).await;
+    sqlx::query("update events set created_at = now() - interval '10 seconds' where conversation_id = $1 and kind = 'turn_end'").bind(id).execute(&server.pool).await.unwrap();
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 2, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Background task finished."}}}) }).await;
+    wait_for(&server, id, "working", true).await;
+    let node = link.id;
+    drop(link);
+    common::eventually("the node to go offline", || async {
+        let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
+
+        nodes.as_array().unwrap().iter().any(|candidate| candidate["id"] == json!(node) && candidate["online"] == false).then_some(())
+    })
+    .await;
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/cancel"))).await;
+
+    assert_eq!(status, 204);
+    assert_eq!(server.conversation(id).await["agent_active"], false);
+}
+
+#[tokio::test]
 async fn a_failed_session_clears_agent_active() {
     let server = sweeping_server().await;
     let mut link = server.online_node("laptop").await;

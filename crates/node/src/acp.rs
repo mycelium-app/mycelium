@@ -14,13 +14,16 @@ enum ResumeKind {
     Unsupported,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 enum Pending {
     Initialize,
     NewSession,
     ResumeSession,
     Prompt,
     Steer(Uuid),
+    SetMode(String),
+    SetModel(String),
+    SetConfig(String, String),
     Other,
 }
 
@@ -82,6 +85,10 @@ pub struct SessionSnapshot {
     cwd: Option<String>,
     #[serde(default)]
     steering: bool,
+    #[serde(default)]
+    current_model: Option<String>,
+    #[serde(default)]
+    current_mode: Option<String>,
 }
 
 impl SessionSnapshot {
@@ -116,6 +123,8 @@ pub struct SessionState {
     prompt_capabilities: PromptCapabilities,
     cwd: Option<String>,
     steering: bool,
+    current_model: Option<String>,
+    current_mode: Option<String>,
 }
 
 fn request_frame(id: i64, method: &str, params: Value) -> Value {
@@ -196,6 +205,8 @@ impl SessionState {
             permissions: HashMap::new(),
             prompt_capabilities: PromptCapabilities::default(),
             steering: false,
+            current_model: None,
+            current_mode: None,
         }
     }
 
@@ -218,6 +229,8 @@ impl SessionState {
         state.prompt_capabilities = snapshot.prompt_capabilities;
         state.cwd = snapshot.cwd;
         state.steering = snapshot.steering;
+        state.current_model = snapshot.current_model;
+        state.current_mode = snapshot.current_mode;
 
         state
     }
@@ -241,6 +254,8 @@ impl SessionState {
             prompt_capabilities: self.prompt_capabilities,
             cwd: self.cwd.clone(),
             steering: self.steering,
+            current_model: self.current_model.clone(),
+            current_mode: self.current_mode.clone(),
         }
     }
 
@@ -253,7 +268,7 @@ impl SessionState {
     }
 
     pub fn is_busy(&self) -> bool {
-        self.session_id.is_none() || self.history_loading || !self.queued_prompts.is_empty() || !self.permissions.is_empty() || self.pending.values().any(|pending| *pending == Pending::Prompt)
+        self.session_id.is_none() || self.history_loading || !self.queued_prompts.is_empty() || !self.permissions.is_empty() || self.pending.values().any(|pending| matches!(pending, Pending::Prompt))
     }
 
     pub fn mark_closing(&mut self) {
@@ -393,11 +408,11 @@ impl SessionState {
     }
 
     pub fn has_open_turn(&self) -> bool {
-        self.pending.values().any(|pending| *pending == Pending::Prompt)
+        self.pending.values().any(|pending| matches!(pending, Pending::Prompt))
     }
 
     pub fn open_turn(&self) -> Option<String> {
-        self.pending.iter().find(|(_, pending)| **pending == Pending::Prompt).map(|(id, _)| id.clone())
+        self.pending.iter().find(|(_, pending)| matches!(pending, Pending::Prompt)).map(|(id, _)| id.clone())
     }
 
     pub fn end_turn_unanswered(&mut self) -> Vec<Action> {
@@ -405,7 +420,7 @@ impl SessionState {
             return Vec::new();
         }
 
-        self.pending.retain(|_, pending| *pending != Pending::Prompt);
+        self.pending.retain(|_, pending| !matches!(pending, Pending::Prompt));
 
         let seq = self.head + 1;
         let mut actions = self.emit(seq, NodeToControl::TurnEnd { conversation_id: self.conversation_id, seq, stop_reason: "cancelled".to_string(), usage: None });
@@ -547,6 +562,13 @@ impl SessionState {
                     Pending::ResumeSession
                 }
                 "session/prompt" => Pending::Prompt,
+                "session/set_mode" => Pending::SetMode(frame.pointer("/params/modeId").and_then(Value::as_str).unwrap_or_default().to_string()),
+                "session/set_model" => Pending::SetModel(frame.pointer("/params/modelId").and_then(Value::as_str).unwrap_or_default().to_string()),
+                "session/set_config_option" => {
+                    let config_id = frame.pointer("/params/configId").and_then(Value::as_str).unwrap_or_default().to_string();
+                    let value = frame.pointer("/params/value").map(|value| value.as_str().map_or_else(|| value.to_string(), str::to_string)).unwrap_or_default();
+                    Pending::SetConfig(config_id, value)
+                }
                 _ => Pending::Other,
             };
             self.pending.insert(id.to_string(), pending);
@@ -678,8 +700,40 @@ impl SessionState {
 
                 vec![Action::Reply(NodeToControl::Steered { request_id, outcome: outcome.into(), error: error_message })]
             }
+            Pending::SetMode(mode) => {
+                let Some(message) = error_message else {
+                    self.current_mode = Some(mode);
+
+                    return Vec::new();
+                };
+                let message = format!("The agent could not switch to the mode {mode}: {}. Pick another mode.", without_full_stop(&message));
+
+                self.notice(seq, "mode", mode, self.current_mode.clone(), message)
+            }
+            Pending::SetModel(model) => {
+                let Some(message) = error_message else {
+                    self.current_model = Some(model);
+
+                    return Vec::new();
+                };
+                let message = format!("The agent could not switch to the model {model}: {}. Pick another model.", without_full_stop(&message));
+
+                self.notice(seq, "model", model, self.current_model.clone(), message)
+            }
+            Pending::SetConfig(config_id, value) => {
+                let Some(message) = error_message else {
+                    return Vec::new();
+                };
+                let message = format!("The agent could not change the setting {config_id} to {value}: {}. Pick another value.", without_full_stop(&message));
+
+                self.notice(seq, "config", value, None, message)
+            }
             Pending::Other => Vec::new(),
         }
+    }
+
+    fn notice(&self, seq: i64, setting: &str, requested: String, current: Option<String>, message: String) -> Vec<Action> {
+        self.emit(seq, NodeToControl::SessionNotice { conversation_id: self.conversation_id, seq, setting: setting.to_string(), requested, current, message })
     }
 
     fn session_ready(&mut self, session_id: String, result: &Value) -> Vec<Action> {
@@ -691,9 +745,15 @@ impl SessionState {
         self.models_advertised = models.is_some();
         self.config_advertised = config_options.is_some();
         self.session_id = Some(session_id.clone());
+        self.current_model = models.as_ref().and_then(|models| models.get("currentModelId")).and_then(Value::as_str).map(str::to_string);
+        self.current_mode = modes.as_ref().and_then(|modes| modes.get("currentModeId")).and_then(Value::as_str).map(str::to_string);
 
         vec![Action::Started(NodeToControl::SessionStarted { conversation_id: self.conversation_id, acp_session_id: session_id, modes, models, config_options })]
     }
+}
+
+fn without_full_stop(message: &str) -> &str {
+    message.strip_suffix('.').unwrap_or(message)
 }
 
 fn resume_kind_of(initialize_result: &Value) -> ResumeKind {
@@ -1063,6 +1123,83 @@ mod tests {
         assert_eq!(frames[0]["params"]["modelId"], "opus");
         assert_eq!(frames[1]["method"], "session/set_config_option");
         assert_eq!(frames[1]["params"], json!({"sessionId": "s1", "configId": "effort", "value": "high"}));
+    }
+
+    fn refusal(id: i64) -> Value {
+        json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32602, "message": "Unknown model."}})
+    }
+
+    fn notices(actions: &[Action]) -> Vec<&NodeToControl> {
+        actions.iter().filter_map(|action| if let Action::Emit(_, message @ NodeToControl::SessionNotice { .. }) = action { Some(message) } else { None }).collect()
+    }
+
+    #[test]
+    fn a_refused_model_leaves_a_notice_naming_the_model_and_keeps_the_session() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        started(&mut state, json!({"sessionId": "s1", "models": {"currentModelId": "sonnet", "availableModels": []}}));
+        state.on_command(Command::SetConfig { mode: None, model: Some("opus-legacy".into()), config: None });
+
+        let actions = state.on_entry(4, Direction::In, refusal(3));
+
+        assert!(!actions.iter().any(|action| matches!(action, Action::Emit(_, NodeToControl::SessionFailed { .. }))));
+        let [NodeToControl::SessionNotice { seq, setting, requested, current, message, .. }] = &notices(&actions)[..] else {
+            panic!("expected one notice, got {actions:?}");
+        };
+        assert_eq!(*seq, 4);
+        assert_eq!(setting, "model");
+        assert_eq!(requested, "opus-legacy");
+        assert_eq!(current.as_deref(), Some("sonnet"));
+        assert_eq!(message, "The agent could not switch to the model opus-legacy: Unknown model. Pick another model.");
+    }
+
+    #[test]
+    fn a_refused_mode_leaves_a_notice_naming_the_mode() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        started(&mut state, json!({"sessionId": "s1", "modes": {"currentModeId": "default", "availableModes": []}}));
+        state.on_command(Command::SetConfig { mode: Some("plan".into()), model: None, config: None });
+
+        let actions = state.on_entry(4, Direction::In, json!({"jsonrpc": "2.0", "id": 3, "error": {"code": -32602, "message": "Unknown mode"}}));
+
+        let [NodeToControl::SessionNotice { setting, requested, current, message, .. }] = &notices(&actions)[..] else {
+            panic!("expected one notice, got {actions:?}");
+        };
+        assert_eq!(setting, "mode");
+        assert_eq!(requested, "plan");
+        assert_eq!(current.as_deref(), Some("default"));
+        assert_eq!(message, "The agent could not switch to the mode plan: Unknown mode. Pick another mode.");
+    }
+
+    #[test]
+    fn a_refused_config_option_leaves_a_notice_naming_the_setting() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        started(&mut state, json!({"sessionId": "s1", "configOptions": [{"id": "effort"}]}));
+        let config = Some(BTreeMap::from([("effort".to_string(), json!("extreme"))]));
+        state.on_command(Command::SetConfig { mode: None, model: None, config });
+
+        let actions = state.on_entry(4, Direction::In, json!({"jsonrpc": "2.0", "id": 3, "error": {"code": -32602, "message": "Invalid value"}}));
+
+        let [NodeToControl::SessionNotice { setting, message, .. }] = &notices(&actions)[..] else {
+            panic!("expected one notice, got {actions:?}");
+        };
+        assert_eq!(setting, "config");
+        assert_eq!(message, "The agent could not change the setting effort to extreme: Invalid value. Pick another value.");
+    }
+
+    #[test]
+    fn a_refused_model_after_a_confirmed_one_reports_the_confirmed_model_as_current() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        started(&mut state, json!({"sessionId": "s1", "models": {"currentModelId": "sonnet", "availableModels": []}}));
+        state.on_command(Command::SetConfig { mode: None, model: Some("opus".into()), config: None });
+        let confirmed = state.on_entry(4, Direction::In, json!({"jsonrpc": "2.0", "id": 3, "result": {}}));
+        state.on_command(Command::SetConfig { mode: None, model: Some("opus-legacy".into()), config: None });
+
+        let actions = state.on_entry(5, Direction::In, refusal(4));
+
+        assert!(notices(&confirmed).is_empty());
+        let [NodeToControl::SessionNotice { current, .. }] = &notices(&actions)[..] else {
+            panic!("expected one notice, got {actions:?}");
+        };
+        assert_eq!(current.as_deref(), Some("opus"));
     }
 
     #[test]

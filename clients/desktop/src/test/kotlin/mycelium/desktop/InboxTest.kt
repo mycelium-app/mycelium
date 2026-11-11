@@ -51,6 +51,9 @@ private fun conversation(status: String, actionItems: List<Pair<String, String>>
 private const val PermissionEvents = """[{"conversation_id":"c1","seq":1,"kind":"permission_request","payload":{"request_id":"r1","toolCall":{"title":"pnpm db:migrate"},
 "options":[{"optionId":"approve","name":"Approve","kind":"allow_once"},{"optionId":"deny","name":"Deny","kind":"reject_once"}]}}]"""
 
+private const val StartProposalJson = """{"id":"p1","conversation_id":"c1","kind":"subagent","title":"Review the schema","state":"proposed","created_at":"2026-10-22T10:06:00Z",
+"steps":[{"key":"review","title":"Review the schema","node":{"id":"n1","name":"atlas","online":true},"folder":"/work/harbour","agent":"claude","account_choices":["work","personal"],"first_message":"Read the migrations and list anything that breaks old clients."}]}"""
+
 private const val NoFeed = """{"posts":[]}"""
 
 private const val VoiceOff = """{"voice_enabled":false}"""
@@ -74,7 +77,7 @@ class InboxTest {
 
     private val deletes = java.util.concurrent.CopyOnWriteArrayList<String>()
 
-    private fun show(status: String, feed: String = NoFeed, privacy: String = VoiceOff, events: String? = null, actionItems: List<Pair<String, String>> = emptyList()): Store {
+    private fun show(status: String, feed: String = NoFeed, privacy: String = VoiceOff, events: String? = null, actionItems: List<Pair<String, String>> = emptyList(), startProposals: String = "[]"): Store {
         val open = actionItems.toMutableList()
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -91,6 +94,7 @@ class InboxTest {
             val body = when {
                 path.endsWith("/inbox/feed") -> feed
                 path.endsWith("/privacy") -> privacy
+                path.endsWith("/start-proposals") -> startProposals
                 request.method == HttpMethod.Delete -> conversation(status, open)
                 path.endsWith("/conversations") -> "[${conversation(status, open)}]"
                 path.endsWith("/conversations/c1/events") -> events ?: if (status == "input") PermissionEvents else "[]"
@@ -118,6 +122,44 @@ class InboxTest {
 
         rule.waitUntil(5_000) { posts.any { it.first.endsWith("/conversations/c1/permission") } }
         assertTrue(posts.single { it.first.endsWith("/conversations/c1/permission") }.second.contains("\"approve\""))
+    }
+
+    @Test
+    fun aStartProposalOfAWorkingConversationIsInNeedsYouWithItsCreateButton() {
+        show("working", startProposals = "[$StartProposalJson]")
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Proposed a subagent: Review the schema").fetchSemanticsNodes().isNotEmpty() }
+
+        assertTrue(rule.onAllNodesWithText("Bump the UI kit").fetchSemanticsNodes().isNotEmpty())
+        rule.onNodeWithText("Waiting for approval").assertExists()
+        rule.onNodeWithText("Create").assertExists()
+        rule.onNodeWithText("Don't create").assertExists()
+    }
+
+    @Test
+    fun theInboxWithAStartProposalOfAWorkingConversationRenders() {
+        val engine = MockEngine { request ->
+            val path = request.url.encodedPath
+            val body = when {
+                path.endsWith("/start-proposals") -> "[$StartProposalJson]"
+                path.endsWith("/conversations") -> "[${conversation("working")}]"
+                path.endsWith("/inbox/feed") -> NoFeed
+                path.endsWith("/privacy") -> VoiceOff
+                path.endsWith("/nodes") || path.endsWith("/groups") || path.endsWith("/workflows") || path.endsWith("/queue") || path.endsWith("/session-updates") || path.endsWith("/events") -> "[]"
+                else -> "{}"
+            }
+
+            respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
+
+        runBlocking {
+            store.refresh()
+            store.refreshStartProposals()
+        }
+
+        val png = renderAt("inbox-start-proposal", true, false, height = 1530) { Shell(store, platform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Inbox) }
+
+        assertTrue(png.length() > 10_000)
     }
 
     @Test

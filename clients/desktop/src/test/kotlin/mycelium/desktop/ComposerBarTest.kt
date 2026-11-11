@@ -207,6 +207,13 @@ class ComposerBarTest {
     }
 
     @Test
+    fun aStopThatIsUnderWayReplacesStopWithStoppingAheadOfThePickers() {
+        val stopping = HarnessReport(working = true, stopping = true, models = true)
+
+        assertEquals(listOf(BarControl.Attach, BarControl.Goal, BarControl.Stopping, BarControl.Model, BarControl.Usage, BarControl.Send), barControls(ConversationKind.WorkspaceWorking, stopping))
+    }
+
+    @Test
     fun teachMeIsOmittedWhereNothingHandlesIt() {
         assertTrue(BarControl.TeachMe !in barControls(ConversationKind.WorkspaceIdle, HarnessReport()))
         assertTrue(BarControl.TeachMe in barControls(ConversationKind.WorkspaceIdle, HarnessReport(teachMe = true)))

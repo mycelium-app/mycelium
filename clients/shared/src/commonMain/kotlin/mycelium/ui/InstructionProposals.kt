@@ -115,7 +115,7 @@ fun InstructionProposals(store: Store, onOpenGroup: ((String) -> Unit)? = null, 
 private const val DecidedShown = 5
 
 @Composable
-private fun ProposalCard(store: Store, proposal: InstructionProposal, onOpenGroup: ((String) -> Unit)?) {
+internal fun ProposalCard(store: Store, proposal: InstructionProposal, onOpenGroup: ((String) -> Unit)?) {
     val colors = MyTheme.colors
     val openConversation = LocalOpenConversation.current
     var declining by remember(proposal.id) { mutableStateOf(false) }

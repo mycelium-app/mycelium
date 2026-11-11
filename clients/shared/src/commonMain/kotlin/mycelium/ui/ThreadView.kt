@@ -329,6 +329,10 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
         }
         is ThreadItem.Workflow -> if (workflowPinKey(item.progress.runId) in LocalPinnedKeys.current) PinnedReference("Workflow") else WorkflowCard(item.progress, onStopWorkflow)
         is ThreadItem.ModelChanged -> ModelChangedDivider("Switched to ${item.provider} · ${item.model}")
+        is ThreadItem.Notice -> Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { contentDescription = "Notice: ${item.text}" }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.Top) {
+            Icon(MyIcon.Alert, MyTheme.colors.statusAttention, Tokens.Size.IconSm)
+            Label(item.text, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+        }
         is ThreadItem.Continued -> if (item.why != null) SwitchLine(item.text, item.why) else ModelChangedDivider(item.text)
         is ThreadItem.TeachMode -> ModelChangedDivider(if (item.on) "Teach me on" else "Teach me off")
         is ThreadItem.VoiceMode -> ModelChangedDivider(if (item.on) "Voice mode on" else "Voice mode off")
