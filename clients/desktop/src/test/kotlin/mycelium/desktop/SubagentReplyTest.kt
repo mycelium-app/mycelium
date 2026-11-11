@@ -118,7 +118,16 @@ class SubagentReplyTest {
     private fun row(title: String) = rule.onNode(hasContentDescription("$title, ", substring = true) and hasClickAction())
 
     private fun waitForRow(title: String) {
-        rule.waitUntil(5_000) { rule.onAllNodes(hasContentDescription("$title, ", substring = true) and hasClickAction()).fetchSemanticsNodes().isNotEmpty() }
+        val collapsed = hasContentDescription("show them", substring = true)
+        val listed = hasContentDescription("$title, ", substring = true) and hasClickAction()
+
+        rule.waitUntil(5_000) { rule.onAllNodes(collapsed or listed).fetchSemanticsNodes().isNotEmpty() }
+
+        if (rule.onAllNodes(collapsed).fetchSemanticsNodes().isNotEmpty()) {
+            rule.onNode(collapsed).performClick()
+        }
+
+        rule.waitUntil(5_000) { rule.onAllNodes(listed).fetchSemanticsNodes().isNotEmpty() }
     }
 
     private fun height(interaction: SemanticsNodeInteraction) = interaction.fetchSemanticsNode().boundsInRoot.height
@@ -144,6 +153,21 @@ class SubagentReplyTest {
         assertEquals(0, rule.onAllNodes(hasContentDescription("Audit the lockfile for drift, ", substring = true)).fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodes(hasContentDescription("Dry run the migration, ", substring = true)).fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodes(hasContentDescription("Tidy the release notes, ", substring = true)).fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun theCardStartsCollapsedUnlessASubagentIsWaitingOnThePerson() {
+        render("[$Parent,$Working]")
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("1 subagent, show them").fetchSemanticsNodes().isNotEmpty() }
+
+        assertEquals(0, rule.onAllNodes(hasContentDescription("Check the changelog wording, ", substring = true)).fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun theCardStartsOpenWhenASubagentIsWaitingOnThePerson() {
+        render("[$Parent,$Waiting,$Working]")
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("2 subagents, hide them").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test

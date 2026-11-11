@@ -49,9 +49,9 @@ fun SubagentCards(actions: ThreadSubagents) {
         return
     }
 
-    var expanded by remember { mutableStateOf(true) }
     val colors = MyTheme.colors
     val waiting = subagents.filter { it.status == ConversationStatus.Input }
+    var expanded by remember(actions.conversationId, waiting.isNotEmpty()) { mutableStateOf(waiting.isNotEmpty()) }
     val count = "${subagents.size} ${if (subagents.size == 1) "subagent" else "subagents"}"
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
