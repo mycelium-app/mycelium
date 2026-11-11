@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.34.16
+
+- A side chat or fork of an agent chat stays in Chats under its parent instead of also showing in Workspaces, and shares its parent's folder, which is kept until no conversation uses it.
+- A side chat of an assistant's conversation stays with its assistant.
+- An agent chat continued on a model and back again returns to Chats with a fresh folder, and a model chat continued on an agent with no folder becomes an agent chat in Chats.
+- The subagents card starts collapsed unless a subagent is waiting on you.
+- An integration tool whose input schema is a reference is listed with the object it names, so agents can call it.
+
 ## v0.34.15
 
 - An environment started from an assistant's chat shows there, in the same side panel as in any other conversation. Assistant chats now have the full panel rail.
