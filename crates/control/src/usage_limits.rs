@@ -5,7 +5,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::nodes::node_offline;
 use crate::prompts::{continue_unless_queued, retry_failed};
 use crate::state::AppState;
-use crate::store::{CONVERSATION_COLUMNS, ConversationRow, find_owned, parse_enum};
+use crate::store::{CONVERSATION_COLUMNS, ConversationRow, TURN_HAS_ENDED, find_owned, parse_enum};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -181,9 +181,14 @@ pub async fn inspect(state: &AppState, node_id: Uuid, conversation_id: Uuid, mes
 
 pub async fn inspect_reply(state: &AppState, node_id: Uuid, conversation_id: Uuid) -> ApiResult<Option<(String, Detected)>> {
     let reply = sqlx::query_scalar::<_, Option<String>>(
-        "select string_agg(payload->'update'->'content'->>'text', '' order by seq) from events
+        "with last_text as (
+             select max(seq) as text_seq from events where conversation_id = $1 and kind = 'acp_update' and payload->'update'->>'sessionUpdate' = 'agent_message_chunk'
+         )
+         select string_agg(payload->'update'->'content'->>'text', '' order by seq) from events, last_text
          where conversation_id = $1 and kind = 'acp_update' and payload->'update'->>'sessionUpdate' = 'agent_message_chunk'
-           and seq > coalesce((select max(seq) from events where conversation_id = $1 and (kind = 'user_message' or (kind = 'acp_update' and payload->'update'->>'sessionUpdate' is distinct from 'agent_message_chunk'))), 0)",
+           and last_text.text_seq > coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message'), 0)
+           and events.seq > coalesce((select max(seq) from events where conversation_id = $1 and seq < last_text.text_seq
+               and (kind in ('user_message', 'turn_end') or (kind = 'acp_update' and payload->'update'->>'sessionUpdate' in ('tool_call', 'tool_call_update')))), 0)",
     )
     .bind(conversation_id)
     .fetch_optional(&state.pool)
@@ -196,6 +201,23 @@ pub async fn inspect_reply(state: &AppState, node_id: Uuid, conversation_id: Uui
     let limit = inspect(state, node_id, conversation_id, &message).await?;
 
     Ok(limit.map(|limit| (message, limit)))
+}
+
+pub async fn inspect_reply_after_turn(state: &AppState, node_id: Uuid, conversation_id: Uuid) -> ApiResult<Option<(String, Detected)>> {
+    let replied_after_turn = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!(
+        "select {TURN_HAS_ENDED} and exists (
+             select 1 from events where conversation_id = $1 and kind = 'acp_update' and payload->'update'->>'sessionUpdate' = 'agent_message_chunk'
+               and seq > coalesce((select max(seq) from events where conversation_id = $1 and kind in ('turn_end', 'error')), 0))",
+    )))
+    .bind(conversation_id)
+    .fetch_one(&state.pool)
+    .await?;
+
+    if !replied_after_turn {
+        return Ok(None);
+    }
+
+    inspect_reply(state, node_id, conversation_id).await
 }
 
 pub async fn inspect_refused_review(state: &AppState, node_id: Uuid, conversation_id: Uuid) -> ApiResult<Option<(String, Detected)>> {

@@ -490,6 +490,14 @@ async fn runs_on_node(state: &AppState, node_id: Uuid, conversation_id: Uuid) ->
     Ok(found)
 }
 
+async fn stop_at_limit(state: &AppState, node_id: Uuid, conversation_id: Uuid, message: &str, limit: crate::usage_limits::Detected) -> ApiResult<()> {
+    let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?;
+
+    state.hub.forget_prompts_of(conversation_id);
+
+    stop_for_failure(state, node_id, conversation_id, owner, None, message, Some(limit)).await
+}
+
 async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid, owner: Option<Uuid>, seq: Option<i64>, message: &str, limit: Option<crate::usage_limits::Detected>) -> ApiResult<()> {
     let resume_at = limit.as_ref().and_then(|limit| limit.resume_at);
     let automatic = limit.as_ref().is_some_and(|limit| limit.automatic);
@@ -872,9 +880,15 @@ impl UpdateBatch {
             state.publish(Some(row.owner), StreamMessage::Conversation(active.to_proto()?));
         }
 
+        let text_finished = stored.last().is_some_and(|(_, update)| update["update"]["sessionUpdate"] != "agent_message_chunk");
+
         for (event, update) in stored {
             state.publish(Some(row.owner), StreamMessage::Event(event));
             after_update(state, node_id, conversation_id, update).await?;
+        }
+
+        if text_finished && let Some((message, limit)) = crate::usage_limits::inspect_reply_after_turn(state, node_id, conversation_id).await? {
+            return stop_at_limit(state, node_id, conversation_id, &message, limit).await;
         }
 
         Ok(())
@@ -1112,11 +1126,7 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
     };
 
     if let Some((message, limit)) = limited {
-        let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?;
-
-        state.hub.forget_prompts_of(conversation_id);
-
-        return stop_for_failure(state, node_id, conversation_id, owner, None, &message, Some(limit)).await;
+        return stop_at_limit(state, node_id, conversation_id, &message, limit).await;
     }
 
     if let Err(error) = sqlx::query("update conversations set limit_resumes = 0 where id = $1 and limit_resumes > 0").bind(conversation_id).execute(&state.pool).await {

@@ -353,6 +353,65 @@ async fn a_limit_reply_on_its_own_line_after_text_in_the_same_message_gets_the_c
     assert_eq!(last_error(&server, id).await["usage_limit"]["window"], "five_hour");
 }
 
+fn rate_limit_rejected() -> Value {
+    json!({"update": {"sessionUpdate": "usage_update", "used": 650556, "size": 1000000, "_meta": {"_claude/rateLimit": {"status": "rejected", "rateLimitType": "five_hour"}}}})
+}
+
+fn turn_cost() -> Value {
+    json!({"update": {"sessionUpdate": "usage_update", "used": 650556, "size": 1000000, "cost": {"amount": 84.58, "currency": "USD"}, "_meta": {"_claude/origin": {"kind": "task-notification"}}}})
+}
+
+fn agent_text(text: &str) -> Value {
+    json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}})
+}
+
+#[tokio::test]
+async fn a_limit_reply_followed_by_a_usage_update_before_the_turn_ends_gets_the_card() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 3, update: rate_limit_rejected() }).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 4, update: agent_text("You've hit your session limit · resets 3:30am (UTC)") }).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 5, update: turn_cost() }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 6, stop_reason: "end_turn".into(), usage: None }).await;
+
+    common::eventually("the conversation to fail", || async { (server.conversation(id).await["status"] == "failed").then_some(()) }).await;
+    assert_eq!(last_error(&server, id).await["usage_limit"]["window"], "five_hour");
+}
+
+#[tokio::test]
+async fn a_limit_reply_in_a_turn_the_agent_started_itself_after_the_last_turn_ended_gets_the_card() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 3, update: agent_text("Approve the access card and I will read the events.") }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 4, stop_reason: "end_turn".into(), usage: None }).await;
+    common::eventually("the turn to end", || async { (server.conversation(id).await["status"] == "review").then_some(()) }).await;
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 5, update: rate_limit_rejected() }).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 6, update: agent_text("You've hit your session limit · resets 3:30am (UTC)") }).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 7, update: turn_cost() }).await;
+
+    common::eventually("the conversation to fail", || async { (server.conversation(id).await["status"] == "failed").then_some(()) }).await;
+    assert_eq!(last_error(&server, id).await["usage_limit"]["window"], "five_hour");
+}
+
+#[tokio::test]
+async fn text_the_agent_sends_by_itself_after_its_turn_that_is_not_a_limit_leaves_the_conversation_alone() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
+    common::eventually("the turn to end", || async { (server.conversation(id).await["status"] == "review").then_some(()) }).await;
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 4, update: agent_text("The background build finished and every test passed.") }).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 5, update: turn_cost() }).await;
+    common::eventually("the update to be stored", || async { server.events(id).await.iter().any(|event| event["payload"]["update"]["cost"].is_object()).then_some(()) }).await;
+
+    assert!(server.events(id).await.iter().all(|event| event["kind"] != "error"));
+}
+
 #[tokio::test]
 async fn a_limit_reply_waits_for_the_person_when_they_chose_to_be_asked() {
     let server = Server::start().await;
