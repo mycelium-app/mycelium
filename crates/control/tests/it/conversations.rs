@@ -1246,8 +1246,7 @@ async fn closing_an_idle_conversation_without_a_running_agent_tells_the_node_not
 
     assert_eq!(close(&server, id).await, 204);
 
-    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/cancel"))).await;
-    assert_eq!(link.next().await, ControlToNode::Cancel { conversation_id: id });
+    started_conversation(&server, &mut link, None).await;
 }
 
 #[tokio::test]
