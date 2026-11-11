@@ -797,3 +797,17 @@ async fn cloning_onto_a_folder_that_holds_another_repository_is_still_refused() 
     let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
     assert_eq!(listed, json!([]));
 }
+
+#[tokio::test]
+async fn the_project_tool_names_the_node_by_its_name() {
+    let server = Server::start().await;
+    let link = server.online_node("atlas").await;
+    let node = link.id;
+    sqlx::query("insert into projects (owner, node_id, name, path) select created_by, id, 'harbour', '/work/harbour' from nodes where id = $1").bind(node).execute(&server.pool).await.unwrap();
+
+    let reply = server.approved_agent_mcp(&link.token, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "update_project", "arguments": {"project": "harbour", "test_command": "cargo test"}}})).await;
+    let text = reply["result"]["content"][0]["text"].as_str().unwrap();
+
+    assert!(text.contains("at /work/harbour on atlas"), "{text}");
+    assert!(!text.contains(&node.to_string()), "{text}");
+}

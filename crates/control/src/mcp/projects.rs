@@ -43,8 +43,10 @@ pub fn definitions() -> Value {
     ])
 }
 
-fn described(project: &Project) -> String {
-    format!("{} ({}) at {} on node {}", project.name, project.id, project.path, project.node_id)
+async fn described(state: &crate::state::AppState, project: &Project) -> ApiResult<String> {
+    let node = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(project.node_id).fetch_one(&state.pool).await?;
+
+    Ok(format!("{} ({}) at {} on {node}", project.name, project.id, project.path))
 }
 
 async fn node_id(state: &crate::state::AppState, owner: Uuid, node: &str) -> ApiResult<Option<Uuid>> {
@@ -84,7 +86,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
         let request = CreateProjectRequest { node_id, forge_id, repository: field("repository"), path: field("path"), new_repository: arguments["new_repository"].as_bool().unwrap_or(false), new_folder: field("new_folder"), group_id: None };
 
         return Ok(match projects::create(State(state.clone()), AuthUser::of(state, owner).await?, Json(request)).await {
-            Ok((_, Json(project))) => ToolReply::text(&format!("Added the project {}.", described(&project)), false),
+            Ok((_, Json(project))) => ToolReply::text(&format!("Added the project {}.", described(state, &project).await?), false),
             Err(error) => ToolReply::text(&format!("Nothing was added. {}", error.message()), true),
         });
     }
@@ -129,7 +131,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
     }
 
     Ok(match updated {
-        Some(Ok(Json(project))) => ToolReply::text(&format!("Updated the project {}.", described(&project)), false),
+        Some(Ok(Json(project))) => ToolReply::text(&format!("Updated the project {}.", described(state, &project).await?), false),
         Some(Err(error)) => ToolReply::text(&format!("Nothing more was changed. {}", error.message()), true),
         None => ToolReply::text("Nothing was changed.", true),
     })
