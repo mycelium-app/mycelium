@@ -125,6 +125,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
 ];
 
 const SILENT_ROUTES: &[&str] = &[
+    "POST /api/v1/mcp-session-tokens/revoke",
     "POST /api/v1/nodes/join-tokens",
     "PUT /api/v1/agent-settings",
     "PUT /api/v1/agent-settings/account-mode",
