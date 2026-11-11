@@ -492,3 +492,42 @@ async fn a_full_window_with_no_other_account_waits_for_the_reset() {
 
     assert!(server.events(id).await.iter().all(|event| event["kind"] != "continued"));
 }
+
+#[tokio::test]
+async fn a_chat_on_an_agent_continued_on_a_model_and_back_stays_a_chat_with_a_scratch_folder() {
+    let server = Server::start().await;
+    let (router, _) = fake_openai();
+    let base = serve(router).await;
+    let provider = add_provider(&server, &base).await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
+    let (_, chat) = server.user.json(server.user.post("/api/v1/chats").json(&json!({"agent": "claude", "account": "sam@example.com"}))).await;
+    let id: Uuid = chat["id"].as_str().unwrap().parse().unwrap();
+    let folder = format!(".mycelium-assistants/{id}");
+
+    assert!(matches!(next_command(&mut link).await, ControlToNode::WriteFolder { .. }));
+    link.expect_start_session().await;
+    link.start_session(id, "acp-1").await;
+    common::eventually("the session", || async { (!server.conversation(id).await["acp_session_id"].is_null()).then_some(()) }).await;
+
+    let (status, model) = continue_on(&server, id, json!({"agent": "chat", "provider_id": provider["id"]})).await;
+    assert_eq!(status, 200, "{model}");
+
+    let deleted = loop {
+        if let ControlToNode::DeleteFolder { root } = next_command(&mut link).await {
+            break root;
+        }
+    };
+    assert_eq!(deleted, folder);
+
+    let (status, back) = continue_on(&server, id, json!({"agent": "claude", "account": "sam@example.com", "node_id": link.id})).await;
+
+    assert_eq!(status, 200, "{back}");
+    assert_eq!((back["scratch"].clone(), back["cwd"].clone()), (json!(true), json!(folder)));
+
+    let written = loop {
+        if let ControlToNode::WriteFolder { root, .. } = next_command(&mut link).await {
+            break root;
+        }
+    };
+    assert_eq!(written, folder);
+}

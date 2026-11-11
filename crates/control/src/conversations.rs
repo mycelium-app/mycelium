@@ -115,7 +115,7 @@ pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConvers
         return Err(ApiError::bad_request("project_required", "Choose a project to start a worktree from."));
     }
 
-    let scratch_id = scratch.then(Uuid::new_v4);
+    let scratch_id = (scratch && request.parent_id.is_none()).then(Uuid::new_v4);
     let mut cwd = match (&project, scratch_id) {
         (_, Some(id)) => assistants::folder_of(id),
         (Some(project), None) => project.path.clone(),
@@ -238,7 +238,7 @@ pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConvers
 
     let mut started_event = None;
 
-    if scratch {
+    if scratch_id.is_some() {
         let node_name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(request.node_id).fetch_one(&mut *tx).await?;
 
         started_event = append_event(&mut tx, row.id, EventKind::Continued, &json!({"kind": "scratch", "node_name": node_name}), None).await?;
@@ -258,7 +258,7 @@ pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConvers
         assistants::copy_down(state, request.node_id, assistant_id).await?;
     }
 
-    if scratch && !state.hub.send(request.node_id, ControlToNode::WriteFolder { root: cwd.clone(), files: Vec::new(), replace: true }) {
+    if scratch_id.is_some() && !state.hub.send(request.node_id, ControlToNode::WriteFolder { root: cwd.clone(), files: Vec::new(), replace: true }) {
         sqlx::query("delete from conversations where id = $1").bind(row.id).execute(&state.pool).await?;
 
         return Err(node_offline());
@@ -300,7 +300,7 @@ pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<
             return Err(ApiError::conflict("provider_removed", "This chat's model provider was removed. Choose another model in the message box to carry on."));
         };
         let started = CreateChatRequest { provider_id: Some(provider_id), agent: None, account: None, node_id: None, model: parent.model.clone(), prompt: text.map(str::to_string), parent_id: Some(id) };
-        let conversation = chats::start(&state, user.id, started, Some(request.kind), None).await?;
+        let conversation = chats::start(&state, user.id, started, Some(request.kind), parent.assistant_id).await?;
 
         return Ok((StatusCode::CREATED, Json(conversation)));
     }
@@ -344,7 +344,7 @@ pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<
         model: None,
         routing: None,
     };
-    let conversation = start(&state, user.id, started).await?;
+    let conversation = start_for(&state, user.id, started, parent.assistant_id, parent.scratch).await?;
 
     Ok((StatusCode::CREATED, Json(conversation)))
 }
@@ -750,7 +750,9 @@ pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Pat
         state.publish(Some(user.id), StreamMessage::ConversationRemoved { conversation_id: removed_id });
     }
 
-    if row.scratch {
+    let folder_still_used = sqlx::query_scalar::<_, bool>("select exists (select 1 from conversations where node_id = $1 and cwd = $2 and scratch)").bind(row.node_id).bind(&row.cwd).fetch_one(&state.pool).await?;
+
+    if row.scratch && !folder_still_used {
         state.hub.send(row.node_id, ControlToNode::DeleteFolder { root: row.cwd });
     }
 

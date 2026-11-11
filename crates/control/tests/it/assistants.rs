@@ -1041,3 +1041,32 @@ async fn an_unknown_assistant_icon_or_colour_or_a_file_that_is_not_an_image_is_r
     let (status, refused) = server.user.json(server.user.post(&format!("{path}/avatar")).header("content-type", "text/plain").body("hello")).await;
     assert_eq!((status, refused["error"].clone()), (400, json!("avatar_not_image")));
 }
+
+#[tokio::test]
+async fn a_side_chat_of_an_assistant_session_stays_with_its_assistant() {
+    let server = Server::start().await;
+    let mut link = server.online_node("atlas").await;
+    let assistant = harness_assistant(&server, json!([link.id])).await;
+    let started = prompt(&server.user, assistant["id"].as_str().unwrap(), "Open the war room").await;
+    let parent: Uuid = started["id"].as_str().unwrap().parse().unwrap();
+    link.start_session(parent, "acp-1").await;
+
+    let (status, side) = server.user.json(server.user.post(&format!("/api/v1/conversations/{parent}/side")).json(&json!({"kind": "btw", "text": "What is in here?"}))).await;
+
+    assert_eq!(status, 201, "{side}");
+    assert_eq!((side["parent_id"].clone(), side["assistant_id"].clone()), (json!(parent), assistant["id"].clone()));
+}
+
+#[tokio::test]
+async fn a_side_chat_of_an_assistants_model_chat_stays_with_its_assistant() {
+    let server = Server::start().await;
+    let (provider, _) = chat_provider(&server).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let started = prompt(&server.user, assistant["id"].as_str().unwrap(), "Hello").await;
+    let parent = started["id"].as_str().unwrap();
+
+    let (status, side) = server.user.json(server.user.post(&format!("/api/v1/conversations/{parent}/side")).json(&json!({"kind": "side"}))).await;
+
+    assert_eq!(status, 201, "{side}");
+    assert_eq!((side["parent_id"].clone(), side["assistant_id"].clone()), (json!(parent), assistant["id"].clone()));
+}

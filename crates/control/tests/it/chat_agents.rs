@@ -135,3 +135,49 @@ async fn deleting_a_chat_on_an_agent_deletes_its_scratch_folder() {
 
     assert_eq!(removed, format!(".mycelium-assistants/{id}"));
 }
+
+fn in_chats(conversation: &serde_json::Value) -> bool {
+    conversation["agent"] == "chat" || conversation["scratch"] == true
+}
+
+#[tokio::test]
+async fn a_side_chat_of_a_chat_on_an_agent_stays_in_chats_and_leaves_the_parents_folder_alone_when_deleted() {
+    let server = Server::start().await;
+    let mut link = node_signed_in(&server, "atlas", "sam@example.com").await;
+    let (_, parent) = server.user.json(server.user.post("/api/v1/chats").json(&json!({"agent": "claude", "account": "sam@example.com"}))).await;
+    let parent_id: Uuid = parent["id"].as_str().unwrap().parse().unwrap();
+
+    assert!(matches!(link.next().await, ControlToNode::WriteFolder { .. }));
+    link.expect_start_session().await;
+    link.start_session(parent_id, "acp-1").await;
+
+    let (status, side) = server.user.json(server.user.post(&format!("/api/v1/conversations/{parent_id}/side")).json(&json!({"kind": "btw", "text": "What is in here?"}))).await;
+    let side_id: Uuid = side["id"].as_str().unwrap().parse().unwrap();
+
+    assert_eq!(status, 201, "{side}");
+    assert_eq!((side["parent_id"].clone(), side["cwd"].clone(), side["scratch"].clone()), (json!(parent_id), parent["cwd"].clone(), json!(true)));
+    assert!(in_chats(&side));
+
+    link.expect_start_session().await;
+    link.start_session(side_id, "acp-2").await;
+    server.user.json(server.user.patch(&format!("/api/v1/conversations/{side_id}")).json(&json!({"archived": true}))).await;
+
+    let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/conversations/{side_id}"))).await;
+
+    assert_eq!(status, 204);
+
+    let (status, _) = server.user.json(server.user.get(&format!("/api/v1/conversations/{parent_id}"))).await;
+
+    assert_eq!(status, 200);
+
+    let deleted_folder = tokio::time::timeout(std::time::Duration::from_millis(500), async {
+        loop {
+            if let ControlToNode::DeleteFolder { root } = link.next().await {
+                return root;
+            }
+        }
+    })
+    .await;
+
+    assert!(deleted_folder.is_err(), "deleting the side chat deleted the folder the parent still uses: {deleted_folder:?}");
+}

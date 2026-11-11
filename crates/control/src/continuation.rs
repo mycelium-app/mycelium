@@ -4,7 +4,7 @@ use crate::chats::{self, CHAT_AGENT};
 use crate::conversations::require_signed_in_account;
 use crate::error::{ApiError, ApiResult};
 use crate::model_providers;
-use crate::nodes::node_has;
+use crate::nodes::{node_has, node_offline};
 use crate::state::AppState;
 use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, lock_owned, parse_enum};
 use axum::Json;
@@ -88,7 +88,7 @@ pub async fn continue_with(state: &AppState, owner: Uuid, id: Uuid, target: Targ
     let before_node_name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(before.node_id).fetch_one(&mut *tx).await?;
     let from = json!({
         "agent": before.agent, "account": before.account, "provider_id": before.provider_id, "provider_name": before_provider_name, "model": before.model,
-        "node_id": before.node_id, "node_name": before_node_name, "cwd": before.cwd, "project_id": before.project_id,
+        "node_id": before.node_id, "node_name": before_node_name, "cwd": before.cwd, "project_id": before.project_id, "scratch": before.scratch,
     });
 
     let row;
@@ -166,9 +166,11 @@ pub async fn continue_with(state: &AppState, owner: Uuid, id: Uuid, target: Targ
 
         let earlier_project = earlier.as_ref().filter(|earlier| earlier["node_id"].as_str() == Some(node_id.to_string().as_str())).and_then(|earlier| earlier["project_id"].as_str()?.parse::<Uuid>().ok());
         let project_id = if node_id == before.node_id { before.project_id } else { earlier_project };
+        let restores_scratch = from_chat && target.cwd.is_none() && earlier.as_ref().is_some_and(|earlier| earlier["scratch"] == json!(true));
+        let scratch = if from_chat { restores_scratch } else { before.scratch };
 
         row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
-            "update conversations set agent = $2, account = $3, provider_id = null, model = $7, node_id = $4, cwd = $5, project_id = $6,
+            "update conversations set agent = $2, account = $3, provider_id = null, model = $7, node_id = $4, cwd = $5, project_id = $6, scratch = $8,
                  previous_session_ids = case when acp_session_id is null then previous_session_ids else array_append(previous_session_ids, acp_session_id) end, acp_session_id = null
              where id = $1 returning {CONVERSATION_COLUMNS}"
         )))
@@ -179,9 +181,14 @@ pub async fn continue_with(state: &AppState, owner: Uuid, id: Uuid, target: Targ
         .bind(&cwd)
         .bind(project_id)
         .bind(&target.model)
+        .bind(scratch)
         .fetch_one(&mut *tx)
         .await?;
         let moved = (node_id != before.node_id).then_some((node_id, node_name));
+
+        if restores_scratch && !state.hub.send(node_id, ControlToNode::WriteFolder { root: cwd.clone(), files: Vec::new(), replace: true }) {
+            return Err(node_offline());
+        }
 
         if let Some(folder) = scratch_folder.as_ref().filter(|_| moved.is_some()) {
             assistants::copy_between_nodes(state, before.node_id, node_id, folder).await?;
