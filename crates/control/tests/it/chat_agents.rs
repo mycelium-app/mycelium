@@ -170,14 +170,17 @@ async fn a_side_chat_of_a_chat_on_an_agent_stays_in_chats_and_leaves_the_parents
 
     assert_eq!(status, 200);
 
-    let deleted_folder = tokio::time::timeout(std::time::Duration::from_millis(500), async {
-        loop {
-            if let ControlToNode::DeleteFolder { root } = link.next().await {
-                return root;
-            }
-        }
-    })
-    .await;
+    let (_, marker) = server.user.json(server.user.post("/api/v1/chats").json(&json!({"agent": "claude", "account": "sam@example.com"}))).await;
+    let marker_folder = format!(".mycelium-assistants/{}", marker["id"].as_str().unwrap());
+    let mut deleted = Vec::new();
 
-    assert!(deleted_folder.is_err(), "deleting the side chat deleted the folder the parent still uses: {deleted_folder:?}");
+    loop {
+        match link.next().await {
+            ControlToNode::DeleteFolder { root } => deleted.push(root),
+            ControlToNode::WriteFolder { root, .. } if root == marker_folder => break,
+            _ => {}
+        }
+    }
+
+    assert!(deleted.is_empty(), "deleting the side chat deleted the folder the parent still uses: {deleted:?}");
 }

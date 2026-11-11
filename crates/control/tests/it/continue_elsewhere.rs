@@ -603,16 +603,20 @@ async fn continuing_a_chat_on_an_agent_on_a_model_keeps_the_folder_its_side_chat
     let (status, model) = continue_on(&server, id, json!({"agent": "chat", "provider_id": provider["id"]})).await;
     assert_eq!(status, 200, "{model}");
 
-    let deleted = tokio::time::timeout(std::time::Duration::from_millis(500), async {
-        loop {
-            if let ControlToNode::DeleteFolder { root } = next_command(&mut link).await {
-                return root;
-            }
+    let (_, marker) = server.user.json(server.user.post("/api/v1/chats").json(&json!({"agent": "claude", "account": "sam@example.com"}))).await;
+    let marker_folder = format!(".mycelium-assistants/{}", marker["id"].as_str().unwrap());
+    let mut deleted = Vec::new();
+
+    loop {
+        match next_command(&mut link).await {
+            ControlToNode::DeleteFolder { root } => deleted.push(root),
+            ControlToNode::WriteFolder { root, .. } if root == marker_folder => break,
+            _ => {}
         }
-    })
-    .await;
+    }
+
+    assert!(deleted.is_empty(), "the folder the side chat uses was deleted: {deleted:?}");
     let kept = server.conversation(side["id"].as_str().unwrap().parse().unwrap()).await;
 
-    assert!(deleted.is_err(), "the folder the side chat uses was deleted: {deleted:?}");
     assert_eq!((kept["scratch"].clone(), kept["cwd"].clone()), (json!(true), json!(format!(".mycelium-assistants/{id}"))));
 }
