@@ -230,6 +230,24 @@ async fn exhausted_credits_with_every_other_account_at_its_limit_resume_when_one
 }
 
 #[tokio::test]
+async fn a_side_chat_at_a_limit_with_every_other_account_spent_moves_on_when_one_resets() {
+    let server = Server::start().await;
+    let resets = chrono::Utc::now() + chrono::Duration::minutes(10);
+    let spent = mycelium_proto::conversation::UsageWindow { name: "five_hour".into(), used_percent: 100.0, resets_at: Some(resets), rate_per_hour: None, runs_out_at: None };
+    let work = mycelium_proto::conversation::LoginInfo { windows: vec![spent], ..with_usage("work@example.org", 0) };
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 90), work]).await;
+    let id = running(&server, &mut link, "claude_any").await;
+    let parent = server.create_conversation(link.id, None).await;
+    sqlx::query("update conversations set parent_id = $2, side_kind = 'side' where id = $1").bind(id).bind(parent.id).execute(&server.pool).await.unwrap();
+
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: limit_message() }).await;
+
+    let resume_at = common::eventually("a resume to be scheduled", || async { server.conversation(id).await["resume_at"].as_str().map(|at| at.parse::<chrono::DateTime<chrono::Utc>>().unwrap()) }).await;
+    assert_eq!(server.conversation(id).await["status"], "failed");
+    assert!(resume_at > resets && resume_at <= resets + chrono::Duration::minutes(2), "{resume_at} against {resets}");
+}
+
+#[tokio::test]
 async fn an_approval_review_refused_for_lack_of_credits_carries_the_turn_on_another_account() {
     let server = Server::start().await;
     let (mut link, id) = running_on_codex_before_claude(&server, with_usage("work@example.org", 60)).await;

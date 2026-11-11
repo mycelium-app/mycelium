@@ -133,7 +133,7 @@ fn zoned(zone: Tz, date: NaiveDate, time: NaiveTime) -> Option<DateTime<Utc>> {
 pub struct Detected {
     pub payload: Value,
     pub resume_at: Option<DateTime<Utc>>,
-    pub automatic: bool,
+    pub resumes_on_another_account: bool,
     pub account: Option<String>,
 }
 
@@ -173,10 +173,11 @@ pub async fn inspect(state: &AppState, node_id: Uuid, conversation_id: Uuid, mes
         limit.resets_at = wanted.filter(|at| *at > now).min().or_else(|| any.filter(|at| *at > now).min());
     }
 
-    let automatic = on_usage_limit == "resume" && !side_chat && resumes < AUTOMATIC_RESUME_CAP;
+    let resumes_on_another_account = on_usage_limit == "resume" && resumes < AUTOMATIC_RESUME_CAP;
+    let automatic = resumes_on_another_account && !side_chat;
     let resume_at = limit.resets_at.filter(|_| automatic).map(|at| at + Duration::seconds(RESUME_DELAY_SECONDS));
 
-    Ok(Some(Detected { payload: json!({"message": message, "usage_limit": {"window": limit.window, "resets_at": limit.resets_at}}), resume_at, automatic, account }))
+    Ok(Some(Detected { payload: json!({"message": message, "usage_limit": {"window": limit.window, "resets_at": limit.resets_at}}), resume_at, resumes_on_another_account, account }))
 }
 
 pub async fn inspect_reply(state: &AppState, node_id: Uuid, conversation_id: Uuid) -> ApiResult<Option<(String, Detected)>> {
