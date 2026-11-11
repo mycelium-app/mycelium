@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -285,7 +286,9 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                                 when (column) {
                                     0 -> TableCell.Slot("${repository.name} ${repository.owner} updated 12 minutes ago", Tokens.Size.IconMd + Tokens.Space.S1_5 * 3) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                                            ProjectIcon(setUp.firstOrNull(), Tokens.Size.IconMd)
+                                            Box(Modifier.size(Tokens.Size.IconMd)) {
+                                                ProjectIcon(setUp.firstOrNull(), Tokens.Size.IconMd)
+                                            }
                                             Label(repository.name, style = Tokens.Type.UiStrong, maxLines = 1)
                                             Label(repository.owner, Modifier.weight(1f, fill = false), color = colors.textFaint, maxLines = 1)
                                             repository.updatedAt?.let { Label("updated ${timestamp(it, ago = true)}", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1) }
