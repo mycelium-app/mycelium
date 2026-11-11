@@ -151,12 +151,12 @@ const val ContinueNodePrefix = "on:"
 
 fun currentContinueId(conversation: Conversation): String? = when {
     conversation.routing != null -> "$RoutingPrefix${conversation.routing}"
-    conversation.agent == "chat" -> conversation.providerId?.let { provider -> conversation.model?.let { "$ContinueChatPrefix$provider:$it" } }
+    conversation.runsOnModel -> conversation.providerId?.let { provider -> conversation.model?.let { "$ContinueChatPrefix$provider:$it" } }
     else -> "$ContinueAccountPrefix${conversation.account ?: DefaultAccountId}"
 }
 
-fun currentContinueLabel(conversation: Conversation, providers: List<ModelProvider>): String = when (conversation.agent) {
-    "chat" -> "${providers.firstOrNull { it.id == conversation.providerId }?.name ?: "Chat"}${conversation.model?.let { " · $it" }.orEmpty()}"
+fun currentContinueLabel(conversation: Conversation, providers: List<ModelProvider>): String = when {
+    conversation.runsOnModel -> "${providers.firstOrNull { it.id == conversation.providerId }?.name ?: "Chat"}${conversation.model?.let { " · $it" }.orEmpty()}"
     else -> "${agentName(conversation.agent)} · ${conversation.account ?: "Default account"}"
 }
 

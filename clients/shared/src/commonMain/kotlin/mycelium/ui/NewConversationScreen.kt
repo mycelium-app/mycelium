@@ -409,7 +409,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                         placeholder = "Ask, plan or build",
                         onSubmit = ::create,
                         attachments = attached.controls(),
-                        kind = ConversationKind.NewConversation,
+                        subject = BarSubject.NewConversation,
                         error = cwdError ?: branchError,
                         setup = setup?.let { current ->
                             {

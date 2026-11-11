@@ -3,7 +3,7 @@ package mycelium
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.state.chatSections
-import mycelium.state.isChat
+import mycelium.state.runsOnModel
 import mycelium.state.needsInputIn
 import mycelium.state.sidebarSections
 import kotlin.test.Test
@@ -58,7 +58,7 @@ class ChatsTest {
         val all = listOf(conversation("chat"), conversation("work", agent = "claude"))
 
         assertEquals(listOf("work"), sidebarSections(all).flatMap { it.rows }.map { it.id })
-        assertTrue(all[0].isChat)
+        assertTrue(all[0].runsOnModel)
     }
 
     @Test

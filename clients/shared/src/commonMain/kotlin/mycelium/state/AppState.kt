@@ -352,7 +352,7 @@ fun isWorktree(conversation: Conversation, project: Project?): Boolean {
 }
 
 private fun topLevel(conversations: Collection<Conversation>, filter: String): List<Conversation> {
-    val active = conversations.filter { it.archivedAt == null && !it.inChatList && !it.isAssistantSession && !it.isSubagent && inGroupFilter(it, filter) }
+    val active = conversations.filter { it.archivedAt == null && it.hasWorkspace && !it.isAssistantSession && !it.readOnly && inGroupFilter(it, filter) }
     val activeIds = active.map { it.id }.toSet()
 
     return active.filter { it.parentId == null || it.parentId !in activeIds }
@@ -396,7 +396,7 @@ data class SidebarRow(val conversation: Conversation, val depth: Int, val sideCh
 
 fun sidebarRows(parents: List<Conversation>, conversations: Collection<Conversation>, collapsed: Set<String>, depth: Int = 0): List<SidebarRow> =
     parents.flatMap { parent ->
-        val sideChats = conversations.filter { it.archivedAt == null && it.parentId == parent.id && !it.isSubagent }.sortedByDescending { it.updatedAt }
+        val sideChats = conversations.filter { it.archivedAt == null && it.parentId == parent.id && !it.readOnly }.sortedByDescending { it.updatedAt }
         val shown = if (parent.id in collapsed) emptyList() else sidebarRows(sideChats, conversations, collapsed, depth + 1)
 
         listOf(SidebarRow(parent, depth, sideChats.size)) + shown
@@ -428,7 +428,7 @@ fun subagentSections(conversations: Collection<Conversation>, conversationId: St
 }
 
 fun subagentsOf(conversations: Collection<Conversation>, parentId: String, startedHere: Set<String> = emptySet()): List<Conversation> =
-    conversations.filter { it.archivedAt == null && it.parentId == parentId && (it.isSubagent || it.id in startedHere) }.sortedByDescending { it.createdAt }
+    conversations.filter { it.archivedAt == null && it.parentId == parentId && (it.readOnly || it.id in startedHere) }.sortedByDescending { it.createdAt }
 
 private val SubagentRecentWindow = 1.hours
 

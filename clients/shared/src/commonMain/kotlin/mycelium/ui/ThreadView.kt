@@ -131,6 +131,7 @@ fun ThreadView(
     onDismissFailure: (() -> Unit)? = null,
     limitActions: LimitActions? = null,
     agent: String = "",
+    runsOnModel: Boolean = false,
     dismissedPins: Set<String> = emptySet(),
     onUnpin: (String) -> Unit = {},
     hasOlder: Boolean = false,
@@ -258,7 +259,7 @@ fun ThreadView(
                             )
                         } else {
                             CompositionLocalProvider(LocalImageJump provides jumpToImage, LocalImageGallery provides gallery, LocalPinnedKeys provides pinnedKeys) {
-                                ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) onDismissFailure else null, if (index == lastFailure) limitActions else null, agent)
+                                ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) onDismissFailure else null, if (index == lastFailure) limitActions else null, agent, runsOnModel)
                             }
                         }
                     }
@@ -301,7 +302,7 @@ fun ThreadView(
 val LocalReadAloud = compositionLocalOf<((String) -> Unit)?> { null }
 
 @Composable
-private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?, onDismissFailure: (() -> Unit)?, limitActions: LimitActions?, agent: String) {
+private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?, onDismissFailure: (() -> Unit)?, limitActions: LimitActions?, agent: String, runsOnModel: Boolean) {
     when (item) {
         is ThreadItem.UserMessage -> UserMessage(item.text, item.files, item.images, item.goalSentAt, item.goalNudge, item.goalWhy, item.spoken, item.spokenAt, agent)
         is ThreadItem.GoalReport -> GoalReportBlock(item, agent)
@@ -309,7 +310,7 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
         is ThreadItem.Thought -> Thought(item)
         is ThreadItem.ToolCall -> Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             if (toolLabel(item.kind, item.title) != "workflow" || item.status == ToolStatus.Failed) {
-                ToolCall(item, chat = agent == "chat")
+                ToolCall(item, chat = runsOnModel)
             }
 
             for (image in item.images) {

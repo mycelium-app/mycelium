@@ -30,6 +30,7 @@ import mycelium.api.Assistant
 import mycelium.api.Conversation
 import mycelium.api.PutAssistantSecretRequest
 import mycelium.state.AppState
+import mycelium.state.runsOnModel
 import mycelium.state.Store
 import mycelium.state.VoiceAssistantKey
 import mycelium.state.ThreadBuilder
@@ -201,7 +202,7 @@ private fun EarlierSession(store: Store, state: AppState, session: Conversation)
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
         Label("${session.title}, ${timestamp(session.createdAt, true)}", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted, maxLines = 1)
-        ThreadView(items = thread, onAnswer = { _, _ -> }, onStopWorkflow = {}, modifier = Modifier.height(Tokens.Size.EarlierThread), agent = session.agent)
+        ThreadView(items = thread, onAnswer = { _, _ -> }, onStopWorkflow = {}, modifier = Modifier.height(Tokens.Size.EarlierThread), agent = session.agent, runsOnModel = session.runsOnModel)
     }
 }
 
@@ -244,7 +245,7 @@ private fun ColumnScope.StartSession(store: Store, state: AppState, assistant: A
             placeholder = if (assistant.builtinKey == VoiceAssistantKey) "Ask ${assistant.name}" else "Message ${assistant.name}",
             onSubmit = ::send,
             attachments = AttachmentControls(emptyList(), problem, { problem = "Send your first message, then attach files to the next one." }, {}),
-            kind = ConversationKind.Assistant,
+            subject = BarSubject.NewAssistantSession,
             modifier = Modifier.widthIn(max = readingMeasure()),
             error = missing,
             assistantActions = actions,

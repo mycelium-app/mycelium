@@ -77,9 +77,9 @@ fun conversationModelLabel(conversation: Conversation, currentModel: String?, op
         return "Any model"
     }
 
-    val held = ModelChoice(agent = conversation.agent.takeIf { it != "chat" }, providerId = conversation.providerId, model = (if (conversation.agent == "chat") conversation.model else currentModel)?.ifEmpty { null })
-    val name = options.firstOrNull { it.isChosen(held) }?.name ?: held.model ?: if (conversation.agent == "chat") "Choose a model" else agentName(conversation.agent)
-    val pinned = conversation.account.takeIf { conversation.routing == null && conversation.agent != "chat" }
+    val held = ModelChoice(agent = conversation.agent.takeIf { conversation.hasSession }, providerId = conversation.providerId, model = (if (conversation.runsOnModel) conversation.model else currentModel)?.ifEmpty { null })
+    val name = options.firstOrNull { it.isChosen(held) }?.name ?: held.model ?: if (conversation.runsOnModel) "Choose a model" else agentName(conversation.agent)
+    val pinned = conversation.account.takeIf { conversation.routing == null && conversation.hasSession }
 
     return listOfNotNull(name, pinned?.let(::accountShortName)).joinToString(" · ")
 }

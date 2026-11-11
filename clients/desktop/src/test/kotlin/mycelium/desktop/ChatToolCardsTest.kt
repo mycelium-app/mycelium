@@ -47,7 +47,7 @@ class ChatToolCardsTest {
         rule.setContent {
             MyceliumTheme(true) {
                 Box(Modifier.width(640.dp).background(MyTheme.colors.bgContent).padding(16.dp)) {
-                    ThreadView(items, onAnswer = { request, option -> answered += request to option }, onStopWorkflow = {}, agent = agent)
+                    ThreadView(items, onAnswer = { request, option -> answered += request to option }, onStopWorkflow = {}, agent = agent, runsOnModel = agent == "chat")
                 }
             }
         }

@@ -34,7 +34,7 @@ import mycelium.state.AppState
 import mycelium.state.Store
 import mycelium.state.formatCost
 import mycelium.state.formatTokens
-import mycelium.state.isSubagent
+import mycelium.state.readOnly
 
 private const val SearchDebounceMillis = 250L
 
@@ -74,7 +74,7 @@ fun pastConversations(current: Collection<Conversation>, archived: Collection<Co
 
     return source
         .distinctBy { it.id }
-        .filter { !it.isSubagent && inGroupFilter(it, group) }
+        .filter { !it.readOnly && inGroupFilter(it, group) }
         .filter { query.isBlank() || it.title.contains(query.trim(), ignoreCase = true) }
         .sortedByDescending { it.updatedAt }
 }

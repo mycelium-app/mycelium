@@ -261,7 +261,7 @@ fun ComposerCard(
     placeholder: String,
     onSubmit: () -> Unit,
     attachments: AttachmentControls,
-    kind: ConversationKind,
+    subject: BarSubject,
     modifier: Modifier = Modifier,
     error: String? = null,
     assistantActions: AssistantActionControls? = null,
@@ -326,7 +326,7 @@ fun ComposerCard(
                 }
             }
 
-            if (LocalTouch.current && kind == ConversationKind.NewConversation) {
+            if (LocalTouch.current && subject.choosesMode) {
                 Row(Modifier.fillMaxWidth().horizontalScrollFaded(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                     control(BarControl.Mode)
                     control(BarControl.Model)
@@ -337,7 +337,7 @@ fun ComposerCard(
                     control(BarControl.Send)
                 }
             } else {
-                ComposerBar(barControls(kind, HarnessReport(models = model != null, modes = mode != null)), render = control)
+                ComposerBar(barControls(subject, HarnessReport(models = model != null, modes = mode != null)), render = control)
             }
         }
 

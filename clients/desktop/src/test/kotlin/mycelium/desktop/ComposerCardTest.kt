@@ -18,8 +18,8 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import mycelium.ui.AttachmentControls
+import mycelium.ui.BarSubject
 import mycelium.ui.ComposerCard
-import mycelium.ui.ConversationKind
 import mycelium.ui.MyButton
 import mycelium.ui.MyceliumTheme
 import org.junit.Rule
@@ -42,7 +42,7 @@ class ComposerCardTest {
                     placeholder = "Ask",
                     onSubmit = {},
                     attachments = AttachmentControls(emptyList(), null, {}, {}),
-                    kind = ConversationKind.NewConversation,
+                    subject = BarSubject.NewConversation,
                     strip = { MyButton({}, text = "orion", description = "Place: orion") },
                     model = { MyButton({}, text = "Opus", description = "Model: Opus") },
                 )

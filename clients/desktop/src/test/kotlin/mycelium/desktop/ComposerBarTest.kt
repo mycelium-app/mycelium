@@ -44,7 +44,7 @@ import mycelium.state.Store
 import mycelium.ui.BarControl
 import mycelium.ui.Composer
 import mycelium.ui.ModelPickerControls
-import mycelium.ui.ConversationKind
+import mycelium.ui.BarSubject
 import mycelium.ui.ConversationScreen
 import mycelium.ui.GoalControls
 import mycelium.ui.HarnessReport
@@ -203,33 +203,33 @@ class ComposerBarTest {
     fun aNewConversationHasOneModelControlWithNoSeparateAccount() {
         val everything = HarnessReport(voice = true, working = true, models = true, modes = true, settings = true)
 
-        assertEquals(listOf(BarControl.Attach, BarControl.Mode, BarControl.Model, BarControl.Send), barControls(ConversationKind.NewConversation, everything))
+        assertEquals(listOf(BarControl.Attach, BarControl.Mode, BarControl.Model, BarControl.Send), barControls(BarSubject.NewConversation, everything))
     }
 
     @Test
     fun aStopThatIsUnderWayReplacesStopWithStoppingAheadOfThePickers() {
         val stopping = HarnessReport(working = true, stopping = true, models = true)
 
-        assertEquals(listOf(BarControl.Attach, BarControl.Goal, BarControl.Stopping, BarControl.Model, BarControl.Usage, BarControl.Send), barControls(ConversationKind.WorkspaceWorking, stopping))
+        assertEquals(listOf(BarControl.Attach, BarControl.Goal, BarControl.Stopping, BarControl.Model, BarControl.Usage, BarControl.Send), barControls(BarSubject.of(conversation()), stopping))
     }
 
     @Test
     fun teachMeIsOmittedWhereNothingHandlesIt() {
-        assertTrue(BarControl.TeachMe !in barControls(ConversationKind.WorkspaceIdle, HarnessReport()))
-        assertTrue(BarControl.TeachMe in barControls(ConversationKind.WorkspaceIdle, HarnessReport(teachMe = true)))
+        assertTrue(BarControl.TeachMe !in barControls(BarSubject.of(conversation()), HarnessReport()))
+        assertTrue(BarControl.TeachMe in barControls(BarSubject.of(conversation()), HarnessReport(teachMe = true)))
     }
 
     @Test
     fun aNewChatHasOnlyAttachModelAndSend() {
         val everything = HarnessReport(voice = true, working = true, models = true, modes = true, settings = true)
 
-        assertEquals(listOf(BarControl.Attach, BarControl.Model, BarControl.Send), barControls(ConversationKind.NewChat, everything))
+        assertEquals(listOf(BarControl.Attach, BarControl.Model, BarControl.Send), barControls(BarSubject.NewChat, everything))
     }
 
     @Test
     fun anAssistantAlsoGetsItsActions() {
-        assertTrue(BarControl.Actions in barControls(ConversationKind.Assistant, HarnessReport()))
-        assertTrue(BarControl.Actions !in barControls(ConversationKind.WorkspaceIdle, HarnessReport()))
+        assertTrue(BarControl.Actions in barControls(BarSubject.NewAssistantSession, HarnessReport()))
+        assertTrue(BarControl.Actions !in barControls(BarSubject.of(conversation()), HarnessReport()))
     }
 
     private fun showHeader(width: Int) {

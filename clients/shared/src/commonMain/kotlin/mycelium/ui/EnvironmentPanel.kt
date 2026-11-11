@@ -63,7 +63,7 @@ import mycelium.api.EnvironmentController
 import mycelium.api.EnvironmentSize
 import mycelium.api.EnvironmentTarget
 import mycelium.api.NodeSummary
-import mycelium.state.isChat
+import mycelium.state.runsOnModel
 import mycelium.state.AppState
 import mycelium.state.EnvironmentStage
 import mycelium.state.Store
@@ -118,7 +118,7 @@ fun EnvironmentPanel(
     modifier: Modifier = Modifier,
 ) {
     val environment = state.environments[conversation.id]
-    val chat = conversation.isChat
+    val chat = conversation.runsOnModel
     val eligible = environmentNodes(state.nodes.values)
     var chosenId by remember(conversation.id) { mutableStateOf<String?>(null) }
     val runOn = environmentRunOn(eligible, state.lastEnvironmentNodeId, chosenId)
@@ -206,7 +206,7 @@ private fun ColumnScope.ClosedEnvironment(
 
                 Label("Start a separate desktop on $nodeName. The agent can look at it, click, type and scroll while you watch, and you can take over at any time. It never shows your own screen.", color = colors.textMuted)
 
-                if (conversation.isChat && eligible.size > 1) {
+                if (conversation.runsOnModel && eligible.size > 1) {
                     Label("Run on", Modifier.padding(top = Tokens.Space.S2).semantics { heading() }, Tokens.Type.UiStrong)
 
                     Column(Modifier.selectableGroup()) {
@@ -240,7 +240,7 @@ private fun ColumnScope.ClosedEnvironment(
                     }
                 }
 
-                MyButton({ store.startEnvironment(conversation.id, if (offered.isEmpty()) null else environmentAppsToStart(offered, ticked), if (conversation.isChat) node?.id else null) }, text = "Start environment", variant = ButtonVariant.Primary)
+                MyButton({ store.startEnvironment(conversation.id, if (offered.isEmpty()) null else environmentAppsToStart(offered, ticked), if (conversation.runsOnModel) node?.id else null) }, text = "Start environment", variant = ButtonVariant.Primary)
             }
 
             EnvironmentStage.Starting -> {

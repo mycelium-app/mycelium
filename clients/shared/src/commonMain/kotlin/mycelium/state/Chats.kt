@@ -19,21 +19,32 @@ private const val DaysInWeek = 7
 
 data class ChatSection(val name: String, val rows: List<Conversation>)
 
-val Conversation.isChat: Boolean get() = agent == ChatAgent
+enum class ConversationPlace { None, Scratch, Folder }
 
-val Conversation.inChatList: Boolean get() = isChat || scratch
+val Conversation.runsOnModel: Boolean get() = agent == ChatAgent
+
+val Conversation.place: ConversationPlace
+    get() = when {
+        scratch -> ConversationPlace.Scratch
+        runsOnModel -> ConversationPlace.None
+        else -> ConversationPlace.Folder
+    }
+
+val Conversation.hasWorkspace: Boolean get() = place == ConversationPlace.Folder
+
+val Conversation.hasSession: Boolean get() = !runsOnModel
 
 val Conversation.isAssistantSession: Boolean get() = assistantId != null
 
 val Conversation.waitsToBeOpened: Boolean get() = status == ConversationStatus.Review || unread
 
-val Conversation.isSubagent: Boolean get() = sideKind == SubagentKind
+val Conversation.readOnly: Boolean get() = sideKind == SubagentKind
 
 fun pinnedChats(conversations: Collection<Conversation>): List<Conversation> =
-    conversations.filter { it.inChatList && !it.isAssistantSession && it.archivedAt == null && it.pinnedAt != null && it.parentId == null }.sortedBy { it.pinnedAt }
+    conversations.filter { !it.hasWorkspace && !it.isAssistantSession && it.archivedAt == null && it.pinnedAt != null && it.parentId == null }.sortedBy { it.pinnedAt }
 
 fun chatSections(conversations: Collection<Conversation>, now: Instant = Clock.System.now()): List<ChatSection> {
-    val active = conversations.filter { it.inChatList && !it.isAssistantSession && it.archivedAt == null && it.pinnedAt == null }
+    val active = conversations.filter { !it.hasWorkspace && !it.isAssistantSession && it.archivedAt == null && it.pinnedAt == null }
     val activeIds = active.map { it.id }.toSet()
     val today = (now.epochSeconds).floorDiv(SecondsPerDay)
 

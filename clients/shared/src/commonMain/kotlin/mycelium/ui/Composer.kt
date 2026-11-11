@@ -489,7 +489,7 @@ fun Composer(
     }
 
     val controls = barControls(
-        conversationKind(conversation, working),
+        BarSubject.of(conversation),
         HarnessReport(voice = dictation != null, voiceMode = voiceMode != null, inVoiceMode = voiceMode?.phase != null, teachMe = onTeachMe != null, working = working, stopping = stopping, models = options.models.isNotEmpty(), modes = modes.isNotEmpty(), settings = settings.isNotEmpty()),
     ).filterNot { it == BarControl.Send && queueEdit != null }
 

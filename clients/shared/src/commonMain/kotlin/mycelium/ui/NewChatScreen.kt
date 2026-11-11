@@ -160,7 +160,7 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
                     placeholder = "Ask anything",
                     onSubmit = ::create,
                     attachments = attached.controls(),
-                    kind = ConversationKind.NewChat,
+                    subject = BarSubject.NewChat,
                     error = messageError,
                     model = {
                         ModelPicker(

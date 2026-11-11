@@ -7,20 +7,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import mycelium.api.Conversation
-import mycelium.api.ConversationStatus
-import mycelium.state.isChat
-
-enum class ConversationKind {
-    WorkspaceIdle,
-    WorkspaceWorking,
-    WorkspaceFailed,
-    ChatOnAgent,
-    ChatOnModel,
-    Assistant,
-    AssistantWorkspace,
-    NewConversation,
-    NewChat,
-}
+import mycelium.state.hasSession
+import mycelium.state.hasWorkspace
 
 enum class BarGroup { Tools, Status, Pickers, Usage, Turn }
 
@@ -52,34 +40,45 @@ data class HarnessReport(
     val settings: Boolean = false,
 )
 
-fun conversationKind(conversation: Conversation, working: Boolean): ConversationKind = when {
-    conversation.assistantId != null && !conversation.isChat && !conversation.scratch -> ConversationKind.AssistantWorkspace
-    conversation.assistantId != null -> ConversationKind.Assistant
-    conversation.isChat -> ConversationKind.ChatOnModel
-    conversation.scratch -> ConversationKind.ChatOnAgent
-    conversation.status == ConversationStatus.Failed -> ConversationKind.WorkspaceFailed
-    working -> ConversationKind.WorkspaceWorking
-    else -> ConversationKind.WorkspaceIdle
+data class BarSubject(
+    val starting: Boolean = false,
+    val choosesMode: Boolean = false,
+    val assistant: Boolean = false,
+    val goal: Boolean = false,
+    val configurable: Boolean = false,
+) {
+    companion object {
+        val NewConversation = BarSubject(starting = true, choosesMode = true)
+        val NewChat = BarSubject(starting = true)
+        val NewAssistantSession = BarSubject(assistant = true)
+
+        fun of(conversation: Conversation): BarSubject {
+            val assistant = conversation.assistantId != null
+
+            return BarSubject(
+                assistant = assistant,
+                goal = conversation.hasWorkspace && !assistant,
+                configurable = conversation.hasSession && (conversation.hasWorkspace || !assistant),
+            )
+        }
+    }
 }
 
-fun barControls(kind: ConversationKind, harness: HarnessReport): List<BarControl> {
-    val starting = kind == ConversationKind.NewConversation || kind == ConversationKind.NewChat
-    val workspace = kind == ConversationKind.WorkspaceIdle || kind == ConversationKind.WorkspaceWorking || kind == ConversationKind.WorkspaceFailed
-    val assistant = kind == ConversationKind.Assistant || kind == ConversationKind.AssistantWorkspace
-    val configurable = workspace || kind == ConversationKind.ChatOnAgent || kind == ConversationKind.AssistantWorkspace
+fun barControls(subject: BarSubject, harness: HarnessReport): List<BarControl> {
+    val starting = subject.starting
 
     return listOfNotNull(
         BarControl.Attach,
-        BarControl.Actions.takeIf { assistant },
+        BarControl.Actions.takeIf { subject.assistant },
         BarControl.Dictate.takeIf { harness.voice && !harness.inVoiceMode && !starting },
         BarControl.TeachMe.takeIf { harness.teachMe && !starting },
         BarControl.VoiceMode.takeIf { harness.voiceMode && !starting },
-        BarControl.Goal.takeIf { workspace },
+        BarControl.Goal.takeIf { subject.goal },
         BarControl.Stopping.takeIf { harness.working && harness.stopping && !starting },
-        BarControl.Mode.takeIf { harness.modes && kind == ConversationKind.NewConversation },
+        BarControl.Mode.takeIf { harness.modes && subject.choosesMode },
         BarControl.Model,
-        BarControl.Mode.takeIf { harness.modes && configurable },
-        BarControl.Settings.takeIf { harness.settings && configurable },
+        BarControl.Mode.takeIf { harness.modes && subject.configurable },
+        BarControl.Settings.takeIf { harness.settings && subject.configurable },
         BarControl.Usage.takeIf { !starting },
         BarControl.Stop.takeIf { harness.working && !harness.stopping && !starting },
         BarControl.Send,

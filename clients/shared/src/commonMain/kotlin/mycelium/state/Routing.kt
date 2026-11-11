@@ -105,7 +105,7 @@ fun routedLabel(conversation: Conversation, providers: List<ModelProvider>): Str
     val account = conversation.account
 
     return when {
-        routing == Routing.AnyModel && conversation.agent == "chat" -> "Any model: ${providers.firstOrNull { it.id == conversation.providerId }?.name ?: "Chat"}${conversation.model?.let { " · $it" }.orEmpty()}"
+        routing == Routing.AnyModel && conversation.runsOnModel -> "Any model: ${providers.firstOrNull { it.id == conversation.providerId }?.name ?: "Chat"}${conversation.model?.let { " · $it" }.orEmpty()}"
         routing == Routing.AnyModel -> "Any model: ${agentName(conversation.agent)}${account?.let { ", $it" }.orEmpty()}"
         else -> "Any account${account?.let { ": $it" }.orEmpty()}"
     }

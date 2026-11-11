@@ -13,7 +13,7 @@ import kotlin.test.assertTrue
 class ChatToolsRenderTest {
     private fun render(name: String, dark: Boolean) = renderAt(name, dark, false) {
         Box(Modifier.fillMaxSize().background(MyTheme.colors.bgContent)) {
-            ThreadView(buildThread(ChatToolThread), onAnswer = { _, _ -> }, onStopWorkflow = {}, agent = "chat")
+            ThreadView(buildThread(ChatToolThread), onAnswer = { _, _ -> }, onStopWorkflow = {}, agent = "chat", runsOnModel = true)
         }
     }
 

@@ -8,7 +8,7 @@ import mycelium.state.ActivityKind
 import mycelium.state.ActivityTarget
 import mycelium.state.AppState
 import mycelium.state.WellnessStore
-import mycelium.state.isChat
+import mycelium.state.runsOnModel
 
 private fun elsewhereLabel(route: Route): String = when (route) {
     Route.New, is Route.NewIn -> "New conversation"
@@ -30,7 +30,7 @@ private fun elsewhereLabel(route: Route): String = when (route) {
 fun activityTargetOf(route: Route, state: AppState): ActivityTarget = when (route) {
     is Route.Chat -> {
         val conversation = state.conversations[route.id]
-        val kind = if (conversation?.isChat == true) ActivityKind.Chat else ActivityKind.Conversation
+        val kind = if (conversation?.runsOnModel == true) ActivityKind.Chat else ActivityKind.Conversation
 
         ActivityTarget(kind, "conversation", conversation?.title, conversation?.groupId, route.id)
     }

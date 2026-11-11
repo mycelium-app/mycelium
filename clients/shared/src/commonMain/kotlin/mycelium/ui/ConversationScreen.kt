@@ -112,8 +112,12 @@ import mycelium.state.DefaultAccountId
 import mycelium.state.SignInPrefix
 import mycelium.state.isLaptop
 import mycelium.state.sessionGrants
-import mycelium.state.isChat
-import mycelium.state.isSubagent
+import mycelium.state.ConversationPlace
+import mycelium.state.hasSession
+import mycelium.state.hasWorkspace
+import mycelium.state.place
+import mycelium.state.readOnly
+import mycelium.state.runsOnModel
 import mycelium.state.ThreadBuilder
 import mycelium.state.reportedModelChoices
 import mycelium.state.sessionOptions
@@ -163,7 +167,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     var panel by remember(id) {
         val saved = if (compact) null else platform?.loadPreference("$SidePanelPreference:$id")
 
-        mutableStateOf(SidePanel.entries.firstOrNull { it.name == saved && it != SidePanel.Outline && it != SidePanel.Apps && (it != SidePanel.PullRequest || conversation?.pullRequestNumber != null) && (conversation?.isChat != true || it == SidePanel.Environment) })
+        mutableStateOf(SidePanel.entries.firstOrNull { it.name == saved && it != SidePanel.Outline && it != SidePanel.Apps && (it != SidePanel.PullRequest || conversation?.pullRequestNumber != null) && (conversation?.runsOnModel != true || it == SidePanel.Environment) })
     }
     var panelWidth by remember(workspace) {
         val saved = workspace?.let { platform?.loadPreference("$SidePanelWidthPreference:$it") } ?: platform?.loadPreference(SidePanelWidthPreference)
@@ -278,7 +282,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     }
 
     val groupName = groupId?.let { state.groups[it]?.name }
-    val chat = conversation.isChat
     var outlinePage by remember(id) { mutableStateOf<OutlinePage?>(null) }
     var outlinePhoneStage by remember(id) { mutableStateOf<OutlinePhoneStage?>(null) }
     val embedsOutline = platform?.embedsOtherSites != false
@@ -286,7 +289,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         outlinePage = page
 
         when {
-            chat || !panels -> false
+            conversation.runsOnModel || !panels -> false
             compact -> {
                 outlinePhoneStage = if (embedsOutline) OutlinePhoneStage.Document else OutlinePhoneStage.Tree
 
@@ -348,7 +351,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
-    val node = if (chat) null else state.nodes[conversation.nodeId]
+    val node = if (conversation.runsOnModel) null else state.nodes[conversation.nodeId]
     val accountPicker = run {
         val favourites = rememberFavouriteModels(store)
         val login = node?.logins?.firstOrNull { it.agent == conversation.agent && it.account == conversation.account }
@@ -361,7 +364,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
             sessionOptions(conversation, state.events[id].orEmpty(), state.sessionUpdates[id].orEmpty(), reportedModelChoices(node, conversation.agent, conversation.account)).currentModel
         }
         val anyModel = conversation.routing == Routing.AnyModel
-        val current = if (chat) ModelChoice(providerId = conversation.providerId, model = conversation.model) else ModelChoice(agent = conversation.agent, model = sessionModel?.ifEmpty { null })
+        val current = if (conversation.runsOnModel) ModelChoice(providerId = conversation.providerId, model = conversation.model) else ModelChoice(agent = conversation.agent, model = sessionModel?.ifEmpty { null })
 
         ModelPickerControls(
             label = conversationModelLabel(conversation, sessionModel, options),
@@ -376,9 +379,9 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
             onPickModel = { option ->
                 store.act {
                     when {
-                        option.providerId != null && chat -> api.patchConversation(id, PatchConversationRequest(providerId = option.providerId, model = option.model))
+                        option.providerId != null && conversation.runsOnModel -> api.patchConversation(id, PatchConversationRequest(providerId = option.providerId, model = option.model))
                         option.providerId != null -> store.continueOn(id, "$ContinueChatPrefix${option.providerId}:${option.model}")
-                        option.agent == conversation.agent && !chat -> api.setConfig(id, ConfigRequest(model = option.model))
+                        option.agent == conversation.agent && conversation.hasSession -> api.setConfig(id, ConfigRequest(model = option.model))
                         else -> store.continueOn(id, "$ContinueModelPrefix${option.agent}:${option.model}")
                     }
                 }
@@ -417,15 +420,15 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         )
     }
     val ides = LocalIdes.current
-    val ideTarget = if (node != null && !chat && ides != null) IdeTarget(node, conversation.cwd) else null
+    val ideTarget = if (node != null && conversation.hasSession && ides != null) IdeTarget(node, conversation.cwd) else null
     val ideMain = node?.let { ides?.main(it) }
-    val ideControls = if (ides != null && node != null && ideMain != null && !chat) {
+    val ideControls = if (ides != null && node != null && ideMain != null && conversation.hasSession) {
         IdeControls(ideMain, ides.others(node), ides.where(node), { ide -> ides.open(node, ide, conversation.cwd) }, ides.openSettings)
     } else {
         null
     }
-    val subagentParent = conversation.parentId?.takeIf { conversation.isSubagent }?.let { state.conversations[it] }
-    val sideKind = { kind: String -> if (chat) "side" else kind }
+    val subagentParent = conversation.parentId?.takeIf { conversation.readOnly }?.let { state.conversations[it] }
+    val sideKind = { kind: String -> if (conversation.runsOnModel) "side" else kind }
     val threadBuilder = remember(id) { ThreadBuilder() }
     val thread = remember(state.events[id]) { threadBuilder.build(state.events[id].orEmpty()) }
     val agentWorking = turnIsOpen(state.events[id].orEmpty()) || (conversation.agentActive && conversation.status == ConversationStatus.Working)
@@ -503,13 +506,13 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val generatedActions = GeneratedUiActions(
         onSendMessage = { text -> store.send(id, text) },
         onSideChat = { text -> store.act { onOpenConversation(api.startSideChat(id, sideKind("btw"), text).id) } },
-        canOpenFiles = !chat,
+        canOpenFiles = conversation.hasSession,
     )
 
     val outerOpener = LocalArtifactOpener.current
     val artefactOpener = outerOpener?.let { outer ->
         ArtifactOpener(outer.artifacts) { artifactId ->
-            if (panels && !chat && conversationArtefacts(state, id).any { it.id == artifactId }) {
+            if (panels && conversation.hasSession && conversationArtefacts(state, id).any { it.id == artifactId }) {
                 viewedArtefact = artifactId
                 openPanel(SidePanel.Artefacts)
             } else {
@@ -521,7 +524,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val outerAppViewer = LocalAppViewer.current
     val appViewer = outerAppViewer?.let { outer ->
         { uuid: String ->
-            if (!compact && !chat && panels) {
+            if (!compact && conversation.hasSession && panels) {
                 viewedApp = uuid
                 openPanel(SidePanel.Apps)
             } else {
@@ -541,7 +544,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val workflowControl: (String, WorkflowControlRequest) -> Unit = { workflowId, request -> store.act { store.controlWorkflow(workflowId, request) } }
     val conversationWorkflows = ConversationWorkflows(
         workflows = state.workflows.values.filter { it.conversationId == id }.sortedBy { it.createdAt },
-        onOpen = if (chat || !panels) null else { workflowId -> openedWorkflowId = workflowId; openPanel(SidePanel.Subagents) },
+        onOpen = if (conversation.runsOnModel || !panels) null else { workflowId -> openedWorkflowId = workflowId; openPanel(SidePanel.Subagents) },
         onControl = workflowControl,
     )
 
@@ -552,7 +555,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val agentOpener: (String) -> (() -> Unit)? = { agentId -> state.conversations.values.firstOrNull { it.parentId == id && it.agentId == agentId }?.let { agentConversation -> { onOpenConversation(agentConversation.id) } } }
 
     var browsingPath by remember(id) { mutableStateOf<String?>(null) }
-    val pathOpener: ((String) -> Unit)? = if (chat || node == null) null else { path ->
+    val pathOpener: ((String) -> Unit)? = if (conversation.runsOnModel || node == null) null else { path ->
         val rooted = path.startsWith("/") || path.startsWith("~")
         val full = if (rooted) path else conversation.cwd.trimEnd('/') + "/" + path.removePrefix("./")
 
@@ -568,7 +571,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     }
 
     CompositionLocalProvider(LocalBroughtIn provides BroughtInActions(store, state, onOpenConversation), LocalThreadSubagents provides ThreadSubagents(store, state, id, onOpenConversation), LocalPathOpener provides pathOpener, LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAppViewer provides appViewer, LocalAgentOpener provides agentOpener, LocalConversationWorkflows provides conversationWorkflows, LocalOutlineOpener provides showOutline, LocalOutlinePage provides shownOutlinePage, LocalIdeTarget provides ideTarget) {
-        val walkthrough = state.walkthroughs[id]?.takeIf { !it.dismissed && !chat }
+        val walkthrough = state.walkthroughs[id]?.takeIf { !it.dismissed && conversation.hasSession }
 
         val density = LocalDensity.current
 
@@ -585,7 +588,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
             }
         }
 
-        val terminalAvailable = !chat && !conversation.scratch
+        val terminalAvailable = conversation.hasWorkspace
 
         LaunchedEffect(id, terminalAvailable) {
             if (terminalAvailable) {
@@ -619,7 +622,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     slots = header,
                     conversation = conversation,
                     node = node,
-                    chat = chat,
                     compact = compact,
                     onNode = { nodeSheetOpen = true },
                     onOpenNodes = onOpenNodes,
@@ -666,7 +668,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 val diffs = store.diffTabs.collectAsState().value[id] ?: DiffTabs()
                 val activeDiff = diffs.tabs.firstOrNull { it.key == diffs.active }
 
-                if (!compact && !chat && (diffs.tabs.isNotEmpty() || walkthrough != null)) {
+                if (!compact && conversation.hasSession && (diffs.tabs.isNotEmpty() || walkthrough != null)) {
                     val shown = if (tab == WalkthroughTab && walkthrough == null) ConversationTab else tab
 
                     MainTabStrip(
@@ -745,6 +747,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         onDismissFailure = if (conversation.status == ConversationStatus.Failed) ({ store.dismissFailure(conversation) }) else null,
                         limitActions = if (conversation.status == ConversationStatus.Failed) limitActions else null,
                         agent = conversation.agent,
+                        runsOnModel = conversation.runsOnModel,
                         dismissedPins = dismissedPins,
                         onUnpin = { key ->
                             store.pinDismissals.dismiss(id, key)
@@ -760,7 +763,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
                 val parentId = conversation.parentId
 
-                if (conversation.isSubagent && parentId != null) {
+                if (conversation.readOnly && parentId != null) {
                     Row(Modifier.fillMaxWidth().padding(Tokens.Space.S3), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
                         Label("A subagent's conversation is read-only.", Modifier.weight(1f), color = MyTheme.colors.textMuted)
                         ConversationUsageBar(api, id, state.events[id].orEmpty().count { it.kind == mycelium.api.EventKinds.TurnEnd })
@@ -824,7 +827,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             options = remember(conversation, state.events[id], state.sessionUpdates[id], state.nodes[conversation.nodeId]) { sessionOptions(conversation, state.events[id].orEmpty(), state.sessionUpdates[id].orEmpty(), reportedModelChoices(state.nodes[conversation.nodeId], conversation.agent, conversation.account)) },
                             commands = remember(state.events[id], state.sessionUpdates[id]) { slashCommands(state.events[id].orEmpty(), state.sessionUpdates[id].orEmpty()) },
                             onSetMode = { mode -> store.act { api.setConfig(id, ConfigRequest(mode = mode)) } },
-                            permissions = SessionPermissions(sessionGrants(state.events[id].orEmpty()), if (chat) ({ tool -> store.act { api.revokePermission(id, tool) } }) else null),
+                            permissions = SessionPermissions(sessionGrants(state.events[id].orEmpty()), if (conversation.runsOnModel) ({ tool -> store.act { api.revokePermission(id, tool) } }) else null),
                             onSetModel = { model -> store.act { api.setConfig(id, ConfigRequest(model = model)) } },
                             onSearchFiles = { query -> api.files(id, query) },
                             onSearchReferences = { query -> forgeReferences(api.issues().issues, api.pullRequests().pullRequests, query) },
@@ -894,7 +897,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     }
                 }
 
-                Rail(if (narrow && chatForced) null else panel, !chat && outlineAccounts.isNotEmpty(), conversationApps(state, id).isNotEmpty(), conversation.pullRequestNumber != null, conversation.scratch || chat) { chosen ->
+                Rail(if (narrow && chatForced) null else panel, conversation.hasSession && outlineAccounts.isNotEmpty(), conversationApps(state, id).isNotEmpty(), conversation.pullRequestNumber != null, !conversation.hasWorkspace) { chosen ->
                     if (narrow) {
                         if (panel == chosen && !chatForced) {
                             chatForced = true
@@ -909,7 +912,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
-    if (compact && !chat && panels && panel != null) {
+    if (compact && conversation.hasSession && panels && panel != null) {
         BottomSheet(onDismiss = { openPanel(null) }) {
             when (panel) {
                 SidePanel.Subagents -> if (openedWorkflow != null) {
@@ -925,7 +928,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
-    outlinePhoneStage?.takeIf { compact && !chat && panels }?.let { stage ->
+    outlinePhoneStage?.takeIf { compact && conversation.hasSession && panels }?.let { stage ->
         FullScreenSheet({ outlinePhoneStage = if (stage == OutlinePhoneStage.Document) OutlinePhoneStage.Tree else null }) {
             platform?.let { OutlinePhone(outlineBrowser, it, outlineAccounts, shownOutlinePage, stage, { next -> outlinePhoneStage = next }, selectOutline, onClose = { outlinePhoneStage = null }) }
         }
@@ -955,7 +958,6 @@ private fun ConversationHeader(
     slots: HeaderSlots?,
     conversation: Conversation,
     node: NodeSummary?,
-    chat: Boolean,
     compact: Boolean,
     onNode: () -> Unit,
     onOpenNodes: () -> Unit,
@@ -1010,7 +1012,7 @@ private fun ConversationHeader(
     val nodeMenu: @Composable () -> Unit = {
         if (nodeMenuOpen) {
             MenuPopup(onDismiss = { nodeMenuOpen = false }) {
-                if (!conversation.scratch) {
+                if (conversation.place != ConversationPlace.Scratch) {
                     MenuItem("Move", onClick = { nodeMenuOpen = false; moveOpen = true }, leading = MyIcon.Move)
                 }
 
@@ -1053,7 +1055,7 @@ private fun ConversationHeader(
             }
         }
 
-        if (compact && chat) {
+        if (compact && conversation.runsOnModel) {
             Box(Modifier.weight(0.001f))
             WatchingButton(watches, watchStatus, onOpenWatch, onStopWatch, compact = true)
             MyButton(onEnvironment, icon = MyIcon.Desktop, description = "Environment", muted = true)
@@ -1061,7 +1063,7 @@ private fun ConversationHeader(
             MyButton(onNode, icon = node?.let(::nodeIcon) ?: MyIcon.Server, description = "Running on ${node?.name ?: "an unknown node"}", muted = true)
             WatchingButton(watches, watchStatus, onOpenWatch, onStopWatch, compact = true)
 
-            if (!conversation.scratch) {
+            if (conversation.place != ConversationPlace.Scratch) {
                 MyButton(onTerminal, icon = MyIcon.Terminal, description = if (terminalShown) "Hide terminal" else "Show terminal", muted = true, selected = terminalShown)
                 MyButton(onGit, icon = MyIcon.Branch, description = "Git", muted = true)
             }
@@ -1070,7 +1072,7 @@ private fun ConversationHeader(
         } else {
             if (!placeInMore) {
                 Row(Modifier.onSizeChanged { placeWidth = with(density) { it.width.toDp() } }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                    if (!chat && !conversation.scratch) {
+                    if (conversation.hasWorkspace) {
                         ProjectBreadcrumb(project, projects, nodes, onProject, setUpFolder = conversation.cwd.takeIf { project == null }, onSetUp = onSetUp)
                     }
 
@@ -1132,7 +1134,7 @@ private fun ConversationHeader(
 
             if (menuOpen) {
                 MenuPopup(onDismiss = { menuOpen = false }) {
-                    if (placeInMore && !chat && !conversation.scratch) {
+                    if (placeInMore && conversation.hasWorkspace) {
                         MenuItem("Project", onClick = { menuOpen = false; projectMenuOpen = true }, hint = project?.name ?: "None", leading = MyIcon.Folder)
                     }
 
@@ -1154,7 +1156,7 @@ private fun ConversationHeader(
                     if (compact) {
                         MenuItem("Rename", onClick = { menuOpen = false; renaming = true }, leading = MyIcon.Pencil)
 
-                        if (!chat) {
+                        if (conversation.hasSession) {
                             MenuItem("Project", onClick = { menuOpen = false; projectMenuOpen = true }, hint = project?.name ?: "None", leading = MyIcon.Folder)
                         }
                     }
@@ -1166,11 +1168,11 @@ private fun ConversationHeader(
                         MenuItem("Take over", onClick = { menuOpen = false; onTakeOver() }, hint = "from ${manager.title.ifBlank { manager.id }}", leading = MyIcon.Hand)
                     }
 
-                    if (!chat && !conversation.scratch) {
+                    if (conversation.hasWorkspace) {
                         MenuItem(if (terminalShown) "Hide terminal" else "Show terminal", onClick = { menuOpen = false; onTerminal() }, hint = "Ctrl+`", leading = MyIcon.Terminal)
                     }
 
-                    if (!chat && !archived) {
+                    if (conversation.hasSession && !archived) {
                         MenuItem("Close session", onClick = { menuOpen = false; onCloseSession() }, leading = MyIcon.Stop)
                     }
 

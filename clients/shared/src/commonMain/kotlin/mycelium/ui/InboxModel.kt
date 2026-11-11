@@ -13,6 +13,8 @@ import mycelium.api.ConversationStatus
 import mycelium.api.Project
 import mycelium.api.Workflow
 import mycelium.api.WorkflowKinds
+import mycelium.state.ConversationPlace
+import mycelium.state.place
 import mycelium.state.WorkflowStepStatuses
 import mycelium.state.AppState
 import mycelium.state.MyceliumCall
@@ -136,7 +138,7 @@ fun inboxItems(state: AppState): List<InboxItem> {
     fun item(conversation: Conversation, key: String, waitingSince: String, context: String?, request: InboxRequest, thread: List<ThreadItem>): InboxItem {
         val project = conversation.projectId?.let { state.projects[it] }
 
-        return InboxItem("${conversation.id}/$key", conversation, project, project?.name ?: projectName(conversation.cwd).takeUnless { conversation.scratch }, conversation.assistantId?.let { state.assistants[it] }, waitingSince, context, request, thread)
+        return InboxItem("${conversation.id}/$key", conversation, project, project?.name ?: projectName(conversation.cwd).takeUnless { conversation.place == ConversationPlace.Scratch }, conversation.assistantId?.let { state.assistants[it] }, waitingSince, context, request, thread)
     }
 
     val fromApprovals = waitingApprovals(state).mapNotNull { approval ->
@@ -170,7 +172,7 @@ fun inboxItems(state: AppState): List<InboxItem> {
             val conversation = workflow.conversationId?.let { state.conversations[it] } ?: return@mapNotNull null
             val project = conversation.projectId?.let { state.projects[it] }
 
-            InboxItem("${conversation.id}/workflow-${workflow.id}", conversation, project, project?.name ?: projectName(conversation.cwd).takeUnless { conversation.scratch }, conversation.assistantId?.let { state.assistants[it] }, workflow.updatedAt, null, InboxRequest.Gate(workflow), emptyList())
+            InboxItem("${conversation.id}/workflow-${workflow.id}", conversation, project, project?.name ?: projectName(conversation.cwd).takeUnless { conversation.place == ConversationPlace.Scratch }, conversation.assistantId?.let { state.assistants[it] }, workflow.updatedAt, null, InboxRequest.Gate(workflow), emptyList())
         }
 
     return (fromConversations + fromApprovals + fromGates).sortedByDescending { it.waitingSince }
