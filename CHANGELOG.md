@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.12
+
+- The Wellness & Learning page has a Start a break now button that starts a break straight away, the same break the reminder offers.
+- A conversation that arrives just after the app connects stays in the list instead of being dropped by the first refresh.
+
 ## v0.34.11
 
 - A conversation that reaches a usage limit is caught even when the agent sends the limit message before a usage update or after its turn has ended, so it moves to another account instead of sitting still. A side chat at a limit with every account spent moves on when another account resets.
