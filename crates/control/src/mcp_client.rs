@@ -84,7 +84,7 @@ impl McpConnection {
                 tools.push(McpTool {
                     name: name.to_string(),
                     description: tool["description"].as_str().unwrap_or_default().to_string(),
-                    input_schema: tool.get("inputSchema").cloned().unwrap_or_else(|| json!({"type": "object"})),
+                    input_schema: object_schema(tool.get("inputSchema").cloned().unwrap_or_else(|| json!({"type": "object"}))),
                     read_only: tool["annotations"]["readOnlyHint"].as_bool(),
                 });
             }
@@ -280,6 +280,25 @@ impl McpConnection {
             _ => Err(McpError::Failed("it did not answer in a form Mycelium understands.".to_string())),
         }
     }
+}
+
+fn object_schema(schema: Value) -> Value {
+    let named = schema["$ref"].as_str().and_then(|reference| reference.strip_prefix("#/")).and_then(|path| schema.pointer(&format!("/{path}"))).filter(|target| target.is_object()).cloned();
+    let Some(mut resolved) = named else {
+        return schema;
+    };
+
+    for key in ["$schema", "definitions", "$defs"] {
+        if let (Some(value), Some(object)) = (schema.get(key), resolved.as_object_mut()) {
+            object.entry(key).or_insert_with(|| value.clone());
+        }
+    }
+
+    if let Some(object) = resolved.as_object_mut() {
+        object.entry("type").or_insert_with(|| json!("object"));
+    }
+
+    resolved
 }
 
 fn header_value(value: &str) -> String {

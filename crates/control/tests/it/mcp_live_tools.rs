@@ -102,6 +102,45 @@ async fn tools_list_includes_a_connected_servers_tools_under_a_prefixed_name_and
 }
 
 #[tokio::test]
+async fn a_tool_whose_input_schema_is_a_reference_is_listed_as_the_object_it_names() {
+    async fn handle(Json(body): Json<Value>) -> Response {
+        if body.get("id").is_none() {
+            return StatusCode::ACCEPTED.into_response();
+        }
+
+        let result = match body["method"].as_str().unwrap_or_default() {
+            "initialize" => json!({"protocolVersion": "2025-11-25", "capabilities": {"tools": {}}, "serverInfo": {"name": "notes", "version": "1"}}),
+            "tools/list" => json!({"tools": [{"name": "create_note", "description": "Create a note.", "inputSchema": {
+                "$schema": "http://json-schema.org/draft-07/schema#",
+                "$ref": "#/definitions/CreateNote",
+                "definitions": {"CreateNote": {"type": "object", "properties": {"title": {"type": "string"}, "tag": {"$ref": "#/definitions/Tag"}}, "required": ["title"]}, "Tag": {"type": "string"}},
+            }}]}),
+            _ => return StatusCode::NOT_FOUND.into_response(),
+        };
+
+        Json(json!({"jsonrpc": "2.0", "id": body["id"], "result": result})).into_response()
+    }
+
+    let server = Server::start().await;
+    let (_, token) = server.join("node", "laptop").await;
+    let base = serve(Router::new().route("/mcp", post(handle))).await;
+    let (status, added) = server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Notes", "url": format!("{base}/mcp")}))).await;
+    assert_eq!(status, 201, "{added}");
+
+    let listed = mcp(&server, &token, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})).await;
+    let tool = listed["result"]["tools"].as_array().unwrap().iter().find(|tool| tool["name"] == "notes__create_note").unwrap();
+    let schema = &tool["inputSchema"];
+
+    assert_eq!(schema["type"], "object");
+    assert!(schema.get("$ref").is_none());
+    assert_eq!(schema["required"], json!(["title"]));
+    assert_eq!(schema["properties"]["title"], json!({"type": "string"}));
+    assert_eq!(schema["properties"]["tag"], json!({"$ref": "#/definitions/Tag"}));
+    assert_eq!(schema["definitions"]["Tag"], json!({"type": "string"}));
+    assert!(schema["properties"].get("response_filter").is_some());
+}
+
+#[tokio::test]
 async fn workspace_agents_list_and_call_litellm_tools_through_mycelium() {
     let server = Server::start().await;
     let (_, token) = server.join("node", "laptop").await;
