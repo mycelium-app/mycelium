@@ -764,13 +764,28 @@ impl Daemon {
             (env, folder, requested_account)
         };
 
+        let mcp_in_claude_options = agent == AgentId::Claude && self.pods.is_none();
+        let mcp_server = if mcp_in_claude_options {
+            match self.config.save_mcp_headers(conversation_id, &mcp_token) {
+                Ok(headers_file) => self.config.mcp_server_reading(&headers_file),
+                Err(error) => {
+                    self.refuse(conversation_id, format!("The node could not save the conversation's Mycelium credentials: {error:#}"));
+
+                    return;
+                }
+            }
+        } else {
+            self.config.mcp_server(&mcp_token)
+        };
+
         let launch = Launch {
             agent,
             account: requested_account,
             keeper_binary: self.options.keeper_binary.clone(),
             agent_command,
             agent_env: env,
-            mcp_server: self.config.mcp_server(&mcp_token),
+            mcp_server,
+            mcp_in_claude_options,
             instructions: instructions.filter(|_| agent == AgentId::Claude),
             cwd: folder,
             resume,

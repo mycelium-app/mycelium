@@ -60,6 +60,7 @@ pub struct StartPlan {
     pub resume: Option<String>,
     pub fork: bool,
     pub mcp_server: Value,
+    pub mcp_in_claude_options: bool,
     pub instructions: Option<String>,
 }
 
@@ -497,11 +498,16 @@ impl SessionState {
     }
 
     fn start_session_request(&mut self, plan: &StartPlan) -> Action {
-        let mcp_servers = if self.http_mcp { json!([plan.mcp_server]) } else { json!([]) };
+        let in_acp = self.http_mcp && !plan.mcp_in_claude_options;
+        let mcp_servers = if in_acp { json!([plan.mcp_server]) } else { json!([]) };
         let mut params = json!({"cwd": plan.cwd, "mcpServers": mcp_servers});
 
         if let Some(instructions) = &plan.instructions {
-            params["_meta"] = json!({"systemPrompt": {"append": instructions}});
+            params["_meta"]["systemPrompt"] = json!({"append": instructions});
+        }
+
+        if self.http_mcp && plan.mcp_in_claude_options {
+            params["_meta"]["claudeCode"] = json!({"options": {"mcpServers": {"mycelium": plan.mcp_server}}});
         }
 
         let Some(resume) = &plan.resume else {
@@ -779,7 +785,7 @@ mod tests {
     }
 
     fn plan(resume: Option<&str>) -> Option<StartPlan> {
-        Some(StartPlan { cwd: "/work".into(), resume: resume.map(str::to_string), fork: false, mcp_server: json!({"type": "http", "name": "mycelium"}), instructions: None })
+        Some(StartPlan { cwd: "/work".into(), resume: resume.map(str::to_string), fork: false, mcp_server: json!({"type": "http", "name": "mycelium"}), mcp_in_claude_options: false, instructions: None })
     }
 
     fn sent_frames(actions: &[Action]) -> Vec<Value> {
@@ -887,6 +893,21 @@ mod tests {
     }
 
     #[test]
+    fn a_claude_session_gets_the_mycelium_server_in_its_options_and_not_in_the_acp_list() {
+        let mut through_options = plan(None).unwrap();
+        through_options.mcp_in_claude_options = true;
+        through_options.instructions = Some("Use British English.".into());
+        let mut state = SessionState::new(conversation(), Some(through_options), 0);
+        state.on_live();
+
+        let actions = state.on_entry(1, Direction::In, json!({"jsonrpc": "2.0", "id": 1, "result": {"agentCapabilities": {"mcpCapabilities": {"http": true}}}}));
+
+        let frames = sent_frames(&actions);
+        assert_eq!(frames[0]["params"]["mcpServers"], json!([]));
+        assert_eq!(frames[0]["params"]["_meta"], json!({"systemPrompt": {"append": "Use British English."}, "claudeCode": {"options": {"mcpServers": {"mycelium": {"type": "http", "name": "mycelium"}}}}}));
+    }
+
+    #[test]
     fn the_mycelium_mcp_server_is_passed_when_resuming_too() {
         let mut state = SessionState::new(conversation(), plan(Some("abc")), 0);
         state.on_live();
@@ -922,7 +943,7 @@ mod tests {
 
     #[test]
     fn a_fork_asks_the_agent_to_fork_the_session_and_adopts_the_session_it_returns() {
-        let forking = Some(StartPlan { cwd: "/work".into(), resume: Some("abc".into()), fork: true, mcp_server: json!({"type": "http", "name": "mycelium"}), instructions: None });
+        let forking = Some(StartPlan { cwd: "/work".into(), resume: Some("abc".into()), fork: true, mcp_server: json!({"type": "http", "name": "mycelium"}), mcp_in_claude_options: false, instructions: None });
         let mut state = SessionState::new(conversation(), forking, 0);
         state.on_live();
 

@@ -341,6 +341,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/memory-banks", get(memories::list_banks).post(memories::create_bank))
         .route("/api/v1/memory-banks/{id}", patch(memories::update_bank).delete(memories::delete_bank))
         .route("/api/v1/mcp", get(mcp::stream).post(mcp::handle))
+        .route("/api/v1/mcp-session-tokens/revoke", post(mcp_tokens::revoke))
         .route("/api/v1/forges", get(forges::list).post(forges::connect))
         .route("/api/v1/forges/{id}", delete(forges::disconnect))
         .route("/api/v1/forges/{id}/mcp", post(forges::link_mcp))

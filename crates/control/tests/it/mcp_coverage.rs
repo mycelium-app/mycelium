@@ -152,6 +152,7 @@ const COVERED: &[(&str, &str, &str)] = &[
 ];
 
 const EXCEPTIONS: &[(&str, &str, &str)] = &[
+    ("POST", "/api/v1/mcp-session-tokens/revoke", "revoking the credentials agents use is the person's decision, not an agent's"),
     ("POST", "/api/v1/artifact-access-requests/{id}/approve", "approving an approval card from an agent would let it approve its own request"),
     ("POST", "/api/v1/assistant-changes/{id}/approve", "approving an approval card from an agent would let it approve its own request"),
     ("POST", "/api/v1/assistants/{id}/action-proposals/{proposal_id}/approve", "approving an approval card from an agent would let it approve its own request"),

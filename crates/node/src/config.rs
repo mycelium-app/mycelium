@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 const NODE_TOKEN_PREFIX: &str = "myc_node_";
 pub const API_TOKEN_FILE: &str = "api-token";
+pub const MCP_HEADERS_FILE: &str = "mcp-headers.json";
 pub const SSH_HOST_KEY_FILE: &str = "ssh_host_ed25519_key";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -138,6 +139,14 @@ impl NodeConfig {
         Ok(path)
     }
 
+    pub fn save_mcp_headers(&self, conversation_id: Uuid, session_token: &str) -> Result<PathBuf> {
+        let path = self.sessions_dir().join(conversation_id.to_string()).join(MCP_HEADERS_FILE);
+        let headers = json!({"Authorization": format!("Bearer {session_token}")});
+        write_private_file(&path, headers.to_string().as_bytes())?;
+
+        Ok(path)
+    }
+
     pub fn save_ssh_token(&self, request_id: Uuid, conversation_id: Uuid, token: &str) -> Result<PathBuf> {
         let path = self.sessions_dir().join(conversation_id.to_string()).join(format!("ssh-token-{request_id}"));
         write_private_file(&path, token.as_bytes())?;
@@ -171,6 +180,16 @@ impl NodeConfig {
             "headers": [
                 {"name": "Authorization", "value": format!("Bearer {session_token}")},
             ],
+        })
+    }
+
+    pub fn mcp_server_reading(&self, headers_file: &Path) -> Value {
+        let base = self.control_plane.trim_end_matches('/');
+
+        json!({
+            "type": "http",
+            "url": format!("{base}/api/v1/mcp"),
+            "headersHelper": format!("cat '{}'", headers_file.display()),
         })
     }
 
@@ -431,6 +450,22 @@ mod tests {
                 ],
             })
         );
+    }
+
+    #[test]
+    fn the_session_token_is_kept_in_a_private_file_that_the_headers_helper_prints() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = sample();
+        config.state_dir = dir.path().to_path_buf();
+
+        let headers_file = config.save_mcp_headers(Uuid::from_u128(5), "myc_session_example").unwrap();
+        let server = config.mcp_server_reading(&headers_file);
+        let helper = server["headersHelper"].as_str().unwrap();
+        let printed = std::process::Command::new("sh").arg("-c").arg(helper).output().unwrap();
+
+        assert!(!server.to_string().contains("myc_session_example"), "{server}");
+        assert_eq!(std::fs::metadata(&headers_file).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(serde_json::from_slice::<Value>(&printed.stdout).unwrap(), json!({"Authorization": "Bearer myc_session_example"}));
     }
 
     #[test]

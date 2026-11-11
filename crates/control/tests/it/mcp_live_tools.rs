@@ -313,3 +313,58 @@ async fn tools_act_for_the_conversations_owner_not_the_node_creator() {
     assert_eq!(status, 200, "{listed}");
     assert!(!names(&listed).contains(&"lab__get_weather".to_string()));
 }
+
+fn sha256_hex(secret: &str) -> String {
+    hash(secret).iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+async fn mcp_status(server: &Server, token: &str) -> u16 {
+    let anonymous = server.anonymous();
+
+    anonymous.json(anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {token}")).json(&json!({"jsonrpc": "2.0", "id": 1, "method": "ping"}))).await.0
+}
+
+#[tokio::test]
+async fn a_session_token_revoked_by_its_digest_no_longer_reaches_the_tools() {
+    let server = Server::start().await;
+    let token = own_session_token(&server).await;
+    assert_eq!(mcp_status(&server, &token).await, 200);
+
+    let (status, body) = server.user.json(server.user.post("/api/v1/mcp-session-tokens/revoke").json(&json!({"sha256": sha256_hex("own-session-secret")}))).await;
+
+    assert_eq!((status, body), (200, json!({"revoked": 1})));
+    assert_eq!(mcp_status(&server, &token).await, 401);
+}
+
+#[tokio::test]
+async fn a_session_token_of_another_persons_conversation_is_left_alone() {
+    let server = Server::start().await;
+    let (node, _) = server.join("node", "laptop").await;
+    let (_, token) = conversation_of_another_user(&server, node).await;
+
+    let (status, body) = server.user.json(server.user.post("/api/v1/mcp-session-tokens/revoke").json(&json!({"sha256": sha256_hex("other-session-secret")}))).await;
+
+    assert_eq!((status, body), (200, json!({"revoked": 0})));
+    assert_eq!(mcp_status(&server, &token).await, 200);
+}
+
+#[tokio::test]
+async fn every_session_token_of_a_conversation_can_be_revoked_at_once() {
+    let server = Server::start().await;
+    let token = own_session_token(&server).await;
+    let conversation = sqlx::query_scalar::<_, Uuid>("select conversation_id from mcp_session_tokens").fetch_one(&server.pool).await.unwrap();
+
+    let (status, body) = server.user.json(server.user.post("/api/v1/mcp-session-tokens/revoke").json(&json!({"conversation_id": conversation}))).await;
+
+    assert_eq!((status, body), (200, json!({"revoked": 1})));
+    assert_eq!(mcp_status(&server, &token).await, 401);
+}
+
+#[tokio::test]
+async fn a_digest_that_is_not_sha256_hex_is_refused_with_how_to_fix_it() {
+    let server = Server::start().await;
+
+    let (status, body) = server.user.json(server.user.post("/api/v1/mcp-session-tokens/revoke").json(&json!({"sha256": "myc_session_abc"}))).await;
+
+    assert_eq!((status, body["error"].clone()), (400, json!("invalid_sha256")));
+}
