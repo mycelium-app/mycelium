@@ -18,6 +18,8 @@ import mycelium.state.splitSignedOut
 import mycelium.state.usageClockTime
 import mycelium.state.usageProjection
 import mycelium.state.compactWindowUsage
+import mycelium.state.usageUpdated
+import mycelium.state.windowShortName
 import mycelium.state.CompactWindowUsage
 import mycelium.state.windowName
 import mycelium.state.evenPacePercent
@@ -65,6 +67,7 @@ class AccountUsageTest {
         val credits = ResetCredits(2, listOf(ResetCredit("b", "2026-12-01T00:00:00Z"), ResetCredit("a", "2026-11-14T09:00:00Z"), ResetCredit("c")))
 
         assertEquals("2 resets banked, next expires 14 Nov", bankedResetsSummary(credits, utc))
+        assertEquals("2 banked, expires 14 Nov", bankedResetsSummary(credits, utc, brief = true))
         assertEquals("1 reset banked", bankedResetsSummary(ResetCredits(1), utc))
         assertEquals("1 reset banked", bankedResetsSummary(ResetCredits(1, listOf(ResetCredit("a"))), utc))
     }
@@ -163,14 +166,35 @@ class AccountUsageTest {
     fun aCompactWindowGivesItsForecastAndTimeLeft() {
         val window = UsageWindow("five_hour", 64.0, resetsAt = "2026-10-23T19:00:00Z", ratePerHour = 12.0, runsOutAt = "2026-10-23T17:00:00Z")
 
-        assertEquals(CompactWindowUsage(64, "runs out in 3h", "64% used, 5h left", true), compactWindowUsage(window, ::utc, Now))
+        assertEquals(CompactWindowUsage(64, "runs out in 3h", "64% used, 5h left", true, "5h 00m", "at this rate runs out in 3h, resets in 5h 00m"), compactWindowUsage(window, ::utc, Now))
     }
 
     @Test
     fun aCompactWindowThatLastsUntilItResetsHasNoForecast() {
         val window = UsageWindow("seven_day", 20.0, resetsAt = "2026-10-28T09:00:00Z", ratePerHour = 0.2)
 
-        assertEquals(CompactWindowUsage(20, null, "20% used, resets Wed", false), compactWindowUsage(window, ::utc, Now))
+        assertEquals(CompactWindowUsage(20, null, "20% used, resets Wed", false, "Wed", "resets Wed"), compactWindowUsage(window, ::utc, Now))
+    }
+
+    @Test
+    fun aWindowResettingLaterTodayGivesTheHoursAndPaddedMinutesLeft() {
+        val window = UsageWindow("five_hour", 12.0, resetsAt = "2026-10-23T18:05:00Z")
+
+        assertEquals("4h 05m", compactWindowUsage(window, ::utc, Now).reset)
+        assertEquals("resets in 4h 05m", compactWindowUsage(window, ::utc, Now).resetDescription)
+    }
+
+    @Test
+    fun windowsGetTheirShortLabels() {
+        assertEquals("5h", windowShortName("five_hour"))
+        assertEquals("7d", windowShortName("seven_day"))
+        assertEquals("7d", windowShortName("seven_day_opus"))
+    }
+
+    @Test
+    fun theCardSaysHowLongAgoItsOldestReadingWas() {
+        assertEquals("Updated 2m ago", usageUpdated(listOf("2026-10-23T13:58:00Z", "2026-10-23T13:59:00Z"), Now))
+        assertEquals(null, usageUpdated(emptyList(), Now))
     }
 
     @Test
@@ -192,14 +216,14 @@ class AccountUsageTest {
     fun aFullWindowDoesNotSayWhenItRunsOut() {
         val window = UsageWindow("five_hour", 100.0, resetsAt = "2026-10-23T14:06:00Z", ratePerHour = 20.0, runsOutAt = "2026-10-23T13:57:00Z")
 
-        assertEquals(CompactWindowUsage(100, null, "100% used, 6m left", false), compactWindowUsage(window, ::utc, Now))
+        assertEquals(CompactWindowUsage(100, null, "100% used, 6m left", false, "6m", "resets in 6m"), compactWindowUsage(window, ::utc, Now))
     }
 
     @Test
     fun aWindowWhoseResetHasPassedShowsAsReset() {
         val window = UsageWindow("five_hour", 100.0, resetsAt = "2026-10-23T13:03:00Z", ratePerHour = 20.0, runsOutAt = "2026-10-23T12:57:00Z")
 
-        assertEquals(CompactWindowUsage(0, null, "0% used, reset 13:03", false), compactWindowUsage(window, ::utc, Now))
+        assertEquals(CompactWindowUsage(0, null, "0% used, reset 13:03", false, "13:03", "reset 13:03"), compactWindowUsage(window, ::utc, Now))
     }
 
     @Test

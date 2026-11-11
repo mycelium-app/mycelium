@@ -88,7 +88,7 @@ fun workflowStats(agent: WorkflowAgent): String? = listOfNotNull(
 
 fun workflowTokens(progress: WorkflowProgress): String? = progress.totals.tokens?.let { "${tokenCount(it)} toks" }
 
-private fun tokenCount(tokens: Long): String = when {
+fun tokenCount(tokens: Long): String = when {
     tokens >= 1_000_000 -> "${tokens / 100_000 / 10.0}M"
     tokens >= 1_000 -> "${tokens / 100 / 10.0}k"
     else -> tokens.toString()

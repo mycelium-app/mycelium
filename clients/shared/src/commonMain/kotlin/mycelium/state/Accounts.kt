@@ -86,13 +86,17 @@ fun chatAccountFirst(accounts: List<AgentAccount>, agent: String?, nodeName: Str
     return accounts.sortedBy { if (it == current) 0 else 1 }.map { it to (it == current) }
 }
 
-fun bankedResetsSummary(credits: ResetCredits, localDateTime: (Long) -> String?): String {
-    val count = if (credits.availableCount == 1) "1 reset banked" else "${credits.availableCount} resets banked"
+fun bankedResetsSummary(credits: ResetCredits, localDateTime: (Long) -> String?, brief: Boolean = false): String {
+    val count = when {
+        brief -> "${credits.availableCount} banked"
+        credits.availableCount == 1 -> "1 reset banked"
+        else -> "${credits.availableCount} resets banked"
+    }
     val next = credits.credits.orEmpty().mapNotNull { credit -> credit.expiresAt?.let { instantOrNull(it) } }.minOrNull() ?: return count
     val date = (localDateTime(next.toEpochMilliseconds()) ?: next.toString()).substringBefore('T')
     val (_, month, day) = date.split('-')
 
-    return "$count, next expires ${day.toInt()} ${MonthNames[month.toInt() - 1]}"
+    return "$count, ${if (brief) "expires" else "next expires"} ${day.toInt()} ${MonthNames[month.toInt() - 1]}"
 }
 
 fun runsOutBeforeReset(window: UsageWindow): Boolean {
@@ -226,6 +230,8 @@ fun usageClockTime(iso: String, localDateTime: (Long) -> String?, now: Instant =
 
 private val MonthNames = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
+fun monthAbbreviation(month: Int): String = MonthNames[month - 1]
+
 fun usageProjection(window: UsageWindow, localDateTime: (Long) -> String?, now: Instant = Clock.System.now()): String {
     val resets = window.resetsAt?.let { "resets ${usageClockTime(it, localDateTime, now)}" }
     val about = if (localDateTime(now.toEpochMilliseconds()) == null) "" else "about "
@@ -235,14 +241,28 @@ fun usageProjection(window: UsageWindow, localDateTime: (Long) -> String?, now: 
     return listOfNotNull(runsOut ?: steady, resets).joinToString(", ").replaceFirstChar { it.uppercase() }
 }
 
-data class CompactWindowUsage(val percent: Int, val forecast: String?, val summary: String, val attention: Boolean)
+data class CompactWindowUsage(val percent: Int, val forecast: String?, val summary: String, val attention: Boolean, val reset: String = "", val resetDescription: String = "")
+
+fun windowShortName(name: String): String = when {
+    name == "five_hour" -> "5h"
+    name.startsWith("seven_day") -> "7d"
+    else -> name
+}
+
+fun usageUpdated(readAts: List<String>, now: Instant = Clock.System.now()): String? {
+    val oldest = readAts.mapNotNull { read -> instantOrNull(read)?.let { read to it } }.minByOrNull { it.second }?.first ?: return null
+
+    return "Updated ${ago(oldest, now)}"
+}
 
 fun compactWindowUsage(window: UsageWindow, localDateTime: (Long) -> String?, now: Instant = Clock.System.now()): CompactWindowUsage {
     val resetsAt = window.resetsAt
     val resets = resetsAt?.let { instantOrNull(it) }
 
     if (resetsAt != null && resets != null && resets <= now) {
-        return CompactWindowUsage(0, null, "0% used, reset ${usageClockTime(resetsAt, localDateTime, now)}", false)
+        val clock = usageClockTime(resetsAt, localDateTime, now)
+
+        return CompactWindowUsage(0, null, "0% used, reset $clock", false, clock, "reset $clock")
     }
 
     val percent = window.usedPercent.roundToInt().coerceIn(0, 100)
@@ -253,15 +273,29 @@ fun compactWindowUsage(window: UsageWindow, localDateTime: (Long) -> String?, no
         resetsAt == null -> ""
         resets != null && localReset != null && resets - now >= 1.days -> {
             val (_, month, day) = localReset.substringBefore('T').split('-')
-            val weekday = WeekdayNames[(Instant.parse("${localReset.substringBefore('T')}T00:00:00Z").epochSeconds / 86_400 + 3).mod(7).toInt()].take(3)
 
-            if (resets - now >= SevenDays) ", resets $weekday ${day.toInt()} ${MonthNames[month.toInt() - 1]}" else ", resets $weekday"
+            if (resets - now >= SevenDays) ", resets ${weekdayAbbreviation(localReset)} ${day.toInt()} ${MonthNames[month.toInt() - 1]}" else ", resets ${weekdayAbbreviation(localReset)}"
         }
         else -> ", ${until(resetsAt, now).removePrefix("in ")} left"
     }
+    val remaining = resets?.let { it - now }
+    val reset = when {
+        remaining == null -> ""
+        localReset != null && remaining >= 1.days -> weekdayAbbreviation(localReset)
+        remaining.inWholeMinutes < 60 -> "${remaining.inWholeMinutes}m"
+        else -> "${remaining.inWholeHours}h ${(remaining.inWholeMinutes % 60).toString().padStart(2, '0')}m"
+    }
+    val resetDescription = when {
+        remaining == null -> null
+        localReset != null && remaining >= 1.days -> "resets $reset"
+        else -> "resets in $reset"
+    }
+    val description = listOfNotNull(forecast?.let { "at this rate $it" }, resetDescription).joinToString(", ")
 
-    return CompactWindowUsage(percent, forecast, "$percent% used$left", attention)
+    return CompactWindowUsage(percent, forecast, "$percent% used$left", attention, reset, description)
 }
+
+private fun weekdayAbbreviation(localDateTime: String): String = WeekdayNames[weekdayOf(localDateTime.substringBefore('T'))].take(3)
 
 private val FiveHours = 5.hours
 private val SevenDays = 7.days

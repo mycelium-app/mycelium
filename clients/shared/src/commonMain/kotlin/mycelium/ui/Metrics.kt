@@ -27,6 +27,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import mycelium.state.ColumnAlign
 
@@ -65,7 +66,7 @@ fun Kpi(title: String, value: String, modifier: Modifier = Modifier, caption: St
 private val MarkerWidth = 2.dp
 
 @Composable
-fun Meter(percent: Int, description: String, modifier: Modifier = Modifier, attention: Boolean = false, markerPercent: Int? = null) {
+fun Meter(percent: Int, description: String, modifier: Modifier = Modifier, attention: Boolean = false, markerPercent: Int? = null, height: Dp = MeterHeight) {
     val colors = MyTheme.colors
     val fill = when {
         percent >= AttentionPercent -> colors.statusFailed
@@ -76,7 +77,7 @@ fun Meter(percent: Int, description: String, modifier: Modifier = Modifier, atte
     Canvas(
         modifier
             .fillMaxWidth()
-            .height(MeterHeight)
+            .height(height)
             .semantics {
                 contentDescription = description
                 progressBarRangeInfo = ProgressBarRangeInfo(percent.toFloat(), 0f..100f)

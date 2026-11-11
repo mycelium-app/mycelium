@@ -729,6 +729,10 @@ pub struct ModelProvider {
     pub name: String,
     pub base_url: Option<String>,
     pub key_hint: Option<String>,
+    #[serde(default)]
+    pub has_admin_key: bool,
+    #[serde(default)]
+    pub admin_key_hint: Option<String>,
     pub models: Vec<String>,
     pub default_model: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -750,20 +754,34 @@ pub struct CreateModelProviderRequest {
     pub base_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admin_key: Option<String>,
 }
 
 impl std::fmt::Debug for CreateModelProviderRequest {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("CreateModelProviderRequest").field("kind", &self.kind).field("name", &self.name).field("base_url", &self.base_url).field("api_key", &"<hidden>").finish()
+        formatter.debug_struct("CreateModelProviderRequest").field("kind", &self.kind).field("name", &self.name).field("base_url", &self.base_url).field("api_key", &"<hidden>").field("admin_key", &"<hidden>").finish()
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+fn present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(deserializer).map(Some)
+}
+
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct UpdateModelProviderRequest {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
     pub model_class: Option<ModelClass>,
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub admin_key: Option<Option<String>>,
+}
+
+impl std::fmt::Debug for UpdateModelProviderRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("UpdateModelProviderRequest").field("name", &self.name).field("model_class", &self.model_class).field("admin_key", &self.admin_key.as_ref().map(|_| "<hidden>")).finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

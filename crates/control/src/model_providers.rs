@@ -20,7 +20,7 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 const ANTHROPIC_MAX_TOKENS: u32 = 8192;
 pub const SPEECH_VOICES: [&str; 9] = ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"];
 const ANTHROPIC_PREFERRED: [&str; 3] = ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5"];
-const PROVIDER_COLUMNS: &str = "id, kind, name, base_url, api_key, models, default_model, created_at, model_class";
+const PROVIDER_COLUMNS: &str = "id, kind, name, base_url, api_key, admin_key, models, default_model, created_at, model_class";
 
 #[derive(sqlx::FromRow)]
 pub struct ProviderRow {
@@ -29,6 +29,7 @@ pub struct ProviderRow {
     pub name: String,
     pub base_url: Option<String>,
     pub api_key: Option<crate::secrets::Sealed>,
+    pub admin_key: Option<crate::secrets::Sealed>,
     pub models: Vec<String>,
     pub default_model: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -245,6 +246,8 @@ impl ProviderRow {
             name: self.name.clone(),
             base_url: self.base_url.clone(),
             key_hint: self.api_key.as_deref().map(token_hint),
+            has_admin_key: self.admin_key.is_some(),
+            admin_key_hint: self.admin_key.as_deref().map(|key| key.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect()),
             models: self.models.clone(),
             default_model: self.default_model.clone(),
             created_at: self.created_at,
@@ -278,6 +281,31 @@ impl ProviderRow {
             (ModelProviderKind::OpenaiCompatible, None) => request,
             (ModelProviderKind::Anthropic, key) => request.header("anthropic-version", ANTHROPIC_VERSION).header("x-api-key", key.as_deref().unwrap_or_default()),
         })
+    }
+
+    pub(crate) async fn read_admin(&self, http: &reqwest::Client, key: &str, path: &str, query: &[(&str, String)]) -> Result<reqwest::Response, reqwest::Error> {
+        let base = self.base_url.as_deref().unwrap_or(ANTHROPIC_URL);
+
+        http.get(format!("{base}/v1/organizations/{path}")).query(query).header("user-agent", "mycelium").header("anthropic-version", ANTHROPIC_VERSION).header("x-api-key", key).timeout(std::time::Duration::from_secs(10)).send().await
+    }
+
+    async fn check_admin_key(&self, http: &reqwest::Client, key: &str) -> ApiResult<()> {
+        let month_start = chrono::Utc::now().format("%Y-%m-01T00:00:00Z").to_string();
+        let response = self.read_admin(http, key, "cost_report", &[("starting_at", month_start), ("bucket_width", "1d".into()), ("limit", "1".into())]).await;
+        let Ok(response) = response else {
+            return Err(ProviderError::Unreachable.into_api(&self.name, &self.address().unwrap_or_default()));
+        };
+        let status = response.status();
+
+        if matches!(status.as_u16(), 401 | 403) {
+            return Err(ApiError::bad_request("admin_key_refused", "Anthropic refused this Admin API key. Check it is active in the Console, or create a new one"));
+        }
+
+        if !status.is_success() {
+            return Err(ProviderError::Failed(status.as_u16()).into_api(&self.name, &self.address().unwrap_or_default()));
+        }
+
+        Ok(())
     }
 
     fn model_listings(&self) -> ApiResult<Vec<String>> {
@@ -538,6 +566,18 @@ fn default_model(kind: ModelProviderKind, models: &[String]) -> Option<String> {
     }
 }
 
+fn require_admin_key_allowed(kind: ModelProviderKind, key: &str) -> ApiResult<()> {
+    if kind != ModelProviderKind::Anthropic {
+        return Err(ApiError::bad_request("admin_key_unsupported", "Only an Anthropic provider takes an Admin API key."));
+    }
+
+    if !key.starts_with("sk-ant-admin") {
+        return Err(ApiError::bad_request("admin_key_invalid", "Enter an Admin API key that starts with sk-ant-admin"));
+    }
+
+    Ok(())
+}
+
 pub async fn list_owned(state: &AppState, owner: Uuid) -> ApiResult<Vec<ProviderRow>> {
     let rows = sqlx::query_as::<_, ProviderRow>(sqlx::AssertSqlSafe(format!("select {PROVIDER_COLUMNS} from model_providers where owner = $1 order by created_at, id"))).bind(owner).fetch_all(&state.pool).await?;
 
@@ -611,6 +651,7 @@ pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateModelProviderRequest>) -> ApiResult<(StatusCode, Json<ModelProvider>)> {
     let name = request.name.trim();
     let key = request.api_key.as_deref().map(str::trim).filter(|key| !key.is_empty());
+    let admin_key = request.admin_key.as_deref().map(str::trim).filter(|key| !key.is_empty());
     let entered = request.base_url.as_deref().map(str::trim).filter(|entered| !entered.is_empty());
 
     if name.is_empty() {
@@ -636,22 +677,28 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         }
         None => None,
     };
-    let draft = ProviderRow { id: Uuid::nil(), kind: enum_text(&request.kind), name: name.to_string(), base_url: base_url.clone(), api_key: key.map(crate::secrets::Sealed::from), models: Vec::new(), default_model: None, created_at: chrono::Utc::now(), model_class: "cloud".into() };
+    let draft = ProviderRow { id: Uuid::nil(), kind: enum_text(&request.kind), name: name.to_string(), base_url: base_url.clone(), api_key: key.map(crate::secrets::Sealed::from), admin_key: admin_key.map(crate::secrets::Sealed::from), models: Vec::new(), default_model: None, created_at: chrono::Utc::now(), model_class: "cloud".into() };
     let mut models = draft.list_models(&state.http).await?.map_err(|error| error.into_api(name, &draft.address().unwrap_or_default()))?;
 
     if models.is_empty() && request.kind == ModelProviderKind::Anthropic {
         models = ANTHROPIC_PREFERRED.iter().map(|model| model.to_string()).collect();
     }
 
+    if let Some(admin_key) = admin_key {
+        require_admin_key_allowed(request.kind, admin_key)?;
+        draft.check_admin_key(&state.http, admin_key).await?;
+    }
+
     let chosen = default_model(request.kind, &models);
     let row = sqlx::query_as::<_, ProviderRow>(sqlx::AssertSqlSafe(format!(
-        "insert into model_providers (owner, kind, name, base_url, api_key, models, default_model) values ($1, $2, $3, $4, $5, $6, $7) returning {PROVIDER_COLUMNS}"
+        "insert into model_providers (owner, kind, name, base_url, api_key, admin_key, models, default_model) values ($1, $2, $3, $4, $5, $6, $7, $8) returning {PROVIDER_COLUMNS}"
     )))
     .bind(user.id)
     .bind(&draft.kind)
     .bind(name)
     .bind(&base_url)
     .bind(&draft.api_key)
+    .bind(&draft.admin_key)
     .bind(&models)
     .bind(&chosen)
     .fetch_one(&state.pool)
@@ -678,21 +725,35 @@ pub async fn refresh(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 
 pub async fn update(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<UpdateModelProviderRequest>) -> ApiResult<Json<ModelProvider>> {
     let name = request.name.as_deref().map(str::trim);
+    let admin_key = request.admin_key.as_ref().map(|key| key.as_deref().map(str::trim).filter(|key| !key.is_empty()));
 
     if name.is_some_and(str::is_empty) {
         return Err(ApiError::bad_request("name_required", "Enter a name for this provider."));
     }
 
-    let row = sqlx::query_as::<_, ProviderRow>(sqlx::AssertSqlSafe(format!("update model_providers set name = coalesce($3, name), model_class = coalesce($4, model_class) where id = $1 and owner = $2 returning {PROVIDER_COLUMNS}")))
+    let current = find_owned(&state, id, user.id).await?;
+
+    if let Some(Some(admin_key)) = admin_key {
+        require_admin_key_allowed(current.parsed_kind()?, admin_key)?;
+        current.check_admin_key(&state.http, admin_key).await?;
+    }
+
+    let row = sqlx::query_as::<_, ProviderRow>(sqlx::AssertSqlSafe(format!("update model_providers set name = coalesce($3, name), model_class = coalesce($4, model_class), admin_key = case when $5 then $6 else admin_key end where id = $1 and owner = $2 returning {PROVIDER_COLUMNS}")))
         .bind(id)
         .bind(user.id)
         .bind(name)
         .bind(request.model_class.map(|class| enum_text(&class)))
+        .bind(admin_key.is_some())
+        .bind(admin_key.flatten().map(crate::secrets::Sealed::from))
         .fetch_optional(&state.pool)
         .await?;
     let Some(row) = row else {
         return Err(ApiError::not_found("That model provider"));
     };
+
+    if admin_key.is_some() {
+        sqlx::query("delete from model_provider_usage where provider_id = $1").bind(id).execute(&state.pool).await?;
+    }
 
     Ok(Json(row.to_proto()?))
 }
@@ -712,7 +773,7 @@ mod tests {
     use super::*;
 
     fn provider(kind: ModelProviderKind, base_url: &str) -> ProviderRow {
-        ProviderRow { id: Uuid::nil(), kind: enum_text(&kind), name: "p".into(), base_url: Some(base_url.into()), api_key: None, models: vec![], default_model: None, created_at: chrono::Utc::now(), model_class: "cloud".into() }
+        ProviderRow { id: Uuid::nil(), kind: enum_text(&kind), name: "p".into(), base_url: Some(base_url.into()), api_key: None, admin_key: None, models: vec![], default_model: None, created_at: chrono::Utc::now(), model_class: "cloud".into() }
     }
 
     fn user(text: &str) -> ChatMessage {

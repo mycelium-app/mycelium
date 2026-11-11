@@ -10,6 +10,8 @@ data class ModelProvider(
     val name: String,
     @SerialName("base_url") val baseUrl: String? = null,
     @SerialName("key_hint") val keyHint: String? = null,
+    @SerialName("has_admin_key") val hasAdminKey: Boolean = false,
+    @SerialName("admin_key_hint") val adminKeyHint: String? = null,
     val models: List<String> = emptyList(),
     @SerialName("default_model") val defaultModel: String? = null,
     @SerialName("created_at") val createdAt: String,
@@ -28,10 +30,15 @@ data class CreateModelProviderRequest(
     val name: String,
     @SerialName("base_url") val baseUrl: String? = null,
     @SerialName("api_key") val apiKey: String? = null,
+    @SerialName("admin_key") val adminKey: String? = null,
 )
 
 @Serializable
-data class UpdateModelProviderRequest(val name: String? = null, @SerialName("model_class") val modelClass: String? = null)
+data class UpdateModelProviderRequest(
+    val name: String? = null,
+    @SerialName("model_class") val modelClass: String? = null,
+    @SerialName("admin_key") val adminKey: String? = null,
+)
 
 @Serializable
 data class CreateChatRequest(

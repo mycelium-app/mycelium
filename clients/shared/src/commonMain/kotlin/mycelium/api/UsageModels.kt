@@ -86,7 +86,16 @@ data class ModelProviderUsage(
     @SerialName("provider_id") val providerId: String,
     val name: String,
     @SerialName("read_at") val readAt: String? = null,
+    val status: String = "ok",
     val spend: OpenRouterSpend? = null,
+    @SerialName("api_cost") val apiCost: ApiCost? = null,
+)
+
+@Serializable
+data class ApiCost(
+    @SerialName("today_usd") val todayUsd: Double,
+    @SerialName("month_usd") val monthUsd: Double,
+    @SerialName("today_tokens") val todayTokens: Long = 0,
 )
 
 @Serializable

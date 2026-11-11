@@ -16,6 +16,7 @@ import mycelium.ui.MyTheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -36,6 +37,7 @@ import mycelium.Platform
 import mycelium.api.Me
 import mycelium.api.UsageWindow
 import mycelium.state.AgentAccount
+import mycelium.api.ApiCost
 import mycelium.api.ModelProviderUsage
 import mycelium.api.OpenRouterSpend
 import mycelium.ui.UsageCard
@@ -48,6 +50,7 @@ import mycelium.ui.Route
 import mycelium.ui.Shell
 import org.junit.Rule
 import kotlin.test.Test
+import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.minutes
 import kotlin.test.assertTrue
 import kotlin.test.assertEquals
@@ -114,50 +117,89 @@ class UsageCardTest {
     private fun codexWithBankedResets() = AgentAccount("codex", "work@example.com", "device_auth", emptyList(), windows = listOf(UsageWindow("five_hour", 5.0)), resetCredits = ResetCredits(2))
 
     @Test
-    fun anOverspentKeyShowsItsNegativeRemainingLimit() {
-        rule.setContent {
-            MyceliumTheme(true) {
-                UsageCard(emptyList(), providers = listOf(ModelProviderUsage("p1", "Overspent key", spend = OpenRouterSpend(total = 1.1, limitRemaining = -0.1))))
-            }
-        }
+    fun anAnthropicProviderIsOneRowWithTodayAndTheMonthSoFar() {
+        val provider = ModelProviderUsage("p1", "Anthropic", "2099-01-01T10:00:00Z", apiCost = ApiCost(6.4, 142.18, 1_200_000))
 
-        rule.onNodeWithText("-$0.10").performScrollTo().assertIsDisplayed()
+        rule.setContent { MyceliumTheme(true) { UsageCard(emptyList(), providers = listOf(provider)) } }
+
+        rule.onNodeWithText("Anthropic").assertIsDisplayed()
+        rule.onNodeWithText("$6.40").assertIsDisplayed()
+        rule.onNodeWithText("today").assertIsDisplayed()
+        rule.onNodeWithText("$142.18").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Anthropic. Today $6.40 and 1.2M tokens. So far this month $142.18.").assertExists()
     }
 
     @Test
-    fun aKeyWithADailyLimitShowsTodaysSpendAgainstItAndTheTotalBelow() {
+    fun anAnthropicProviderWhoseAdminKeyWasRefusedSaysSo() {
+        rule.setContent { MyceliumTheme(true) { UsageCard(emptyList(), providers = listOf(ModelProviderUsage("p1", "Anthropic", status = "refused"))) } }
+
+        rule.onNodeWithText("Admin key refused").assertIsDisplayed()
+    }
+
+    @Test
+    fun aProviderNothingHasBeenReadFromSaysNotReportedYet() {
+        rule.setContent { MyceliumTheme(true) { UsageCard(emptyList(), providers = listOf(ModelProviderUsage("p1", "Anthropic"))) } }
+
+        rule.onNodeWithText("Not reported yet").assertIsDisplayed()
+    }
+
+    @Test
+    fun anOpenRouterKeyWithOnlyATotalShowsTheTotalInTheSameRow() {
         rule.setContent {
             MyceliumTheme(true) {
-                UsageCard(emptyList(), providers = listOf(ModelProviderUsage("p1", "OpenRouter", spend = OpenRouterSpend(total = 2.39, daily = 2.34, limit = 5.0, limitReset = "daily"))))
+                UsageCard(emptyList(), providers = listOf(ModelProviderUsage("p1", "OpenRouter", spend = OpenRouterSpend(total = 2.39))))
             }
         }
 
         rule.onNodeWithText("OpenRouter").assertIsDisplayed()
         rule.onNodeWithText("OpenRouter: OpenRouter").assertDoesNotExist()
-        rule.onNodeWithText("Daily limit").assertIsDisplayed()
-        rule.onNodeWithText("$2.34 / $5.00").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Daily limit 47% used").assertExists()
         rule.onNodeWithText("$2.39").assertIsDisplayed()
     }
 
     @Test
-    fun lastUpdatedLinesUpWithTheWindowValuesAtTheRightAndALongForecastLeavesTheValueWhole() {
-        val window = UsageWindow("seven_day", 17.0, resetsAt = "2099-01-07T10:00:00Z", ratePerHour = 1.0, runsOutAt = "2099-01-03T01:37:00Z")
-        val account = AgentAccount("codex", "work@example.com", "oauth_token", emptyList(), windows = listOf(window), usageReadAt = "2026-10-25T10:00:00Z")
+    fun theHeaderSaysHowLongAgoTheOldestReadingWasOnceForTheWholeCard() {
+        val window = UsageWindow("seven_day", 17.0, resetsAt = "2099-01-07T10:00:00Z")
+        val old = AgentAccount("codex", "work@example.com", "oauth_token", emptyList(), windows = listOf(window), usageReadAt = "2026-10-25T10:00:00Z")
+        val recent = AgentAccount("codex", "sam@example.org", "oauth_token", emptyList(), windows = listOf(window), usageReadAt = "2099-01-01T10:00:00Z")
 
-        rule.setContent {
-            MyceliumTheme(true) {
-                Box(Modifier.width(320.dp).height(600.dp)) {
-                    UsageCard(listOf(account to false))
-                }
-            }
-        }
+        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(old to false, recent to false)) } }
 
-        val updated = rule.onNodeWithText("last updated", substring = true).getUnclippedBoundsInRoot()
-        val value = rule.onNodeWithText("17% used", substring = true).fetchSemanticsNode()
+        rule.onAllNodes(hasText("Updated", substring = true)).fetchSemanticsNodes().let { assertEquals(1, it.size) }
+        rule.onNodeWithText("ago", substring = true).assertIsDisplayed()
+    }
 
-        assertEquals(updated.right, value.boundsInRoot.right.toDp(rule), 1.dp)
-        assertTrue(value.config[SemanticsProperties.Text].single().text.endsWith("left"))
+    @Test
+    fun aWindowRowUsesShortLabelsAndHasAFullAccessibleDescription() {
+        val resets = (kotlin.time.Clock.System.now() + 3.days).toString()
+        val window = UsageWindow("seven_day", 71.0, resetsAt = resets, ratePerHour = 1.0, runsOutAt = (kotlin.time.Clock.System.now() + 1.days).toString())
+        val account = AgentAccount("claude", "work@example.com", "oauth_token", emptyList(), windows = listOf(window))
+
+        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false)) } }
+
+        rule.onNodeWithText("7d").assertIsDisplayed()
+        rule.onNodeWithText("71%").assertIsDisplayed()
+        rule.onNode(hasContentDescription("Weekly window, 71% used, at this rate runs out in", substring = true)).assertExists()
+    }
+
+    @Test
+    fun theOpenChatsAccountShowsThisChatAsMutedTextOnItsSecondRow() {
+        val windows = listOf(UsageWindow("five_hour", 40.0, resetsAt = "2099-01-01T22:30:00Z"), UsageWindow("seven_day", 10.0, resetsAt = "2099-01-05T10:00:00Z"))
+        val account = AgentAccount("claude", "work@example.com", "oauth_token", emptyList(), windows = windows)
+
+        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to true)) } }
+
+        val first = rule.onNodeWithText("5h").getUnclippedBoundsInRoot().top
+        val second = rule.onNodeWithText("7d").getUnclippedBoundsInRoot().top
+
+        rule.onNodeWithText("This chat").assertIsDisplayed()
+        assertEquals(18.dp, second - first, 1.dp)
+    }
+
+    @Test
+    fun theUseResetButtonNamesTheAccountItResets() {
+        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(codexWithBankedResets() to false), onUseReset = { _, _ -> "reset" }) } }
+
+        rule.onNodeWithContentDescription("Use a banked reset for work@example.com").assertIsDisplayed()
     }
 
     @Test
@@ -167,7 +209,7 @@ class UsageCardTest {
 
         rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false)) } }
 
-        rule.onNodeWithText("2 resets banked, next expires 14 Nov").assertIsDisplayed()
+        rule.onNodeWithText("2 banked, expires 14 Nov").assertIsDisplayed()
     }
 
     @Test
@@ -233,7 +275,7 @@ class UsageCardTest {
 
         rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false)) } }
 
-        rule.onNodeWithContentDescription("5-hour window 5% used, even pace 50%").assertExists()
+        rule.onNode(hasContentDescription("5-hour window, 5% used, resets in", substring = true) and hasContentDescription("even pace 50%", substring = true)).assertExists()
     }
 
     @Test
@@ -243,8 +285,8 @@ class UsageCardTest {
 
         rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false)) } }
 
-        rule.onNodeWithText("Weekly window").assertIsDisplayed()
-        rule.onNodeWithText("5-hour window").assertDoesNotExist()
+        rule.onNodeWithText("7d").assertIsDisplayed()
+        rule.onNodeWithText("5h").assertDoesNotExist()
     }
 
     @Test
@@ -282,7 +324,7 @@ class UsageCardTest {
     }
 
     @Test
-    fun anUnusedKeyShowsZeroSpendAndUnreportedPeriodsStayUnknown() {
+    fun anUnusedKeyShowsZeroSpendAndNoUpdatedTime() {
         rule.setContent {
             MyceliumTheme(true) {
                 UsageCard(emptyList(), providers = listOf(ModelProviderUsage("p1", "Unused key", spend = OpenRouterSpend(total = 0.0))))
@@ -290,9 +332,7 @@ class UsageCardTest {
         }
 
         rule.onNodeWithText("$0.00").assertIsDisplayed()
-        rule.onAllNodes(hasText("Not reported")).fetchSemanticsNodes().let { assertEquals(1, it.size) }
-        rule.onNodeWithText("Key limit remaining").assertDoesNotExist()
-        rule.onAllNodes(hasText("last updated", substring = true)).fetchSemanticsNodes().let { assertEquals(0, it.size) }
+        rule.onAllNodes(hasText("Updated", substring = true)).fetchSemanticsNodes().let { assertEquals(0, it.size) }
     }
 
     @Test
@@ -301,17 +341,16 @@ class UsageCardTest {
         assertEquals(0, requests.get())
         rule.onNodeWithContentDescription("Usage").performClick()
         rule.waitUntil { rule.onAllNodes(hasText("OpenRouter: Work key")).fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("$12.35").assertIsDisplayed()
         rule.onNodeWithText("$0.13").assertIsDisplayed()
-        rule.onNodeWithText("$87.66").assertIsDisplayed()
-        rule.onNodeWithText("last updated", substring = true).performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("$8.50").assertIsDisplayed()
+        rule.onNodeWithText("Updated", substring = true).performScrollTo().assertIsDisplayed()
         rule.onNodeWithText("No account has reported usage yet.").assertDoesNotExist()
 
         rule.onNodeWithContentDescription("Usage").performClick()
         rule.onNodeWithContentDescription("Usage").performClick()
         rule.waitUntil { requests.get() == 2 }
         rule.onNodeWithText("OpenRouter: Work key").performScrollTo().assertIsDisplayed()
-        rule.onNodeWithText("$12.35").assertIsDisplayed()
+        rule.onNodeWithText("$8.50").assertIsDisplayed()
     }
 
     @Test
@@ -323,7 +362,7 @@ class UsageCardTest {
         rule.onNodeWithContentDescription("Usage").performClick()
 
         rule.onNodeWithText("This chat").assertIsDisplayed()
-        rule.onNodeWithText("40% used", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("40%").assertIsDisplayed()
 
         val thisChatTop = rule.onNodeWithText("This chat").getUnclippedBoundsInRoot().top
         val annTop = rule.onNodeWithText("example.net").getUnclippedBoundsInRoot().top

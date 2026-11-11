@@ -38,6 +38,8 @@ private const val OllamaJson = """{"id":"p1","kind":"openai_compatible","name":"
 
 private const val AnthropicJson = """{"id":"p2","kind":"anthropic","name":"Claude API","key_hint":"wxyz","models":["claude-sonnet-5-5","claude-opus-5-5"],"default_model":"claude-sonnet-5-5","created_at":"2026-10-22T10:00:00Z"}"""
 
+private const val AnthropicWithAdminKeyJson = """{"id":"p2","kind":"anthropic","name":"Claude API","key_hint":"wxyz","has_admin_key":true,"admin_key_hint":"9c1e","models":["claude-sonnet-5-5"],"default_model":"claude-sonnet-5-5","created_at":"2026-10-22T10:00:00Z"}"""
+
 private val ChatModelsAddProvider = hasText("Add a provider").and(hasContentDescription("Add a provider for speech to text").not())
 
 class ModelProvidersSettingsTest {
@@ -51,8 +53,9 @@ class ModelProvidersSettingsTest {
     private val bodies = java.util.concurrent.CopyOnWriteArrayList<String>()
     private var listed = OllamaJson
     private var postAnswer: Pair<HttpStatusCode, String> = HttpStatusCode.Created to AnthropicJson
+    private var patchAnswer: Pair<HttpStatusCode, String>? = null
 
-    private fun show(experiments: String = "{}") {
+    private fun show(experiments: String = "{}", waitFor: String = "Ollama") {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             bodies += String(request.body.toByteArray())
@@ -61,7 +64,7 @@ class ModelProvidersSettingsTest {
             when {
                 request.url.encodedPath.endsWith("/experiments") -> respond(experiments, HttpStatusCode.OK, json)
                 request.method == HttpMethod.Post -> respond(postAnswer.second, postAnswer.first, json)
-                request.method == HttpMethod.Patch -> respond(OllamaJson.replace("\"Ollama\"", "\"Workstation\""), HttpStatusCode.OK, json)
+                request.method == HttpMethod.Patch -> patchAnswer?.let { respond(it.second, it.first, json) } ?: respond(OllamaJson.replace("\"Ollama\"", "\"Workstation\""), HttpStatusCode.OK, json)
                 request.method == HttpMethod.Delete -> respond("", HttpStatusCode.NoContent)
                 else -> respond("[$listed]", HttpStatusCode.OK, json)
             }
@@ -74,7 +77,7 @@ class ModelProvidersSettingsTest {
                 ModelProvidersSettings(store)
             }
         }
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Ollama").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText(waitFor).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -227,5 +230,101 @@ class ModelProvidersSettingsTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Ollama").fetchSemanticsNodes().isEmpty() }
         assertEquals("/api/v1/model-providers/p1", requests.last { it.method == HttpMethod.Delete }.url.encodedPath)
+    }
+
+    @Test
+    fun anAnthropicRowShowsTheAdminKeyHintUnderTheKeyAndNeverTheKey() {
+        listed = AnthropicWithAdminKeyJson
+        show(waitFor = "Claude API")
+
+        rule.onNodeWithText("Ends in wxyz").assertExists()
+        rule.onNodeWithText("Admin key ...9c1e").assertExists()
+    }
+
+    @Test
+    fun theMenuOffersToAddAnAdminKeyOnAnthropicOnly() {
+        listed = "$AnthropicJson,$OllamaJson"
+        show()
+
+        rule.onNodeWithContentDescription("More for Claude API").performClick()
+        rule.onNodeWithText("Add admin key").assertExists()
+        rule.onNodeWithText("Remove admin key").assertDoesNotExist()
+    }
+
+    @Test
+    fun theMenuOffersToChangeOrRemoveAnExistingAdminKey() {
+        listed = AnthropicWithAdminKeyJson
+        patchAnswer = HttpStatusCode.OK to AnthropicJson
+        show(waitFor = "Claude API")
+
+        rule.onNodeWithContentDescription("More for Claude API").performClick()
+        rule.onNodeWithText("Change admin key").assertExists()
+        rule.onNodeWithText("Remove admin key").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Admin key ...9c1e").fetchSemanticsNodes().isEmpty() }
+        assertEquals("""{"admin_key":""}""", bodies.last { it.isNotEmpty() })
+    }
+
+    @Test
+    fun aKeyWithoutTheAdminPrefixIsExplainedInASummaryAndSendsNothing() {
+        listed = AnthropicJson
+        show(waitFor = "Claude API")
+
+        rule.onNodeWithContentDescription("More for Claude API").performClick()
+        rule.onNodeWithText("Add admin key").performClick()
+        rule.onNodeWithContentDescription("Admin API key (optional)").performTextInput("sk-ant-api03-not-admin")
+        rule.onNodeWithContentDescription("Admin API key (optional)").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        rule.onNodeWithText("Save").performClick()
+
+        rule.onNodeWithText("There is a problem").assertExists()
+        rule.onNodeWithContentDescription("Go to Admin API key: Enter an Admin API key that starts with sk-ant-admin").assertExists()
+        assertEquals(false, requests.any { it.method == HttpMethod.Patch })
+    }
+
+    @Test
+    fun anAdminKeyAnthropicRefusesIsShownItsMessageAndTheDialogStays() {
+        listed = AnthropicJson
+        patchAnswer = HttpStatusCode.BadRequest to """{"error":"admin_key_refused","message":"Anthropic refused this Admin API key. Check it is active in the Console, or create a new one"}"""
+        show(waitFor = "Claude API")
+
+        rule.onNodeWithContentDescription("More for Claude API").performClick()
+        rule.onNodeWithText("Add admin key").performClick()
+        rule.onNodeWithContentDescription("Admin API key (optional)").performTextInput("sk-ant-admin01-example")
+        rule.onNodeWithText("Save").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Anthropic refused", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasContentDescription("Admin API key (optional). Error: Anthropic refused", substring = true)).assertExists()
+    }
+
+    @Test
+    fun savingAnAdminKeySendsItAndShowsOnlyItsHint() {
+        listed = AnthropicJson
+        patchAnswer = HttpStatusCode.OK to AnthropicWithAdminKeyJson
+        show(waitFor = "Claude API")
+
+        rule.onNodeWithContentDescription("More for Claude API").performClick()
+        rule.onNodeWithText("Add admin key").performClick()
+        rule.onNodeWithContentDescription("Admin API key (optional)").performTextInput("sk-ant-admin01-example")
+        rule.onNodeWithText("Save").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Admin key ...9c1e").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals("""{"admin_key":"sk-ant-admin01-example"}""", bodies.last { it.isNotEmpty() })
+        rule.onAllNodesWithText("sk-ant-admin01-example").assertCountEquals(0)
+    }
+
+    @Test
+    fun theAddFormTakesAnOptionalAdminKeyForAnthropicOnly() {
+        show()
+
+        rule.onNode(ChatModelsAddProvider).performClick()
+        rule.onAllNodesWithContentDescription("Admin API key (optional)").assertCountEquals(0)
+        rule.onNodeWithText("Anthropic").performClick()
+        rule.onNodeWithContentDescription("Name").performTextInput("Claude API")
+        rule.onNodeWithContentDescription("API key").performTextInput("sk-ant-secret")
+        rule.onNodeWithContentDescription("Admin API key (optional)").performTextInput("sk-ant-admin01-example")
+        rule.onNodeWithText("Add provider").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Ends in wxyz").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals("""{"kind":"anthropic","name":"Claude API","api_key":"sk-ant-secret","admin_key":"sk-ant-admin01-example"}""", bodies.last { it.isNotEmpty() })
     }
 }

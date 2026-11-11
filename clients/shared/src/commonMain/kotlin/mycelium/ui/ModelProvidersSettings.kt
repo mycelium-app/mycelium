@@ -29,6 +29,8 @@ import androidx.compose.ui.semantics.semantics
 import mycelium.api.CreateModelProviderRequest
 import mycelium.api.ModelProvider
 import mycelium.api.UpdateModelProviderRequest
+import mycelium.state.AdminKeyPrefix
+import mycelium.state.AdminKeyProblem
 import mycelium.state.Choice
 import mycelium.state.Store
 
@@ -59,6 +61,8 @@ fun ModelProvidersSettings(store: Store, revealSpeech: Boolean = false, addSpeec
     var name by remember { mutableStateOf("") }
     var baseUrl by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
+    var adminKey by remember { mutableStateOf("") }
+    var adminKeyFor by remember { mutableStateOf<ModelProvider?>(null) }
     var forSpeech by remember { mutableStateOf(false) }
     val runner = rememberAction()
     val speech = remember { BringIntoViewRequester() }
@@ -89,11 +93,17 @@ fun ModelProvidersSettings(store: Store, revealSpeech: Boolean = false, addSpeec
             return
         }
 
+        if (kind == "anthropic" && adminKey.isNotBlank() && !adminKey.trim().startsWith(AdminKeyPrefix)) {
+            runner.failure = AdminKeyProblem
+
+            return
+        }
+
         runner {
             val request = when (kind) {
                 "openrouter" -> CreateModelProviderRequest("openai_compatible", name.trim().ifEmpty { "OpenRouter" }, OpenRouterUrl, apiKey.trim())
                 "litellm" -> CreateModelProviderRequest("openai_compatible", name.trim().ifEmpty { "LiteLLM" }, baseUrl.trim(), apiKey.trim().ifEmpty { null })
-                else -> CreateModelProviderRequest(kind, name.trim(), baseUrl.trim().ifEmpty { null }.takeIf { kind == "openai_compatible" }, apiKey.trim().ifEmpty { null })
+                else -> CreateModelProviderRequest(kind, name.trim(), baseUrl.trim().ifEmpty { null }.takeIf { kind == "openai_compatible" }, apiKey.trim().ifEmpty { null }, adminKey.trim().ifEmpty { null }.takeIf { kind == "anthropic" })
             }
             val added = store.api.createModelProvider(request)
             providers = providers.filter { it.id != added.id } + added
@@ -102,6 +112,7 @@ fun ModelProvidersSettings(store: Store, revealSpeech: Boolean = false, addSpeec
             name = ""
             baseUrl = ""
             apiKey = ""
+            adminKey = ""
         }
     }
 
@@ -136,7 +147,16 @@ fun ModelProvidersSettings(store: Store, revealSpeech: Boolean = false, addSpeec
                                 }
                             }
 
-                            1 -> TableCell.Text(provider.keyHint?.let { "Ends in $it" } ?: "No key", color = colors.textMuted)
+                            1 -> if (provider.hasAdminKey) {
+                                TableCell.Slot("Ends in ${provider.keyHint}") {
+                                    Column {
+                                        Label(provider.keyHint?.let { "Ends in $it" } ?: "No key", color = colors.textMuted, maxLines = 1)
+                                        Label("Admin key ...${provider.adminKeyHint}", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+                                    }
+                                }
+                            } else {
+                                TableCell.Text(provider.keyHint?.let { "Ends in $it" } ?: "No key", color = colors.textMuted)
+                            }
                             2 -> TableCell.Slot(if (provider.models.isEmpty()) "No models found" else "${provider.models.size} models", Tokens.Space.S8) {
                                 MyButton(
                                     { expanded = if (expanded == provider.id) null else provider.id; search = "" },
@@ -168,6 +188,23 @@ fun ModelProvidersSettings(store: Store, revealSpeech: Boolean = false, addSpeec
                                         renamed = provider.name
                                         renaming = provider
                                     })
+                                    if (provider.kind == "anthropic") {
+                                        MenuItem(if (provider.hasAdminKey) "Change admin key" else "Add admin key", onClick = {
+                                            close()
+                                            adminKeyFor = provider
+                                        })
+                                    }
+
+                                    if (provider.hasAdminKey) {
+                                        MenuItem("Remove admin key", onClick = {
+                                            close()
+                                            store.act {
+                                                val updated = store.api.updateModelProvider(provider.id, UpdateModelProviderRequest(adminKey = ""))
+                                                providers = providers.map { if (it.id == updated.id) updated else it }
+                                            }
+                                        })
+                                    }
+
                                     MenuItem("Remove provider", onClick = {
                                         close()
                                         store.act {
@@ -193,6 +230,10 @@ fun ModelProvidersSettings(store: Store, revealSpeech: Boolean = false, addSpeec
             }
 
             RenameDialog("Rename provider", "Provider name", renamed, { renamed = it }, save, { renaming = null })
+        }
+
+        adminKeyFor?.let { target ->
+            AdminKeyDialog(store, target, onSaved = { updated -> providers = providers.map { if (it.id == updated.id) updated else it } }, onDismiss = { adminKeyFor = null })
         }
 
         val browsing = providers.firstOrNull { it.id == expanded }
@@ -249,6 +290,10 @@ fun ModelProvidersSettings(store: Store, revealSpeech: Boolean = false, addSpeec
                     else -> "API key"
                 }, mono = true, masked = true, onSubmit = ::add)
 
+                if (kind == "anthropic") {
+                    TextInput(adminKey, { adminKey = it }, label = "Admin API key (optional)", hint = "Create one in the Anthropic Console under Settings, Admin keys. It starts with $AdminKeyPrefix.", mono = true, masked = true, onSubmit = ::add)
+                }
+
                 runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
@@ -260,6 +305,7 @@ fun ModelProvidersSettings(store: Store, revealSpeech: Boolean = false, addSpeec
                             name = ""
                             baseUrl = ""
                             apiKey = ""
+                            adminKey = ""
                             runner.failure = null
                         },
                         text = "Cancel",

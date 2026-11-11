@@ -3,14 +3,19 @@ package mycelium.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -27,14 +32,19 @@ import mycelium.state.evenPacePercent
 import mycelium.state.nextUsageTick
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
-import kotlin.math.absoluteValue
-import kotlin.math.roundToInt
-import kotlin.math.roundToLong
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Instant
+import mycelium.state.SpendFigure
+import mycelium.state.apiSpendRow
+import mycelium.state.usageUpdated
+import mycelium.state.windowShortName
 import mycelium.api.ModelProviderUsage
-import mycelium.api.OpenRouterSpend
 import mycelium.api.ResetCredits
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
@@ -44,7 +54,6 @@ import mycelium.api.UseResetRequest
 import mycelium.state.AgentAccount
 import mycelium.state.Store
 import mycelium.state.UnnamedAccount
-import mycelium.state.ago
 import mycelium.state.bankedResetsSummary
 import mycelium.state.compactWindowUsage
 import mycelium.state.windowName
@@ -59,6 +68,12 @@ fun UsageCard(
     onUseReset: (suspend (AgentAccount, String) -> String)? = null,
 ) {
     val colors = MyTheme.colors
+    var now by remember { mutableStateOf(Clock.System.now()) }
+
+    LaunchedEffect(now) {
+        delay(UpdatedTick)
+        now = Clock.System.now()
+    }
 
     BoxWithConstraints(modifier) {
         Column(
@@ -69,15 +84,17 @@ fun UsageCard(
                 .border(Tokens.Size.Hairline, colors.border, BlockShape)
                 .verticalScroll(rememberScrollState()),
         ) {
-            Row(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                Label("Usage", Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong)
+            val reported = accounts.filter { (account, _) -> account.windows.isNotEmpty() }
+            val updated = usageUpdated(reported.mapNotNull { (account, _) -> account.usageReadAt } + providers.mapNotNull { it.readAt }, now)
+
+            Row(Modifier.fillMaxWidth().padding(start = Tokens.Space.S1_5, top = Tokens.Space.S0_5, end = Tokens.Space.S1, bottom = Tokens.Space.S0_5), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                Label("Usage", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                Label(updated.orEmpty(), Modifier.weight(1f), Tokens.Type.Meta.copy(textAlign = TextAlign.End), colors.textMuted, maxLines = 1)
 
                 if (onOpenHistory != null) {
                     MyButton(onOpenHistory, icon = MyIcon.Move, description = "Usage history", size = ButtonSize.Sm, muted = true)
                 }
             }
-
-            val reported = accounts.filter { (account, _) -> account.windows.isNotEmpty() }
 
             if (reported.isEmpty() && providers.isEmpty()) {
                 Hairline()
@@ -95,7 +112,7 @@ fun UsageCard(
                 for (provider in providers.sortedBy { it.providerId != currentProviderId }) {
                     Hairline()
 
-                    ProviderBlock(provider, provider.providerId == currentProviderId)
+                    ProviderRow(provider, now)
                 }
             }
 
@@ -111,34 +128,19 @@ fun UsageCard(
 }
 
 @Composable
-private fun UsageHeader(title: String, thisChat: Boolean, readAt: String?, leading: @Composable RowScope.() -> Unit = {}) {
-    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-        leading()
-        Label(title, style = Tokens.Type.UiStrong, maxLines = 1)
+private fun Hinted(hint: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val source = remember { MutableInteractionSource() }
 
-        if (thisChat) {
-            Tag("This chat")
-        }
-
-        Label(readAt?.let { "last updated ${ago(it)}" }.orEmpty(), Modifier.weight(1f), Tokens.Type.Meta.copy(textAlign = TextAlign.End), MyTheme.colors.textMuted, maxLines = 1)
-    }
-}
-
-@Composable
-private fun UsageLine(name: String, note: String?, value: String) {
-    val colors = MyTheme.colors
-
-    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-        Label(name, style = Tokens.Type.Meta, maxLines = 1)
-
-        Label(note.orEmpty(), Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
-        Label(value, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+    Box(modifier.hoverable(source)) {
+        content()
+        Tooltip(hint, source)
     }
 }
 
 @Composable
 internal fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (suspend (AgentAccount, String) -> String)?) {
     val platform = LocalPlatform.current
+    val colors = MyTheme.colors
     val localDateTime: (Long) -> String? = { millis -> platform?.localDateTime(millis) }
     var now by remember { mutableStateOf(Clock.System.now()) }
 
@@ -147,25 +149,50 @@ internal fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (s
         now = Clock.System.now()
     }
 
-    Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-        UsageHeader(accountShortName(account.label), thisChat, account.usageReadAt) {
-            Icon(agentIcon(account.agent), MyTheme.colors.text, Tokens.Size.IconMd)
-        }
-
+    Column(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S0_5)) {
         val usages = account.windows.map { it to compactWindowUsage(it, localDateTime, now) }
         val weekExhausted = usages.any { (window, usage) -> window.name.startsWith("seven_day") && usage.percent >= 100 }
+        val shown = usages.filterNot { (window, _) -> weekExhausted && window.name == "five_hour" }
 
-        for ((window, usage) in usages) {
-            if (weekExhausted && window.name == "five_hour") continue
-
+        for ((index, entry) in shown.withIndex()) {
+            val (window, usage) = entry
             val name = windowName(window.name).replaceFirstChar { it.uppercase() }
+            val pace = evenPacePercent(window, now)
+            val description = listOfNotNull(name, "${usage.percent}% used", usage.resetDescription.takeIf { it.isNotEmpty() }, pace?.let { "even pace $it%" }).joinToString(", ")
+            val attention = usage.attention
 
-            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
-                UsageLine(name, usage.forecast, usage.summary)
-                val pace = evenPacePercent(window, now)
-                val description = "$name ${usage.percent}% used" + (pace?.let { ", even pace $it%" } ?: "")
+            Row(Modifier.fillMaxWidth().height(UsageRowHeight), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.width(UsageNameWidth), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                    if (index == 0) {
+                        Icon(agentIcon(account.agent), colors.text, Tokens.Size.IconSm)
+                        Label(accountShortName(account.label), style = Tokens.Type.MetaStrong, maxLines = 1)
+                    } else if (thisChat && index == 1) {
+                        Label("This chat", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                    }
+                }
 
-                Meter(usage.percent, description, attention = usage.attention, markerPercent = pace)
+                Hinted(name, Modifier.width(UsageWindowWidth)) {
+                    Label(windowShortName(window.name), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1, overflow = TextOverflow.Clip)
+                }
+                Hinted(description, Modifier.weight(1f).widthIn(min = UsageMeterMinWidth)) {
+                    Meter(usage.percent, description, attention = attention, markerPercent = pace, height = UsageMeterHeight)
+                }
+                Label("${usage.percent}%", Modifier.width(UsagePercentWidth), Tokens.Type.Meta.copy(textAlign = TextAlign.End), maxLines = 1)
+                Hinted(description, Modifier.width(UsageResetWidth)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                        if (attention) {
+                            Icon(MyIcon.Alert, colors.statusAttention, UsageAlertSize)
+                        }
+
+                        Label(usage.reset, style = Tokens.Type.Meta, color = if (attention) colors.statusAttention else colors.textMuted, maxLines = 1)
+                    }
+                }
+            }
+        }
+
+        if (thisChat && shown.size < 2) {
+            Row(Modifier.height(UsageRowHeight), verticalAlignment = Alignment.CenterVertically) {
+                Label("This chat", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
             }
         }
 
@@ -186,11 +213,13 @@ private fun BankedResets(account: AgentAccount, banked: ResetCredits, localDateT
     var outcome by remember { mutableStateOf<String?>(null) }
     var working by remember { mutableStateOf(false) }
 
-    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-        Label(bankedResetsSummary(banked, localDateTime), Modifier.weight(1f), Tokens.Type.Meta, MyTheme.colors.textMuted)
+    Row(Modifier.fillMaxWidth().height(Tokens.Size.ControlSm), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+        Hinted(bankedResetsSummary(banked, localDateTime), Modifier.weight(1f)) {
+            Label(bankedResetsSummary(banked, localDateTime, brief = true), style = Tokens.Type.Meta, color = MyTheme.colors.textMuted, maxLines = 1)
+        }
 
         if (onUseReset != null) {
-            MyButton({ key = Uuid.random().toString() }, text = "Use reset", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+            MyButton({ key = Uuid.random().toString() }, text = "Use reset", description = "Use a banked reset for ${account.label}", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
         }
     }
 
@@ -244,54 +273,43 @@ private fun resetOutcomeMessage(outcome: String): String = when (outcome) {
 }
 
 @Composable
-private fun ProviderBlock(provider: ModelProviderUsage, thisChat: Boolean) {
-    val title = if (provider.name.equals("OpenRouter", ignoreCase = true)) "OpenRouter" else "OpenRouter: ${provider.name}"
+private fun ProviderRow(provider: ModelProviderUsage, now: Instant) {
+    val colors = MyTheme.colors
+    val row = apiSpendRow(provider, now)
 
-    Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-        UsageHeader(title, thisChat, provider.readAt)
+    Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S0_5).height(UsageRowHeight), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.width(UsageNameWidth), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+            Icon(MyIcon.Key, colors.text, Tokens.Size.IconSm)
+            Label(row.name, style = Tokens.Type.MetaStrong, maxLines = 1)
+        }
 
-        val spend = provider.spend
-
-        if (spend == null) {
-            Label("Spend not reported yet.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
-        } else {
-            SpendLines(spend)
+        Hinted(row.tooltip, Modifier.weight(1f).semantics { contentDescription = "${row.name}. ${row.tooltip}" }) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                if (row.problem != null) {
+                    Label(row.problem, style = Tokens.Type.Meta, color = if (provider.status == "refused") colors.statusFailed else colors.textMuted, maxLines = 1)
+                } else {
+                    row.today?.let { SpendFigureLabel(it) }
+                    row.month?.let { SpendFigureLabel(it) }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun SpendLines(spend: OpenRouterSpend) {
-    val limit = spend.limit
-
-    if (limit != null) {
-        val (name, used) = when (spend.limitReset) {
-            "daily" -> "Daily limit" to spend.daily
-            "weekly" -> "Weekly limit" to spend.weekly
-            "monthly" -> "Monthly limit" to spend.monthly
-            else -> "Key limit" to spend.total
-        }
-        val percent = if (used == null || limit <= 0.0) 0 else (used / limit * 100).roundToInt().coerceIn(0, 100)
-
-        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
-            UsageLine(name, null, "${usd(used)} / ${usd(limit)}")
-            Meter(percent, "$name $percent% used")
-        }
-    } else {
-        UsageLine("Today", null, usd(spend.daily))
+private fun SpendFigureLabel(figure: SpendFigure) {
+    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+        Label(figure.amount, style = Tokens.Type.Meta, maxLines = 1)
+        Label(figure.label, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted, maxLines = 1)
     }
-
-    if (limit == null && spend.limitRemaining != null) {
-        UsageLine("Key limit remaining", null, usd(spend.limitRemaining))
-    }
-
-    UsageLine("Total", null, usd(spend.total))
 }
 
-private fun usd(amount: Double?): String {
-    val cents = amount?.let { (it * 100).roundToLong() } ?: return "Not reported"
-    val sign = if (cents < 0) "-" else ""
-    val absolute = cents.absoluteValue
-
-    return "$sign$${absolute / 100}.${(absolute % 100).toString().padStart(2, '0')}"
-}
+private val UsageRowHeight = 18.dp
+private val UsageNameWidth = 92.dp
+private val UsageWindowWidth = 14.dp
+private val UsageMeterMinWidth = 36.dp
+private val UsagePercentWidth = 28.dp
+private val UsageResetWidth = 52.dp
+private val UsageMeterHeight = 4.dp
+private val UsageAlertSize = 12.dp
+private val UpdatedTick = 1.minutes
