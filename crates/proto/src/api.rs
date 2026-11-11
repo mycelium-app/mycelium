@@ -1252,6 +1252,8 @@ pub enum MessageProposalState {
     Proposed,
     Sent,
     Declined,
+    Withdrawn,
+    Superseded,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

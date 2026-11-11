@@ -316,3 +316,76 @@ async fn a_message_to_a_conversation_in_the_middle_of_a_turn_is_reported_as_queu
     assert!(said.starts_with("Queued for") && said.contains("goes when that turn ends"), "{said}");
     assert!(delivered.contains("Use v0.29.0"), "{delivered}");
 }
+
+fn proposal_id(reply: &Value) -> String {
+    let reply = text(reply);
+    let start = reply.find("(proposal ").unwrap() + "(proposal ".len();
+
+    reply[start..start + 36].to_string()
+}
+
+#[tokio::test]
+async fn a_pending_proposal_keeps_the_reason_the_agent_gave_for_it() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let source = working_conversation(&server, &mut link, "Plan the release").await;
+    working_conversation(&server, &mut link, "Fix billing export").await;
+
+    let reply = propose(&server, &link, source, "Fix billing export").await;
+
+    assert!(text(&reply).contains("Waiting for the person"), "{reply}");
+    let listed = proposals(&server).await;
+    assert_eq!(listed[0]["reason"], "You asked for the schema");
+    assert_eq!(listed[0]["id"], proposal_id(&reply));
+}
+
+#[tokio::test]
+async fn the_proposing_conversation_withdraws_its_pending_proposal() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let source = working_conversation(&server, &mut link, "Plan the release").await;
+    working_conversation(&server, &mut link, "Fix billing export").await;
+    let id = proposal_id(&propose(&server, &link, source, "Fix billing export").await);
+
+    let withdrawn = call(&server, &link, source, "withdraw_message", json!({"proposal": id})).await;
+
+    assert_ne!(withdrawn["isError"], true, "{withdrawn}");
+    assert_eq!(proposals(&server).await[0]["state"], "withdrawn");
+
+    let again = call(&server, &link, source, "withdraw_message", json!({"proposal": id})).await;
+
+    assert_eq!(again["isError"], true, "{again}");
+}
+
+#[tokio::test]
+async fn another_conversation_cannot_withdraw_a_proposal() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let source = working_conversation(&server, &mut link, "Plan the release").await;
+    let other = working_conversation(&server, &mut link, "Fix billing export").await;
+    let id = proposal_id(&propose(&server, &link, source, "Fix billing export").await);
+
+    let refused = call(&server, &link, other, "withdraw_message", json!({"proposal": id})).await;
+
+    assert_eq!(refused["isError"], true, "{refused}");
+    assert_eq!(proposals(&server).await[0]["state"], "proposed");
+}
+
+#[tokio::test]
+async fn a_newer_proposal_to_the_same_conversation_supersedes_the_older_one() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let source = working_conversation(&server, &mut link, "Plan the release").await;
+    working_conversation(&server, &mut link, "Fix billing export").await;
+    working_conversation(&server, &mut link, "Write the changelog").await;
+    let older = proposal_id(&propose(&server, &link, source, "Fix billing export").await);
+    let elsewhere = proposal_id(&propose(&server, &link, source, "Write the changelog").await);
+
+    let newer = propose(&server, &link, source, "Fix billing export").await;
+
+    assert!(text(&newer).contains("superseded"), "{newer}");
+    let states: std::collections::HashMap<String, String> = proposals(&server).await.iter().map(|found| (found["id"].as_str().unwrap().to_string(), found["state"].as_str().unwrap().to_string())).collect();
+    assert_eq!(states[&older], "superseded");
+    assert_eq!(states[&elsewhere], "proposed");
+    assert_eq!(states[&proposal_id(&newer)], "proposed");
+}

@@ -45,6 +45,8 @@ impl ProposalRow {
         let state = match self.state.as_str() {
             "sent" => MessageProposalState::Sent,
             "declined" => MessageProposalState::Declined,
+            "withdrawn" => MessageProposalState::Withdrawn,
+            "superseded" => MessageProposalState::Superseded,
             _ => MessageProposalState::Proposed,
         };
 
@@ -104,7 +106,7 @@ async fn resolve_for_sender(state: &AppState, owner: Uuid, target: &str, sender:
     })
 }
 
-pub async fn propose(state: &AppState, conversation_id: Uuid, target: &str, message: &str, reason: &str) -> ApiResult<Result<(MessageProposal, Option<prompts::Sent>), String>> {
+pub async fn propose(state: &AppState, conversation_id: Uuid, target: &str, message: &str, reason: &str) -> ApiResult<Result<(MessageProposal, Option<prompts::Sent>, u64), String>> {
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     let target_id = match resolve_for_sender(state, owner, target, Some(conversation_id)).await? {
         Ok(target_id) => target_id,
@@ -115,6 +117,7 @@ pub async fn propose(state: &AppState, conversation_id: Uuid, target: &str, mess
         return Ok(Err("Nothing was proposed. That is this conversation. Choose another one.".to_string()));
     }
 
+    let superseded = sqlx::query("update message_proposals set state = 'superseded', decided_at = now() where conversation_id = $1 and target_id = $2 and state = 'proposed'").bind(conversation_id).bind(target_id).execute(&state.pool).await?.rows_affected();
     let id = sqlx::query_scalar::<_, Uuid>("insert into message_proposals (owner, conversation_id, target_id, message, reason) values ($1, $2, $3, $4, $5) returning id")
         .bind(owner)
         .bind(conversation_id)
@@ -129,10 +132,10 @@ pub async fn propose(state: &AppState, conversation_id: Uuid, target: &str, mess
     if crate::conversation_connections::active(state, owner, conversation_id, target_id).await? || crate::group_connections::connected(state, owner, conversation_id, target_id).await? {
         let (sent, delivery) = approve_and_send(state, owner, id).await?;
 
-        return Ok(Ok((sent, Some(delivery))));
+        return Ok(Ok((sent, Some(delivery), superseded)));
     }
 
-    Ok(Ok((proposal, None)))
+    Ok(Ok((proposal, None, superseded)))
 }
 
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<MessageProposal>>> {
@@ -213,6 +216,23 @@ pub async fn decline_for(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<M
     }
 
     Ok(publish(state, owner, find_owned(state, id, owner).await?))
+}
+
+pub async fn withdraw_for(state: &AppState, conversation_id: Uuid, id: Uuid) -> ApiResult<Result<MessageProposal, String>> {
+    let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+    let found = sqlx::query_as::<_, ProposalRow>(sqlx::AssertSqlSafe(format!("select {} from {PROPOSAL_JOINS} where p.id = $1 and p.owner = $2 and p.conversation_id = $3", proposal_columns()))).bind(id).bind(owner).bind(conversation_id).fetch_optional(&state.pool).await?;
+
+    let Some(found) = found else {
+        return Ok(Err("Nothing was withdrawn. This conversation has no message proposal with that id.".to_string()));
+    };
+
+    let withdrawn = sqlx::query("update message_proposals set state = 'withdrawn', decided_at = now() where id = $1 and state = 'proposed'").bind(id).execute(&state.pool).await?;
+
+    if withdrawn.rows_affected() == 0 {
+        return Ok(Err(format!("Nothing was withdrawn. The message to {} has already been decided.", label(found.target_id, &found.target_title))));
+    }
+
+    Ok(Ok(publish(state, owner, find_owned(state, id, owner).await?)))
 }
 
 pub async fn approve_and_connect(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<MessageProposal>> {

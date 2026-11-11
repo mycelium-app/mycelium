@@ -133,6 +133,17 @@ pub fn definitions() -> Value {
             },
         },
         {
+            "name": "withdraw_message",
+            "description": "Withdraw a message this conversation proposed with send_to_conversation while it still waits for the person, so it leaves their Inbox. Give the proposal id from the send_to_conversation reply. Only this conversation's own pending proposals can be withdrawn. Proposing a newer message to the same conversation withdraws the older one automatically.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "proposal": {"type": "string", "description": "The proposal id from the send_to_conversation reply."},
+                },
+                "required": ["proposal"],
+            },
+        },
+        {
             "name": "watch_conversation",
             "description": "Watch another of the person's conversations: a message arrives here, and wakes this conversation if it is idle, each time that conversation's turn ends and it has finished, failed or is waiting on the person. Conversations this one started with start_conversation or start_subagent are watched already. It needs the same access as read_conversation. Stop with unwatch.",
             "inputSchema": {
@@ -655,6 +666,19 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
 
             ToolReply::text(&json!({"watches": crate::watches::listed(state, owner, conversation_id).await?}).to_string(), false)
         }
+        "withdraw_message" => {
+            let Some(given) = arguments.get("proposal").and_then(Value::as_str).and_then(|given| given.trim().parse::<Uuid>().ok()) else {
+                return Ok(ToolReply::invalid("withdraw_message needs proposal, the id of a message proposal."));
+            };
+            let Some((conversation_id, _)) = caller.conversation().await? else {
+                return Ok(ToolReply::text("Nothing was withdrawn. A message proposal belongs to a conversation, and this call did not come from one.", true));
+            };
+
+            match message_proposals::withdraw_for(state, conversation_id, given).await? {
+                Ok(proposal) => ToolReply::text(&format!("Withdrew the message to {} (proposal {}). It no longer waits for the person.", proposal.target_title, proposal.id), false),
+                Err(message) => ToolReply::text(&message, true),
+            }
+        }
         "unwatch" => {
             let Some(given) = arguments.get("watch").and_then(Value::as_str).map(str::trim).filter(|given| !given.is_empty()) else {
                 return Ok(ToolReply::invalid("unwatch needs watch, a string."));
@@ -696,7 +720,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             };
 
             match message_proposals::propose(state, conversation_id, target, message, reason).await? {
-                Ok((proposal, delivery)) => {
+                Ok((proposal, delivery, superseded)) => {
                     let message = match delivery {
                         Some(crate::prompts::Sent::Delivered) => format!("Sent to {} (message {}).", proposal.target_title, proposal.id),
                         Some(crate::prompts::Sent::QueuedWhileBusy) => format!("Queued for {} (message {}). It is in the middle of a turn, so the message goes when that turn ends.", proposal.target_title, proposal.id),
@@ -715,6 +739,12 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                                 None => waiting,
                             }
                         }
+                    };
+
+                    let message = match superseded {
+                        0 => message,
+                        1 => format!("{message} An older pending message to the same conversation was superseded and no longer waits for the person."),
+                        count => format!("{message} {count} older pending messages to the same conversation were superseded and no longer wait for the person."),
                     };
 
                     ToolReply::text(&message, false)
