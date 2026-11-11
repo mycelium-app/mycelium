@@ -29,6 +29,7 @@ import kotlin.test.assertTrue
 
 class StoreConnectionTest {
     private val conversation = """{"id":"c1","owner":"u","node_id":"n","agent":"claude","cwd":"/work","title":"Restore","status":"done","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
+    private val node = """{"id":"n","name":"Node","hostname":"h","os":"linux","arch":"x86_64","version":"1","online":true,"draining":false}"""
     private val json = headersOf(HttpHeaders.ContentType, "application/json")
 
     private class Sockets {
@@ -140,7 +141,9 @@ class StoreConnectionTest {
                 release.await()
             }
 
-            respond("[]", HttpStatusCode.OK, json)
+            val body = if (request.url.encodedPath.endsWith("/nodes")) """[$node]""" else "[]"
+
+            respond(body, HttpStatusCode.OK, json)
         }
         val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope, stream = sockets::stream)
 
@@ -148,8 +151,8 @@ class StoreConnectionTest {
         store.untilConnected()
         store.receive(parseStreamMessage("""{"type":"conversation",${conversation.removePrefix("{")}""")!!)
         release.complete(Unit)
-        withContext(Dispatchers.Default) { delay(200) }
+        val listed = withContext(Dispatchers.Default) { withTimeout(5_000) { store.state.first { it.nodes.isNotEmpty() } } }
 
-        assertEquals(listOf("c1"), store.state.value.conversations.keys.toList())
+        assertEquals(listOf("c1"), listed.conversations.keys.toList())
     }
 }

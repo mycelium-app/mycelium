@@ -196,6 +196,7 @@ class Store(
                         stream {
                             connectedAt = timeSource.markNow()
                             lastHeardAt = connectedAt
+                            streamedConversations.value = emptySet()
                             mutableState.update { it.copy(connected = true) }
                             launch { refreshOverStream() }
                         }.collect { message ->
@@ -229,7 +230,6 @@ class Store(
         launch { wellness.load() }
         launch { voice.load() }
 
-        streamedConversations.value = emptySet()
         val conversations = async { untilLoaded { api.conversations(archived = false) } }
         val nodes = async { untilLoaded { api.nodes() } }
 
