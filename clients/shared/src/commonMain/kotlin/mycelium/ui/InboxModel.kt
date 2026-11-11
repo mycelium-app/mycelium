@@ -43,7 +43,7 @@ data class InboxItem(
     val key: String,
     val conversation: Conversation,
     val project: Project?,
-    val projectName: String,
+    val projectName: String?,
     val assistant: Assistant?,
     val waitingSince: String,
     val context: String?,
@@ -134,7 +134,7 @@ fun inboxItems(state: AppState): List<InboxItem> {
     fun item(conversation: Conversation, key: String, waitingSince: String, context: String?, request: InboxRequest, thread: List<ThreadItem>): InboxItem {
         val project = conversation.projectId?.let { state.projects[it] }
 
-        return InboxItem("${conversation.id}/$key", conversation, project, project?.name ?: projectName(conversation.cwd), conversation.assistantId?.let { state.assistants[it] }, waitingSince, context, request, thread)
+        return InboxItem("${conversation.id}/$key", conversation, project, project?.name ?: projectName(conversation.cwd).takeUnless { conversation.scratch }, conversation.assistantId?.let { state.assistants[it] }, waitingSince, context, request, thread)
     }
 
     val fromApprovals = waitingApprovals(state).mapNotNull { approval ->
@@ -168,7 +168,7 @@ fun inboxItems(state: AppState): List<InboxItem> {
             val conversation = workflow.conversationId?.let { state.conversations[it] } ?: return@mapNotNull null
             val project = conversation.projectId?.let { state.projects[it] }
 
-            InboxItem("${conversation.id}/workflow-${workflow.id}", conversation, project, project?.name ?: projectName(conversation.cwd), conversation.assistantId?.let { state.assistants[it] }, workflow.updatedAt, null, InboxRequest.Gate(workflow), emptyList())
+            InboxItem("${conversation.id}/workflow-${workflow.id}", conversation, project, project?.name ?: projectName(conversation.cwd).takeUnless { conversation.scratch }, conversation.assistantId?.let { state.assistants[it] }, workflow.updatedAt, null, InboxRequest.Gate(workflow), emptyList())
         }
 
     return (fromConversations + fromApprovals + fromGates).sortedByDescending { it.waitingSince }

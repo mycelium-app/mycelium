@@ -822,10 +822,10 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                     }
                 }
 
-                conversationRows(PinnedName, pinnedChatRows, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = false)
+                conversationRows(PinnedName, pinnedChatRows, state, store, route, onRoute, collapsed, { collapsed = it }, inChatList = true)
 
                 for (section in chats) {
-                    conversationRows(section.name, section.rows, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = false)
+                    conversationRows(section.name, section.rows, state, store, route, onRoute, collapsed, { collapsed = it }, inChatList = true)
                 }
             } else {
                 item(key = "label") {
@@ -840,7 +840,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                     }
                 }
 
-                conversationRows(PinnedName, pinned, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = true)
+                conversationRows(PinnedName, pinned, state, store, route, onRoute, collapsed, { collapsed = it }, inChatList = false)
 
                 val (beforeManaged, afterManaged) = sections.partition { statusRank(it.status) <= statusRank(ConversationStatus.Working) }
 
@@ -859,11 +859,11 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                     }
 
                     if (!settled || settledOpen) {
-                        conversationRows(null, section.rows, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = true)
+                        conversationRows(null, section.rows, state, store, route, onRoute, collapsed, { collapsed = it }, inChatList = false)
                     }
                 }
 
-                conversationRows(SnoozedName, snoozed, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = true)
+                conversationRows(SnoozedName, snoozed, state, store, route, onRoute, collapsed, { collapsed = it }, inChatList = false)
             }
         }
 
@@ -957,7 +957,7 @@ private fun LazyListScope.conversationRows(
     onRoute: (Route) -> Unit,
     collapsed: Set<String>,
     onCollapsed: (Set<String>) -> Unit,
-    withNode: Boolean,
+    inChatList: Boolean,
 ) {
     if (parents.isEmpty()) {
         return
@@ -987,12 +987,13 @@ private fun LazyListScope.conversationRows(
     items(sidebarRows(parents, state.conversations.values, collapsed), key = { it.conversation.id }) { row ->
         ConversationRow(
             row.conversation,
-            if (withNode) state.nodes[row.conversation.nodeId] else null,
+            if (inChatList) null else state.nodes[row.conversation.nodeId],
             row.conversation.projectId?.let { state.projects[it] },
             selected = row.conversation.id == (route as? Route.Chat)?.id,
             onClick = { onRoute(Route.Chat(row.conversation.id)) },
             depth = row.depth,
             sideChats = row.sideChats,
+            inChatList = inChatList,
             pingHeld = row.conversation.assistantId != null && store.wellness.holdsPings(LocalHoursView.current?.closed(row.conversation.groupId) == true),
             expanded = row.conversation.id !in collapsed,
             onToggle = { onCollapsed(if (row.conversation.id in collapsed) collapsed - row.conversation.id else collapsed + row.conversation.id) },
@@ -1035,7 +1036,7 @@ private fun LazyListScope.managedRows(
     }
 
     if (open) {
-        conversationRows(null, managed, state, store, route, onRoute, collapsed, onCollapsed, withNode = true)
+        conversationRows(null, managed, state, store, route, onRoute, collapsed, onCollapsed, inChatList = false)
     }
 }
 
@@ -1086,7 +1087,7 @@ private fun SectionHeading(name: String, open: Boolean?, onToggle: () -> Unit, c
 }
 
 @Composable
-private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Project?, selected: Boolean, onClick: () -> Unit, depth: Int = 0, sideChats: Int = 0, pingHeld: Boolean = false, expanded: Boolean = true, onToggle: () -> Unit = {}, onPin: () -> Unit = {}, onSnooze: (String?) -> Unit = {}, onRename: (String) -> Unit = {}, onCloseSession: () -> Unit = {}, onDismiss: () -> Unit = {}, onArchive: () -> Unit = {}, onCancelResume: () -> Unit = {}) {
+private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Project?, selected: Boolean, onClick: () -> Unit, depth: Int = 0, sideChats: Int = 0, inChatList: Boolean = false, pingHeld: Boolean = false, expanded: Boolean = true, onToggle: () -> Unit = {}, onPin: () -> Unit = {}, onSnooze: (String?) -> Unit = {}, onRename: (String) -> Unit = {}, onCloseSession: () -> Unit = {}, onDismiss: () -> Unit = {}, onArchive: () -> Unit = {}, onCancelResume: () -> Unit = {}) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
     val menu = rememberRowMenuState()
@@ -1139,7 +1140,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                     shape = BlockShape,
                     description = "$shownTitle${if (unread) ", unread" else ""}, $statusName${row.flagReason?.let { ", $it" }.orEmpty()}, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.isSubagent) ", subagent" else ", side chat" }.orEmpty()}${if (!row.isChat && place.isNotEmpty()) ", " + listOfNotNull(row.branch?.let { "branch $it" }, pullRequestText).joinToString(", ") else ""}",
                 )
-                .padding(start = Tokens.Space.S2 + (if (row.isChat && sideChats == 0) 0.dp else Tokens.Space.S3) + indent, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
+                .padding(start = Tokens.Space.S2 + (if (inChatList && sideChats == 0) 0.dp else Tokens.Space.S3) + indent, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1151,7 +1152,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                 ConversationStatus.Done -> null
             }
 
-            if (!row.isChat) {
+            if (!inChatList) {
                 val iconSize = if (place.isNotEmpty()) Tokens.Size.TwoLineRowIcon else Tokens.Size.IconSm
 
                 Box(Modifier.width(Tokens.Space.S8), contentAlignment = Alignment.Center) {
@@ -1212,18 +1213,16 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                 Label(timestamp(row.updatedAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
             }
 
-            if (row.isChat) {
-                val waitingMark = when (row.status) {
-                    ConversationStatus.Input -> colors.text.takeUnless { pingHeld }
-                    ConversationStatus.Review -> colors.text.takeUnless { pingHeld || unread }
-                    else -> badge
-                }
-
-                Box(Modifier.size(Tokens.Space.S2).background(waitingMark ?: Color.Transparent, CircleShape), contentAlignment = Alignment.Center) {
-                    if (unread && waitingMark == null) {
+            if (inChatList) {
+                Box(Modifier.testTag("status-slot").size(Tokens.Size.IconSm), contentAlignment = Alignment.Center) {
+                    if (badge != null) {
+                        Box(Modifier.testTag("status-dot").size(Tokens.Space.S2).background(badge, CircleShape))
+                    } else if (unread) {
                         UnreadDot()
                     }
                 }
+
+                Icon(agentIcon(row.agent), colors.textMuted, Tokens.Size.IconSm, Modifier.testTag("agent-icon"))
             } else if (unread) {
                 Box(Modifier.size(Tokens.Size.IconSm), contentAlignment = Alignment.Center) {
                     UnreadDot()

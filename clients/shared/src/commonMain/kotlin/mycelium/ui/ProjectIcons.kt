@@ -119,8 +119,6 @@ fun ProjectIcon(project: Project?, size: Dp = Tokens.Size.IconSm, modifier: Modi
         Box(modifier.size(size).border(Tokens.Size.Hairline, MyTheme.colors.textMuted, ControlShape), contentAlignment = Alignment.Center) {
             Label(initial, style = Tokens.Type.UiStrong.copy(fontSize = fontSize, lineHeight = fontSize), color = MyTheme.colors.textMuted)
         }
-    } else {
-        Box(modifier.size(size))
     }
 }
 

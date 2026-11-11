@@ -12,6 +12,9 @@ import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.graphics.asSkiaBitmap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -122,6 +125,28 @@ class InboxTest {
 
         rule.waitUntil(5_000) { posts.any { it.first.endsWith("/conversations/c1/permission") } }
         assertTrue(posts.single { it.first.endsWith("/conversations/c1/permission") }.second.contains("\"approve\""))
+    }
+
+    @Test
+    fun anInboxItemWithoutAProjectOrAssistantStartsItsNameAtTheRowContentStart() {
+        show("input")
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Approve pnpm db:migrate").fetchSemanticsNodes().isNotEmpty() }
+
+        val left = rule.onNodeWithText("harbour", useUnmergedTree = true).getUnclippedBoundsInRoot().left
+
+        assertEquals(rule.onNodeWithText("Needs you", useUnmergedTree = true).getUnclippedBoundsInRoot().left, left)
+    }
+
+    @Test
+    fun theInboxRendersForComparisonWithTheArtboard() {
+        show("input")
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Approve pnpm db:migrate").fetchSemanticsNodes().isNotEmpty() }
+        val png = org.jetbrains.skia.Image.makeFromBitmap(rule.onRoot().captureToImage().asSkiaBitmap()).encodeToData(org.jetbrains.skia.EncodedImageFormat.PNG)!!.bytes
+        val out = java.io.File("/tmp/mycelium-build-chats-row/shots/inbox.png")
+        out.parentFile.mkdirs()
+        out.writeBytes(png)
+
+        assertEquals(true, out.length() > 5_000)
     }
 
     @Test

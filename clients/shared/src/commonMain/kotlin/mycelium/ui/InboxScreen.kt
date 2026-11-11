@@ -271,7 +271,7 @@ private fun InboxItemRow(store: Store, state: AppState, item: InboxItem, focused
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             if (item.assistant != null) {
                 AssistantAvatar(item.assistant)
-            } else {
+            } else if (item.project != null) {
                 ProjectIcon(item.project)
             }
 
@@ -280,7 +280,10 @@ private fun InboxItemRow(store: Store, state: AppState, item: InboxItem, focused
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Label(item.projectName, style = Tokens.Type.UiStrong, maxLines = 1)
+                if (item.projectName != null) {
+                    Label(item.projectName, style = Tokens.Type.UiStrong, maxLines = 1)
+                }
+
                 Label(conversation.title, Modifier.weight(1f), maxLines = 1)
             }
 

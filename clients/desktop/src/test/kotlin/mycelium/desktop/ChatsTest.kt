@@ -3,7 +3,12 @@ package mycelium.desktop
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.graphics.asSkiaBitmap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -55,8 +60,8 @@ private object ChatPlatform : Platform {
     override fun copyToClipboard(text: String) = Unit
 }
 
-private fun conversation(id: String, title: String, agent: String, updatedAt: String, provider: String? = if (agent == "chat") "p1" else null) =
-    """{"id":"$id","owner":"u","node_id":"n1","agent":"$agent","cwd":"/work/app","title":"$title","status":"review","model":${if (provider == null) "null" else "\"llama3.2\""},${if (provider == null) "" else """"provider_id":"$provider","""}"created_at":"$updatedAt","updated_at":"$updatedAt"}"""
+private fun conversation(id: String, title: String, agent: String, updatedAt: String, provider: String? = if (agent == "chat") "p1" else null, scratch: Boolean = false) =
+    """{"id":"$id","scratch":$scratch,"owner":"u","node_id":"n1","agent":"$agent","cwd":"/work/app","title":"$title","status":"review","model":${if (provider == null) "null" else "\"llama3.2\""},${if (provider == null) "" else """"provider_id":"$provider","""}"created_at":"$updatedAt","updated_at":"$updatedAt"}"""
 
 private const val Anthropic = """{"id":"p2","kind":"anthropic","name":"Anthropic","models":["claude-sonnet-5-5"],"default_model":"claude-sonnet-5-5","created_at":"2026-10-22T10:00:00Z"}"""
 
@@ -82,6 +87,7 @@ class ChatsTest {
         conversation("c1", "Trip to Lisbon", "chat", now.toString(), if (removedProvider) null else "p1"),
         conversation("c2", "Compare restore strategies", "chat", (now - 3.days).toString()),
         conversation("c3", "Old recipe question", "chat", (now - 30.days).toString()),
+        conversation("s1", "Sketch a bookshelf", "claude", now.toString(), scratch = true),
     ).joinToString(",", "[", "]")
 
     private fun shell(route: Route = Route.Empty) {
@@ -128,6 +134,38 @@ class ChatsTest {
         rule.onNodeWithText("Workspaces").performClick()
 
         rule.onAllNodesWithText("New conversation").onFirst().assertIsDisplayed()
+    }
+
+    @Test
+    fun anAgentChatAndAModelChatStartAtTheSameX() {
+        shell()
+        rule.onNodeWithText("Chats").performClick()
+
+        val agentX = rule.onNodeWithText("Sketch a bookshelf", useUnmergedTree = true).getUnclippedBoundsInRoot().left
+        val modelX = rule.onNodeWithText("Trip to Lisbon", useUnmergedTree = true).getUnclippedBoundsInRoot().left
+
+        assertEquals(modelX, agentX)
+    }
+
+    @Test
+    fun anAgentChatInChatsShowsItsStatusDotAndAgentIcon() {
+        shell()
+        rule.onNodeWithText("Chats").performClick()
+
+        assertEquals(4, rule.onAllNodesWithTag("agent-icon", useUnmergedTree = true).fetchSemanticsNodes().size)
+        assertEquals(4, rule.onAllNodesWithTag("status-dot", useUnmergedTree = true).fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun theChatsListRendersForComparisonWithTheArtboard() {
+        shell()
+        rule.onNodeWithText("Chats").performClick()
+        val png = org.jetbrains.skia.Image.makeFromBitmap(rule.onRoot().captureToImage().asSkiaBitmap()).encodeToData(org.jetbrains.skia.EncodedImageFormat.PNG)!!.bytes
+        val out = java.io.File("/tmp/mycelium-build-chats-row/shots/chats-list.png")
+        out.parentFile.mkdirs()
+        out.writeBytes(png)
+
+        assertEquals(true, out.length() > 5_000)
     }
 
     @Test
