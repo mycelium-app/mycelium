@@ -20,6 +20,7 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -54,10 +55,10 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-private fun conversation(status: String, actionItems: List<Pair<String, String>> = emptyList()): String {
+private fun conversation(status: String, actionItems: List<Pair<String, String>> = emptyList(), assistantId: String? = null): String {
     val items = actionItems.joinToString(",") { (id, text) -> """{"id":"$id","text":"$text","created_at":"2026-10-22T10:0${id.last()}:00Z"}""" }
 
-    val itemsField = if (items.isEmpty()) "" else ",\"action_items\":[$items]"
+    val itemsField = (if (items.isEmpty()) "" else ",\"action_items\":[$items]") + (assistantId?.let { ",\"assistant_id\":\"$it\"" } ?: "")
 
     return """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/harbour","title":"Bump the UI kit","status":"$status",
 "acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:05:00Z","archived_at":null$itemsField}"""
@@ -68,6 +69,10 @@ private const val PermissionEvents = """[{"conversation_id":"c1","seq":1,"kind":
 
 private const val StartProposalJson = """{"id":"p1","conversation_id":"c1","kind":"subagent","title":"Review the schema","state":"proposed","created_at":"2026-10-22T10:06:00Z",
 "steps":[{"key":"review","title":"Review the schema","node":{"id":"n1","name":"atlas","online":true},"folder":"/work/harbour","agent":"claude","account_choices":["work","personal"],"first_message":"Read the migrations and list anything that breaks old clients."}]}"""
+
+private const val AssistantJson = """{"id":"a1","name":"Archivist","created_at":"2026-10-01T00:00:00Z"}"""
+
+private const val MessageProposalJson = """{"id":"m1","conversation_id":"c1","target_id":"t1","target_title":"Release notes","target_node":"atlas","message":"Please publish the notes.","reason":"The notes are ready for example.com","state":"proposed","created_at":"2026-10-22T10:06:00Z"}"""
 
 private const val NoFeed = """{"posts":[]}"""
 
@@ -92,7 +97,7 @@ class InboxTest {
 
     private val deletes = java.util.concurrent.CopyOnWriteArrayList<String>()
 
-    private fun show(status: String, feed: String = NoFeed, privacy: String = VoiceOff, textSize: TextSize = TextSize.Default, density: Float = 1f, events: String? = null, actionItems: List<Pair<String, String>> = emptyList(), startProposals: String = "[]"): Store {
+    private fun show(status: String, feed: String = NoFeed, privacy: String = VoiceOff, textSize: TextSize = TextSize.Default, density: Float = 1f, events: String? = null, actionItems: List<Pair<String, String>> = emptyList(), startProposals: String = "[]", assistantId: String? = null, assistants: String = "[]", messageProposals: String = "[]"): Store {
         val open = actionItems.toMutableList()
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -110,8 +115,10 @@ class InboxTest {
                 path.endsWith("/inbox/feed") -> feed
                 path.endsWith("/privacy") -> privacy
                 path.endsWith("/start-proposals") -> startProposals
-                request.method == HttpMethod.Delete -> conversation(status, open)
-                path.endsWith("/conversations") -> "[${conversation(status, open)}]"
+                path.endsWith("/message-proposals") -> messageProposals
+                path.endsWith("/assistants") -> assistants
+                request.method == HttpMethod.Delete -> conversation(status, open, assistantId)
+                path.endsWith("/conversations") -> "[${conversation(status, open, assistantId)}]"
                 path.endsWith("/conversations/c1/events") -> events ?: if (status == "input") PermissionEvents else "[]"
                 path.endsWith("/nodes") || path.endsWith("/groups") || path.endsWith("/workflows") || path.endsWith("/queue") || path.endsWith("/session-updates") -> "[]"
                 else -> "{}"
@@ -170,6 +177,16 @@ class InboxTest {
         rule.onNodeWithText("Waiting for approval").assertExists()
         rule.onNodeWithText("Create").assertExists()
         rule.onNodeWithText("Don't create").assertExists()
+    }
+
+    @Test
+    fun aMessageProposalCardNamesTheAssistantAndShowsItsOwnReasonNotTheLastMessage() {
+        val lastMessage = """[{"conversation_id":"c1","seq":1,"kind":"acp_update","payload":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Unrelated chatter from earlier"}}}}]"""
+        show("working", events = lastMessage, assistantId = "a1", assistants = "[$AssistantJson]", messageProposals = "[$MessageProposalJson]")
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("The notes are ready for example.com").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithContentDescription("Open Archivist").assertExists()
+        rule.onAllNodesWithText("Unrelated chatter from earlier").assertCountEquals(0)
     }
 
     @Test

@@ -49,7 +49,9 @@ data class InboxItem(
     val context: String?,
     val request: InboxRequest,
     val thread: List<ThreadItem>,
-)
+) {
+    val name: String get() = assistant?.name ?: conversation.title
+}
 
 fun InboxItem.resolved(): InboxItem? = when (request) {
     is InboxRequest.Approval -> copy(request = InboxRequest.Approval(request.permission.copy(resolved = true)))
@@ -108,7 +110,7 @@ fun ensureOpened(store: Store, conversationId: String) {
     }
 }
 
-private data class WaitingApproval(val kind: String, val id: String, val conversationId: String?, val createdAt: String, val request: InboxRequest)
+private data class WaitingApproval(val kind: String, val id: String, val conversationId: String?, val createdAt: String, val request: InboxRequest, val reason: String? = null)
 
 private fun approvalCall(id: String, parsed: MyceliumCall) =
     InboxRequest.Mycelium(ThreadItem.ToolCall("approval-$id", id, "mycelium ${parsed.tool.key}", "other", "", ToolStatus.Done, null, null), parsed)
@@ -119,7 +121,7 @@ private fun waitingApprovals(state: AppState): List<WaitingApproval> =
 
         WaitingApproval("start", proposal.id, proposal.conversationId, proposal.createdAt, approvalCall(proposal.id, MyceliumCall.StartProposed(tool, proposal.title, proposal.id)))
     } + state.messageProposals.values.filter { it.waiting }.map { proposal ->
-        WaitingApproval("message", proposal.id, proposal.conversationId, proposal.createdAt, approvalCall(proposal.id, MyceliumCall.SendToConversation(proposal.targetTitle, proposal.message, proposal.reason, proposal.id)))
+        WaitingApproval("message", proposal.id, proposal.conversationId, proposal.createdAt, approvalCall(proposal.id, MyceliumCall.SendToConversation(proposal.targetTitle, proposal.message, proposal.reason, proposal.id)), proposal.reason)
     } + state.apiAccessRequests.values.filter { it.waiting }.map { request ->
         WaitingApproval("api-access", request.id, request.conversationId, request.createdAt, approvalCall(request.id, MyceliumCall.RequestApiAccess(request.scopes, request.hours, request.reason, request.id)))
     } + state.sshAccessRequests.values.filter { it.waiting }.map { request ->
@@ -140,7 +142,7 @@ fun inboxItems(state: AppState): List<InboxItem> {
     val fromApprovals = waitingApprovals(state).mapNotNull { approval ->
         val conversation = approval.conversationId?.let { state.conversations[it] }?.takeIf { it.archivedAt == null } ?: return@mapNotNull null
         val thread = buildThread(state.events[conversation.id].orEmpty())
-        val context = thread.filterIsInstance<ThreadItem.AgentMessage>().lastOrNull()?.text
+        val context = approval.reason ?: thread.filterIsInstance<ThreadItem.AgentMessage>().lastOrNull()?.text
 
         item(conversation, "${approval.kind}-${approval.id}", approval.createdAt, context, approval.request, thread)
     }

@@ -66,6 +66,16 @@ class InboxModelTest {
     }
 
     @Test
+    fun aMessageProposalItemIsNamedByItsAssistantAndCarriesItsOwnReason() {
+        val chats = mapOf("w" to conversation("w", ConversationStatus.Working).copy(assistantId = "archivist"))
+        val assistants = mapOf("archivist" to Assistant("archivist", "Archivist", createdAt = "2026-10-01T00:00:00Z"))
+        val item = inboxItems(AppState(conversations = chats, assistants = assistants, messageProposals = mapOf("m1" to messageProposal("m1", "w")))).single()
+
+        assertEquals("Archivist", item.name)
+        assertEquals("Because", item.context)
+    }
+
+    @Test
     fun aProposalOfAnArchivedOrUnknownConversationIsNotInNeedsYou() {
         val chats = mapOf("a" to conversation("a", ConversationStatus.Working, archivedAt = "2026-10-22T11:00:00Z"))
         val proposals = mapOf("p1" to startProposal("p1", "a"), "p2" to startProposal("p2", "gone"))

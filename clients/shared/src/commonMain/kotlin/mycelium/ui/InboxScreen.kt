@@ -276,7 +276,7 @@ private fun InboxItemRow(store: Store, state: AppState, item: InboxItem, focused
             }
 
             Row(
-                Modifier.weight(1f).pressable({ onOpenConversation(conversation.id) }, description = "Open ${conversation.title}", shape = ControlShape),
+                Modifier.weight(1f).pressable({ onOpenConversation(conversation.id) }, description = "Open ${item.name}", shape = ControlShape),
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -284,11 +284,11 @@ private fun InboxItemRow(store: Store, state: AppState, item: InboxItem, focused
                     Label(item.projectName, style = Tokens.Type.UiStrong, maxLines = 1)
                 }
 
-                Label(conversation.title, Modifier.weight(1f), maxLines = 1)
+                Label(item.name, Modifier.weight(1f), maxLines = 1)
             }
 
             Label(relativeTime(item.waitingSince), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-            MyButton({ expanded = !expanded }, icon = if (expanded) MyIcon.ChevronUp else MyIcon.ChevronDown, description = if (expanded) "Show less of ${conversation.title}" else "Show more of ${conversation.title}", size = ButtonSize.Sm, muted = true)
+            MyButton({ expanded = !expanded }, icon = if (expanded) MyIcon.ChevronUp else MyIcon.ChevronDown, description = if (expanded) "Show less of ${item.name}" else "Show more of ${item.name}", size = ButtonSize.Sm, muted = true)
         }
 
         item.context?.let { MarkdownText(it, style = Tokens.Type.Ui, color = colors.textMuted, maxLines = 2, overflow = TextOverflow.Ellipsis) }
