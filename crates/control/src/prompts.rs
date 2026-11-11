@@ -588,9 +588,9 @@ pub async fn stop(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
         return chats::stop(state, owner, id).await;
     }
 
-    let turn_ended = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!("select {TURN_HAS_ENDED}"))).bind(id).fetch_one(&state.pool).await?;
+    let idle = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!("select {TURN_HAS_ENDED} and not exists (select 1 from queued_prompts where conversation_id = $1)"))).bind(id).fetch_one(&state.pool).await?;
 
-    if turn_ended {
+    if idle {
         let cleared = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set agent_active = false where id = $1 and agent_active returning {CONVERSATION_COLUMNS}")))
             .bind(id)
             .fetch_optional(&state.pool)
