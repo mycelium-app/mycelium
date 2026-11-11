@@ -28,7 +28,7 @@ class ToolCallsStayVisibleTest {
         val permission = ThreadItem.Permission("kp", "r1", "mcp__gitlab__create_merge_request", options, false, "GitLab", null, null, false, null, "call3")
         val items = calls.take(3) + permission + calls.drop(3)
 
-        rule.setContent { MyceliumTheme(true) { Box(Modifier.width(720.dp)) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}) } } }
+        rule.setContent { MyceliumTheme(true) { Box(Modifier.width(720.dp)) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false) } } }
 
         (1..5).forEach { rule.onNodeWithText("file$it.kt", substring = true).assertExists() }
         assertEquals(0, rule.onAllNodesWithContentDescription("tool calls", substring = true).fetchSemanticsNodes().size)

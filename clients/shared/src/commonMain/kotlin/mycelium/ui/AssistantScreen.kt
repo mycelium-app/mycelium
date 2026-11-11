@@ -236,7 +236,7 @@ private fun ColumnScope.StartSession(store: Store, state: AppState, assistant: A
         message = TextFieldValue("", TextRange.Zero)
     }
 
-    ThreadView(items = waiting.mapIndexed { index, text -> ThreadItem.UserMessage("sending-$index", text) }, onAnswer = { _, _ -> }, onStopWorkflow = {}, modifier = Modifier.weight(1f))
+    ThreadView(items = waiting.mapIndexed { index, text -> ThreadItem.UserMessage("sending-$index", text) }, onAnswer = { _, _ -> }, onStopWorkflow = {}, modifier = Modifier.weight(1f), runsOnModel = false)
 
     Box(Modifier.fillMaxWidth().padding(Tokens.Space.S4), contentAlignment = Alignment.Center) {
         ComposerCard(

@@ -19,7 +19,7 @@ class MarkdownTableTest {
     @Test
     fun aTablesCellsLineUpInColumns() {
         val table = "| Check | Result |\n|---|---|\n| sha256 of every file | ok |\n| signer | 6ca54d2f |"
-        rule.setContent { MyceliumTheme(true) { ThreadView(listOf(ThreadItem.AgentMessage("m1", table)), onAnswer = { _, _ -> }, onStopWorkflow = {}) } }
+        rule.setContent { MyceliumTheme(true) { ThreadView(listOf(ThreadItem.AgentMessage("m1", table)), onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false) } }
 
         val header = rule.onNodeWithText("Result", useUnmergedTree = true).getBoundsInRoot()
         val cell = rule.onNodeWithText("6ca54d2f", useUnmergedTree = true).getBoundsInRoot()
@@ -32,7 +32,7 @@ class MarkdownTableTest {
         val prose = "The merge conflicted in five files, they are resolved, the checks are running in the background and nothing is committed yet, so wait for the report."
         val long = "Keeps the outcome and progress version with no log observer, plus the new finish rule for complete or warn and the cancelled or failed title, and errors come from the outcome."
         val message = "$prose\n\n| File | Resolution |\n|---|---|\n| restore.svelte | $long |"
-        rule.setContent { MyceliumTheme(true) { ThreadView(listOf(ThreadItem.AgentMessage("m1", message)), onAnswer = { _, _ -> }, onStopWorkflow = {}) } }
+        rule.setContent { MyceliumTheme(true) { ThreadView(listOf(ThreadItem.AgentMessage("m1", message)), onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false) } }
 
         val paragraph = rule.onNodeWithText(prose, useUnmergedTree = true).getBoundsInRoot()
         val cell = rule.onNodeWithText(long, useUnmergedTree = true).getBoundsInRoot()
@@ -44,7 +44,7 @@ class MarkdownTableTest {
     fun aShortCellIsCentredBesideACellWhoseTextWraps() {
         val long = "Keeps the outcome and progress version with no log observer, plus the new finish rule for complete or warn and the cancelled or failed title, and errors come from the outcome."
         val message = "| File | Resolution | Lines |\n|---|---|--:|\n| restore.svelte | $long | 12 |"
-        rule.setContent { MyceliumTheme(true) { ThreadView(listOf(ThreadItem.AgentMessage("m1", message)), onAnswer = { _, _ -> }, onStopWorkflow = {}) } }
+        rule.setContent { MyceliumTheme(true) { ThreadView(listOf(ThreadItem.AgentMessage("m1", message)), onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false) } }
 
         val wrapped = rule.onNodeWithText(long, useUnmergedTree = true).getBoundsInRoot()
         val short = rule.onNodeWithText("12", useUnmergedTree = true).getBoundsInRoot()
@@ -58,7 +58,7 @@ class MarkdownTableTest {
         val table = "| Check | Result |\n|---|---|\n| sig | ok |\n| sha | ok |"
         val prose = "A long enough paragraph that the thread is clearly wider than a two column table of short words."
         val message = "$prose\n\n$table"
-        rule.setContent { MyceliumTheme(true) { ThreadView(listOf(ThreadItem.AgentMessage("m1", message)), onAnswer = { _, _ -> }, onStopWorkflow = {}) } }
+        rule.setContent { MyceliumTheme(true) { ThreadView(listOf(ThreadItem.AgentMessage("m1", message)), onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false) } }
 
         val paragraph = rule.onNodeWithText(prose, useUnmergedTree = true).getBoundsInRoot()
         val header = rule.onNodeWithText("Check", useUnmergedTree = true).getBoundsInRoot()

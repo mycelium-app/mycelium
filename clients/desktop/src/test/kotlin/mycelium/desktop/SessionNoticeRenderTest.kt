@@ -30,7 +30,7 @@ class SessionNoticeRenderTest {
     @Composable
     private fun Thread() {
         Box(Modifier.fillMaxSize().background(MyTheme.colors.bgContent)) {
-            ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, agent = "claude")
+            ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, agent = "claude", runsOnModel = false)
         }
     }
 

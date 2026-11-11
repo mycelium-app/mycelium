@@ -70,7 +70,7 @@ class LazyHistoryTest {
                     hasOlder = state.hasOlderEvents("c1"),
                     loadingOlder = "c1" in state.loadingOlderEvents,
                     onLoadOlder = { scope.launch { store.loadOlder("c1") } },
-                )
+                 runsOnModel = false)
             }
         }
 

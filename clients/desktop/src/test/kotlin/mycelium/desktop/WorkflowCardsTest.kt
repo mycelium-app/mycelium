@@ -71,7 +71,7 @@ class WorkflowCardsTest {
             MyceliumTheme(true) {
                 CompositionLocalProvider(LocalConversationWorkflows provides ConversationWorkflows(workflows, { opened += it }, { id, request -> controls += id to request })) {
                     Box(Modifier.width(900.dp).height(700.dp)) {
-                        ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = { stopped += "stop" }, dismissedPins = setOf("workflow:run"))
+                        ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = { stopped += "stop" }, dismissedPins = setOf("workflow:run"), runsOnModel = false)
                     }
                 }
             }
@@ -145,7 +145,7 @@ class WorkflowCardsTest {
             MyceliumTheme(true) {
                 CompositionLocalProvider(LocalConversationWorkflows provides ConversationWorkflows(listOf(run), { opened += it }, { _, _ -> })) {
                     Box(Modifier.width(900.dp).height(700.dp)) {
-                        ThreadView(listOf(ThreadItem.Workflow("w", WorkflowProgress("run", agents, lastLineAt = Clock.System.now() - 1.minutes))), onAnswer = { _, _ -> }, onStopWorkflow = { stopped += "stop" }, dismissedPins = setOf("workflow:run"))
+                        ThreadView(listOf(ThreadItem.Workflow("w", WorkflowProgress("run", agents, lastLineAt = Clock.System.now() - 1.minutes))), onAnswer = { _, _ -> }, onStopWorkflow = { stopped += "stop" }, dismissedPins = setOf("workflow:run"), runsOnModel = false)
                     }
                 }
             }
@@ -169,7 +169,7 @@ class WorkflowCardsTest {
             MyceliumTheme(true) {
                 CompositionLocalProvider(LocalConversationWorkflows provides ConversationWorkflows(listOf(releaseCheck.copy(status = "failed", endedAt = Clock.System.now().toString())), { opened += it }, { id, request -> controls += id to request })) {
                     Box(Modifier.width(900.dp).height(700.dp)) {
-                        ThreadView(emptyList(), onAnswer = { _, _ -> }, onStopWorkflow = {}, dismissedPins = dismissed, onUnpin = { dismissed = dismissed + it })
+                        ThreadView(emptyList(), onAnswer = { _, _ -> }, onStopWorkflow = {}, dismissedPins = dismissed, onUnpin = { dismissed = dismissed + it }, runsOnModel = false)
                     }
                 }
             }

@@ -46,7 +46,7 @@ class GeneratedUiTest {
         rule.setContent {
             MyceliumTheme(true) {
                 CompositionLocalProvider(LocalGeneratedUiActions provides GeneratedUiActions({ sent += it }, { sideChats += it }, canOpenFiles)) {
-                    ThreadView(listOf(ThreadItem.AgentMessage("a", text)), onAnswer = { _, _ -> }, onStopWorkflow = {})
+                    ThreadView(listOf(ThreadItem.AgentMessage("a", text)), onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false)
                 }
             }
         }

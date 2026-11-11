@@ -80,7 +80,7 @@ class BroughtInConversationTest {
 
                 CompositionLocalProvider(LocalBroughtIn provides BroughtInActions(store, state, { opened += it })) {
                     Box(Modifier.width(720.dp)) {
-                        ThreadView(listOf(ThreadItem.BroughtIn("e1", "c2", "Release v0.3.7 checklist")), onAnswer = { _, _ -> }, onStopWorkflow = {})
+                        ThreadView(listOf(ThreadItem.BroughtIn("e1", "c2", "Release v0.3.7 checklist")), onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false)
                     }
                 }
             }

@@ -32,7 +32,7 @@ class WorkflowEndedCardTest {
         rule.setContent {
             MyceliumTheme(true) {
                 Box(Modifier.width(900.dp).height(700.dp)) {
-                    ThreadView(listOf(ThreadItem.Workflow("w", progress)), onAnswer = { _, _ -> }, onStopWorkflow = {}, dismissedPins = setOf("workflow:run"))
+                    ThreadView(listOf(ThreadItem.Workflow("w", progress)), onAnswer = { _, _ -> }, onStopWorkflow = {}, dismissedPins = setOf("workflow:run"), runsOnModel = false)
                 }
             }
         }

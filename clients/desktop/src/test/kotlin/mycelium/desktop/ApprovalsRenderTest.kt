@@ -38,7 +38,7 @@ class ApprovalsRenderTest {
     private fun render(name: String, vararg items: ThreadItem, value: JsonElement = JsonArray((1..6).map(::row))) =
         renderAt(name, dark = true, phone = false) {
             CompositionLocalProvider(LocalResponseActions provides actions(value)) {
-                Box(Modifier.width(900.dp)) { ThreadView(items.toList(), onAnswer = { _, _ -> }, onStopWorkflow = {}) }
+                Box(Modifier.width(900.dp)) { ThreadView(items.toList(), onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false) }
             }
         }
 

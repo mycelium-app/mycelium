@@ -119,7 +119,7 @@ class AnnotationsTest {
         rule.setContent {
             MyceliumTheme(true) {
                 CompositionLocalProvider(LocalAnnotate provides AnnotateActions(onAttach = { attached += it }, onAsk = { _, _ -> }), LocalClipboardManager provides memory) {
-                    ThreadView(listOf(ThreadItem.AgentMessage("e1", "The retry delay is read from RESTORE_BACKOFF_MS")), onAnswer = { _, _ -> }, onStopWorkflow = {})
+                    ThreadView(listOf(ThreadItem.AgentMessage("e1", "The retry delay is read from RESTORE_BACKOFF_MS")), onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false)
                 }
             }
         }
@@ -149,7 +149,7 @@ class AnnotationsTest {
             MyceliumTheme(true) {
                 CompositionLocalProvider(LocalAnnotate provides AnnotateActions(onAttach = { }, onAsk = { _, _ -> }), LocalClipboardManager provides memory) {
                     focus = LocalFocusManager.current
-                    ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {})
+                    ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false)
                 }
             }
         }
@@ -178,7 +178,7 @@ class AnnotationsTest {
         rule.setContent {
             MyceliumTheme(true) {
                 CompositionLocalProvider(LocalAnnotate provides AnnotateActions(onAttach = { }, onAsk = { _, _ -> }), LocalClipboardManager provides memory) {
-                    ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {})
+                    ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false)
                 }
             }
         }
@@ -219,7 +219,7 @@ class AnnotationsTest {
         rule.setContent {
             MyceliumTheme(true) {
                 CompositionLocalProvider(LocalAnnotate provides AnnotateActions(onAttach = { attached += it }, onAsk = { _, _ -> }), LocalClipboardManager provides memory) {
-                    ThreadView(listOf(item), onAnswer = { _, _ -> }, onStopWorkflow = {})
+                    ThreadView(listOf(item), onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false)
                 }
             }
         }

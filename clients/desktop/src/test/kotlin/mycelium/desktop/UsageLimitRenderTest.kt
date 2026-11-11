@@ -22,7 +22,7 @@ class UsageLimitRenderTest {
 
     private fun render(name: String, resumeAt: String?) = renderAt(name, true, false) {
         Box(Modifier.fillMaxSize().background(MyTheme.colors.bgContent)) {
-            ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, limitActions = LimitActions(resumeAt, {}, {}, {}), agent = "claude")
+            ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, limitActions = LimitActions(resumeAt, {}, {}, {}), agent = "claude", runsOnModel = false)
         }
     }
 

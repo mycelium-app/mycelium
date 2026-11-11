@@ -44,7 +44,7 @@ class ApprovalFlowTest {
 
     private fun showPermission(editsByDefault: Boolean) {
         val item = ThreadItem.Permission("k", "r1", "mcp__zulip__get_messages", Options, false, "Zulip", "ada@example.com", null, editsByDefault)
-        rule.setContent { MyceliumTheme(true) { Box(Modifier.width(640.dp)) { ThreadView(listOf(item), onAnswer = { _, option -> answers += option }, onStopWorkflow = {}) } } }
+        rule.setContent { MyceliumTheme(true) { Box(Modifier.width(640.dp)) { ThreadView(listOf(item), onAnswer = { _, option -> answers += option }, onStopWorkflow = {}, runsOnModel = false) } } }
     }
 
     private fun showResponse(rows: Int) {
@@ -54,7 +54,7 @@ class ApprovalFlowTest {
             send = { _, value -> sent += value },
         )
         val item = ThreadItem.ResponseEdit("k", "r1", "Zulip", "ada@example.com", "get_messages")
-        rule.setContent { MyceliumTheme(true) { CompositionLocalProvider(LocalResponseActions provides actions) { Box(Modifier.width(900.dp)) { ThreadView(listOf(item), onAnswer = { _, _ -> }, onStopWorkflow = {}) } } } }
+        rule.setContent { MyceliumTheme(true) { CompositionLocalProvider(LocalResponseActions provides actions) { Box(Modifier.width(900.dp)) { ThreadView(listOf(item), onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false) } } } }
     }
 
     @Test

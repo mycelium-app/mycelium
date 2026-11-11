@@ -68,7 +68,7 @@ class AppearanceTest {
                         Label("Sample code", style = Tokens.Type.Code)
                         Label("Motion is ${display.reducedMotion.name}")
                         Label("Stamped " + timestamp("2026-10-22T10:00:00Z"))
-                        Box(Modifier.height(300.dp)) { ThreadView(listOf(ThreadItem.AgentMessage("m1", prose)), { _, _ -> }, {}) }
+                        Box(Modifier.height(300.dp)) { ThreadView(listOf(ThreadItem.AgentMessage("m1", prose)), { _, _ -> }, {}, runsOnModel = false) }
                     }
                 }
             }

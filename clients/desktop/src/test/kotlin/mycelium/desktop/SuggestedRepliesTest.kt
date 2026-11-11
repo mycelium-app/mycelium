@@ -25,7 +25,7 @@ class SuggestedRepliesTest {
     @Test
     fun tappingASuggestedReplySendsIt() {
         val sent = mutableListOf<String>()
-        rule.setContent { MyceliumTheme(true) { ThreadView(finished, onAnswer = { _, _ -> }, onStopWorkflow = {}, onSuggest = { sent += it }) } }
+        rule.setContent { MyceliumTheme(true) { ThreadView(finished, onAnswer = { _, _ -> }, onStopWorkflow = {}, onSuggest = { sent += it }, runsOnModel = false) } }
 
         rule.onNodeWithContentDescription("Reply: Run the e2e suite").assertIsDisplayed().performClick()
 
@@ -35,7 +35,7 @@ class SuggestedRepliesTest {
     @Test
     fun repliesShowOnlyUnderTheNewestFinishedTurn() {
         val older = finished + listOf(ThreadItem.UserMessage("e4", "Run the e2e suite"), ThreadItem.AgentMessage("e5", "Ran them. Want me to commit?"), ThreadItem.TurnEnd("e6", "end_turn"))
-        rule.setContent { MyceliumTheme(true) { ThreadView(older, onAnswer = { _, _ -> }, onStopWorkflow = {}) } }
+        rule.setContent { MyceliumTheme(true) { ThreadView(older, onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false) } }
 
         assertEquals(0, rule.onAllNodesWithContentDescription("Reply: Open a merge request").fetchSemanticsNodes().size)
         rule.onNodeWithContentDescription("Reply: Yes").assertIsDisplayed()
@@ -44,7 +44,7 @@ class SuggestedRepliesTest {
     @Test
     fun repliesGoOnceAMessageIsSentAfterTheTurn() {
         val sending = finished + ThreadItem.UserMessage("sending", "Open a merge request")
-        rule.setContent { MyceliumTheme(true) { ThreadView(sending, onAnswer = { _, _ -> }, onStopWorkflow = {}) } }
+        rule.setContent { MyceliumTheme(true) { ThreadView(sending, onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false) } }
 
         assertEquals(0, rule.onAllNodesWithContentDescription("Reply: Open a merge request").fetchSemanticsNodes().size)
     }

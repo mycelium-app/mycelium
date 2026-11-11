@@ -51,7 +51,7 @@ class AppDeployCardTest {
             MyceliumTheme(true) {
                 CompositionLocalProvider(LocalAppDeployments provides { uuid -> polls += 1; fetch(uuid) }, LocalAppOpener provides { app, deployment -> opened += app to deployment }, LocalPlatform provides platform) {
                     Box(Modifier.width(640.dp).padding(16.dp)) {
-                        ThreadView(buildThread(deployThread(tool)), onAnswer = { _, _ -> }, onStopWorkflow = {}, agent = "claude")
+                        ThreadView(buildThread(deployThread(tool)), onAnswer = { _, _ -> }, onStopWorkflow = {}, agent = "claude", runsOnModel = false)
                     }
                 }
             }

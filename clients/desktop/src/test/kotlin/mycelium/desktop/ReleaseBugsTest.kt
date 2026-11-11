@@ -68,7 +68,7 @@ class ReleaseBugsTest {
         rule.setContent {
             MyceliumTheme(true) {
                 Box(Modifier.width(600.dp)) {
-                    ThreadView(listOf(review), onAnswer = { _, _ -> }, onStopWorkflow = {}, agent = "codex")
+                    ThreadView(listOf(review), onAnswer = { _, _ -> }, onStopWorkflow = {}, agent = "codex", runsOnModel = false)
                 }
             }
         }

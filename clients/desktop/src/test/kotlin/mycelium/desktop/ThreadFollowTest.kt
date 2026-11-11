@@ -29,7 +29,7 @@ class ThreadFollowTest {
     @Test
     fun aNewMessageScrollsIntoViewWhenTheNewestIsShowing() {
         val items = mutableStateOf<List<ThreadItem>>(messages(30))
-        rule.setContent { MyceliumTheme(true) { ThreadView(items.value, onAnswer = { _, _ -> }, onStopWorkflow = {}, modifier = Modifier.height(300.dp)) } }
+        rule.setContent { MyceliumTheme(true) { ThreadView(items.value, onAnswer = { _, _ -> }, onStopWorkflow = {}, modifier = Modifier.height(300.dp), runsOnModel = false) } }
 
         rule.runOnIdle { items.value = messages(31) }
 
@@ -39,7 +39,7 @@ class ThreadFollowTest {
     @Test
     fun aReaderScrolledUpStaysPutAndTheButtonTakesThemToTheNewest() {
         val items = mutableStateOf<List<ThreadItem>>(messages(30))
-        rule.setContent { MyceliumTheme(true) { ThreadView(items.value, onAnswer = { _, _ -> }, onStopWorkflow = {}, modifier = Modifier.height(300.dp).testTag("thread")) } }
+        rule.setContent { MyceliumTheme(true) { ThreadView(items.value, onAnswer = { _, _ -> }, onStopWorkflow = {}, modifier = Modifier.height(300.dp).testTag("thread"), runsOnModel = false) } }
         rule.onNodeWithContentDescription("Conversation").performTouchInput { swipeDown() }
 
         rule.runOnIdle { items.value = messages(31) }
@@ -53,7 +53,7 @@ class ThreadFollowTest {
         val earlier = listOf(ThreadItem.UserMessage("u0", "First question"), ThreadItem.AgentMessage("a0", "First answer"), ThreadItem.TurnEnd("t0", "end_turn"))
         val reply = (1..30).map { ThreadItem.AgentMessage("r$it", "Reply part $it") }
         val items = earlier + ThreadItem.UserMessage("u1", "Second question") + reply + ThreadItem.TurnEnd("t1", "end_turn")
-        rule.setContent { MyceliumTheme(true) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, modifier = Modifier.height(300.dp).testTag("thread")) } }
+        rule.setContent { MyceliumTheme(true) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, modifier = Modifier.height(300.dp).testTag("thread"), runsOnModel = false) } }
 
         rule.onAllNodesWithContentDescription("Scroll to the top of this reply").onLast().performClick()
         rule.waitForIdle()

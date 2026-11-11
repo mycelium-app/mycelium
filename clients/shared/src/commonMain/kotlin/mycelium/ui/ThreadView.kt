@@ -131,7 +131,7 @@ fun ThreadView(
     onDismissFailure: (() -> Unit)? = null,
     limitActions: LimitActions? = null,
     agent: String = "",
-    runsOnModel: Boolean = false,
+    runsOnModel: Boolean,
     dismissedPins: Set<String> = emptySet(),
     onUnpin: (String) -> Unit = {},
     hasOlder: Boolean = false,

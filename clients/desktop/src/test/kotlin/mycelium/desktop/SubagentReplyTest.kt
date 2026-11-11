@@ -109,7 +109,7 @@ class SubagentReplyTest {
                 val state by store.state.collectAsState()
 
                 CompositionLocalProvider(LocalThreadSubagents provides ThreadSubagents(store, state, "c1", { opened += it })) {
-                    Box(Modifier.width(720.dp)) { ThreadView(emptyList(), onAnswer = { _, _ -> }, onStopWorkflow = {}) }
+                    Box(Modifier.width(720.dp)) { ThreadView(emptyList(), onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false) }
                 }
             }
         }

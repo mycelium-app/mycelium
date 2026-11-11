@@ -30,7 +30,7 @@ class SentMarkdownTest {
         rule.setContent {
             MyceliumTheme(true) {
                 CompositionLocalProvider(LocalPlatform provides platform) {
-                    ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {})
+                    ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false)
                 }
             }
         }

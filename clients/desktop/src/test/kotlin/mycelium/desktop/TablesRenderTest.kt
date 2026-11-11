@@ -198,7 +198,7 @@ class TablesRenderTest {
 
     @Test
     fun markdownTableRenders() {
-        everywhere("markdown", 400) { ThreadView(listOf(ThreadItem.AgentMessage("m1", Markdown)), onAnswer = { _, _ -> }, onStopWorkflow = {}) }
+        everywhere("markdown", 400) { ThreadView(listOf(ThreadItem.AgentMessage("m1", Markdown)), onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false) }
     }
 
     @Test

@@ -46,7 +46,7 @@ class ShellRenderTest {
         val stalled = WorkflowProgress("c", stalledAgents, plannedPhases = listOf("Implement", "Verify"), lastLineAt = Clock.System.now() - 25.minutes)
         val items = listOf(stopped, failed, stalled).mapIndexed { index, progress -> ThreadItem.Workflow("w$index", progress) }
 
-        assertTrue(renderAt("workflow-ended", true, false) { Box(Modifier.width(900.dp)) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, dismissedPins = setOf("workflow:a", "workflow:b", "workflow:c")) } }.length() > 3_000)
+        assertTrue(renderAt("workflow-ended", true, false) { Box(Modifier.width(900.dp)) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, dismissedPins = setOf("workflow:a", "workflow:b", "workflow:c"), runsOnModel = false) } }.length() > 3_000)
     }
 
     @Test

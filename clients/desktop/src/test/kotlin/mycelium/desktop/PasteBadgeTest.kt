@@ -161,7 +161,7 @@ class PasteBadgeTest {
     fun aSentPastedBlockShowsAsACollapsedBadgeThatExpandsInPlace() {
         rule.setContent {
             MyceliumTheme(true) {
-                ThreadView(listOf(ThreadItem.UserMessage("u1", "look at ${pastedBlock(long)} please")), onAnswer = { _, _ -> }, onStopWorkflow = {})
+                ThreadView(listOf(ThreadItem.UserMessage("u1", "look at ${pastedBlock(long)} please")), onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false)
             }
         }
 

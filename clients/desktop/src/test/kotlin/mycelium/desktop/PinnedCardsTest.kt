@@ -41,7 +41,7 @@ class PinnedCardsTest {
         rule.setContent {
             MyceliumTheme(true) {
                 Box(Modifier.width(width.dp).height(700.dp)) {
-                    ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, dismissedPins = dismissed, onUnpin = { dismissed = dismissed + it })
+                    ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, dismissedPins = dismissed, onUnpin = { dismissed = dismissed + it }, runsOnModel = false)
                 }
             }
         }
@@ -104,7 +104,7 @@ class PinnedCardsTest {
         rule.setContent {
             MyceliumTheme(true) {
                 CompositionLocalProvider(mycelium.ui.LocalAgentOpener provides { agentId -> if (agentId == "a1") { { opened += agentId } } else null }) {
-                    ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {})
+                    ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false)
                 }
             }
         }

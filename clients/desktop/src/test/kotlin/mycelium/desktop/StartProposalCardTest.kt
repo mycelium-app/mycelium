@@ -93,7 +93,7 @@ class StartProposalCardTest {
                 val state by store.state.collectAsState()
 
                 CompositionLocalProvider(LocalStartProposals provides startProposals(store, state)) {
-                    Box(Modifier.width(640.dp).background(MyTheme.colors.bgContent).padding(16.dp)) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}) }
+                    Box(Modifier.width(640.dp).background(MyTheme.colors.bgContent).padding(16.dp)) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false) }
                 }
             }
         }

@@ -108,7 +108,7 @@ class AgentMarkdownTest {
         rule.setContent {
             MyceliumTheme(true) {
                 CompositionLocalProvider(LocalPlatform provides platform) {
-                    ThreadView(listOf(ThreadItem.AgentMessage("m1", text)), onAnswer = { _, _ -> }, onStopWorkflow = {})
+                    ThreadView(listOf(ThreadItem.AgentMessage("m1", text)), onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false)
                 }
             }
         }

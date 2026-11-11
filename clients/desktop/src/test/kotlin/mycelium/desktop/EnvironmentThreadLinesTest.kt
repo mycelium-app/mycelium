@@ -35,7 +35,7 @@ class EnvironmentThreadLinesTest {
         rule.setContent {
             MyceliumTheme(true) {
                 Box(Modifier.width(640.dp).padding(16.dp)) {
-                    ThreadView(buildThread(events), onAnswer = { _, _ -> }, onStopWorkflow = {}, agent = "claude")
+                    ThreadView(buildThread(events), onAnswer = { _, _ -> }, onStopWorkflow = {}, agent = "claude", runsOnModel = false)
                 }
             }
         }

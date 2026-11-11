@@ -25,7 +25,7 @@ class CommandCardTest {
                 update(2, """{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"1\n"}}]}"""),
             ),
         )
-        rule.setContent { MyceliumTheme(true) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}) } }
+        rule.setContent { MyceliumTheme(true) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false) } }
 
         rule.onNodeWithContentDescription("Command echo 1").assertExists()
         rule.onNodeWithText("1", useUnmergedTree = true).assertExists()

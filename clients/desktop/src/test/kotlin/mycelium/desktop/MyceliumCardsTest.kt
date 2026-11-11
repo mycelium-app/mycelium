@@ -49,7 +49,7 @@ class MyceliumCardsTest {
 
     private fun show(events: List<Event>) {
         val items = buildThread(events)
-        rule.setContent { MyceliumTheme(true) { Box(Modifier.width(640.dp).background(MyTheme.colors.bgContent).padding(16.dp)) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}) } } }
+        rule.setContent { MyceliumTheme(true) { Box(Modifier.width(640.dp).background(MyTheme.colors.bgContent).padding(16.dp)) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false) } } }
     }
 
     @Test
@@ -113,7 +113,7 @@ class MyceliumCardsTest {
     fun everyCardRendersInTheDarkTheme() {
         val items = buildThread(MyceliumThread)
         val file = renderAt("mycelium-cards", true, false) {
-            Box(Modifier.width(640.dp).background(MyTheme.colors.bgContent).padding(16.dp)) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}) }
+            Box(Modifier.width(640.dp).background(MyTheme.colors.bgContent).padding(16.dp)) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false) }
         }
 
         assertEquals(true, file.length() > 0)
@@ -123,7 +123,7 @@ class MyceliumCardsTest {
     fun aProposedInstructionsEditShowsTheReasonAndOpensTheReview() {
         var reviewed: String? = null
         val items = buildThread(call("t10", 1, "mcp__mycelium__propose_instructions_edit", """{"text":"x","base_revision":"abc","reason":"You said: never commit unasked.","layer":"global"}""", "completed", "Proposal 88888888-8888-8888-8888-888888888888 made for the Global instructions. It waits for the person to approve it in Settings, Instructions."))
-        rule.setContent { MyceliumTheme(true) { androidx.compose.runtime.CompositionLocalProvider(mycelium.ui.LocalReviewInstructions provides { layer -> reviewed = layer }) { Box(Modifier.width(640.dp).background(MyTheme.colors.bgContent).padding(16.dp)) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}) } } } }
+        rule.setContent { MyceliumTheme(true) { androidx.compose.runtime.CompositionLocalProvider(mycelium.ui.LocalReviewInstructions provides { layer -> reviewed = layer }) { Box(Modifier.width(640.dp).background(MyTheme.colors.bgContent).padding(16.dp)) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false) } } } }
 
         rule.onNodeWithContentDescription("Proposed an edit to the Global instructions").assertExists()
         rule.onNodeWithText("You said: never commit unasked.").assertExists()

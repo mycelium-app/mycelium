@@ -92,7 +92,7 @@ class MessageProposalCardTest {
                 val state by store.state.collectAsState()
 
                 CompositionLocalProvider(LocalMessageProposals provides messageProposals(store, state)) {
-                    Box(Modifier.width(640.dp).background(MyTheme.colors.bgContent).padding(16.dp)) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}) }
+                    Box(Modifier.width(640.dp).background(MyTheme.colors.bgContent).padding(16.dp)) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, runsOnModel = false) }
                 }
             }
         }
