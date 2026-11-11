@@ -538,3 +538,30 @@ async fn a_prompt_lost_with_the_link_arrives_exactly_once_after_reconnect() {
 
     daemon.kill().await.unwrap();
 }
+
+#[tokio::test]
+async fn a_claude_session_keeps_its_mycelium_credentials_in_a_private_file_that_goes_when_the_session_ends() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let Some(environment) = Environment::start().await else {
+        return;
+    };
+    let api = &environment.api;
+
+    environment.join_node().await;
+    let mut daemon = environment.run_daemon();
+    let node = environment.wait_for_node_with_claude().await;
+    let conversation = environment.start_conversation(node, "hello").await;
+    api.wait_for_status(conversation, "review").await;
+
+    let headers_file = sessions_dir(&environment.node_home).join(conversation.to_string()).join("mcp-headers.json");
+    let mode = std::fs::metadata(&headers_file).unwrap().permissions().mode() & 0o777;
+    let headers: Value = serde_json::from_str(&std::fs::read_to_string(&headers_file).unwrap()).unwrap();
+    assert_eq!(mode, 0o600);
+    assert!(headers["Authorization"].as_str().unwrap().starts_with("Bearer myc_session_"));
+
+    assert_eq!(api.patch(&format!("/api/v1/conversations/{conversation}"), json!({"archived": true})).await, 200);
+    eventually("the keeper to exit after the session is closed", || async { (!keeper_is_running(&environment.node_home)).then_some(()) }).await;
+    eventually("the credentials file to be removed", || async { (!headers_file.exists()).then_some(()) }).await;
+    daemon.kill().await.unwrap();
+}
