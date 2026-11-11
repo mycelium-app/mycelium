@@ -725,7 +725,7 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
                     steps[index].error = Some(step_error(state, conversation).await?);
                     row.status = "failed".into();
                 }
-                if status == "review" || status == "done" {
+                if (status == "review" || status == "done") && !crate::link::waiting_on_background_task(state, conversation).await? {
                     steps[index].output = sqlx::query_scalar::<_, Option<String>>("select string_agg(payload->'update'->'content'->>'text','' order by seq) from events where conversation_id=$1 and kind='acp_update' and payload->'update'->>'sessionUpdate'='agent_message_chunk'").bind(conversation).fetch_one(&state.pool).await?.unwrap_or_default();
                     settle(&mut steps[index], "done");
                     steps[index].summary = summary_of(&steps[index].output);

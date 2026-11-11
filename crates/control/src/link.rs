@@ -1066,6 +1066,22 @@ pub(crate) async fn waiting_on_person(state: &AppState, conversation_id: Uuid) -
     Ok(ending.ends_with('?'))
 }
 
+pub(crate) async fn waiting_on_background_task(state: &AppState, conversation_id: Uuid) -> ApiResult<bool> {
+    let launched = sqlx::query_scalar::<_, bool>(
+        "with latest as (select max(seq) as turn_end from events where conversation_id = $1 and kind = 'turn_end')
+         select exists (
+           select 1 from events e, latest
+           where e.conversation_id = $1 and e.kind = 'acp_update' and e.payload->'update'->'rawInput'->>'run_in_background' = 'true'
+             and e.seq < latest.turn_end
+             and e.seq > coalesce((select max(p.seq) from events p where p.conversation_id = $1 and p.kind in ('user_message', 'turn_end') and p.seq < latest.turn_end), 0))",
+    )
+    .bind(conversation_id)
+    .fetch_one(&state.pool)
+    .await?;
+
+    Ok(launched)
+}
+
 pub(crate) async fn has_agents_out(state: &AppState, conversation_id: Uuid) -> ApiResult<bool> {
     let out = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!("select {}", has_live_workflow_agent("$1")))).bind(conversation_id).fetch_one(&state.pool).await?;
 

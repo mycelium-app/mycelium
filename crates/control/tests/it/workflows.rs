@@ -495,3 +495,32 @@ async fn a_claude_code_workflow_run_appears_in_the_list_and_ends_with_its_journa
     assert_eq!((run["run_id"].clone(), run["conversation_id"].clone(), run["phases"].clone()), (json!("run-1"), json!(conversation.id), json!(["Implement", "Verify"])));
     assert_eq!((run["steps"][0]["label"].clone(), run["steps"][0]["tokens"].clone(), run["steps"][0]["turns"].clone(), run["steps"][0]["summary"].clone()), (json!("Write code"), json!(1200), json!(3), json!("Wrote it")));
 }
+
+#[tokio::test]
+async fn a_step_whose_agent_ends_its_turn_waiting_on_a_background_task_is_done_only_after_the_later_turn() {
+    use mycelium_proto::link::NodeToControl;
+    let server = Server::start().await;
+    let mut link = server.online_node("worker").await;
+    let (_, workflow) = server.user.json(server.user.post("/api/v1/workflows").json(&json!({"title":"Build","steps":[{"key":"build","title":"Build","prompt":"Build it","node_id":link.id,"agent":"claude","cwd":"/work/app"}]}))).await;
+    let id = workflow["id"].as_str().unwrap();
+    let conversation = link.expect_start_session().await;
+    link.start_session(conversation, "build-session").await;
+    link.expect_prompt().await;
+    let launched = json!({"update":{"sessionUpdate":"tool_call","toolCallId":"bash-1","title":"cargo build","kind":"execute","status":"in_progress","rawInput":{"command":"cargo build","run_in_background":true}}});
+    let waiting = json!({"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Build running; waiting for notification."}}});
+    let finished = json!({"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Build passed."}}});
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: conversation, seq: 1, update: launched }).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: conversation, seq: 2, update: waiting }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: conversation, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
+    link.barrier(conversation, 4).await;
+    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+    let while_building = get(&server, id).await;
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: conversation, seq: 5, update: finished }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: conversation, seq: 6, stop_reason: "end_turn".into(), usage: None }).await;
+    let done = wait_status(&server, id, "done").await;
+
+    assert_eq!(while_building["steps"][0]["status"], "running", "{while_building}");
+    assert!(done["output"].as_str().unwrap().contains("Build passed."), "{done}");
+}
