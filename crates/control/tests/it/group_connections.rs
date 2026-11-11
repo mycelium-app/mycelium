@@ -156,7 +156,9 @@ async fn a_message_between_unconnected_or_revoked_groups_waits_for_approval() {
 
     propose(&fleet.server, &fleet.link, fleet.yucca_chat, fleet.immich_chat).await;
     assert_eq!(queue(&fleet.server, fleet.immich_chat).await.len(), 0);
-    assert!(proposals(&fleet.server).await.iter().all(|proposal| proposal["state"] == "proposed"));
+    let mut states: Vec<String> = proposals(&fleet.server).await.iter().map(|proposal| proposal["state"].as_str().unwrap().to_string()).collect();
+    states.sort();
+    assert_eq!(states, ["proposed", "superseded"]);
 }
 
 #[tokio::test]
