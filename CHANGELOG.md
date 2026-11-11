@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.34.15
+
+- An environment started from an assistant's chat shows there, in the same side panel as in any other conversation. Assistant chats now have the full panel rail.
+- Using an existing folder as a project recognises a remote that names the forge through an SSH config host alias or a git insteadOf rewrite, by resolving it the way git does. The node needs Mycelium v0.34.15 or newer for this.
+- A folder on a node in the New project dialog no longer shows a ~/projects path under Set up on.
+- A message proposal in Needs you is headed by its assistant's name and shows the reason the agent gave for it, not the conversation's latest message. An agent can withdraw its own pending message with withdraw_message, and a newer message to the same conversation replaces the older one.
+
 ## v0.34.14
 
 - The Usage card is half as tall: each window is one row with its bar, percentage and reset, and one line says when usage was last read. Anthropic API spend shows beside the subscription accounts, today's and this month's, once an Admin API key is added to the Anthropic provider in Settings, Providers. OpenRouter spend uses the same row.
