@@ -1,6 +1,18 @@
 package mycelium.desktop
 
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import mycelium.ui.Accent
+import mycelium.ui.Appearance
+import mycelium.ui.Display
+import mycelium.ui.LocalAppearance
+import mycelium.ui.TextSize
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertHasClickAction
@@ -80,7 +92,7 @@ class InboxTest {
 
     private val deletes = java.util.concurrent.CopyOnWriteArrayList<String>()
 
-    private fun show(status: String, feed: String = NoFeed, privacy: String = VoiceOff, events: String? = null, actionItems: List<Pair<String, String>> = emptyList(), startProposals: String = "[]"): Store {
+    private fun show(status: String, feed: String = NoFeed, privacy: String = VoiceOff, textSize: TextSize = TextSize.Default, density: Float = 1f, events: String? = null, actionItems: List<Pair<String, String>> = emptyList(), startProposals: String = "[]"): Store {
         val open = actionItems.toMutableList()
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -110,7 +122,7 @@ class InboxTest {
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
 
         runBlocking { store.refresh() }
-        rule.setContent { MyceliumTheme(true) { Shell(store, platform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Inbox) } }
+        rule.setContent { CompositionLocalProvider(LocalDensity provides Density(density), LocalAppearance provides Appearance(true, Accent.Neutral, emptyList(), {}, display = Display(textSize = textSize))) { MyceliumTheme(true) { Shell(store, platform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Inbox) } } }
 
         return store
     }
@@ -338,6 +350,35 @@ class InboxTest {
 
         rule.onNodeWithText("Mycelium release v1 is live with Nightly and [[nope:x]].").assertExists()
         rule.onNodeWithContentDescription("Open chat: Mycelium, Restore flow copy").assertHasClickAction()
+    }
+
+    private fun assertEveryInlineBadgeShowsItsLabelInFull(size: TextSize, density: Float) {
+        val message = "[[project:Mycelium]] [[type:release]] [[outcome:live]] [[project:Platform]] shipped."
+        show("done", """{"posts":[${feedPost("p1", message)}]}""", textSize = size, density = density)
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Outcome: live").fetchSemanticsNodes().isNotEmpty() }
+
+        for ((name, label) in listOf("Project: Mycelium" to "Mycelium", "Type: release" to "release", "Outcome: live" to "live", "Project: Platform" to "Platform")) {
+            val node = rule.onNode(hasText(label) and hasAnyAncestor(hasContentDescription(name)), useUnmergedTree = true)
+            val results = mutableListOf<TextLayoutResult>()
+            node.fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action?.invoke(results)
+
+            assertTrue(results.isNotEmpty() && !results.single().hasVisualOverflow && results.single().lineCount == 1, "$label is cut off at ${size.label} text size and density $density")
+        }
+    }
+
+    @Test
+    fun everyInlineBadgeShowsItsLabelInFullAtTheDefaultTextSize() {
+        assertEveryInlineBadgeShowsItsLabelInFull(TextSize.Default, 1f)
+    }
+
+    @Test
+    fun everyInlineBadgeShowsItsLabelInFullAtTheLargestTextSize() {
+        assertEveryInlineBadgeShowsItsLabelInFull(TextSize.ExtraLarge, 1f)
+    }
+
+    @Test
+    fun everyInlineBadgeShowsItsLabelInFullOnAFractionalDensityAtTheDefaultTextSize() {
+        assertEveryInlineBadgeShowsItsLabelInFull(TextSize.Default, 0.9f)
     }
 
     @Test

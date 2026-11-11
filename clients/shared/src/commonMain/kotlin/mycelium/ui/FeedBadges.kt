@@ -4,9 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -30,7 +29,6 @@ private const val LongestLabel = 32
 private val FeedBadgeMarkup = Regex("\\[\\[(project|type|outcome|custom):([^\\[\\]|\\n]+)(?:\\|([a-z0-9-]{1,32}))?]]")
 private val BadgeHeight = 18.dp
 private val BadgeLineHeight = 20.sp
-private val BadgeWidest = 200.dp
 
 enum class FeedBadgeKind(val word: String, val spoken: String?) {
     Project("project", "Project"),
@@ -104,7 +102,7 @@ private fun FeedBadgeChip(badge: FeedBadge, project: Project?) {
                 contentDescription = badge.accessibleName
                 role = Role.Image
             }
-            .height(BadgeHeight)
+            .heightIn(min = BadgeHeight)
             .background(MyTheme.colors.bgSelected, ControlShape)
             .padding(horizontal = Tokens.Space.S1_5),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
@@ -116,7 +114,7 @@ private fun FeedBadgeChip(badge: FeedBadge, project: Project?) {
             Icon(feedBadgeIcon(badge), feedBadgeTint(badge), Tokens.Size.IconSm)
         }
 
-        Label(badge.label, style = Tokens.Type.Meta, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Label(badge.label, style = Tokens.Type.Meta, maxLines = 1, overflow = TextOverflow.Clip)
     }
 }
 
@@ -125,16 +123,16 @@ internal fun feedBadgeContent(text: String, projects: Collection<Project>): Map<
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     val style = Tokens.Type.Meta.themed()
-    val chrome = Tokens.Space.S1_5 * 2 + Tokens.Size.IconSm + Tokens.Space.S1
+    val chromePx = with(density) { Tokens.Space.S1_5.roundToPx() * 2 + Tokens.Size.IconSm.roundToPx() + Tokens.Space.S1.roundToPx() }
 
     return feedBadges(text).associate { badge ->
         val project = projects.takeIf { badge.kind == FeedBadgeKind.Project }?.firstOrNull { it.name.equals(badge.label, ignoreCase = true) }
-        val labelWidth = with(density) { measurer.measure(badge.label, style, maxLines = 1).size.width.toDp() }
-        val width = (chrome + labelWidth).coerceAtMost(BadgeWidest)
-        val placeholder = with(density) { Placeholder(width.toSp(), BadgeLineHeight, PlaceholderVerticalAlign.TextCenter) }
+        val labelPx = measurer.measure(badge.label, style, maxLines = 1).size.width
+        val widthPx = chromePx + labelPx
+        val placeholder = with(density) { Placeholder(widthPx.toSp(), BadgeLineHeight, PlaceholderVerticalAlign.TextCenter) }
 
         badge.token to InlineTextContent(placeholder) {
-            Box(Modifier.widthIn(max = width), contentAlignment = Alignment.CenterStart) {
+            Box(contentAlignment = Alignment.CenterStart) {
                 FeedBadgeChip(badge, project)
             }
         }
