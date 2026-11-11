@@ -7,6 +7,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.performKeyInput
@@ -32,6 +33,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import mycelium.ui.LocalGroupFilter
 import mycelium.api.Conversation
 import mycelium.api.MyceliumApi
 import mycelium.api.Project
@@ -249,8 +251,40 @@ class ProjectsTest {
         rule.onNodeWithText("Clone and open").performClick()
 
         rule.waitUntil(5_000) { created != null }
-        assertEquals("""{"group_id":"g1"}""", patches.single().second)
-        assertEquals("g1", created?.groupId)
+        assertEquals("""{"node_id":"$AtlasId","forge_id":"f1","repository":"acme-org/acme-backups","group_id":"g1"}""", posts.single().second)
+        assertEquals(0, patches.size)
+    }
+
+    @Test
+    fun cloningFromAGroupsPageFilesTheNewProjectUnderThatGroupWithoutAskingAgain() {
+        groups = """[{"id":"g1","name":"work","created_at":"2026-10-22T10:00:00Z"}]"""
+        val store = store()
+        var created: Project? = null
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); CompositionLocalProvider(LocalGroupFilter provides "g1") { NewProjectDialog(store, state, onDismiss = {}, onCreated = { created = it }) } } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("acme-org/acme-backups").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("acme-org/acme-backups").performClick()
+        rule.onNodeWithText("Clone and open").performClick()
+
+        rule.waitUntil(5_000) { created != null }
+        assertEquals("""{"node_id":"$AtlasId","forge_id":"f1","repository":"acme-org/acme-backups","group_id":"g1"}""", posts.single().second)
+    }
+
+    @Test
+    fun aCloneWhoseAnswerNeverArrivesOpensTheProjectOnceItAppears() {
+        projects = """[${BackupsProject.replace(LaptopId, AtlasId)}]"""
+        createProjectAnswer = HttpStatusCode.GatewayTimeout to "<html>Gateway Time-out</html>"
+        val store = store()
+        var created: Project? = null
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = { created = it }) } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("acme-org/acme-backups").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("acme-org/acme-backups").performClick()
+        rule.onNodeWithText("Clone and open").performClick()
+
+        rule.waitUntil(5_000) { created != null }
+        assertEquals("p1", created?.id)
+        rule.onAllNodesWithText("The server answered with status 504. Try again in a moment.").assertCountEquals(0)
     }
 
     @Test

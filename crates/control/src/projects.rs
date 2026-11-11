@@ -22,6 +22,7 @@ pub const MAX_AVATAR_BYTES: usize = 256 * 1024;
 const MAX_ICON_CHARACTERS: usize = 40;
 const AVATAR_MEDIA_TYPES: [&str; 3] = ["image/png", "image/jpeg", "image/webp"];
 const PROJECTS_FOLDER: &str = "projects";
+const FOLDER_OCCUPIED: &str = "already exists and is not empty";
 
 #[derive(Clone, sqlx::FromRow)]
 pub struct ProjectRow {
@@ -65,9 +66,21 @@ pub async fn clone_repository(state: &AppState, forge: &forges::ForgeRow, reposi
     let credentials = forge.git_credentials()?;
     let url = format!("{}/{repository}.git", forge.base_url);
     let target = folder.map_or_else(|| format!("{PROJECTS_FOLDER}/{repository}"), str::to_string);
-    let answer = relay(state, node_id, target, GitCommand::Clone { url, credentials: Some(credentials) }).await?;
+    let cloned = relay(state, node_id, target.clone(), GitCommand::Clone { url, credentials: Some(credentials) }).await;
 
-    Ok(answer["path"].as_str().unwrap_or_default().to_string())
+    match cloned {
+        Ok(answer) => Ok(answer["path"].as_str().unwrap_or_default().to_string()),
+        Err(error) if error.message().contains(FOLDER_OCCUPIED) => {
+            let answer = relay(state, node_id, target, GitCommand::Register).await?;
+            let registered = answer["path"].as_str().unwrap_or_default().to_string();
+            let clone_urls = forges::ForgeApi::from_row(forge)?.clone_urls(&state.http, repository).await;
+
+            check_checkout(&answer, &registered, &forge.base_url, &clone_urls, repository)?;
+
+            Ok(registered)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 async fn create_folder(state: &AppState, node_id: Uuid, name: &str) -> ApiResult<String> {
@@ -144,6 +157,14 @@ pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
 }
 
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateProjectRequest>) -> ApiResult<(StatusCode, Json<Project>)> {
+    tokio::spawn(create_project(state, user, request)).await.map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "project_create_aborted", "Setting up the project stopped unexpectedly. Check the project list, then try again."))?
+}
+
+async fn create_project(state: AppState, user: AuthUser, request: CreateProjectRequest) -> ApiResult<(StatusCode, Json<Project>)> {
+    if let Some(group_id) = request.group_id {
+        groups::find_owned(&state, group_id, user.id).await?;
+    }
+
     let exists = sqlx::query_scalar::<_, bool>("select exists (select 1 from nodes where id = $1 and revoked_at is null)").bind(request.node_id).fetch_one(&state.pool).await?;
 
     if !exists {
@@ -211,7 +232,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
     };
 
     let inserted = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!(
-        "insert into projects (owner, node_id, name, path, forge_id, repository) values ($1, $2, $3, $4, $5, $6) returning {PROJECT_COLUMNS}",
+        "insert into projects (owner, node_id, name, path, forge_id, repository, group_id) values ($1, $2, $3, $4, $5, $6, $7) returning {PROJECT_COLUMNS}",
     )))
     .bind(user.id)
     .bind(request.node_id)
@@ -219,6 +240,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
     .bind(&path)
     .bind(forge_id)
     .bind(&repository)
+    .bind(request.group_id)
     .fetch_one(&state.pool)
     .await;
 
@@ -253,7 +275,7 @@ pub async fn checkout(State(state): State<AppState>, user: AuthUser, Path(id): P
         return Ok((StatusCode::OK, Json(existing.to_proto())));
     }
 
-    create(State(state), user, Json(CreateProjectRequest { node_id: request.node_id, forge_id: Some(forge_id), repository: Some(repository), path: None, new_repository: false, new_folder: None })).await
+    create_project(state, user, CreateProjectRequest { node_id: request.node_id, forge_id: Some(forge_id), repository: Some(repository), path: None, new_repository: false, new_folder: None, group_id: None }).await
 }
 
 pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchProjectRequest>) -> ApiResult<Json<Project>> {

@@ -695,3 +695,105 @@ async fn a_project_without_a_forge_repository_cannot_be_cloned_onto_another_node
 
     assert_eq!((status, body["error"].clone()), (400, json!("project_not_cloneable")));
 }
+
+#[tokio::test]
+async fn a_new_project_lands_in_the_group_it_was_started_from() {
+    let server = Server::start().await;
+    let github = fake_forge("github").await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let mut link = server.online_node("laptop").await;
+    let (_, group) = server.user.json(server.user.post("/api/v1/groups").json(&json!({"name": "work"}))).await;
+
+    let ((status, project), _) = create_project(&server, &mut link, json!({"forge_id": forge_id, "repository": "acme-org/acme-backups", "group_id": group["id"]}), Ok(json!({"path": "/p/acme-org/acme-backups"}))).await;
+
+    assert_eq!((status, project["group_id"].clone()), (201, group["id"].clone()), "{project}");
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+    assert_eq!(listed[0]["group_id"], group["id"]);
+}
+
+#[tokio::test]
+async fn a_group_that_is_not_yours_is_refused_before_anything_is_cloned() {
+    let server = Server::start().await;
+    let github = fake_forge("github").await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let link = server.online_node("laptop").await;
+
+    let (status, error) = server.user.json(server.user.post("/api/v1/projects").json(&json!({"node_id": link.id, "forge_id": forge_id, "repository": "acme-org/acme-backups", "group_id": Uuid::new_v4()}))).await;
+
+    assert_eq!(status, 404, "{error}");
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+    assert_eq!(listed, json!([]));
+}
+
+#[tokio::test]
+async fn a_clone_that_finishes_after_the_caller_gave_up_still_becomes_a_project() {
+    let server = Server::start().await;
+    let github = fake_forge("github").await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let mut link = server.online_node("laptop").await;
+    let user = server.user.clone();
+    let node_id = link.id;
+    let asking = tokio::spawn(async move { user.json(user.post("/api/v1/projects").json(&json!({"node_id": node_id, "forge_id": forge_id, "repository": "acme-org/acme-backups"}))).await });
+    let request_id = loop {
+        match link.next().await {
+            ControlToNode::Git { request_id, .. } => break request_id,
+            _ => continue,
+        }
+    };
+
+    asking.abort();
+    let _ = asking.await;
+    link.send(NodeToControl::GitResult { request_id, ok: true, output: json!({"path": "/p/acme-org/acme-backups"}), error: None }).await;
+
+    let mut listed = json!([]);
+    for _ in 0..100 {
+        listed = server.user.json(server.user.get("/api/v1/projects")).await.1;
+
+        if listed != json!([]) {
+            break;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+
+    assert_eq!(listed[0]["path"], "/p/acme-org/acme-backups");
+}
+
+#[tokio::test]
+async fn cloning_onto_a_folder_that_already_holds_that_repository_registers_it() {
+    let server = Server::start().await;
+    let github = fake_forge("github").await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let mut link = server.online_node("laptop").await;
+    let user = server.user.clone();
+    let node_id = link.id;
+    let asking = tokio::spawn(async move { user.json(user.post("/api/v1/projects").json(&json!({"node_id": node_id, "forge_id": forge_id, "repository": "acme-org/acme-backups"}))).await });
+
+    let (_, clone) = answer_next(&mut link, Err("/home/sam/projects/acme-org/acme-backups already exists and is not empty. Choose another folder.")).await;
+    let registered = json!({"path": "/home/sam/projects/acme-org/acme-backups", "repository": true, "remotes": [format!("{github}/acme-org/acme-backups.git")]});
+    let (cwd, register) = answer_next(&mut link, Ok(registered)).await;
+    let (status, project) = asking.await.unwrap();
+
+    assert!(matches!(clone, GitCommand::Clone { .. }));
+    assert_eq!((status, cwd.as_str(), register), (201, "projects/acme-org/acme-backups", GitCommand::Register), "{project}");
+    assert_eq!(project["path"], "/home/sam/projects/acme-org/acme-backups");
+}
+
+#[tokio::test]
+async fn cloning_onto_a_folder_that_holds_another_repository_is_still_refused() {
+    let server = Server::start().await;
+    let github = fake_forge("github").await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let mut link = server.online_node("laptop").await;
+    let user = server.user.clone();
+    let node_id = link.id;
+    let asking = tokio::spawn(async move { user.json(user.post("/api/v1/projects").json(&json!({"node_id": node_id, "forge_id": forge_id, "repository": "acme-org/acme-backups"}))).await });
+
+    answer_next(&mut link, Err("/p already exists and is not empty. Choose another folder.")).await;
+    answer_next(&mut link, Ok(json!({"path": "/p", "repository": true, "remotes": [format!("{github}/acme-org/other.git")]}))).await;
+    let (status, error) = asking.await.unwrap();
+
+    assert_eq!((status, error["error"].clone()), (400, json!("folder_other_repository")));
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+    assert_eq!(listed, json!([]));
+}

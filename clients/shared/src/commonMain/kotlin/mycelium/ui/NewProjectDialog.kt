@@ -26,7 +26,9 @@ import mycelium.api.Forge
 import mycelium.api.Group
 import mycelium.api.Project
 import mycelium.api.Repository
+import mycelium.state.AllGroups
 import mycelium.state.AppState
+import mycelium.state.NoGroup
 import mycelium.state.Store
 
 private const val RepositoryChoices = 6
@@ -74,7 +76,8 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
     var folder by remember { mutableStateOf("") }
     var nodeId by remember { mutableStateOf<String?>(null) }
     var groups by remember { mutableStateOf<List<Group>>(emptyList()) }
-    var groupId by remember { mutableStateOf<String?>(null) }
+    val groupFilter = LocalGroupFilter.current
+    var groupId by remember { mutableStateOf<String?>(groupFilter.takeUnless { it == AllGroups || it == NoGroup || it.startsWith("all-except:") }) }
     val action = rememberAction()
 
     val node = nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
@@ -136,18 +139,15 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
 
         val picked = repository
         val request = if (cloning && picked != null) {
-            CreateProjectRequest(node.id, picked.forgeId, picked.fullName)
+            CreateProjectRequest(node.id, picked.forgeId, picked.fullName, groupId = groupId)
         } else if (creating && forge != null) {
-            CreateProjectRequest(node.id, forge.id, created.trim(), newRepository = true)
+            CreateProjectRequest(node.id, forge.id, created.trim(), newRepository = true, groupId = groupId)
         } else {
-            CreateProjectRequest(node.id, path = folder.trim())
+            CreateProjectRequest(node.id, path = folder.trim(), groupId = groupId)
         }
 
         action {
-            val project = store.createProject(request)
-            val chosen = groupId
-
-            onCreated(if (chosen == null) project else store.setProjectGroup(project.id, chosen))
+            onCreated(store.createProject(request))
         }
     }
 

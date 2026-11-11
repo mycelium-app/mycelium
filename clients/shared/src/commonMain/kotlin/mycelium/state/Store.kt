@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -85,6 +86,9 @@ private const val MaxCachedAttachments = 20
 
 private const val MaxCachedAvatars = 200
 private const val MaxCachedPreviews = 200
+
+private const val CloneWaitMillis = 600_000L
+private const val ClonePollMillis = 2_000L
 
 class Store(
     val api: MyceliumApi,
@@ -570,11 +574,37 @@ class Store(
     }
 
     suspend fun createProject(request: CreateProjectRequest): Project {
-        val project = api.createProject(request)
+        val project = try {
+            api.createProject(request)
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Exception) {
+            val unanswered = failure !is ApiException || (failure.status >= 500 && failure.code == "unknown")
+
+            if (!unanswered || request.repository == null) {
+                throw failure
+            }
+
+            awaitProjectOf(request) ?: throw failure
+        }
 
         mutableState.update { it.copy(projects = it.projects + (project.id to project)) }
 
         return project
+    }
+
+    private suspend fun awaitProjectOf(request: CreateProjectRequest): Project? = withTimeoutOrNull(CloneWaitMillis) {
+        var found: Project? = null
+
+        while (found == null) {
+            found = runCatching { api.projects() }.getOrNull()?.firstOrNull { it.nodeId == request.nodeId && it.repository == request.repository }
+
+            if (found == null) {
+                delay(ClonePollMillis)
+            }
+        }
+
+        found
     }
 
     suspend fun createDirectory(nodeId: String, path: String, name: String): DirectoryEntry = api.createDirectory(nodeId, path, name)

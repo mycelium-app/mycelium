@@ -81,7 +81,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             return Ok(ToolReply::text(&refusal, true));
         }
 
-        let request = CreateProjectRequest { node_id, forge_id, repository: field("repository"), path: field("path"), new_repository: arguments["new_repository"].as_bool().unwrap_or(false), new_folder: field("new_folder") };
+        let request = CreateProjectRequest { node_id, forge_id, repository: field("repository"), path: field("path"), new_repository: arguments["new_repository"].as_bool().unwrap_or(false), new_folder: field("new_folder"), group_id: None };
 
         return Ok(match projects::create(State(state.clone()), AuthUser::of(state, owner).await?, Json(request)).await {
             Ok((_, Json(project))) => ToolReply::text(&format!("Added the project {}.", described(&project)), false),

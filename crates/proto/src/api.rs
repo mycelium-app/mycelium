@@ -1624,6 +1624,8 @@ pub struct CreateProjectRequest {
     pub new_repository: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub new_folder: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

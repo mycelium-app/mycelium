@@ -64,6 +64,7 @@ data class CreateProjectRequest(
     val path: String? = null,
     @SerialName("new_repository") val newRepository: Boolean = false,
     @SerialName("new_folder") val newFolder: String? = null,
+    @SerialName("group_id") val groupId: String? = null,
 )
 
 @Serializable
