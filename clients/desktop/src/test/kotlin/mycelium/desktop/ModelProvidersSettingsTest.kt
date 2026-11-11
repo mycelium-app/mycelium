@@ -1,10 +1,14 @@
 package mycelium.desktop
 
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -272,13 +276,25 @@ class ModelProvidersSettingsTest {
 
         rule.onNodeWithContentDescription("More for Claude API").performClick()
         rule.onNodeWithText("Add admin key").performClick()
-        rule.onNodeWithContentDescription("Admin API key (optional)").performTextInput("sk-ant-api03-not-admin")
-        rule.onNodeWithContentDescription("Admin API key (optional)").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        rule.onNode((hasContentDescription("Admin API key (optional)", substring = true) and hasSetTextAction())).performTextInput("sk-ant-api03-not-admin")
+        rule.onNode((hasContentDescription("Admin API key (optional)", substring = true) and hasSetTextAction())).assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
         rule.onNodeWithText("Save").performClick()
 
         rule.onNodeWithText("There is a problem").assertExists()
-        rule.onNodeWithContentDescription("Go to Admin API key: Enter an Admin API key that starts with sk-ant-admin").assertExists()
         assertEquals(false, requests.any { it.method == HttpMethod.Patch })
+    }
+
+    @Test
+    fun activatingTheSummaryLinkFocusesTheAdminKeyField() {
+        listed = AnthropicJson
+        show(waitFor = "Claude API")
+
+        rule.onNodeWithContentDescription("More for Claude API").performClick()
+        rule.onNodeWithText("Add admin key").performClick()
+        rule.onNodeWithText("Save").performClick()
+        rule.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button) and hasText("Enter an Admin API key that starts with sk-ant-admin")).onFirst().performClick()
+
+        rule.onNode((hasContentDescription("Admin API key (optional)", substring = true) and hasSetTextAction())).assertIsFocused()
     }
 
     @Test
@@ -289,11 +305,11 @@ class ModelProvidersSettingsTest {
 
         rule.onNodeWithContentDescription("More for Claude API").performClick()
         rule.onNodeWithText("Add admin key").performClick()
-        rule.onNodeWithContentDescription("Admin API key (optional)").performTextInput("sk-ant-admin01-example")
+        rule.onNode((hasContentDescription("Admin API key (optional)", substring = true) and hasSetTextAction())).performTextInput("sk-ant-admin01-example")
         rule.onNodeWithText("Save").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Anthropic refused", substring = true).fetchSemanticsNodes().isNotEmpty() }
-        rule.onNode(hasContentDescription("Admin API key (optional). Error: Anthropic refused", substring = true)).assertExists()
+        rule.onNode(hasContentDescription("Error: Anthropic refused", substring = true)).assertExists()
     }
 
     @Test
@@ -304,7 +320,7 @@ class ModelProvidersSettingsTest {
 
         rule.onNodeWithContentDescription("More for Claude API").performClick()
         rule.onNodeWithText("Add admin key").performClick()
-        rule.onNodeWithContentDescription("Admin API key (optional)").performTextInput("sk-ant-admin01-example")
+        rule.onNode((hasContentDescription("Admin API key (optional)", substring = true) and hasSetTextAction())).performTextInput("sk-ant-admin01-example")
         rule.onNodeWithText("Save").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Admin key ...9c1e").fetchSemanticsNodes().isNotEmpty() }
@@ -321,7 +337,7 @@ class ModelProvidersSettingsTest {
         rule.onNodeWithText("Anthropic").performClick()
         rule.onNodeWithContentDescription("Name").performTextInput("Claude API")
         rule.onNodeWithContentDescription("API key").performTextInput("sk-ant-secret")
-        rule.onNodeWithContentDescription("Admin API key (optional)").performTextInput("sk-ant-admin01-example")
+        rule.onNode((hasContentDescription("Admin API key (optional)", substring = true) and hasSetTextAction())).performTextInput("sk-ant-admin01-example")
         rule.onNodeWithText("Add provider").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Ends in wxyz").fetchSemanticsNodes().isNotEmpty() }

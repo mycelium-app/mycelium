@@ -10,6 +10,8 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.isRoot
@@ -100,7 +102,7 @@ class UsageApiScreenshotTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Anthropic").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("More for Anthropic").performClick()
         rule.onNodeWithText("Change admin key").performClick()
-        rule.onNodeWithContentDescription("Admin API key (optional)").performTextInput("sk-ant-api03-example-not-admin")
+        rule.onNode((hasContentDescription("Admin API key (optional)", substring = true) and hasSetTextAction())).performTextInput("sk-ant-api03-example-not-admin")
         rule.onNodeWithText("Save").performClick()
 
         rule.onNodeWithText("There is a problem").getUnclippedBoundsInRoot()

@@ -171,7 +171,7 @@ internal fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (s
                     }
                 }
 
-                Hinted(name, Modifier.width(UsageWindowWidth)) {
+                Hinted(name, Modifier.widthIn(min = UsageWindowWidth)) {
                     Label(windowShortName(window.name), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1, overflow = TextOverflow.Clip)
                 }
                 Hinted(description, Modifier.weight(1f).widthIn(min = UsageMeterMinWidth)) {

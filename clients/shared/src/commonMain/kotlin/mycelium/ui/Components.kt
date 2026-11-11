@@ -547,6 +547,7 @@ fun TextInput(
     masked: Boolean = false,
     leadingIcon: MyIcon? = null,
     hint: String? = null,
+    errorAbove: Boolean = false,
     focusRequester: FocusRequester? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
@@ -561,6 +562,11 @@ fun TextInput(
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
         if (showLabel) {
             Label(label, style = Tokens.Type.MetaStrong, color = colors.textMuted)
+        }
+
+        if (errorAbove) {
+            hint?.let { Label(it, style = Tokens.Type.Meta, color = colors.textMuted) }
+            error?.let { Label(it, style = Tokens.Type.MetaStrong, color = colors.statusFailed) }
         }
 
         BasicTextField(
@@ -581,7 +587,7 @@ fun TextInput(
                 .background(colors.bgContent, ControlShape)
                 .border(Tokens.Size.Hairline, borderColor, ControlShape)
                 .semantics {
-                    contentDescription = if (error != null) "$label. Error: $error" else label
+                    contentDescription = if (errorAbove) listOfNotNull(label, hint, error?.let { "Error: $it" }).joinToString(". ") else if (error != null) "$label. Error: $error" else label
                 },
             decorationBox = { inner ->
                 Row(Modifier.fillMaxSize().padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
@@ -605,6 +611,10 @@ fun TextInput(
                 }
             },
         )
+
+        if (errorAbove) {
+            return@Column
+        }
 
         if (error != null) {
             Label(error, style = Tokens.Type.MetaStrong, color = colors.statusFailed)

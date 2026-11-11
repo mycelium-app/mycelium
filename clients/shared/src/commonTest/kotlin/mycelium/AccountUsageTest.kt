@@ -185,6 +185,15 @@ class AccountUsageTest {
     }
 
     @Test
+    fun aResetUnderADayAwayGivesHoursAndMinutesAndFurtherAwayTheWeekday() {
+        val soon = UsageWindow("five_hour", 12.0, resetsAt = "2026-10-23T16:40:00Z")
+        val later = UsageWindow("seven_day", 12.0, resetsAt = "2026-10-27T13:00:00Z")
+
+        assertEquals("2h 40m", compactWindowUsage(soon, { null }, Now).reset)
+        assertEquals("Tue", compactWindowUsage(later, { null }, Now).reset)
+    }
+
+    @Test
     fun windowsGetTheirShortLabels() {
         assertEquals("5h", windowShortName("five_hour"))
         assertEquals("7d", windowShortName("seven_day"))
