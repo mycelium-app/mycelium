@@ -446,13 +446,13 @@ async fn app_project(server: &Server, node: Uuid) -> Uuid {
 async fn start_subagent_proposes_an_existing_worktree_and_shows_it_on_the_card() {
     let server = Server::start().await;
     let mut link = server.online_node_as("laptop", WORKTREE_READY_NODE).await;
-    let conversation = caller(&server, &mut link).await;
+    let conversation = common::caller_on_a_recent_node(&server, &mut link).await;
     let project = app_project(&server, link.id).await;
     let token = link.token.clone();
 
     let (result, ()) = tokio::join!(common::call_tool(&server, &token, conversation, "start_subagent", subagent_in_worktree(project, "/elsewhere/app-spike")), common::answer_existing_worktrees(&mut link, json!([{"path": "/elsewhere/app-spike", "branch": "spike", "head": "bbbb222"}])));
 
-    assert_eq!(result["isError"], Value::Null, "{result}");
+    assert_eq!(result["isError"], json!(false), "{result}");
     assert_eq!(proposals(&server).await[0]["steps"][0]["folder"], json!("/elsewhere/app-spike"));
 }
 
@@ -460,7 +460,7 @@ async fn start_subagent_proposes_an_existing_worktree_and_shows_it_on_the_card()
 async fn start_subagent_refuses_a_path_that_is_not_a_worktree_of_the_project() {
     let server = Server::start().await;
     let mut link = server.online_node_as("laptop", WORKTREE_READY_NODE).await;
-    let conversation = caller(&server, &mut link).await;
+    let conversation = common::caller_on_a_recent_node(&server, &mut link).await;
     let project = app_project(&server, link.id).await;
     let token = link.token.clone();
 

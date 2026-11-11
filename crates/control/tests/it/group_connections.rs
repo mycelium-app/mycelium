@@ -825,7 +825,8 @@ async fn apps_group_with_a_working_chat() -> (Server, NodeLink, Uuid, Uuid) {
     let group = group(&server, "Apps", "/work/app").await;
     let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
     sqlx::query("insert into projects (owner, node_id, name, path, group_id) values ($1, $2, 'app', '/work/app', $3)").bind(owner).bind(link.id).bind(group).execute(&server.pool).await.unwrap();
-    let caller = working_conversation(&server, &mut link, "Manager", "/work/app").await;
+    let caller = common::caller_on_a_recent_node(&server, &mut link).await;
+    sqlx::query("update conversations set title = 'Manager', cwd = '/work/app' where id = $1").bind(caller).execute(&server.pool).await.unwrap();
 
     (server, link, caller, group)
 }
@@ -845,12 +846,12 @@ async fn start_conversation_opens_an_existing_worktree_under_its_project_and_gro
 
     let (started, ()) = tokio::join!(common::call_tool(&server, &token, caller, "start_conversation", start_in_worktree("/elsewhere/app-spike")), common::answer_existing_worktrees(&mut link, git_worktrees()));
 
-    assert_eq!(started["isError"], Value::Null, "{started}");
+    assert_eq!(started["isError"], json!(false), "{started}");
     let (_, listed) = server.user.json(server.user.get("/api/v1/conversations")).await;
     let opened = listed.as_array().unwrap().iter().find(|conversation| conversation["title"] == "Finish the import").unwrap();
     assert_eq!((opened["cwd"].clone(), opened["branch"].clone()), (json!("/elsewhere/app-spike"), json!("spike")));
     assert_eq!(opened["group_id"], json!(group));
-    assert_eq!(opened["project_id"].is_null(), false);
+    assert!(!opened["project_id"].is_null());
 }
 
 #[tokio::test]

@@ -585,6 +585,22 @@ pub async fn call_tool(server: &Server, token: &str, conversation: Uuid, tool: &
     body["result"].clone()
 }
 
+pub async fn caller_on_a_recent_node(server: &Server, link: &mut NodeLink) -> Uuid {
+    let conversation = server.create_conversation(link.id, Some("Plan the release")).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, &format!("acp-{}", conversation.id)).await;
+
+    loop {
+        match link.next().await {
+            ControlToNode::Prompt { .. } => return conversation.id,
+            ControlToNode::Git { request_id, command: mycelium_proto::link::GitCommand::Head, .. } => {
+                link.send(NodeToControl::GitResult { request_id, ok: false, output: Value::Null, error: Some("Not a git repository.".into()) }).await;
+            }
+            _ => {}
+        }
+    }
+}
+
 pub async fn answer_existing_worktrees(link: &mut NodeLink, worktrees: Value) {
     loop {
         if let ControlToNode::Git { request_id, command: mycelium_proto::link::GitCommand::ExistingWorktrees, .. } = link.next().await {

@@ -13,7 +13,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.test.captureToImage
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.ComposeUiTest
+import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.isRoot
@@ -86,9 +87,9 @@ class ConversationAreaRenderTest {
     }
 }
 
+@OptIn(androidx.compose.ui.test.ExperimentalTestApi::class)
 class ConversationAreaInteractionTest {
-    @get:Rule
-    val rule = createComposeRule()
+    private lateinit var rule: ComposeUiTest
 
     @get:Rule
     val scopes = TestScopes()
@@ -139,11 +140,12 @@ class ConversationAreaInteractionTest {
     private fun openExistingWorktrees() {
         rule.onNodeWithContentDescription("Work in the existing checkout").performClick()
         rule.onNodeWithText("Existing worktree").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("spike/sqlite").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("spike/sqlite").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
-    fun aNewWorktreeNamesItsFolderAndTheBranchItStartsFrom() {
+    fun aNewWorktreeNamesItsFolderAndTheBranchItStartsFrom() = runDesktopComposeUiTest(width = 1440, height = 900) {
+        rule = this
         showNewConversation()
 
         rule.onNodeWithContentDescription("Work in the existing checkout").performClick()
@@ -155,7 +157,8 @@ class ConversationAreaInteractionTest {
     }
 
     @Test
-    fun theWorkInMenuListsExistingWorktrees() {
+    fun theWorkInMenuListsExistingWorktrees() = runDesktopComposeUiTest(width = 1440, height = 900) {
+        rule = this
         showNewConversation()
 
         openExistingWorktrees()
@@ -164,7 +167,8 @@ class ConversationAreaInteractionTest {
     }
 
     @Test
-    fun theWorkInSheetListsExistingWorktreesOnAPhone() {
+    fun theWorkInSheetListsExistingWorktreesOnAPhone() = runDesktopComposeUiTest(width = 390, height = 844) {
+        rule = this
         showNewConversation(phone = true)
 
         openExistingWorktrees()
@@ -173,7 +177,8 @@ class ConversationAreaInteractionTest {
     }
 
     @Test
-    fun theModelMenuOffersTheDefaultAndTheListTheNodeReported() {
+    fun theModelMenuOffersTheDefaultAndTheListTheNodeReported() = runDesktopComposeUiTest(width = 1440, height = 900) {
+        rule = this
         showNewConversation()
 
         rule.onNodeWithContentDescription("Model", substring = true).performClick()
