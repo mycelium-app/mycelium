@@ -116,6 +116,11 @@ fun WellnessScreen(store: Store, platform: Platform, startOn: String = "overview
             OpenListButton()
             Icon(MyIcon.Leaf, MyTheme.colors.leaf, Tokens.Size.IconMd)
             BarTitle("Wellness & Learning")
+            Box(Modifier.weight(1f))
+
+            if (wellness.clock.phase != BreakPhase.OnBreak) {
+                MyButton(store.wellness::startBreak, text = "Start a break now", icon = MyIcon.Cup, variant = ButtonVariant.Primary)
+            }
         }
 
         TabRow(listOf(WellnessTabName, ActivityTabName, SkillsTabName, ReflectionsTabName, PuzzlesTabName), tab, { tab = it }, "Wellness and Learning sections", Modifier.padding(horizontal = Tokens.Space.S3))
