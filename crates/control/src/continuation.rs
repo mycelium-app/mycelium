@@ -1,7 +1,7 @@
 use crate::auth::AuthUser;
 use crate::assistants;
 use crate::chats::{self, CHAT_AGENT};
-use crate::conversations::require_signed_in_account;
+use crate::conversations::{self, require_signed_in_account};
 use crate::error::{ApiError, ApiResult};
 use crate::model_providers;
 use crate::nodes::{node_has, node_offline};
@@ -140,7 +140,11 @@ pub async fn continue_with(state: &AppState, owner: Uuid, id: Uuid, target: Targ
         let agent: AgentId = parse_enum(&target.agent).map_err(|_| ApiError::bad_request("agent_unknown", "Choose Claude Code, Codex or a chat model to continue on."))?;
         let earlier = if from_chat { earlier_workspace(&mut tx, id).await? } else { None };
         let node_id = target.node_id.or_else(|| earlier.as_ref().and_then(|earlier| earlier["node_id"].as_str()?.parse().ok())).unwrap_or(before.node_id);
-        let cwd = target.cwd.clone().or_else(|| earlier.as_ref().and_then(|earlier| earlier["cwd"].as_str().map(str::to_string))).filter(|cwd| !cwd.is_empty()).or_else(|| (!from_chat).then(|| before.cwd.clone()));
+        let own_folder = assistants::folder_of(id);
+        let earlier_cwd = earlier.as_ref().and_then(|earlier| earlier["cwd"].as_str()).filter(|cwd| !cwd.is_empty()).map(str::to_string);
+        let earlier_was_scratch = earlier.as_ref().is_some_and(|earlier| earlier["scratch"] == json!(true) || (earlier.get("scratch").is_none() && earlier_cwd.as_deref() == Some(own_folder.as_str())));
+        let restores_scratch = from_chat && target.cwd.is_none() && (earlier_was_scratch || (earlier_cwd.is_none() && target.node_id.is_some()));
+        let cwd = if restores_scratch { Some(own_folder) } else { target.cwd.clone().or(earlier_cwd).filter(|cwd| !cwd.is_empty()).or_else(|| (!from_chat).then(|| before.cwd.clone())) };
 
         let Some(cwd) = cwd else {
             return Err(ApiError::bad_request("folder_required", "Choose a node and folder to continue on."));
@@ -166,7 +170,6 @@ pub async fn continue_with(state: &AppState, owner: Uuid, id: Uuid, target: Targ
 
         let earlier_project = earlier.as_ref().filter(|earlier| earlier["node_id"].as_str() == Some(node_id.to_string().as_str())).and_then(|earlier| earlier["project_id"].as_str()?.parse::<Uuid>().ok());
         let project_id = if node_id == before.node_id { before.project_id } else { earlier_project };
-        let restores_scratch = from_chat && target.cwd.is_none() && earlier.as_ref().is_some_and(|earlier| earlier["scratch"] == json!(true));
         let scratch = if from_chat { restores_scratch } else { before.scratch };
 
         row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
@@ -214,7 +217,7 @@ pub async fn continue_with(state: &AppState, owner: Uuid, id: Uuid, target: Targ
         state.remove_session(before.node_id, id).await?;
     }
 
-    if let Some(folder) = scratch_folder && (to_chat || row.node_id != before.node_id) {
+    if let Some(folder) = scratch_folder && (to_chat || row.node_id != before.node_id) && !conversations::scratch_folder_in_use(state, before.node_id, &folder).await? {
         state.hub.send(before.node_id, ControlToNode::DeleteFolder { root: folder });
     }
 

@@ -531,3 +531,88 @@ async fn a_chat_on_an_agent_continued_on_a_model_and_back_stays_a_chat_with_a_sc
     };
     assert_eq!(written, folder);
 }
+
+async fn scratch_chat(server: &Server, link: &mut NodeLink) -> Uuid {
+    let (_, chat) = server.user.json(server.user.post("/api/v1/chats").json(&json!({"agent": "claude", "account": "sam@example.com"}))).await;
+    let id: Uuid = chat["id"].as_str().unwrap().parse().unwrap();
+
+    assert!(matches!(next_command(link).await, ControlToNode::WriteFolder { .. }));
+    link.expect_start_session().await;
+    link.start_session(id, "acp-1").await;
+    common::eventually("the session", || async { (!server.conversation(id).await["acp_session_id"].is_null()).then_some(()) }).await;
+
+    id
+}
+
+async fn next_folder_written(link: &mut NodeLink) -> String {
+    loop {
+        if let ControlToNode::WriteFolder { root, .. } = next_command(link).await {
+            return root;
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_model_chat_continued_on_an_agent_with_no_folder_becomes_a_chat_on_an_agent_with_a_scratch_folder() {
+    let server = Server::start().await;
+    let (router, _) = fake_openai();
+    let base = serve(router).await;
+    let provider = add_provider(&server, &base).await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
+    let (status, chat) = server.user.json(server.user.post("/api/v1/chats").json(&json!({"provider_id": provider["id"]}))).await;
+    assert_eq!(status, 201, "{chat}");
+    let id: Uuid = chat["id"].as_str().unwrap().parse().unwrap();
+
+    let (status, moved) = continue_on(&server, id, json!({"agent": "claude", "account": "sam@example.com", "node_id": link.id})).await;
+    let folder = format!(".mycelium-assistants/{id}");
+
+    assert_eq!(status, 200, "{moved}");
+    assert_eq!((moved["agent"].clone(), moved["scratch"].clone(), moved["cwd"].clone(), moved["node_id"].clone()), (json!("claude"), json!(true), json!(folder), json!(link.id)));
+    assert_eq!(next_folder_written(&mut link).await, folder);
+}
+
+#[tokio::test]
+async fn a_chat_continued_back_to_an_agent_is_scratch_even_when_its_earlier_handoff_did_not_record_scratch() {
+    let server = Server::start().await;
+    let (router, _) = fake_openai();
+    let base = serve(router).await;
+    let provider = add_provider(&server, &base).await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
+    let id = scratch_chat(&server, &mut link).await;
+    let (status, model) = continue_on(&server, id, json!({"agent": "chat", "provider_id": provider["id"]})).await;
+    assert_eq!(status, 200, "{model}");
+    sqlx::query("update events set payload = payload #- '{from,scratch}' where conversation_id = $1 and kind = 'continued'").bind(id).execute(&server.pool).await.unwrap();
+
+    let (status, back) = continue_on(&server, id, json!({"agent": "claude", "account": "sam@example.com", "node_id": link.id})).await;
+
+    assert_eq!(status, 200, "{back}");
+    assert_eq!((back["scratch"].clone(), back["cwd"].clone()), (json!(true), json!(format!(".mycelium-assistants/{id}"))));
+}
+
+#[tokio::test]
+async fn continuing_a_chat_on_an_agent_on_a_model_keeps_the_folder_its_side_chat_still_uses() {
+    let server = Server::start().await;
+    let (router, _) = fake_openai();
+    let base = serve(router).await;
+    let provider = add_provider(&server, &base).await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
+    let id = scratch_chat(&server, &mut link).await;
+    let (status, side) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/side")).json(&json!({"kind": "side"}))).await;
+    assert_eq!(status, 201, "{side}");
+
+    let (status, model) = continue_on(&server, id, json!({"agent": "chat", "provider_id": provider["id"]})).await;
+    assert_eq!(status, 200, "{model}");
+
+    let deleted = tokio::time::timeout(std::time::Duration::from_millis(500), async {
+        loop {
+            if let ControlToNode::DeleteFolder { root } = next_command(&mut link).await {
+                return root;
+            }
+        }
+    })
+    .await;
+    let kept = server.conversation(side["id"].as_str().unwrap().parse().unwrap()).await;
+
+    assert!(deleted.is_err(), "the folder the side chat uses was deleted: {deleted:?}");
+    assert_eq!((kept["scratch"].clone(), kept["cwd"].clone()), (json!(true), json!(format!(".mycelium-assistants/{id}"))));
+}

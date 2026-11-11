@@ -349,6 +349,10 @@ pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<
     Ok((StatusCode::CREATED, Json(conversation)))
 }
 
+pub async fn scratch_folder_in_use(state: &AppState, node_id: Uuid, folder: &str) -> ApiResult<bool> {
+    Ok(sqlx::query_scalar::<_, bool>("select exists (select 1 from conversations where node_id = $1 and cwd = $2 and scratch)").bind(node_id).bind(folder).fetch_one(&state.pool).await?)
+}
+
 pub async fn require_signed_in_account(state: &AppState, node_id: Uuid, agent: AgentId, account: &str) -> ApiResult<()> {
     let signed_in = sqlx::query_scalar::<_, bool>("select exists (select 1 from logins where node_id = $1 and agent = $2 and account = $3 and state = 'signed_in')")
         .bind(node_id)
@@ -750,9 +754,7 @@ pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Pat
         state.publish(Some(user.id), StreamMessage::ConversationRemoved { conversation_id: removed_id });
     }
 
-    let folder_still_used = sqlx::query_scalar::<_, bool>("select exists (select 1 from conversations where node_id = $1 and cwd = $2 and scratch)").bind(row.node_id).bind(&row.cwd).fetch_one(&state.pool).await?;
-
-    if row.scratch && !folder_still_used {
+    if row.scratch && !scratch_folder_in_use(&state, row.node_id, &row.cwd).await? {
         state.hub.send(row.node_id, ControlToNode::DeleteFolder { root: row.cwd });
     }
 
