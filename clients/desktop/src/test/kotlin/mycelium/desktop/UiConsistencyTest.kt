@@ -153,4 +153,14 @@ class UiConsistencyTest {
 
         rule.waitUntil(5_000) { "/api/v1/conversations/c1/close" in posts }
     }
+
+    @Test
+    fun theAssistantThreadHasTheEnvironmentPanelLikeAnyOtherConversation() {
+        show("working", Route.Assistant("a1"))
+        appears("Open environment")
+
+        rule.onNodeWithContentDescription("Open environment").performClick()
+
+        appears("Close the environment panel")
+    }
 }

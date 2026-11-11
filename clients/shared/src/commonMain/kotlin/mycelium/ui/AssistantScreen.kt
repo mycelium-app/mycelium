@@ -61,10 +61,10 @@ fun AssistantScreen(store: Store, state: AppState, id: String, onOpenSettings: (
 
     if (conversationId != null && isVoice) {
         CompositionLocalProvider(LocalComposerPlaceholder provides "Ask ${assistant.name}", LocalReadAloud provides store.voice::readAloud) {
-            ConversationScreen(store, state, conversationId, onArchived = {}, onOpenConversation = onOpenConversation, onOpenArtefact = onOpenArtefact, panels = false, header = HeaderSlots(title, menu, notices), onManageActions = onManageActions)
+            ConversationScreen(store, state, conversationId, onArchived = {}, onOpenConversation = onOpenConversation, onOpenArtefact = onOpenArtefact, header = HeaderSlots(title, menu, notices), onManageActions = onManageActions)
         }
     } else if (conversationId != null) {
-        ConversationScreen(store, state, conversationId, onArchived = {}, onOpenConversation = onOpenConversation, onOpenArtefact = onOpenArtefact, panels = false, header = HeaderSlots(title, menu, notices), onManageActions = onManageActions)
+        ConversationScreen(store, state, conversationId, onArchived = {}, onOpenConversation = onOpenConversation, onOpenArtefact = onOpenArtefact, header = HeaderSlots(title, menu, notices), onManageActions = onManageActions)
     } else {
         Column(Modifier.fillMaxSize()) {
             Bar {
