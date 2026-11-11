@@ -238,10 +238,14 @@ async fn check(state: &AppState, watch: &OpenWatch) -> ApiResult<()> {
         }
         Target::Tag(tag) => {
             let runs = api.runs(&state.http, &watch.repository, RunQuery::Reference { reference: tag, sha: None }).await.map_err(failed)?;
-            let release = api.release_url(&state.http, &watch.repository, tag).await.map_err(failed)?;
-            let settled = runs.iter().all(|run| run.finished) && (!runs.is_empty() || release.is_some());
 
-            if settled {
+            if !runs.iter().all(|run| run.finished) {
+                return Ok(());
+            }
+
+            let release = api.release_url(&state.http, &watch.repository, tag).await.map_err(failed)?;
+
+            if !runs.is_empty() || release.is_some() {
                 finish(state, watch, release_text(&watch.repository, tag, &runs, release.as_deref())).await?;
             }
         }
@@ -256,7 +260,6 @@ pub async fn poll(state: &AppState) -> ApiResult<()> {
             select w.id from watches w
             where w.kind in ('pipeline', 'release') and w.ended_at is null
               and (w.checked_at is null or w.checked_at <= now() - make_interval(secs => $1::float8))
-              and not exists (select 1 from forge_webhooks h where h.forge_id = w.forge_id and lower(h.repository) = lower(w.repository))
             order by w.checked_at nulls first limit {POLL_BATCH} for update skip locked)
          returning {WATCH_COLUMNS}"
     )))

@@ -1,5 +1,5 @@
 use crate::common::{NodeLink, Server, serve};
-use crate::watches::{begun, end_turn, prompt_for, quiet_for, text, tool};
+use crate::watches::{begun, connect, end_turn, prompt_for, quiet_for, text, tool};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
@@ -7,6 +7,7 @@ use axum::{Json, Router};
 use hmac::{Hmac, KeyInit, Mac};
 use serde_json::{Value, json};
 use sha2::Sha256;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use uuid::Uuid;
@@ -21,6 +22,7 @@ struct FakeForge {
     hook_secret: Mutex<Option<String>>,
     runs: Mutex<Vec<Value>>,
     release: Mutex<Option<Value>>,
+    release_lookups: AtomicUsize,
 }
 
 type Fake = Arc<FakeForge>;
@@ -41,6 +43,7 @@ fn github_api(fake: &Fake) -> Router {
     }
 
     async fn release(State(fake): State<Fake>, Path(_): Path<(String, String, String)>) -> Result<Json<Value>, StatusCode> {
+        fake.release_lookups.fetch_add(1, Ordering::SeqCst);
         fake.release.lock().unwrap().clone().map(Json).ok_or(StatusCode::NOT_FOUND)
     }
 
@@ -64,9 +67,14 @@ async fn serve_gitlab(fake: &Fake) -> String {
         StatusCode::CREATED
     }
 
+    async fn pipelines(State(fake): State<Fake>, Path(_): Path<String>) -> Json<Value> {
+        Json(Value::Array(fake.runs.lock().unwrap().clone()))
+    }
+
     let api = Router::new()
         .route("/user", get(|| async { Json(json!({"username": "sam"})) }))
         .route("/groups", get(|| async { Json(json!([])) }))
+        .route("/projects/{id}/pipelines", get(pipelines))
         .route("/projects/{id}/hooks", post(register_hook))
         .with_state(fake.clone());
 
@@ -243,4 +251,58 @@ async fn a_pipeline_cannot_be_watched_through_a_project_the_person_does_not_have
 
     assert_eq!(refused["isError"], true, "{refused}");
     assert!(text(&refused).contains("Nothing is watched. None of the person's projects is private."), "{refused}");
+}
+
+#[tokio::test]
+async fn list_watches_lists_conversation_release_and_pipeline_watches_together() {
+    let fake = Fake::default();
+    let public = serve(github_api(&fake)).await;
+    let server = quick_server(&public).await;
+    let (mut link, watcher) = idle_watcher(&server).await;
+    let other = begun(&server, &mut link, "Write the notes").await;
+    connect(&server, watcher, other).await;
+
+    tool(&server, &link, watcher, "watch_conversation", json!({"conversation": other.to_string()})).await;
+    tool(&server, &link, watcher, "watch_release", json!({"forge": "github.com", "repository": "acme/app", "tag": "v1.0.0"})).await;
+    let gitlab = serve_gitlab(&fake).await;
+    let forge = connect_forge(&server, "gitlab", &gitlab, GITLAB_TOKEN).await;
+    tool(&server, &link, watcher, "watch_pipeline", json!({"forge": forge.to_string(), "repository": "slop/app", "ref": "main"})).await;
+    let listed = tool(&server, &link, watcher, "list_watches", json!({})).await;
+    let kinds: Vec<String> = serde_json::from_str::<Value>(&text(&listed)).unwrap()["watches"].as_array().unwrap().iter().map(|watch| watch["kind"].as_str().unwrap().to_string()).collect();
+
+    assert_eq!(listed["isError"], false, "{listed}");
+    assert_eq!(kinds, ["conversation", "release", "pipeline"]);
+}
+
+#[tokio::test]
+async fn a_pipeline_watch_is_told_even_when_the_registered_webhook_never_arrives() {
+    let fake = Fake::default();
+    *fake.runs.lock().unwrap() = vec![json!({"id": 77, "ref": "main", "sha": "abc123def", "status": "running", "web_url": "https://gitlab.example.com/slop/app/-/pipelines/77"})];
+    let gitlab = serve_gitlab(&fake).await;
+    let server = quick_server("http://127.0.0.1:1").await;
+    let (mut link, watcher) = idle_watcher(&server).await;
+    let forge = connect_forge(&server, "gitlab", &gitlab, GITLAB_TOKEN).await;
+
+    tool(&server, &link, watcher, "watch_pipeline", json!({"forge": forge.to_string(), "repository": "slop/app", "ref": "main"})).await;
+    let early = quiet_for(&mut link, watcher).await;
+    *fake.runs.lock().unwrap() = vec![json!({"id": 77, "ref": "main", "sha": "abc123def", "status": "success", "web_url": "https://gitlab.example.com/slop/app/-/pipelines/77"})];
+    let told = prompt_for(&mut link, watcher).await;
+
+    assert!(early, "the pipeline was still running");
+    assert!(told.contains("From slop/app main:") && told.contains("succeeded"), "{told}");
+}
+
+#[tokio::test]
+async fn a_release_watch_does_not_look_for_the_release_while_a_run_is_still_going() {
+    let fake = Fake::default();
+    *fake.runs.lock().unwrap() = vec![run(7, "v1.0.0", "in_progress", None)];
+    let public = serve(github_api(&fake)).await;
+    let server = quick_server(&public).await;
+    let (mut link, watcher) = idle_watcher(&server).await;
+
+    tool(&server, &link, watcher, "watch_release", json!({"forge": "github.com", "repository": "acme/app", "tag": "v1.0.0"})).await;
+    let early = quiet_for(&mut link, watcher).await;
+
+    assert!(early);
+    assert_eq!(fake.release_lookups.load(Ordering::SeqCst), 0);
 }
