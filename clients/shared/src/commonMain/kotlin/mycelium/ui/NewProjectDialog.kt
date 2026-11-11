@@ -92,7 +92,7 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
     val destination = when {
         cloning -> repository?.fullName
         creating -> created.trim().ifEmpty { null }
-        else -> folder.trim().ifEmpty { null }
+        else -> null
     }
 
     LaunchedEffect(query) {

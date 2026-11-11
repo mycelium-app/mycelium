@@ -320,6 +320,25 @@ class ProjectsTest {
     }
 
     @Test
+    fun registeringAnAbsoluteFolderSendsItAsTypedAndShowsNoProjectsDestination() {
+        createProjectAnswer = HttpStatusCode.Created to FolderProject
+        val store = store()
+        var created: String? = null
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = { created = it.id }) } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("immich-app/immich").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("A folder on a node").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Folder on the node").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Folder on the node").performTextInput("  /home/sam/Code/acme/infrastructure  ")
+
+        assertEquals(0, rule.onAllNodesWithText("~/projects/", substring = true).fetchSemanticsNodes().size)
+        rule.onNodeWithText("Register and open").performClick()
+
+        rule.waitUntil(5_000) { created != null }
+        assertEquals("""{"node_id":"$AtlasId","path":"/home/sam/Code/acme/infrastructure"}""", posts.single().second)
+    }
+
+    @Test
     fun theChosenRepositoryFillsTheSearchFieldAndTheFolderItWillLiveInIsShown() {
         val store = store()
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = {}) } }
