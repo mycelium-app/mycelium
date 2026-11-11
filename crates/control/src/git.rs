@@ -103,7 +103,7 @@ pub struct PushRequest {
 }
 
 const CREATE_DIRECTORY_SINCE: (u64, u64, u64) = (0, 20, 0);
-const EXISTING_WORKTREES_SINCE: (u64, u64, u64) = (0, 34, 12);
+const EXISTING_WORKTREES_SINCE: (u64, u64, u64) = (0, 34, 13);
 
 fn node_outdated(name: &str, since: (u64, u64, u64), doing: &str) -> ApiError {
     ApiError::conflict("node_outdated", format!("{name} needs Mycelium v{}.{}.{} or newer to {doing}. Update the node, then try again.", since.0, since.1, since.2))

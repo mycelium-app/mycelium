@@ -2243,11 +2243,11 @@ async fn an_existing_worktree_needs_its_project_its_node_and_no_new_branch() {
 #[tokio::test]
 async fn an_outdated_node_says_it_needs_updating_for_existing_worktrees() {
     let server = Server::start().await;
-    let link = server.online_node_as("laptop", "v0.34.11").await;
+    let link = server.online_node_as("laptop", "v0.34.12").await;
     let (project, _) = project_with_group(&server, link.id).await;
 
     let (status, refused) = server.user.json(server.user.get(&format!("/api/v1/projects/{project}/worktrees"))).await;
 
     assert_eq!((status, refused["error"].clone()), (409, json!("node_outdated")), "{refused}");
-    assert!(refused["message"].as_str().unwrap().contains("laptop needs Mycelium v0.34.12 or newer"), "{refused}");
+    assert!(refused["message"].as_str().unwrap().contains("laptop needs Mycelium v0.34.13 or newer"), "{refused}");
 }
