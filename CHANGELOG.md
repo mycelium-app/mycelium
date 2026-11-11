@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.34.11
+
+- A conversation that reaches a usage limit is caught even when the agent sends the limit message before a usage update or after its turn has ended, so it moves to another account instead of sitting still. A side chat at a limit with every account spent moves on when another account resets.
+- A model, mode or setting the agent refuses leaves a notice in the conversation instead of failing it, and the model button shows the model the agent is using.
+- Stop shows only while a turn is running and turns into Stopping when pressed.
+- Needs you lists every approval that is waiting, from any conversation that is not archived.
+- Release and pipeline watches report back even when a webhook was registered, and a workflow step stays running while its agent waits on background work.
+- Feed posts can carry inline badges for a project, type, outcome or anything custom.
+- You can open a to-do item to its details and edit the list, saving with or without telling the agent, and an assistant's list survives Clear.
+
 ## v0.34.10
 
 - Voice mode in any conversation: one control in the composer listens, then reads the reply aloud. The agent is told when voice mode starts and stops, and can add a short spoken version of its answer, which is the only part read aloud and is never shown in the thread.
