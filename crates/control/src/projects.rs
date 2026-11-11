@@ -108,7 +108,11 @@ fn check_checkout(answer: &Value, registered: &str, base_url: &str, clone_urls: 
     }
 
     let forge_host = remote_location(base_url).map(|(host, _)| host).unwrap_or_default();
-    let remotes: Vec<(String, String)> = answer["remotes"].as_array().into_iter().flatten().filter_map(|remote| remote.as_str().and_then(remote_location)).collect();
+    let known = match answer["resolved_remotes"].is_array() {
+        true => &answer["resolved_remotes"],
+        false => &answer["remotes"],
+    };
+    let remotes: Vec<(String, String)> = known.as_array().into_iter().flatten().filter_map(|remote| remote.as_str().and_then(remote_location)).collect();
 
     let clones: Vec<(String, String)> = clone_urls.iter().filter_map(|url| remote_location(url)).collect();
     let on_forge = |host: &str| host == forge_host || clones.iter().any(|(clone_host, _)| clone_host == host);

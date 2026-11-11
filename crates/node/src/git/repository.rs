@@ -1,5 +1,6 @@
 use super::git;
 use super::git_with_env;
+use super::remotes;
 use anyhow::{Result, anyhow, bail};
 use base64::Engine;
 use mycelium_proto::link::GitCredentials;
@@ -42,10 +43,10 @@ pub(super) fn register(folder: &Path) -> Result<Value> {
 
     let canonical = folder.canonicalize().map_err(|cause| anyhow!("Could not read {}: {cause}.", folder.display()))?;
     let repository = git(&canonical, &["rev-parse", "--git-dir"], &[]).is_ok();
-    let configured = if repository { git(&canonical, &["config", "--get-regexp", r"^remote\..*\.url$"], &[1]).unwrap_or_default() } else { Vec::new() };
-    let remotes: Vec<&str> = std::str::from_utf8(&configured).unwrap_or_default().lines().filter_map(|line| line.split_once(' ').map(|(_, url)| url.trim())).collect();
+    let remotes = if repository { remotes::configured(&canonical) } else { Vec::new() };
+    let resolved_remotes = remotes::resolved(&canonical, &remotes);
 
-    Ok(json!({"path": canonical.to_string_lossy(), "repository": repository, "remotes": remotes}))
+    Ok(json!({"path": canonical.to_string_lossy(), "repository": repository, "remotes": remotes, "resolved_remotes": resolved_remotes}))
 }
 
 fn worktree_folder(project: &Path, branch: &str) -> Result<std::path::PathBuf> {
@@ -206,6 +207,7 @@ mod tests {
         assert_eq!(repo["repository"], true);
         assert_eq!(repo["remotes"], serde_json::json!(["git@example.com:a/b.git"]));
         assert_eq!(plain["remotes"], serde_json::json!([]));
+        assert_eq!(plain["resolved_remotes"], serde_json::json!([]));
         assert!(repo["path"].as_str().unwrap().ends_with("/repo"));
         assert!(run_in(root.path(), "missing", GitCommand::Register).unwrap_err().to_string().contains("does not exist"));
         assert!(run_in(root.path(), "file.txt", GitCommand::Register).unwrap_err().to_string().contains("does not exist"));

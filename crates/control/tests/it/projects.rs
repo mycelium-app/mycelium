@@ -550,6 +550,21 @@ async fn an_existing_folder_cloned_over_the_forges_own_ssh_host_becomes_the_proj
 }
 
 #[tokio::test]
+async fn an_existing_folder_whose_remote_uses_an_ssh_config_alias_becomes_the_project_when_the_alias_resolves_to_the_forge() {
+    let server = Server::start().await;
+    let github = fake_forge("github").await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let mut link = server.online_node("laptop").await;
+    let body = json!({"forge_id": forge_id, "repository": "acme-org/acme-backups", "path": "/aliased"});
+
+    let ((status, project), _) = create_project(&server, &mut link, body.clone(), Ok(json!({"path": "/aliased", "repository": true, "remotes": ["git@forge-alias:acme-org/acme-backups.git"], "resolved_remotes": ["ssh://git@127.0.0.1/acme-org/acme-backups.git"]}))).await;
+    assert_eq!((status, project["repository"].clone()), (201, json!("acme-org/acme-backups")), "{project}");
+
+    let ((status, error), _) = create_project(&server, &mut link, body, Ok(json!({"path": "/aliased", "repository": true, "remotes": ["git@forge-alias:acme-org/acme-backups.git"], "resolved_remotes": ["ssh://git@unrelated.test/acme-org/acme-backups.git"]}))).await;
+    assert_eq!((status, error["error"].clone()), (400, json!("folder_other_repository")));
+}
+
+#[tokio::test]
 async fn an_existing_folder_that_holds_another_repository_or_no_checkout_is_refused_and_nothing_is_registered() {
     let server = Server::start().await;
     let github = fake_forge("github").await;

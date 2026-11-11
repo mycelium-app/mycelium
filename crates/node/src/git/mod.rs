@@ -2,6 +2,7 @@ mod commits;
 mod folder;
 pub(crate) mod history;
 mod moves;
+mod remotes;
 mod repository;
 mod stack;
 #[cfg(test)]
