@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.34.14
+
+- The Usage card is half as tall: each window is one row with its bar, percentage and reset, and one line says when usage was last read. Anthropic API spend shows beside the subscription accounts, today's and this month's, once an Admin API key is added to the Anthropic provider in Settings, Providers. OpenRouter spend uses the same row.
+- Agent chats in the Chats list sit flush left like every other chat, with the same status dot and agent mark, and an Inbox item without a project no longer leaves an empty icon space.
+- Feed badges keep their full label at every text size.
+- The project tools name the node by its name instead of its id.
+- A Claude conversation's Mycelium credentials no longer appear in the node's process list: the node keeps them in a private file that the agent reads, and removes it when the session ends. You can revoke a conversation's Mycelium credentials, or one credential by its SHA-256, with POST /api/v1/mcp-session-tokens/revoke. The node needs this release.
+
 ## v0.34.13
 
 - A new chat can open in an existing worktree of its project, including worktrees made with plain git. The node needs Mycelium v0.34.13 or newer.
