@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.34.13
+
+- A new chat can open in an existing worktree of its project, including worktrees made with plain git. The node needs Mycelium v0.34.13 or newer.
+- Cloning a project no longer reports failure when the clone worked, and a clone still becomes a project when the app stops waiting. Cloning again onto a folder that already holds the same repository registers that folder instead of refusing it, so a clone left behind by an earlier failure can be recovered. A new project is filed under the group it was started from.
+- Three changes announced in Mycelium v0.34.11 that were missing from v0.34.11 and v0.34.12 are back: a model, mode or setting the agent refuses leaves a notice instead of failing the conversation, Needs you lists every waiting approval from any conversation that is not archived, and Stop shows only while a turn is running.
+
 ## v0.34.12
 
 - The Wellness & Learning page has a Start a break now button that starts a break straight away, the same break the reminder offers.
