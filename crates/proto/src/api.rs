@@ -971,7 +971,7 @@ fn connected() -> IntegrationStatus {
     IntegrationStatus::Connected
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct StartChatToolServerOAuthRequest {
     pub name: String,
     pub url: String,
@@ -981,6 +981,16 @@ pub struct StartChatToolServerOAuthRequest {
     pub forge_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+}
+
+impl std::fmt::Debug for StartChatToolServerOAuthRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("StartChatToolServerOAuthRequest").field("name", &self.name).field("url", &self.url).field("kind", &self.kind).field("client_id", &self.client_id).field("client_secret", &"<hidden>").finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

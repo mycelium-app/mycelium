@@ -20,6 +20,7 @@ struct Options {
     issuer_path: &'static str,
     authorisation_extra: Value,
     protected_extra: Value,
+    registered_secret: Option<&'static str>,
 }
 
 impl Default for Options {
@@ -33,6 +34,7 @@ impl Default for Options {
             issuer_path: "",
             authorisation_extra: Value::Null,
             protected_extra: Value::Null,
+            registered_secret: None,
         }
     }
 }
@@ -42,6 +44,7 @@ struct App {
     registrations: Mutex<Vec<Value>>,
     token_requests: Mutex<Vec<Vec<(String, String)>>>,
     mcp_authorisations: Mutex<Vec<String>>,
+    token_authorisations: Mutex<Vec<String>>,
     options: Options,
 }
 
@@ -104,10 +107,14 @@ async fn authorisation_server(State(app): Shared) -> Json<Value> {
 async fn register(State(app): Shared, Json(body): Json<Value>) -> Json<Value> {
     app.registrations.lock().unwrap().push(body);
 
-    Json(json!({"client_id": "client-1"}))
+    match app.options.registered_secret {
+        Some(secret) => Json(json!({"client_id": "client-1", "client_secret": secret})),
+        None => Json(json!({"client_id": "client-1"})),
+    }
 }
 
-async fn token(State(app): Shared, body: String) -> Json<Value> {
+async fn token(State(app): Shared, headers: HeaderMap, body: String) -> Json<Value> {
+    app.token_authorisations.lock().unwrap().push(headers.get("authorization").and_then(|value| value.to_str().ok()).unwrap_or_default().to_string());
     let form: Vec<(String, String)> = url::form_urlencoded::parse(body.as_bytes()).into_owned().collect();
     let refreshing = form.iter().any(|(name, value)| name == "grant_type" && value == "refresh_token");
     app.token_requests.lock().unwrap().push(form);
@@ -128,7 +135,7 @@ async fn token(State(app): Shared, body: String) -> Json<Value> {
 async fn start_with(options: Options) -> (String, Arc<App>) {
     let protected_path = options.protected_path;
     let authorisation_paths = options.authorisation_paths.clone();
-    let app = Arc::new(App { base: Mutex::default(), registrations: Mutex::default(), token_requests: Mutex::default(), mcp_authorisations: Mutex::default(), options });
+    let app = Arc::new(App { base: Mutex::default(), registrations: Mutex::default(), token_requests: Mutex::default(), mcp_authorisations: Mutex::default(), token_authorisations: Mutex::default(), options });
     let mut router = Router::new().route("/mcp", post(mcp)).route(protected_path, get(protected_resource)).route("/register", post(register)).route("/token", post(token));
 
     for path in authorisation_paths {
@@ -243,13 +250,13 @@ async fn an_expired_oauth_token_is_refreshed_before_a_tool_call() {
 }
 
 #[tokio::test]
-async fn an_app_without_client_registration_is_told_to_use_an_api_key() {
+async fn an_app_without_client_registration_asks_for_a_client_id() {
     let server = Server::start().await;
     let (base, _) = start_app(true, 3600).await;
 
     let (status, refused) = begin(&server, json!({"name": "Docs", "url": base, "kind": "outline"})).await;
 
-    assert_eq!((status, refused["error"].as_str(), refused["message"].as_str()), (400, Some("oauth_unsupported"), Some("This app does not let Mycelium sign in. Use an API key instead.")));
+    assert_eq!((status, refused["error"].as_str(), refused["message"].as_str()), (422, Some("client_id_required"), Some("Enter the client ID from 127.0.0.1")));
 }
 
 #[tokio::test]
@@ -529,4 +536,92 @@ async fn the_client_metadata_document_is_public_and_names_its_own_address_and_th
     assert_eq!(document["redirect_uris"], json!([format!("{}/integrations/oauth/callback", server.base)]));
     assert_eq!(document["token_endpoint_auth_method"], "none");
     assert_eq!(document["grant_types"], json!(["authorization_code", "refresh_token"]));
+}
+
+async fn pre_registered_sign_in(server: &Server, base: &str, secret: Option<&str>) -> Vec<(String, String)> {
+    let mut body = json!({"name": "Docs", "url": base, "kind": "outline", "client_id": "pre-1"});
+
+    if let Some(secret) = secret {
+        body["client_secret"] = json!(secret);
+    }
+
+    let (status, started) = begin(server, body).await;
+    assert_eq!(status, 200, "{started}");
+    assert!(!started.to_string().contains("pre-secret"), "{started}");
+
+    query_of(started["authorize_url"].as_str().unwrap())
+}
+
+#[tokio::test]
+async fn a_client_id_entered_by_the_person_is_used_without_registering_and_sends_no_secret_when_there_is_none() {
+    let server = Server::start().await;
+    let (base, app) = start_with(Options { without_registration: true, ..Options::default() }).await;
+    let query = pre_registered_sign_in(&server, &base, None).await;
+
+    callback(&server, &param(&query, "state")).await;
+
+    let exchange = app.token_requests.lock().unwrap()[0].clone();
+    assert_eq!(param(&query, "client_id"), "pre-1");
+    assert!(app.registrations.lock().unwrap().is_empty());
+    assert_eq!((param(&exchange, "client_id"), param(&exchange, "client_secret")), ("pre-1".to_string(), String::new()));
+    assert_eq!(app.token_authorisations.lock().unwrap()[0], "");
+}
+
+#[tokio::test]
+async fn a_client_id_entered_by_the_person_wins_over_a_client_metadata_document_and_registration() {
+    let server = Server::start().await;
+    let (base, app) = start_with(Options { authorisation_extra: json!({"client_id_metadata_document_supported": true}), ..Options::default() }).await;
+
+    let query = pre_registered_sign_in(&server, &base, None).await;
+
+    assert_eq!(param(&query, "client_id"), "pre-1");
+    assert!(app.registrations.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_client_secret_is_sent_in_the_body_when_the_server_takes_it_there_on_exchange_and_refresh_and_is_never_shown() {
+    let server = Server::start().await;
+    let (_, node_token) = server.join("node", "laptop").await;
+    let (base, app) = start_with(Options { without_registration: true, token_lifetime: 1, authorisation_extra: json!({"token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"]}), ..Options::default() }).await;
+    let query = pre_registered_sign_in(&server, &base, Some("pre-secret")).await;
+    callback(&server, &param(&query, "state")).await;
+
+    listed_tools(&server, &node_token).await;
+
+    let requests = app.token_requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 2, "{requests:?}");
+    assert_eq!((param(&requests[0], "grant_type"), param(&requests[0], "client_secret")), ("authorization_code".to_string(), "pre-secret".to_string()));
+    assert_eq!((param(&requests[1], "grant_type"), param(&requests[1], "client_secret")), ("refresh_token".to_string(), "pre-secret".to_string()));
+    let listed = server.user.get("/api/v1/chat-tool-servers").send().await.unwrap().text().await.unwrap();
+    assert!(!listed.contains("pre-secret"), "{listed}");
+    let stored: String = sqlx::query_scalar("select oauth->>'client_secret' from chat_tool_servers").fetch_one(&server.pool).await.unwrap();
+    assert!(stored.starts_with("enc:v1:") && !stored.contains("pre-secret"));
+}
+
+#[tokio::test]
+async fn a_client_secret_is_sent_as_basic_authentication_when_that_is_all_the_server_takes() {
+    let server = Server::start().await;
+    let (base, app) = start_with(Options { without_registration: true, authorisation_extra: json!({"token_endpoint_auth_methods_supported": ["client_secret_basic"]}), ..Options::default() }).await;
+    let query = pre_registered_sign_in(&server, &base, Some("pre-secret")).await;
+
+    callback(&server, &param(&query, "state")).await;
+
+    let exchange = app.token_requests.lock().unwrap()[0].clone();
+    let expected = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode("pre-1:pre-secret"));
+    assert_eq!(app.token_authorisations.lock().unwrap()[0], expected);
+    assert_eq!(param(&exchange, "client_secret"), "");
+}
+
+#[tokio::test]
+async fn a_secret_returned_by_registration_is_kept_and_sent_on_exchange() {
+    let server = Server::start().await;
+    let (base, app) = start_with(Options { registered_secret: Some("dcr-secret"), authorisation_extra: json!({"token_endpoint_auth_methods_supported": ["client_secret_post"]}), ..Options::default() }).await;
+    let query = sign_in(&server, &base).await;
+
+    callback(&server, &param(&query, "state")).await;
+
+    let exchange = app.token_requests.lock().unwrap()[0].clone();
+    assert_eq!((param(&exchange, "client_id"), param(&exchange, "client_secret")), ("client-1".to_string(), "dcr-secret".to_string()));
+    let listed = server.user.get("/api/v1/chat-tool-servers").send().await.unwrap().text().await.unwrap();
+    assert!(!listed.contains("dcr-secret"), "{listed}");
 }

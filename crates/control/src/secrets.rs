@@ -20,7 +20,7 @@ const PREFIX: &str = "enc:v1:";
 const KEY_FILE: &str = "secret.key";
 const NONCE_LENGTH: usize = 12;
 const SEALED_SETTINGS: [&str; 1] = ["encryption_password"];
-const SEALED_COLUMNS: [(&str, &str, &str); 10] = [
+const SEALED_COLUMNS: [(&str, &str, &str); 11] = [
     ("forges", "token", "token = $2"),
     ("forges", "webhook_secret", "webhook_secret = $2"),
     ("model_providers", "api_key", "api_key = $2"),
@@ -30,6 +30,7 @@ const SEALED_COLUMNS: [(&str, &str, &str); 10] = [
     ("chat_tool_servers", "oauth_refresh_token", "oauth_refresh_token = $2"),
     ("chat_tool_servers", "session_key", "session_key = $2"),
     ("chat_tool_servers", "settings->>'encryption_password'", "settings = jsonb_set(settings, '{encryption_password}', to_jsonb($2::text))"),
+    ("chat_tool_servers", "oauth->>'client_secret'", "oauth = jsonb_set(oauth, '{client_secret}', to_jsonb($2::text))"),
     ("assistant_secrets", "value", "value = $2"),
 ];
 

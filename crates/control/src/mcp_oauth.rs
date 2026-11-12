@@ -35,6 +35,13 @@ pub(crate) struct Authorisation {
     token_endpoint: String,
     registration_endpoint: Option<String>,
     metadata_document_supported: bool,
+    token_auth_methods: Option<Vec<String>>,
+}
+
+pub struct ClientCredentials {
+    pub id: String,
+    pub secret: Option<String>,
+    pub method: String,
 }
 
 pub(crate) struct Discovered {
@@ -49,7 +56,28 @@ pub struct Challenge {
     pub error: Option<String>,
 }
 
+impl ClientCredentials {
+    fn from_stored(oauth: &Value) -> Result<ClientCredentials, String> {
+        let secret = match oauth["client_secret"].as_str() {
+            Some(sealed) => Some(crate::secrets::installed_ring().and_then(|ring| ring.open(sealed)).map_err(|error| error.to_string())?),
+            None => None,
+        };
+
+        Ok(ClientCredentials { id: oauth["client_id"].as_str().unwrap_or_default().to_string(), secret, method: oauth["token_auth_method"].as_str().unwrap_or("none").to_string() })
+    }
+}
+
 impl Authorisation {
+    fn secret_method(&self) -> &'static str {
+        let listed = |method: &str| self.token_auth_methods.iter().flatten().any(|listed| listed == method);
+
+        if self.token_auth_methods.is_none() || (listed("client_secret_basic") && !listed("client_secret_post")) {
+            return "client_secret_basic";
+        }
+
+        "client_secret_post"
+    }
+
     pub(crate) fn sign_in(&self) -> &'static str {
         match (self.metadata_document_supported, &self.registration_endpoint) {
             (true, _) => "metadata_document",
@@ -66,15 +94,22 @@ fn tokens_from(body: &Value) -> Option<Tokens> {
     Some(Tokens { access_token, refresh_token: body["refresh_token"].as_str().map(str::to_string), expires_at })
 }
 
-async fn token_request(state: &AppState, endpoint: &str, form: &[(&str, &str)]) -> Result<Tokens, String> {
-    let body = url::form_urlencoded::Serializer::new(String::new()).extend_pairs(form).finish();
-    let response = state
-        .http
-        .post(endpoint)
-        .timeout(DISCOVERY_TIMEOUT)
-        .header("content-type", "application/x-www-form-urlencoded")
-        .header("accept", "application/json")
-        .body(body)
+async fn token_request(state: &AppState, endpoint: &str, client: &ClientCredentials, form: &[(&str, &str)]) -> Result<Tokens, String> {
+    let mut fields = form.to_vec();
+
+    match (&client.secret, client.method.as_str()) {
+        (Some(secret), "client_secret_post") => fields.extend([("client_id", client.id.as_str()), ("client_secret", secret.as_str())]),
+        _ => fields.push(("client_id", client.id.as_str())),
+    }
+
+    let body = url::form_urlencoded::Serializer::new(String::new()).extend_pairs(fields).finish();
+    let mut request = state.http.post(endpoint).timeout(DISCOVERY_TIMEOUT).header("content-type", "application/x-www-form-urlencoded").header("accept", "application/json").body(body);
+
+    if let (Some(secret), "client_secret_basic") = (&client.secret, client.method.as_str()) {
+        request = request.basic_auth(&client.id, Some(secret));
+    }
+
+    let response = request
         .send()
         .await
         .map_err(|error| error.to_string())?;
@@ -90,9 +125,10 @@ async fn token_request(state: &AppState, endpoint: &str, form: &[(&str, &str)]) 
 
 pub async fn refresh(state: &AppState, oauth: &Value, refresh_token: &str) -> Result<Tokens, String> {
     let endpoint = oauth["token_endpoint"].as_str().ok_or("No token endpoint is stored.")?;
-    let form = [("grant_type", "refresh_token"), ("refresh_token", refresh_token), ("client_id", oauth["client_id"].as_str().unwrap_or_default()), ("resource", oauth["resource"].as_str().unwrap_or_default())];
+    let client = ClientCredentials::from_stored(oauth)?;
+    let form = [("grant_type", "refresh_token"), ("refresh_token", refresh_token), ("resource", oauth["resource"].as_str().unwrap_or_default())];
 
-    token_request(state, endpoint, &form).await
+    token_request(state, endpoint, &client, &form).await
 }
 
 async fn get_json(state: &AppState, url: &str) -> Option<Value> {
@@ -211,7 +247,7 @@ async fn authorisation_server_metadata(state: &AppState, issuer: &str) -> Option
             continue;
         };
 
-        return Some(Authorisation { issuer: issuer.to_string(), authorization_endpoint, token_endpoint, registration_endpoint: text("registration_endpoint"), metadata_document_supported: metadata["client_id_metadata_document_supported"].as_bool() == Some(true) });
+        return Some(Authorisation { issuer: issuer.to_string(), authorization_endpoint, token_endpoint, registration_endpoint: text("registration_endpoint"), metadata_document_supported: metadata["client_id_metadata_document_supported"].as_bool() == Some(true), token_auth_methods: metadata["token_endpoint_auth_methods_supported"].as_array().map(|methods| methods.iter().filter_map(|method| method.as_str().map(str::to_string)).collect()) });
     }
 
     None
@@ -301,10 +337,21 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Json(request):
     let Discovered { authorisation, scopes } = discover(&state, &mcp_url).await.map_err(|_| unsupported())?;
 
     let redirect = redirect_uri(&state);
-    let client_id = match (authorisation.metadata_document_supported, authorisation.registration_endpoint.as_deref()) {
-        (true, _) => client_metadata_url(&state),
-        (false, None) => return Err(unsupported()),
-        (false, Some(registration_endpoint)) => {
+    let supplied = request.client_id.as_deref().map(str::trim).filter(|client_id| !client_id.is_empty());
+    let client = match (supplied, authorisation.metadata_document_supported, authorisation.registration_endpoint.as_deref()) {
+        (Some(client_id), _, _) => {
+            let secret = request.client_secret.as_deref().map(str::trim).filter(|secret| !secret.is_empty()).map(str::to_string);
+            let method = if secret.is_some() { authorisation.secret_method() } else { "none" };
+
+            ClientCredentials { id: client_id.to_string(), secret, method: method.to_string() }
+        }
+        (None, true, _) => ClientCredentials { id: client_metadata_url(&state), secret: None, method: "none".to_string() },
+        (None, false, None) => {
+            let host = url::Url::parse(&authorisation.issuer).ok().and_then(|issuer| issuer.host_str().map(str::to_string)).unwrap_or_default();
+
+            return Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "client_id_required", format!("Enter the client ID from {host}")));
+        }
+        (None, false, Some(registration_endpoint)) => {
             let registration = json!({"client_name": "Mycelium", "redirect_uris": [redirect], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"]});
             let registered = state.http.post(registration_endpoint).timeout(DISCOVERY_TIMEOUT).json(&registration).send().await.map_err(|_| unsupported())?;
 
@@ -313,8 +360,15 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Json(request):
             }
 
             let registered: Value = registered.json().await.map_err(|_| unsupported())?;
+            let secret = registered["client_secret"].as_str().filter(|secret| !secret.is_empty()).map(str::to_string);
+            let method = match (&secret, registered["token_endpoint_auth_method"].as_str()) {
+                (None, _) => "none",
+                (Some(_), Some("client_secret_basic")) => "client_secret_basic",
+                (Some(_), Some("client_secret_post")) => "client_secret_post",
+                (Some(_), _) => authorisation.secret_method(),
+            };
 
-            registered["client_id"].as_str().ok_or_else(unsupported)?.to_string()
+            ClientCredentials { id: registered["client_id"].as_str().ok_or_else(unsupported)?.to_string(), secret, method: method.to_string() }
         }
     };
     let verifier = new_token();
@@ -326,7 +380,7 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Json(request):
         let mut query = authorize.query_pairs_mut();
         query
             .append_pair("response_type", "code")
-            .append_pair("client_id", &client_id)
+            .append_pair("client_id", &client.id)
             .append_pair("redirect_uri", &redirect)
             .append_pair("code_challenge", &challenge)
             .append_pair("code_challenge_method", "S256")
@@ -343,7 +397,7 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Json(request):
         _ => json!({}),
     };
 
-    state.hub.track_oauth(sign_in, PendingOAuth { owner: user.id, name: name.to_string(), url: resource, settings, client_id, token_endpoint: authorisation.token_endpoint, verifier, forge_id: request.forge_id, server: request.server_id, created: std::time::Instant::now() });
+    state.hub.track_oauth(sign_in, PendingOAuth { owner: user.id, name: name.to_string(), url: resource, settings, client, token_endpoint: authorisation.token_endpoint, verifier, forge_id: request.forge_id, server: request.server_id, created: std::time::Instant::now() });
 
     Ok(Json(OAuthStart { authorize_url: authorize.to_string() }))
 }
@@ -370,8 +424,8 @@ pub async fn callback(State(state): State<AppState>, Query(query): Query<Callbac
     };
 
     let redirect = redirect_uri(&state);
-    let form = [("grant_type", "authorization_code"), ("code", code.as_str()), ("redirect_uri", redirect.as_str()), ("client_id", pending.client_id.as_str()), ("code_verifier", pending.verifier.as_str()), ("resource", pending.url.as_str())];
-    let Ok(tokens) = token_request(&state, &pending.token_endpoint, &form).await else {
+    let form = [("grant_type", "authorization_code"), ("code", code.as_str()), ("redirect_uri", redirect.as_str()), ("code_verifier", pending.verifier.as_str()), ("resource", pending.url.as_str())];
+    let Ok(tokens) = token_request(&state, &pending.token_endpoint, &pending.client, &form).await else {
         return page(StatusCode::BAD_GATEWAY, &format!("{} did not give Mycelium access. Start the sign-in again from Settings, Integrations.", pending.name));
     };
     let app = pending.settings["app"].as_str().and_then(known_app);
@@ -383,11 +437,22 @@ pub async fn callback(State(state): State<AppState>, Query(query): Query<Callbac
     }
 }
 
+fn stored_oauth(pending: &PendingOAuth) -> ApiResult<Value> {
+    let mut oauth = json!({"client_id": pending.client.id, "token_endpoint": pending.token_endpoint, "resource": pending.url, "token_auth_method": pending.client.method});
+
+    if let Some(secret) = &pending.client.secret {
+        let ring = crate::secrets::installed_ring().map_err(ApiError::internal)?;
+        oauth["client_secret"] = json!(ring.seal(secret));
+    }
+
+    Ok(oauth)
+}
+
 async fn connect(state: &AppState, pending: &PendingOAuth, tokens: &Tokens, app: Option<&crate::chat_tool_servers::KnownApp>) -> ApiResult<()> {
     check_name(state, pending.owner, &pending.name, pending.server).await?;
 
     let listed = fetch_tools(state, &pending.name, &pending.url, Some(&tokens.access_token), DEFAULT_KEY_HEADER, app).await?;
-    let oauth = json!({"client_id": pending.client_id, "token_endpoint": pending.token_endpoint, "resource": pending.url});
+    let oauth = stored_oauth(pending)?;
 
     match pending.server {
         Some(server) => {

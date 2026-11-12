@@ -82,7 +82,7 @@ pub struct PendingOAuth {
     pub name: String,
     pub url: String,
     pub settings: Value,
-    pub client_id: String,
+    pub client: crate::mcp_oauth::ClientCredentials,
     pub token_endpoint: String,
     pub verifier: String,
     pub forge_id: Option<Uuid>,
