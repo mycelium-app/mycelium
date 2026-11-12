@@ -112,7 +112,7 @@ async fn clone_project(server: &Server, link: &mut NodeLink, forge_id: Uuid, rep
 
     answer_next(link, json!({"path": path})).await;
     let (status, project) = asking.await.unwrap();
-    assert_eq!(status, 201, "{project}");
+    assert!(status == 201 || status == 200, "{project}");
 
     project
 }

@@ -358,6 +358,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/projects", get(projects::list).post(projects::create))
         .route("/api/v1/projects/{id}", patch(projects::patch))
         .route("/api/v1/projects/{id}/checkout", post(projects::checkout))
+        .route("/api/v1/projects/{id}/checkouts/{node_id}", delete(projects::remove_checkout))
         .route("/api/v1/projects/{id}/worktrees", get(worktrees::existing))
         .route("/api/v1/projects/{id}/find-icon", post(projects::find_icon))
         .route("/api/v1/projects/{id}/avatar", post(projects::upload_avatar).layer(DefaultBodyLimit::max(projects::MAX_AVATAR_BYTES + 1024)))

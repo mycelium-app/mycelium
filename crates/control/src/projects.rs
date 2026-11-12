@@ -11,7 +11,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::body::Bytes;
 use axum::http::{HeaderMap, StatusCode};
-use mycelium_proto::api::{CheckoutProjectRequest, CreateProjectRequest, PatchProjectRequest, Project, ProjectCheckout};
+use mycelium_proto::api::{CheckoutProjectRequest, CreateProjectRequest, CreatedProject, PatchProjectRequest, Project, ProjectCheckout};
 use mycelium_proto::link::GitCommand;
 use mycelium_proto::stream::StreamMessage;
 use serde_json::Value;
@@ -97,6 +97,20 @@ pub async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<Pr
     let row = row.ok_or_else(|| ApiError::not_found("That project"))?;
 
     Ok(with_checkouts(state, vec![row]).await?.remove(0))
+}
+
+async fn find_by_repository(state: &AppState, owner: Uuid, forge_id: Uuid, repository: &str) -> ApiResult<Option<ProjectRow>> {
+    let row = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("select {PROJECT_COLUMNS} from projects where owner = $1 and forge_id = $2 and lower(repository) = lower($3) order by created_at, id limit 1")))
+        .bind(owner)
+        .bind(forge_id)
+        .bind(repository)
+        .fetch_optional(&state.pool)
+        .await?;
+
+    match row {
+        Some(row) => Ok(Some(with_checkouts(state, vec![row]).await?.remove(0))),
+        None => Ok(None),
+    }
 }
 
 pub async fn add_checkout(state: &AppState, project_id: Uuid, node_id: Uuid, path: &str) -> ApiResult<CheckoutRow> {
@@ -213,11 +227,11 @@ pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
     Ok(Json(rows.into_iter().map(ProjectRow::to_proto).collect()))
 }
 
-pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateProjectRequest>) -> ApiResult<(StatusCode, Json<Project>)> {
+pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateProjectRequest>) -> ApiResult<(StatusCode, Json<CreatedProject>)> {
     tokio::spawn(create_project(state, user, request)).await.map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "project_create_aborted", "Setting up the project stopped unexpectedly. Check the project list, then try again."))?
 }
 
-async fn create_project(state: AppState, user: AuthUser, request: CreateProjectRequest) -> ApiResult<(StatusCode, Json<Project>)> {
+async fn create_project(state: AppState, user: AuthUser, request: CreateProjectRequest) -> ApiResult<(StatusCode, Json<CreatedProject>)> {
     if let Some(group_id) = request.group_id {
         groups::find_owned(&state, group_id, user.id).await?;
     }
@@ -230,6 +244,15 @@ async fn create_project(state: AppState, user: AuthUser, request: CreateProjectR
 
     if !state.hub.is_online(request.node_id) {
         return Err(node_offline());
+    }
+
+    let held = match (request.forge_id, request.repository.as_deref().map(str::trim)) {
+        (Some(forge_id), Some(repository)) if !request.new_repository => find_by_repository(&state, user.id, forge_id, repository).await?,
+        _ => None,
+    };
+
+    if let Some(project) = held.clone() && project.checkout_on(request.node_id).is_some() {
+        return Ok((StatusCode::OK, Json(CreatedProject { project: project.to_proto(), checkout_added: false })));
     }
 
     let new_folder = request.new_folder.as_deref();
@@ -288,57 +311,76 @@ async fn create_project(state: AppState, user: AuthUser, request: CreateProjectR
         _ => return Err(ApiError::bad_request("project_source_required", "Choose a forge repository or enter the folder on the node.")),
     };
 
-    let inserted = sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path, forge_id, repository, group_id) values ($1, $2, $3, $4, $5, $6, $7) returning id")
-    .bind(user.id)
-    .bind(request.node_id)
-    .bind(&name)
-    .bind(&path)
-    .bind(forge_id)
-    .bind(&repository)
-    .bind(request.group_id)
-    .fetch_one(&state.pool)
-    .await;
+    let (project_id, checkout_added) = match held {
+        Some(project) => {
+            add_checkout(&state, project.id, request.node_id, &path).await?;
 
-    match inserted {
-        Ok(project_id) => {
-            link_conversations(&state, user.id, project_id, request.node_id).await?;
-            let owner = user.id;
-            let project = find_owned(&state, project_id, owner).await?.to_proto();
-            state.publish(Some(owner), StreamMessage::Project(project.clone()));
-            let background = state.clone();
-            tokio::spawn(async move { find_automatic_icon(&background, owner, project_id).await });
-
-            Ok((StatusCode::CREATED, Json(project)))
+            (project.id, true)
         }
-        Err(sqlx::Error::Database(cause)) if cause.is_unique_violation() => Err(ApiError::conflict("project_exists", "This folder is already a project on this node.")),
-        Err(cause) => Err(cause.into()),
-    }
+        None => {
+            let inserted = sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path, forge_id, repository, group_id) values ($1, $2, $3, $4, $5, $6, $7) returning id")
+                .bind(user.id)
+                .bind(request.node_id)
+                .bind(&name)
+                .bind(&path)
+                .bind(forge_id)
+                .bind(&repository)
+                .bind(request.group_id)
+                .fetch_one(&state.pool)
+                .await;
+
+            match inserted {
+                Ok(project_id) => (project_id, false),
+                Err(sqlx::Error::Database(cause)) if cause.is_unique_violation() => return Err(ApiError::conflict("project_exists", "This folder is already a project on this node.")),
+                Err(cause) => return Err(cause.into()),
+            }
+        }
+    };
+
+    link_conversations(&state, user.id, project_id, request.node_id).await?;
+    let owner = user.id;
+    let project = find_owned(&state, project_id, owner).await?.to_proto();
+    state.publish(Some(owner), StreamMessage::Project(project.clone()));
+    let background = state.clone();
+    tokio::spawn(async move { find_automatic_icon(&background, owner, project_id).await });
+
+    let status = if checkout_added { StatusCode::OK } else { StatusCode::CREATED };
+
+    Ok((status, Json(CreatedProject { project, checkout_added })))
 }
 
-pub async fn checkout(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<CheckoutProjectRequest>) -> ApiResult<(StatusCode, Json<Project>)> {
+pub async fn checkout(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<CheckoutProjectRequest>) -> ApiResult<(StatusCode, Json<CreatedProject>)> {
     let project = find_owned(&state, id, user.id).await?;
 
     if project.checkout_on(request.node_id).is_some() {
-        return Ok((StatusCode::OK, Json(project.to_proto())));
+        return Ok((StatusCode::OK, Json(CreatedProject { project: project.to_proto(), checkout_added: false })));
     }
 
     let (Some(forge_id), Some(repository)) = (project.forge_id, project.repository.clone()) else {
         return Err(ApiError::bad_request("project_not_cloneable", "This project has no forge repository to clone. Register its folder on that node instead."));
     };
 
-    let sibling = sqlx::query_scalar::<_, Uuid>("select p.id from projects p join project_checkouts c on c.project_id = p.id where p.owner = $1 and c.node_id = $2 and p.forge_id = $3 and lower(p.repository) = lower($4) order by p.created_at, p.id limit 1")
-        .bind(user.id)
-        .bind(request.node_id)
-        .bind(forge_id)
-        .bind(&repository)
-        .fetch_optional(&state.pool)
-        .await?;
+    create_project(state, user, CreateProjectRequest { node_id: request.node_id, forge_id: Some(forge_id), repository: Some(repository), path: request.path, new_repository: false, new_folder: request.new_folder, group_id: None }).await
+}
 
-    if let Some(sibling) = sibling {
-        return Ok((StatusCode::OK, Json(find_owned(&state, sibling, user.id).await?.to_proto())));
+pub async fn remove_checkout(State(state): State<AppState>, user: AuthUser, Path((id, node_id)): Path<(Uuid, Uuid)>) -> ApiResult<StatusCode> {
+    let project = find_owned(&state, id, user.id).await?;
+    let Some(checkout) = project.checkout_on(node_id) else {
+        return Err(ApiError::not_found("That checkout"));
+    };
+
+    if project.checkouts.len() == 1 {
+        return Err(ApiError::conflict("last_checkout", format!("This is the only checkout of {}. Remove the project instead.", project.name)));
     }
 
-    create_project(state, user, CreateProjectRequest { node_id: request.node_id, forge_id: Some(forge_id), repository: Some(repository), path: None, new_repository: false, new_folder: None, group_id: None }).await
+    let mut tx = state.pool.begin().await?;
+
+    sqlx::query("delete from project_checkouts where id = $1").bind(checkout.id).execute(&mut *tx).await?;
+    sqlx::query("update projects set node_id = (select node_id from project_checkouts where project_id = projects.id order by created_at, id limit 1), path = (select path from project_checkouts where project_id = projects.id order by created_at, id limit 1) where id = $1").bind(project.id).execute(&mut *tx).await?;
+    tx.commit().await?;
+    publish_project(&state, user.id, project.id).await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchProjectRequest>) -> ApiResult<Json<Project>> {

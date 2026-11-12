@@ -289,6 +289,7 @@ const EXCEPTIONS: &[(&str, &str, &str)] = &[
 const NOT_YET_COVERED: &[(&str, &str)] = &[
     ("GET", "/api/v1/repositories"),
     ("POST", "/api/v1/projects/{id}/checkout"),
+    ("DELETE", "/api/v1/projects/{id}/checkouts/{node_id}"),
     ("POST", "/api/v1/projects/{id}/find-icon"),
     ("GET", "/api/v1/issues"),
     ("POST", "/api/v1/projects/{id}/issues/{number}/workspace"),

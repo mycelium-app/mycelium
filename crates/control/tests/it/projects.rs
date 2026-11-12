@@ -531,8 +531,9 @@ async fn an_existing_folder_whose_remote_is_the_repository_becomes_the_project_o
     assert_eq!((status, cwd.as_str(), command), (201, "work/backups", GitCommand::Register));
     assert_eq!((project["name"].clone(), project["path"].clone(), project["repository"].clone(), project["forge_id"].clone()), (json!("acme-backups"), json!("/home/sam/work/backups"), json!("acme-org/acme-backups"), json!(forge_id)));
 
-    let ((other, _), _) = create_project(&server, &mut link, json!({"forge_id": forge_id, "repository": "acme-org/acme-backups", "path": "/second"}), Ok(json!({"path": "/second", "repository": true, "remotes": [format!("{github}/acme-org/acme-backups")]}))).await;
-    assert_eq!(other, 201);
+    let mut second_node = server.online_node("desk").await;
+    let ((other, _), _) = create_project(&server, &mut second_node, json!({"forge_id": forge_id, "repository": "acme-org/acme-backups", "path": "/second"}), Ok(json!({"path": "/second", "repository": true, "remotes": [format!("{github}/acme-org/acme-backups")]}))).await;
+    assert_eq!(other, 200);
 }
 
 #[tokio::test]
@@ -545,7 +546,8 @@ async fn an_existing_folder_cloned_over_the_forges_own_ssh_host_becomes_the_proj
     let ((status, _), _) = create_project(&server, &mut link, json!({"forge_id": forge_id, "repository": "sam/nix", "path": "/nix"}), Ok(json!({"path": "/nix", "repository": true, "remotes": ["ssh://git@ssh.forge.test:2222/sam/nix.git"]}))).await;
     assert_eq!(status, 201);
 
-    let ((refused, _), _) = create_project(&server, &mut link, json!({"forge_id": forge_id, "repository": "sam/nix", "path": "/elsewhere"}), Ok(json!({"path": "/elsewhere", "repository": true, "remotes": ["ssh://git@unrelated.test/sam/nix.git"]}))).await;
+    let mut second_node = server.online_node("desk").await;
+    let ((refused, _), _) = create_project(&server, &mut second_node, json!({"forge_id": forge_id, "repository": "sam/nix", "path": "/elsewhere"}), Ok(json!({"path": "/elsewhere", "repository": true, "remotes": ["ssh://git@unrelated.test/sam/nix.git"]}))).await;
     assert_eq!(refused, 400);
 }
 
@@ -676,7 +678,7 @@ async fn setting_up_a_conversations_folder_as_a_project_binds_every_conversation
 }
 
 #[tokio::test]
-async fn a_project_is_cloned_onto_a_node_that_lacks_it_and_reused_once_it_is_there() {
+async fn a_project_is_cloned_onto_a_node_that_lacks_it_as_a_checkout_and_reused_once_it_is_there() {
     let server = Server::start().await;
     let github = fake_forge("github").await;
     let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
@@ -691,12 +693,13 @@ async fn a_project_is_cloned_onto_a_node_that_lacks_it_and_reused_once_it_is_the
     let (cwd, command) = answer_next(&mut orion, Ok(json!({"path": "/srv/projects/acme-org/acme-backups"}))).await;
     let (status, checkout) = asking.await.unwrap();
 
-    assert_eq!((status, cwd.as_str()), (201, "projects/acme-org/acme-backups"));
+    assert_eq!((status, cwd.as_str()), (200, "projects/acme-org/acme-backups"));
     assert!(matches!(command, GitCommand::Clone { .. }));
-    assert_eq!((checkout["node_id"].clone(), checkout["path"].clone()), (json!(orion.id), json!("/srv/projects/acme-org/acme-backups")));
+    assert_eq!((checkout["id"].clone(), checkout["checkout_added"].clone()), (project["id"].clone(), json!(true)));
+    assert_eq!(checkout["checkouts"].as_array().unwrap().len(), 2);
 
     let (again_status, again) = server.user.json(server.user.post(&format!("/api/v1/projects/{}/checkout", project["id"].as_str().unwrap())).json(&json!({"node_id": orion.id}))).await;
-    assert_eq!((again_status, again["id"].clone()), (200, checkout["id"].clone()));
+    assert_eq!((again_status, again["id"].clone(), again["checkout_added"].clone()), (200, project["id"].clone(), Value::Null));
 }
 
 #[tokio::test]
@@ -901,4 +904,113 @@ async fn a_client_from_before_checkouts_reads_a_project_and_a_project_without_ch
 
     assert_eq!((older.id, older.node_id, older.path.as_str()), (newer.id, atlas.id, "/home/sam/backups"));
     assert!(newer.checkouts.is_empty());
+}
+
+#[tokio::test]
+async fn creating_a_project_for_a_repository_already_a_project_adds_a_checkout_on_the_new_node() {
+    let server = Server::start().await;
+    let github = fake_forge("github").await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let mut atlas = server.online_node("atlas").await;
+    let mut orion = server.online_node("orion").await;
+    let ((_, first), _) = create_project(&server, &mut atlas, json!({"forge_id": forge_id, "repository": "acme-org/backups"}), Ok(json!({"path": "/home/sam/projects/acme-org/backups"}))).await;
+
+    let ((status, second), _) = create_project(&server, &mut orion, json!({"forge_id": forge_id, "repository": "Acme-Org/Backups"}), Ok(json!({"path": "/srv/projects/acme-org/backups"}))).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+
+    assert_eq!((status, second["id"].clone(), second["checkout_added"].clone()), (200, first["id"].clone(), json!(true)), "{second}");
+    assert_eq!(second["checkouts"].as_array().unwrap().len(), 2);
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!((listed[0]["node_id"].clone(), listed[0]["path"].clone()), (json!(atlas.id), json!("/home/sam/projects/acme-org/backups")));
+}
+
+#[tokio::test]
+async fn creating_a_project_for_a_repository_already_checked_out_on_that_node_changes_nothing() {
+    let server = Server::start().await;
+    let github = fake_forge("github").await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let mut atlas = server.online_node("atlas").await;
+    let ((_, first), _) = create_project(&server, &mut atlas, json!({"forge_id": forge_id, "repository": "acme-org/backups"}), Ok(json!({"path": "/home/sam/projects/acme-org/backups"}))).await;
+
+    let (status, again) = server.user.json(server.user.post("/api/v1/projects").json(&json!({"node_id": atlas.id, "forge_id": forge_id, "repository": "acme-org/backups"}))).await;
+
+    assert_eq!((status, again["id"].clone(), again["checkout_added"].clone()), (200, first["id"].clone(), Value::Null), "{again}");
+    assert_eq!(again["checkouts"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_folder_on_the_new_node_that_already_holds_the_repository_is_registered_as_its_checkout() {
+    let server = Server::start().await;
+    let github = fake_forge("github").await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let mut atlas = server.online_node("atlas").await;
+    let mut orion = server.online_node("orion").await;
+    let ((_, first), _) = create_project(&server, &mut atlas, json!({"forge_id": forge_id, "repository": "acme-org/backups"}), Ok(json!({"path": "/home/sam/projects/acme-org/backups"}))).await;
+    let user = server.user.clone();
+    let orion_id = orion.id;
+    let asking = tokio::spawn(async move { user.json(user.post("/api/v1/projects").json(&json!({"node_id": orion_id, "forge_id": forge_id, "repository": "acme-org/backups"}))).await });
+
+    answer_next(&mut orion, Err("/srv/projects/acme-org/backups already exists and is not empty. Choose another folder.")).await;
+    let registered = json!({"path": "/srv/projects/acme-org/backups", "repository": true, "remotes": [format!("{github}/acme-org/backups.git")]});
+    let (_, register) = answer_next(&mut orion, Ok(registered)).await;
+    let (status, project) = asking.await.unwrap();
+
+    assert_eq!((status, register), (200, GitCommand::Register), "{project}");
+    assert_eq!((project["id"].clone(), project["checkout_added"].clone()), (first["id"].clone(), json!(true)));
+    assert_eq!(project["checkouts"][1]["path"], "/srv/projects/acme-org/backups");
+}
+
+#[tokio::test]
+async fn the_last_checkout_of_a_project_cannot_be_removed() {
+    let server = Server::start().await;
+    let mut atlas = server.online_node("atlas").await;
+    let project = project_on(&server, &mut atlas).await;
+
+    let (status, body) = server.user.json(server.user.delete(&format!("/api/v1/projects/{}/checkouts/{}", project["id"].as_str().unwrap(), atlas.id))).await;
+
+    assert_eq!((status, body["error"].clone()), (409, json!("last_checkout")));
+    assert_eq!(body["message"], "This is the only checkout of app. Remove the project instead.");
+}
+
+#[tokio::test]
+async fn removing_one_of_two_checkouts_keeps_the_projects_conversations_and_their_node() {
+    let server = Server::start().await;
+    let mut atlas = server.online_node("atlas").await;
+    let orion = server.online_node("orion").await;
+    let project = backups_on_two_nodes(&server, &mut atlas, &orion).await;
+    let (_, on_orion) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": orion.id, "agent": "claude", "project_id": project["id"]}))).await;
+
+    let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/projects/{}/checkouts/{}", project["id"].as_str().unwrap(), orion.id))).await;
+    let kept = server.conversation(on_orion["id"].as_str().unwrap().parse().unwrap()).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+
+    assert_eq!(status, 204);
+    assert_eq!((kept["project_id"].clone(), kept["node_id"].clone()), (project["id"].clone(), json!(orion.id)));
+    assert_eq!(listed[0]["checkouts"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn removing_the_oldest_checkout_makes_the_next_one_the_projects_node_and_path() {
+    let server = Server::start().await;
+    let mut atlas = server.online_node("atlas").await;
+    let orion = server.online_node("orion").await;
+    let project = backups_on_two_nodes(&server, &mut atlas, &orion).await;
+
+    let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/projects/{}/checkouts/{}", project["id"].as_str().unwrap(), atlas.id))).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+
+    assert_eq!(status, 204);
+    assert_eq!((listed[0]["node_id"].clone(), listed[0]["path"].clone()), (json!(orion.id), json!("/srv/backups")));
+}
+
+#[tokio::test]
+async fn a_checkout_that_is_not_there_is_not_found() {
+    let server = Server::start().await;
+    let mut atlas = server.online_node("atlas").await;
+    let orion = server.online_node("orion").await;
+    let project = project_on(&server, &mut atlas).await;
+
+    let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/projects/{}/checkouts/{}", project["id"].as_str().unwrap(), orion.id))).await;
+
+    assert_eq!(status, 404);
 }

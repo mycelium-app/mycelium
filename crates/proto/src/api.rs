@@ -1154,6 +1154,14 @@ pub struct Project {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreatedProject {
+    #[serde(flatten)]
+    pub project: Project,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub checkout_added: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PatchProjectRequest {
     #[serde(default)]
     pub group_id: Option<Uuid>,
@@ -1715,6 +1723,10 @@ pub struct CreateProjectRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CheckoutProjectRequest {
     pub node_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_folder: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

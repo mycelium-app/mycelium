@@ -53,7 +53,7 @@ async fn create_project(server: &Server, link: &mut NodeLink, forge_id: Uuid, pa
     let asking = tokio::spawn(async move { user.json(user.post("/api/v1/projects").json(&body)).await });
     answer_next(link, Ok(json!({"path": path}))).await;
     let (status, project) = asking.await.unwrap();
-    assert_eq!(status, 201, "{project}");
+    assert!(status == 201 || status == 200, "{project}");
 
     project
 }
