@@ -714,5 +714,7 @@ async fn a_chat_is_told_which_markdown_is_rendered_only_while_rich_markdown_is_o
     let requests = fake.requests.lock().unwrap().clone();
 
     assert!(requests[0]["system"].as_str().unwrap().contains("Raw HTML is not rendered."));
+    assert!(requests[0]["system"].as_str().unwrap().contains("use the exact URLs from search_images"));
     assert!(!requests[1]["system"].as_str().unwrap().contains("Raw HTML is not rendered."));
+    assert!(!requests[1]["system"].as_str().unwrap().contains("search_images"));
 }
