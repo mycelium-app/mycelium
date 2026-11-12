@@ -60,6 +60,7 @@ data class CreateConversationRequest(
     val routing: String? = null,
     val config: Map<String, JsonElement>? = null,
     val mode: String? = null,
+    @SerialName("client_id") val clientId: String? = null,
 )
 
 @Serializable
@@ -123,7 +124,7 @@ data class Attachment(
 )
 
 @Serializable
-data class PromptRequest(val text: String, val attachments: List<Attachment> = emptyList(), val spoken: Boolean = false)
+data class PromptRequest(val text: String, val attachments: List<Attachment> = emptyList(), val spoken: Boolean = false, @SerialName("client_id") val clientId: String? = null)
 
 @Serializable
 data class PromptAccepted(val queued: Boolean, val message: String)

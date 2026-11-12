@@ -28,6 +28,7 @@ import mycelium.api.ApiException
 import mycelium.api.Conversation
 import mycelium.api.LoginState
 import mycelium.api.CreateChatRequest
+import mycelium.api.newClientId
 import mycelium.api.ModelProvider
 import mycelium.state.PickerAccount
 import mycelium.state.Store
@@ -47,6 +48,8 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
     val attached = rememberAttachmentDrafts()
     var messageError by remember { mutableStateOf<String?>(null) }
     var agentProblem by remember { mutableStateOf<String?>(null) }
+    var creating by remember { mutableStateOf(false) }
+    val clientId = remember { newClientId() }
     val accountFocus = remember { FocusRequester() }
     val accounts = remember(state.nodes) { newChatAccounts(state.nodes.values) }
     val favourites = rememberFavouriteModels(store)
@@ -76,7 +79,7 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
     fun create() {
         val picked = chosenOption
 
-        if (picked == null) {
+        if (picked == null || creating) {
             return
         }
 
@@ -90,7 +93,8 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
         messageError = null
         agentProblem = null
         val files = attached.drafts.map { it.file }
-        val request = if (picked.agent != null) CreateChatRequest(agent = picked.agent, account = pin?.account, nodeId = pin?.node?.id, model = picked.model.ifEmpty { null }) else CreateChatRequest(picked.providerId, picked.model)
+        val request = if (picked.agent != null) CreateChatRequest(agent = picked.agent, account = pin?.account, nodeId = pin?.node?.id, model = picked.model.ifEmpty { null }, clientId = clientId) else CreateChatRequest(picked.providerId, picked.model, clientId = clientId)
+        creating = true
 
         store.act {
             try {
@@ -107,6 +111,8 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
                 }
 
                 agentProblem = problem.message
+            } finally {
+                creating = false
             }
         }
     }

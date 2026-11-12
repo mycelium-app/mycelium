@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -33,6 +34,7 @@ import mycelium.api.DirectoryEntry
 import mycelium.api.Experiments
 import mycelium.api.ApiException
 import mycelium.api.ControlPlaneUnreachable
+import mycelium.api.newClientId
 import mycelium.api.RemoteImageResult
 import mycelium.api.Artifact
 import mycelium.api.ArtifactAccessRequest
@@ -105,6 +107,7 @@ class Store(
     private var connectAttemptedAt = timeSource.markNow()
     private var lastHeardAt = timeSource.markNow()
     private val streamedConversations = MutableStateFlow<Set<String>>(emptySet())
+    private val sendsInFlight = MutableStateFlow<Set<Pair<String, String>>>(emptySet())
     private val typed = Channel<Pair<String, String>>(Channel.UNLIMITED)
     private val attachmentCache = mutableMapOf<String, ByteArray>()
     private val remoteImageCache = mutableMapOf<Pair<String, String>, ByteArray>()
@@ -555,15 +558,24 @@ class Store(
 
     fun promptAssistant(assistant: mycelium.api.Assistant, text: String, spoken: Boolean = false) {
         val prompt = text.trim()
+        val sending = assistant.id to prompt
+        val alreadyInFlight = sendsInFlight.getAndUpdate { it + sending }
+
+        if (sending in alreadyInFlight) {
+            return
+        }
+
+        val clientId = newClientId()
 
         mutableState.update { it.copy(sending = it.sending + (assistant.id to it.sending[assistant.id].orEmpty() + prompt)) }
 
         act {
             try {
-                api.promptAssistant(assistant.id, prompt, spoken)
+                reusingIdAfterDroppedConnection { api.promptAssistant(assistant.id, prompt, spoken, clientId) }
                 refreshAssistants()
             } finally {
                 mutableState.update { it.copy(sending = it.sending.withoutFirst(assistant.id, prompt)) }
+                sendsInFlight.update { it - sending }
             }
         }
     }
@@ -1068,6 +1080,14 @@ class Store(
     fun send(conversationId: String, text: String, files: List<PickedFile> = emptyList()) {
         val prompt = text.trim()
         val shownWhileSending = prompt.isNotEmpty()
+        val sending = conversationId to "$prompt\u0000${files.joinToString { it.name }}"
+        val alreadyInFlight = sendsInFlight.getAndUpdate { it + sending }
+
+        if (sending in alreadyInFlight) {
+            return
+        }
+
+        val clientId = newClientId()
 
         if (shownWhileSending) {
             mutableState.update { it.copy(sending = it.sending + (conversationId to it.sending[conversationId].orEmpty() + prompt)) }
@@ -1076,7 +1096,7 @@ class Store(
         act {
             try {
                 val attachments = files.map { file -> api.uploadAttachment(conversationId, file.name, file.mediaType, file.bytes) }
-                val queuedNotice = api.sendPrompt(conversationId, prompt, attachments)
+                val queuedNotice = reusingIdAfterDroppedConnection { api.sendPrompt(conversationId, prompt, attachments, clientId = clientId) }
 
                 if (queuedNotice != null) {
                     mutableProblem.value = queuedNotice
@@ -1087,9 +1107,22 @@ class Store(
                 }
 
                 throw failure
+            } finally {
+                sendsInFlight.update { it - sending }
             }
         }
     }
+
+    private suspend fun <T> reusingIdAfterDroppedConnection(request: suspend () -> T): T =
+        try {
+            request()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (rejected: ApiException) {
+            throw rejected
+        } catch (_: Exception) {
+            request()
+        }
 
     fun chooseWalkthroughScope(conversationId: String, walkthroughScope: WalkthroughScope) {
         mutableWalkthroughScopes.update { it + (conversationId to walkthroughScope) }

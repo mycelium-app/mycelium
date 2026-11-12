@@ -32,9 +32,14 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 private const val OlderUnknownRouteMessage = "That address was not found. Check the address and try again."
 private const val UnknownRouteMessage = "This control plane does not offer that yet. Update it to the latest version of Mycelium, then try again."
+
+@OptIn(ExperimentalUuidApi::class)
+fun newClientId(): String = Uuid.random().toString()
 
 const val ControlPlaneUnreachable = "Could not reach the control plane. Check your connection and try again."
 
@@ -543,8 +548,8 @@ class MyceliumApi(
 
     private fun filePath(path: String): String = path.split('/').joinToString("/") { it.encodeURLPathPart() }
 
-    suspend fun promptAssistant(id: String, text: String, spoken: Boolean = false): Conversation =
-        call("/assistants/$id/prompt") { client.post(it) { authorise(); json(PromptRequest(text, spoken = spoken)) } }.body()
+    suspend fun promptAssistant(id: String, text: String, spoken: Boolean = false, clientId: String? = null): Conversation =
+        call("/assistants/$id/prompt") { client.post(it) { authorise(); json(PromptRequest(text, spoken = spoken, clientId = clientId)) } }.body()
 
     suspend fun voiceAssistant(): Assistant = call("/assistants/builtin/voice") { client.get(it) { authorise() } }.body()
 
@@ -1144,8 +1149,8 @@ class MyceliumApi(
             }
         }.body()
 
-    suspend fun sendPrompt(id: String, text: String, attachments: List<Attachment> = emptyList(), spoken: Boolean = false): String? {
-        val response = call("/conversations/$id/prompt") { client.post(it) { authorise(); json(PromptRequest(text, attachments, spoken)) } }
+    suspend fun sendPrompt(id: String, text: String, attachments: List<Attachment> = emptyList(), spoken: Boolean = false, clientId: String? = null): String? {
+        val response = call("/conversations/$id/prompt") { client.post(it) { authorise(); json(PromptRequest(text, attachments, spoken, clientId)) } }
 
         if (response.status != HttpStatusCode.Accepted) {
             return null

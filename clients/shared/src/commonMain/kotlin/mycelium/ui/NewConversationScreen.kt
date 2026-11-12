@@ -43,6 +43,7 @@ import mycelium.api.Forge
 import mycelium.api.NodeSummary
 import mycelium.api.Project
 import mycelium.api.CreateConversationRequest
+import mycelium.api.newClientId
 import mycelium.api.LoginState
 import mycelium.state.AppState
 import mycelium.state.Choice
@@ -96,6 +97,8 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var prompt by remember { mutableStateOf(TextFieldValue("")) }
     val attached = rememberAttachmentDrafts()
     var cwdError by remember { mutableStateOf<String?>(null) }
+    var creating by remember { mutableStateOf(false) }
+    val clientId = remember { newClientId() }
     var chosenProject by remember { mutableStateOf(projectId) }
     var withoutProject by remember { mutableStateOf(false) }
     var newProjectChosen by remember { mutableStateOf(false) }
@@ -256,7 +259,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
             return
         }
 
-        if (nodes.isEmpty() || node == null || chosenAgent == null || setup is ProjectSetup.Failed) {
+        if (creating || nodes.isEmpty() || node == null || chosenAgent == null || setup is ProjectSetup.Failed) {
             return
         }
 
@@ -290,37 +293,44 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
         val files = attached.drafts.map { it.file }
         val text = prompt.text.trim()
 
+        creating = true
+
         store.act {
-            val forge = draft.forge(forges)
-            val owner = forge?.let { draft.ownerOn(it) }
-            val newProject = if (!creatingProject) null else if (draft.repository && forge != null) {
-                store.createProject(CreateProjectRequest(node.id, forge.id, "$owner/$newProjectName", newRepository = true, newFolder = newProjectName))
-            } else {
-                store.createProject(CreateProjectRequest(node.id, newFolder = newProjectName))
-            }
-            val target = newProject ?: project
-            val created = store.api.createConversation(
-                CreateConversationRequest(
-                    if (anyNode && newProject == null) AnyNodeId else node.id,
-                    chosenAgent,
-                    account = chosenAccount?.account,
-                    routing = routing,
-                    cwd = if (target == null) cwd.trim() else null,
-                    projectId = target?.id,
-                    branch = if (project != null && worktree) branch.trim() else null,
-                    worktreePath = chosenWorktree?.path?.takeIf { project != null && inExistingWorktree },
-                    prompt = text.ifEmpty { null }.takeIf { files.isEmpty() },
-                    model = chosenModel.ifEmpty { null },
-                    mode = pickedMode?.takeIf { it == chosenMode },
-                    config = effort?.let { setting -> pickedEffort?.let { mapOf(setting.id to JsonPrimitive(it)) } },
-                ),
-            )
+            try {
+                val forge = draft.forge(forges)
+                val owner = forge?.let { draft.ownerOn(it) }
+                val newProject = if (!creatingProject) null else if (draft.repository && forge != null) {
+                    store.createProject(CreateProjectRequest(node.id, forge.id, "$owner/$newProjectName", newRepository = true, newFolder = newProjectName))
+                } else {
+                    store.createProject(CreateProjectRequest(node.id, newFolder = newProjectName))
+                }
+                val target = newProject ?: project
+                val created = store.api.createConversation(
+                    CreateConversationRequest(
+                        if (anyNode && newProject == null) AnyNodeId else node.id,
+                        chosenAgent,
+                        account = chosenAccount?.account,
+                        routing = routing,
+                        cwd = if (target == null) cwd.trim() else null,
+                        projectId = target?.id,
+                        branch = if (project != null && worktree) branch.trim() else null,
+                        worktreePath = chosenWorktree?.path?.takeIf { project != null && inExistingWorktree },
+                        prompt = text.ifEmpty { null }.takeIf { files.isEmpty() },
+                        model = chosenModel.ifEmpty { null },
+                        mode = pickedMode?.takeIf { it == chosenMode },
+                        config = effort?.let { setting -> pickedEffort?.let { mapOf(setting.id to JsonPrimitive(it)) } },
+                        clientId = clientId,
+                    ),
+                )
 
-            if (files.isNotEmpty()) {
-                store.send(created.id, text, files)
-            }
+                if (files.isNotEmpty()) {
+                    store.send(created.id, text, files)
+                }
 
-            onCreated(created)
+                onCreated(created)
+            } finally {
+                creating = false
+            }
         }
     }
 

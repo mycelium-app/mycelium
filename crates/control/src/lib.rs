@@ -50,6 +50,7 @@ mod imports;
 mod learned;
 mod inbox_feed;
 mod instruction_proposals;
+mod idempotency;
 mod instructions;
 mod email;
 mod environments;

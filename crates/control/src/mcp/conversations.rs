@@ -433,6 +433,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 side_kind: None,
                 model: None,
                 routing,
+                client_id: None,
             };
             let started = match crate::conversations::start(state, owner, request).await {
                 Ok(started) => started,

@@ -3,6 +3,7 @@ use crate::auth::AuthUser;
 use crate::chats;
 use crate::continuation;
 use crate::error::{ApiError, ApiResult};
+use crate::idempotency;
 use crate::instructions;
 use crate::model_providers;
 use crate::git::{pull_requests_of, relay};
@@ -66,7 +67,17 @@ pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Q
 }
 
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateConversationRequest>) -> ApiResult<(StatusCode, Json<Conversation>)> {
+    let entry = idempotency::enter(&state, user.id, request.client_id).await?;
+    let claim = match entry {
+        idempotency::Entry::Repeat(Some(first)) => return Ok((StatusCode::CREATED, Json(find_owned(&state.pool, first, user.id).await?.to_proto()?))),
+        idempotency::Entry::Repeat(None) => return Err(ApiError::not_found("That conversation")),
+        idempotency::Entry::Fresh(claim) => claim,
+    };
     let conversation = start(&state, user.id, request).await?;
+
+    if let Some(claim) = claim {
+        claim.done(Some(conversation.id)).await?;
+    }
 
     Ok((StatusCode::CREATED, Json(conversation)))
 }
@@ -299,7 +310,7 @@ pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<
         let Some(provider_id) = parent.provider_id else {
             return Err(ApiError::conflict("provider_removed", "This chat's model provider was removed. Choose another model in the message box to carry on."));
         };
-        let started = CreateChatRequest { provider_id: Some(provider_id), agent: None, account: None, node_id: None, model: parent.model.clone(), prompt: text.map(str::to_string), parent_id: Some(id) };
+        let started = CreateChatRequest { provider_id: Some(provider_id), agent: None, account: None, node_id: None, model: parent.model.clone(), prompt: text.map(str::to_string), parent_id: Some(id), client_id: None };
         let conversation = chats::start(&state, user.id, started, Some(request.kind), parent.assistant_id).await?;
 
         return Ok((StatusCode::CREATED, Json(conversation)));
@@ -343,6 +354,7 @@ pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<
         side_kind: Some(request.kind),
         model: None,
         routing: None,
+        client_id: None,
     };
     let conversation = start_for(&state, user.id, started, parent.assistant_id, parent.scratch).await?;
 

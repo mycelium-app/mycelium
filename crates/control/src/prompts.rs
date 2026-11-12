@@ -5,6 +5,7 @@ use crate::chats;
 use crate::continuation;
 use crate::error::{ApiError, ApiResult};
 use crate::conversations::derived_title;
+use crate::idempotency;
 use crate::instructions;
 use crate::nodes::{STEERING_SINCE, node_has, node_offline};
 use crate::state::{AppState, SteerAnswer, UnacknowledgedPrompt};
@@ -179,7 +180,16 @@ pub enum Sent {
 
 pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PromptRequest>) -> ApiResult<Response> {
     let spoken = request.spoken;
+    let entry = idempotency::enter(&state, id, request.client_id).await?;
+    let claim = match entry {
+        idempotency::Entry::Repeat(_) => return Ok(StatusCode::NO_CONTENT.into_response()),
+        idempotency::Entry::Fresh(claim) => claim,
+    };
     let sent = send(&state, user.id, id, request).await?;
+
+    if let Some(claim) = claim {
+        claim.done(None).await?;
+    }
 
     if spoken && matches!(sent, Sent::Delivered) {
         mark_spoken(&state, id).await?;

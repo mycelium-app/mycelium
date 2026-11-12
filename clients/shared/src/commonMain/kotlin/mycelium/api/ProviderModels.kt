@@ -49,4 +49,5 @@ data class CreateChatRequest(
     val agent: String? = null,
     val account: String? = null,
     @SerialName("node_id") val nodeId: String? = null,
+    @SerialName("client_id") val clientId: String? = null,
 )

@@ -780,6 +780,7 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
                             model: spec.model.clone(),
                             prompt: Some(text),
                             parent_id: None,
+                            client_id: None,
                         },
                         None,
                         None,
@@ -821,6 +822,7 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
                             side_kind: None,
                             model: spec.model.clone(),
                             routing: crate::routing::for_agent_start(state, row.owner, node_id, spec.routing, spec.account.as_deref(), spec.model.as_ref().map(|_| agent)).await?,
+                            client_id: None,
                         },
                     )
                     .await?;

@@ -293,6 +293,8 @@ pub struct CreateConversationRequest {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing: Option<crate::routing::Routing>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -390,6 +392,8 @@ pub struct PromptRequest {
     pub attachments: Vec<Attachment>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub spoken: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1054,6 +1058,8 @@ pub struct CreateChatRequest {
     pub prompt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

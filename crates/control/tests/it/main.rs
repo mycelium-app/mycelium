@@ -21,6 +21,7 @@ mod chat_agents;
 mod chats;
 mod continue_elsewhere;
 mod conversations;
+mod idempotent_requests;
 mod decision_providers;
 mod discord;
 mod device_flow;

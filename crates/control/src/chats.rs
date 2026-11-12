@@ -6,6 +6,7 @@ use crate::activity::record_turn;
 use crate::chat_tools::{self, Toolbox};
 use crate::conversations::{self, derived_title};
 use crate::error::{ApiError, ApiResult};
+use crate::idempotency;
 use crate::instructions::{assistant_chat_layers, extensions_of, teach_me_layer, voice_mode_layer};
 use crate::model_providers::{self, ChatImage, ChatMessage, ProviderError, ProviderRow, ReportedUsage, ToolCall, ToolResult};
 use crate::state::AppState;
@@ -84,9 +85,25 @@ pub async fn end_interrupted(state: &AppState) -> ApiResult<()> {
 }
 
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateChatRequest>) -> ApiResult<(StatusCode, Json<Conversation>)> {
+    let entry = idempotency::enter(&state, user.id, request.client_id).await?;
+    let claim = match entry {
+        idempotency::Entry::Repeat(Some(first)) => return Ok((StatusCode::CREATED, Json(find_owned(&state.pool, first, user.id).await?.to_proto()?))),
+        idempotency::Entry::Repeat(None) => return Err(ApiError::not_found("That conversation")),
+        idempotency::Entry::Fresh(claim) => claim,
+    };
+    let created = create_unclaimed(&state, &user, request).await?;
+
+    if let Some(claim) = claim {
+        claim.done(Some(created.1.0.id)).await?;
+    }
+
+    Ok(created)
+}
+
+async fn create_unclaimed(state: &AppState, user: &AuthUser, request: CreateChatRequest) -> ApiResult<(StatusCode, Json<Conversation>)> {
     if let Some(agent) = request.agent {
         let account = request.account.as_deref().map(str::trim).filter(|account| !account.is_empty());
-        let signed_in = routing::candidates(&state, user.id, agent, request.node_id).await?;
+        let signed_in = routing::candidates(state, user.id, agent, request.node_id).await?;
         let matching: Vec<_> = signed_in.into_iter().filter(|candidate| account.is_none_or(|account| candidate.account == account)).collect();
         let chosen = routing::best(&matching).or_else(|| routing::most_left(matching.iter()));
         let Some(chosen) = chosen else {
@@ -119,14 +136,15 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
             side_kind: None,
             model: request.model,
             routing: smart,
+            client_id: None,
         };
-        let conversation = conversations::start_for(&state, user.id, started, None, true).await?;
+        let conversation = conversations::start_for(state, user.id, started, None, true).await?;
 
         return Ok((StatusCode::CREATED, Json(conversation)));
     }
 
     let side_kind = request.parent_id.map(|_| SideKind::Side);
-    let conversation = start(&state, user.id, request, side_kind, None).await?;
+    let conversation = start(state, user.id, request, side_kind, None).await?;
 
     Ok((StatusCode::CREATED, Json(conversation)))
 }

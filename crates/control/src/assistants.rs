@@ -3,6 +3,7 @@ use crate::auth::AuthUser;
 use crate::chats;
 use crate::continuation::{self, Target};
 use crate::conversations;
+use crate::idempotency;
 use crate::error::{ApiError, ApiResult};
 use crate::groups;
 use crate::prompts;
@@ -435,7 +436,22 @@ pub async fn upload_avatar(State(state): State<AppState>, user: AuthUser, Path(i
 }
 
 pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PromptRequest>) -> ApiResult<Json<Conversation>> {
-    Ok(Json(wake(&state, user.id, id, request, &StartOverrides::default()).await?))
+    let entry = idempotency::enter(&state, id, request.client_id).await?;
+    let claim = match entry {
+        idempotency::Entry::Repeat(result) => {
+            let conversation = result.ok_or_else(|| ApiError::not_found("That conversation"))?;
+
+            return Ok(Json(store::find_owned(&state.pool, conversation, user.id).await?.to_proto()?));
+        }
+        idempotency::Entry::Fresh(claim) => claim,
+    };
+    let conversation = wake(&state, user.id, id, request, &StartOverrides::default()).await?;
+
+    if let Some(claim) = claim {
+        claim.done(Some(conversation.id)).await?;
+    }
+
+    Ok(Json(conversation))
 }
 
 #[derive(Default)]
@@ -503,7 +519,7 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
 
             match choice {
                 Choice::Chat { provider_id, model, .. } => {
-                    let started = chats::start(state, owner, CreateChatRequest { provider_id: Some(provider_id), agent: None, account: None, node_id: None, model, prompt: None, parent_id: None }, None, Some(id)).await?;
+                    let started = chats::start(state, owner, CreateChatRequest { provider_id: Some(provider_id), agent: None, account: None, node_id: None, model, prompt: None, parent_id: None, client_id: None }, None, Some(id)).await?;
 
                     sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started.id).execute(&state.pool).await?;
                     crate::todos::carry(state, owner, id, started.id).await?;
@@ -512,7 +528,7 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
                 }
                 Choice::Workspace { agent, account, node_id, .. } => {
                     let account = account_for(state, owner, node_id, agent, account).await?;
-                    let started = CreateConversationRequest { mode: None, config: None, node_id, agent, account, cwd: folder_of(id), project_id: None, branch: None, worktree_path: None, title: None, prompt: None, parent_id: None, side_kind: None, model: None, routing: None };
+                    let started = CreateConversationRequest { mode: None, config: None, node_id, agent, account, cwd: folder_of(id), project_id: None, branch: None, worktree_path: None, title: None, prompt: None, parent_id: None, side_kind: None, model: None, routing: None, client_id: None };
                     let started = conversations::start_for(state, owner, started, Some(id), false).await?;
 
                     sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started.id).execute(&state.pool).await?;
