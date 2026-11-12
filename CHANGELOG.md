@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.34.18
+
+- Agents can show images in a reply. A new Web search integration offers search_images, and images whose exact address came from that search load in place, fetched by the control plane and never by your device. Several in a row form a gallery, and the enlarged view names the site and opens the page the image came from.
+- Any other image in a reply waits behind Load image from its host, and nothing is requested until you press it. An image on a private network, over 10 MB or not an image says why it is not shown and keeps a link to it.
+- Fetches made for agents refuse private addresses on every redirect, not only the first address.
+
 ## v0.34.17
 
 - The desktop app stays responsive while agents stream into long conversations. Pinned cards no longer re-read every earlier reply, which pushed recent messages out of the formatting cache, and Needs you no longer rebuilds a whole conversation for each of its waiting approvals on every streamed word.
