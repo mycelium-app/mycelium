@@ -9,6 +9,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -159,6 +160,25 @@ class ApiAccessCardTest {
 
         rule.waitUntil(timeoutMillis = 5_000) { sent.toList().any { it.path.endsWith("/approve") } }
         assertEquals("""{"scopes":["conversations:read"]}""", sent.toList().first { it.path.endsWith("/approve") }.body)
+    }
+
+    @Test
+    fun narrowScopesAreCheckboxesOnlyOnceFullAccessIsUnticked() {
+        show(Full)
+        waitForText("Approve")
+        val checkbox = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox)
+
+        rule.onNodeWithContentDescription("Included: Read conversations").assertExists()
+        rule.onNodeWithContentDescription("Included: Read nodes").assertExists()
+        rule.onNodeWithContentDescription("Allow read conversations").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Allow read nodes").assertDoesNotExist()
+        assertEquals(1, rule.onAllNodes(checkbox).fetchSemanticsNodes().size)
+
+        rule.onNodeWithContentDescription("Allow full access").performClick()
+
+        rule.onNodeWithContentDescription("Allow read conversations").assert(checkbox)
+        rule.onNodeWithContentDescription("Allow read nodes").assert(checkbox)
+        assertEquals(3, rule.onAllNodes(checkbox).fetchSemanticsNodes().size)
     }
 
     @Test

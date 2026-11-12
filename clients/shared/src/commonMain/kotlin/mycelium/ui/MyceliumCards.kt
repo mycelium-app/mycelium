@@ -575,10 +575,15 @@ private fun RequestApiAccessBody(parsed: MyceliumCall.RequestApiAccess) {
     }
 
     for (scopeName in if (waiting) narrow else asked) {
-        if (waiting) {
+        if (waiting && fullTicked) {
+            Row(Modifier.semantics(mergeDescendants = true) { contentDescription = "Included: ${apiScopeLabel(scopeName)}" }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                Icon(MyIcon.Check, colors.textMuted, Tokens.Size.IconMd)
+                Label(apiScopeLabel(scopeName), style = Tokens.Type.Ui, color = colors.textMuted)
+            }
+        } else if (waiting) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(fullTicked || scopeName in ticked, "Allow ${apiScopeLabel(scopeName).replaceFirstChar { it.lowercase() }}", { if (!fullTicked) { ticked = if (scopeName in ticked) ticked - scopeName else ticked + scopeName } }, checkedState = "Allowed", uncheckedState = "Not allowed", inherited = fullTicked)
-                Label(apiScopeLabel(scopeName), style = Tokens.Type.Ui, color = if (fullTicked) colors.textMuted else colors.text)
+                Checkbox(scopeName in ticked, "Allow ${apiScopeLabel(scopeName).replaceFirstChar { it.lowercase() }}", { ticked = if (scopeName in ticked) ticked - scopeName else ticked + scopeName }, checkedState = "Allowed", uncheckedState = "Not allowed")
+                Label(apiScopeLabel(scopeName), style = Tokens.Type.Ui)
             }
         } else {
             Label(apiScopeLabel(scopeName), style = Tokens.Type.Ui)
