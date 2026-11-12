@@ -107,6 +107,7 @@ mod usage_limits;
 mod versions;
 mod walkthrough_diff;
 mod walkthroughs;
+mod remote_images;
 mod voice;
 mod wellness;
 mod web;
@@ -122,8 +123,8 @@ mod paperless;
 mod paging;
 mod stoat;
 mod tandoor;
-mod zulip;
 mod web_search;
+mod zulip;
 
 pub use forge_cache::FORGE_CACHE_TTL;
 pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, FORGE_WATCH_INTERVAL, OidcConfig, PublicFetchRouting, SCHEDULER_TICK, STEER_TIMEOUT, STREAM_RECHECK_INTERVAL, VERSION_CHECK_INTERVAL};
@@ -293,6 +294,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/environment/last-node", get(environments::last_node))
         .route("/api/v1/conversations/{id}/attachments", post(attachments::upload).layer(DefaultBodyLimit::max(attachments::MAX_ATTACHMENT_BYTES + 1024)))
         .route("/api/v1/attachments/{sha256}", get(attachments::get))
+        .route("/api/v1/conversations/{id}/remote-images", get(remote_images::show).post(remote_images::load_on_click))
         .route("/api/v1/artifacts", get(artifacts::list).post(artifacts::create).layer(DefaultBodyLimit::max(artifacts::MAX_REQUEST_BYTES)))
         .route("/api/v1/artifacts/{id}", get(artifacts::get).patch(artifacts::patch).delete(artifacts::delete))
         .route("/api/v1/artifacts/{id}/links", get(artifact_access::links).post(artifact_access::link))

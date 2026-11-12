@@ -225,6 +225,8 @@ const EXCEPTIONS: &[(&str, &str, &str)] = &[
     ("GET", "/api/v1/environment/last-node", "UI default (environment_start already picks it)"),
     ("POST", "/api/v1/conversations/{id}/attachments", "binary upload from a client"),
     ("GET", "/api/v1/attachments/{sha256}", "binary download for the client"),
+    ("GET", "/api/v1/conversations/{id}/remote-images", "fetched by the client while rendering a message"),
+    ("POST", "/api/v1/conversations/{id}/remote-images", "fetched by the client while rendering a message"),
     ("POST", "/api/v1/conversations/{id}/permission", "answering a permission prompt from an agent is self-approval"),
     ("POST", "/api/v1/conversations/{id}/permission/revoke", "permission grants are the person's"),
     ("GET", "/api/v1/conversations/{id}/responses/{request_id}", "response editor for an approval in progress"),

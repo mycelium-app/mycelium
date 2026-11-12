@@ -139,6 +139,7 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/conversations/{id}/cancel",
     "POST /api/v1/conversations/{id}/terminal",
     "POST /api/v1/conversations/{id}/attachments",
+    "POST /api/v1/conversations/{id}/remote-images",
     "POST /api/v1/transcriptions",
     "POST /api/v1/speech",
     "PUT /api/v1/privacy",

@@ -78,6 +78,7 @@ mod subscription_prices;
 mod workflows;
 mod stoat;
 mod tandoor;
+mod remote_images;
 mod web_search;
 mod todos;
 mod terminal_tools;
