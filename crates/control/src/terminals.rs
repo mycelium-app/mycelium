@@ -31,7 +31,7 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path
     let terminal_id = Uuid::new_v4();
     state.hub.track_terminal(terminal_id, row.node_id, user.id, id, 0);
 
-    let sent = state.hub.send(row.node_id, ControlToNode::StartTerminal { terminal_id, conversation_id: id, cwd: row.cwd, cols: request.cols, rows: request.rows });
+    let sent = state.hub.send(row.node_id, ControlToNode::StartTerminal { terminal_id, conversation_id: id, cwd: row.cwd, cols: request.cols, rows: request.rows, command: None });
 
     if !sent {
         state.hub.finish_terminal(terminal_id);
@@ -63,7 +63,7 @@ pub async fn read_buffer(state: &AppState, terminal_id: Uuid) -> Option<Terminal
 
     if !buffer.found {
         state.hub.finish_terminal(terminal_id);
-        state.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id });
+        state.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id, exit_code: None });
 
         return None;
     }
@@ -100,7 +100,7 @@ pub async fn stop(State(state): State<AppState>, user: AuthUser, Path(terminal_i
 
     state.hub.send(owner.node_id, ControlToNode::StopTerminal { terminal_id });
     state.hub.finish_terminal(terminal_id);
-    state.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id });
+    state.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id, exit_code: None });
 
     Ok(StatusCode::NO_CONTENT)
 }

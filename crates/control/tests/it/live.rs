@@ -649,7 +649,7 @@ async fn start_terminal(server: &Server, link: &mut NodeLink, conversation_id: U
     assert_eq!(status, 200, "{started}");
     let terminal_id: Uuid = started["terminal_id"].as_str().unwrap().parse().unwrap();
 
-    let ControlToNode::StartTerminal { terminal_id: asked, conversation_id: for_conversation, cwd, cols, rows } = link.next().await else {
+    let ControlToNode::StartTerminal { terminal_id: asked, conversation_id: for_conversation, cwd, cols, rows, .. } = link.next().await else {
         panic!("expected the node to be told to start a terminal");
     };
     assert_eq!((asked, for_conversation, cwd.as_str(), cols, rows), (terminal_id, conversation_id, "/work/app", 80, 24));
@@ -785,7 +785,7 @@ async fn a_terminal_the_node_no_longer_reports_ends_in_the_stream() {
     returned.hello(vec![]).await;
     returned.send(NodeToControl::TerminalList { terminals: vec![] }).await;
 
-    stream.until(|message| matches!(message, StreamMessage::TerminalExited { terminal_id: id } if id == terminal_id).then_some(())).await;
+    stream.until(|message| matches!(message, StreamMessage::TerminalExited { terminal_id: id, .. } if id == terminal_id).then_some(())).await;
 }
 
 #[tokio::test]
@@ -798,7 +798,7 @@ async fn deleting_a_conversation_stops_its_terminals() {
     let terminal_id = start_terminal(&server, &mut link, conversation.id).await;
 
     server.user.json(server.user.patch(&format!("/api/v1/conversations/{}", conversation.id)).json(&json!({"archived": true}))).await;
-    stream.until(|message| matches!(message, StreamMessage::TerminalExited { terminal_id: id } if id == terminal_id).then_some(())).await;
+    stream.until(|message| matches!(message, StreamMessage::TerminalExited { terminal_id: id, .. } if id == terminal_id).then_some(())).await;
 
     loop {
         if link.next().await == (ControlToNode::StopTerminal { terminal_id }) {
@@ -863,8 +863,8 @@ async fn terminal_output_and_its_end_are_streamed_only_to_the_person_who_opened_
     link.send(NodeToControl::TerminalOutput { terminal_id, data: "bHM=".into() }).await;
     stream.until(|message| matches!(message, StreamMessage::TerminalOutput { terminal_id: id, data, offset: 0 } if id == terminal_id && data == "bHM=").then_some(())).await;
 
-    link.send(NodeToControl::TerminalExited { terminal_id }).await;
-    stream.until(|message| matches!(message, StreamMessage::TerminalExited { terminal_id: id } if id == terminal_id).then_some(())).await;
+    link.send(NodeToControl::TerminalExited { terminal_id, exit_code: None }).await;
+    stream.until(|message| matches!(message, StreamMessage::TerminalExited { terminal_id: id, .. } if id == terminal_id).then_some(())).await;
 }
 
 #[tokio::test]
@@ -887,7 +887,7 @@ async fn terminal_input_and_resizes_reach_the_node_and_stopping_tells_it_to_deta
     let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/terminals/{terminal_id}"))).await;
     assert_eq!(status, 204);
     assert_eq!(link.next().await, ControlToNode::StopTerminal { terminal_id });
-    stream.until(|message| matches!(message, StreamMessage::TerminalExited { terminal_id: id } if id == terminal_id).then_some(())).await;
+    stream.until(|message| matches!(message, StreamMessage::TerminalExited { terminal_id: id, .. } if id == terminal_id).then_some(())).await;
 
     let (status, _) = server.user.json(server.user.post(&format!("/api/v1/terminals/{terminal_id}/input")).json(&json!({"data": "eA=="}))).await;
     assert_eq!(status, 404);
@@ -923,7 +923,7 @@ async fn a_node_cannot_stream_output_for_a_terminal_it_does_not_own() {
     let terminal_id = start_terminal(&server, &mut owner, conversation.id).await;
 
     intruder.send(NodeToControl::TerminalOutput { terminal_id, data: "Zm9yZ2Vk".into() }).await;
-    intruder.send(NodeToControl::TerminalExited { terminal_id }).await;
+    intruder.send(NodeToControl::TerminalExited { terminal_id, exit_code: None }).await;
     owner.send(NodeToControl::TerminalOutput { terminal_id, data: "cmVhbA==".into() }).await;
 
     let first = stream.until(|message| matches!(message, StreamMessage::TerminalOutput { .. } | StreamMessage::TerminalExited { .. }).then_some(message)).await;
@@ -941,7 +941,7 @@ async fn a_terminal_ends_in_the_stream_when_its_node_is_revoked() {
 
     server.user.json(server.user.delete(&format!("/api/v1/nodes/{}", link.id))).await;
 
-    stream.until(|message| matches!(message, StreamMessage::TerminalExited { terminal_id: id } if id == terminal_id).then_some(())).await;
+    stream.until(|message| matches!(message, StreamMessage::TerminalExited { terminal_id: id, .. } if id == terminal_id).then_some(())).await;
 }
 
 #[tokio::test]

@@ -98,6 +98,8 @@ pub enum NodeToControl {
     },
     TerminalExited {
         terminal_id: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i32>,
     },
     TerminalList {
         terminals: Vec<NodeTerminal>,
@@ -560,6 +562,8 @@ pub enum ControlToNode {
         cwd: String,
         cols: u16,
         rows: u16,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<String>,
     },
     TerminalInput {
         terminal_id: Uuid,

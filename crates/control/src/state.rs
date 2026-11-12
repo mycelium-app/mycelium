@@ -875,7 +875,7 @@ impl AppState {
 
     pub fn finish_terminals_of_node(&self, node_id: Uuid, live: &HashSet<Uuid>) {
         for (terminal_id, owner) in self.hub.finish_terminals_of(node_id, live) {
-            self.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id });
+            self.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id, exit_code: None });
         }
     }
 
@@ -887,7 +887,7 @@ impl AppState {
 
             self.hub.send(owner.node_id, ControlToNode::StopTerminal { terminal_id });
             self.hub.finish_terminal(terminal_id);
-            self.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id });
+            self.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id, exit_code: None });
         }
     }
 }

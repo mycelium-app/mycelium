@@ -128,7 +128,7 @@ fn every_node_message_round_trips_under_its_tag() {
         (NodeToControl::LoginOutput { login_id: id(), data: "hi".into() }, "login_output"),
         (NodeToControl::LoginFinished { login_id: id(), ok: true }, "login_finished"),
         (NodeToControl::TerminalOutput { terminal_id: id(), data: "aGk=".into() }, "terminal_output"),
-        (NodeToControl::TerminalExited { terminal_id: id() }, "terminal_exited"),
+        (NodeToControl::TerminalExited { terminal_id: id(), exit_code: Some(1) }, "terminal_exited"),
         (NodeToControl::GitResult { request_id: id(), ok: false, output: Value::Null, error: Some("fatal".into()) }, "git_result"),
         (NodeToControl::GitChunk { request_id: id(), seq: 0, data: "aGk=".into() }, "git_chunk"),
         (NodeToControl::Transcript { path: "p".into(), offset: 0, data: "AA==".into(), size: None }, "transcript"),
@@ -166,7 +166,7 @@ fn every_control_message_round_trips_under_its_tag() {
         (ControlToNode::LoginInput { login_id: id(), text: "x".into() }, "login_input"),
         (ControlToNode::StopLogin { login_id: id() }, "stop_login"),
         (ControlToNode::RemoveLogin { agent: AgentId::Claude, account: "account-1970".into() }, "remove_login"),
-        (ControlToNode::StartTerminal { terminal_id: id(), conversation_id: id(), cwd: "/work".into(), cols: 80, rows: 24 }, "start_terminal"),
+        (ControlToNode::StartTerminal { terminal_id: id(), conversation_id: id(), cwd: "/work".into(), cols: 80, rows: 24, command: Some("git push origin --delete feature/old-sync".into()) }, "start_terminal"),
         (ControlToNode::TerminalInput { terminal_id: id(), data: "bHM=".into() }, "terminal_input"),
         (ControlToNode::ResizeTerminal { terminal_id: id(), cols: 100, rows: 30 }, "resize_terminal"),
         (ControlToNode::StopTerminal { terminal_id: id() }, "stop_terminal"),
@@ -320,7 +320,7 @@ fn stream_login_and_queue_messages_round_trip() {
     let terminal = round_trip(&StreamMessage::TerminalOutput { terminal_id: id(), data: "aGk=".into(), offset: 7 });
     assert_eq!(terminal["type"], "terminal_output");
 
-    let exited = round_trip(&StreamMessage::TerminalExited { terminal_id: id() });
+    let exited = round_trip(&StreamMessage::TerminalExited { terminal_id: id(), exit_code: Some(0) });
     assert_eq!(exited["type"], "terminal_exited");
 
     let resources = round_trip(&StreamMessage::NodeResources { node_id: id(), sample: sample() });
@@ -482,4 +482,25 @@ fn a_workflow_is_sent_with_every_step_field_and_a_plan_without_rounds_runs_once(
     assert_eq!(wire["plan"]["steps"][0], json!({"key": "a", "title": "A", "depends_on": [], "prompt": "", "gate": true, "workflow": null, "node_id": null, "agent": null, "provider_id": null, "cwd": "", "project_id": null, "branch": null, "account": null, "model": null, "difficulty": null}));
     assert_eq!(wire["parent_id"], Value::Null);
     assert_eq!(round_trip(&StreamMessage::Workflow { workflow })["workflow"]["status"], "running");
+}
+
+#[test]
+fn a_terminal_that_exits_without_a_code_or_starts_without_a_command_still_reads() {
+    let exited: NodeToControl = serde_json::from_value(json!({"type": "terminal_exited", "terminal_id": id()})).unwrap();
+    assert_eq!(exited, NodeToControl::TerminalExited { terminal_id: id(), exit_code: None });
+
+    let started: ControlToNode = serde_json::from_value(json!({"type": "start_terminal", "terminal_id": id(), "conversation_id": id(), "cwd": "/work", "cols": 80, "rows": 24})).unwrap();
+    assert_eq!(started, ControlToNode::StartTerminal { terminal_id: id(), conversation_id: id(), cwd: "/work".into(), cols: 80, rows: 24, command: None });
+
+    let plain = serde_json::to_value(&started).unwrap();
+    assert!(plain.get("command").is_none());
+}
+
+#[test]
+fn an_action_item_without_a_command_serialises_as_before() {
+    let item = ActionItem { id: id(), text: "Send Sam the invoice".into(), created_at: now(), command: None, node_id: None, node_name: None, folder: None, run: None };
+
+    let json = round_trip(&item);
+
+    assert_eq!(json.as_object().unwrap().keys().collect::<Vec<_>>(), ["created_at", "id", "text"]);
 }

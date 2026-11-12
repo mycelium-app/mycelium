@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -17,6 +18,12 @@ const NODE_VARIABLE_PREFIX: &str = "MYCELIUM_";
 const TMUX_VARIABLES: [&str; 2] = ["TMUX", "TMUX_PANE"];
 const TMUX_HISTORY_LINES: usize = 2000;
 const TMUX_CONVERSATION_OPTION: &str = "@mycelium_conversation";
+const TMUX_COMMAND_OPTION: &str = "@mycelium_command";
+const COMMAND_PANE_WRAPPER: &str = "\"$@\"; status=$?; sleep 0.3; exit $status";
+const PANE_POLL: Duration = Duration::from_millis(100);
+const PANE_FLUSH: Duration = Duration::from_millis(100);
+const PANE_POLL_FAST: Duration = Duration::from_millis(10);
+const PANE_ATTACH_WAIT: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 struct Scrollback {
@@ -99,12 +106,27 @@ impl Tmux {
     }
 
     fn sessions(&self) -> Vec<TmuxSession> {
-        let format = format!("#{{session_name}} #{{{TMUX_CONVERSATION_OPTION}}} #{{window_width}} #{{window_height}}");
+        let format = format!("#{{session_name}} #{{{TMUX_CONVERSATION_OPTION}}} #{{window_width}} #{{window_height}} #{{?{TMUX_COMMAND_OPTION},1,0}}");
         let Some(listing) = self.output(&["list-sessions", "-F", &format]) else {
             return Vec::new();
         };
 
         listing.lines().filter_map(TmuxSession::parse).collect()
+    }
+
+    fn pane_exit(&self, terminal_id: Uuid) -> Option<i32> {
+        let target = format!("{}:", session_target(terminal_id));
+        let state = self.output(&["display-message", "-p", "-t", &target, "#{pane_dead} #{pane_dead_status} #{pane_dead_signal}"])?;
+        let mut fields = state.split_whitespace();
+
+        if fields.next()? != "1" {
+            return None;
+        }
+
+        let status = fields.next().and_then(|status| status.parse::<i32>().ok());
+        let signal = fields.next().and_then(|signal| signal.parse::<i32>().ok());
+
+        status.or(signal.map(|signal| 128 + signal)).or(Some(-1))
     }
 
     fn history(&self, terminal_id: Uuid) -> Vec<u8> {
@@ -121,6 +143,7 @@ struct TmuxSession {
     conversation_id: Uuid,
     cols: u16,
     rows: u16,
+    command: bool,
 }
 
 impl TmuxSession {
@@ -130,8 +153,9 @@ impl TmuxSession {
         let conversation_id = fields.next()?.parse().ok()?;
         let cols = fields.next()?.parse().ok()?;
         let rows = fields.next()?.parse().ok()?;
+        let command = fields.next() == Some("1");
 
-        Some(TmuxSession { terminal_id, conversation_id, cols, rows })
+        Some(TmuxSession { terminal_id, conversation_id, cols, rows, command })
     }
 }
 
@@ -151,6 +175,12 @@ fn scrub(builder: &mut CommandBuilder) {
             builder.env_remove(&name);
         }
     }
+}
+
+enum ExitSource {
+    Child,
+    Pane { tmux: Tmux, status: Arc<Mutex<Option<i32>>> },
+    Unreported,
 }
 
 struct TerminalProcess {
@@ -188,11 +218,11 @@ impl TerminalManager {
         manager
     }
 
-    pub fn start(&self, terminal_id: Uuid, conversation_id: Uuid, cwd: &str, cols: u16, rows: u16) {
-        if let Err(error) = self.try_start(terminal_id, conversation_id, cwd, cols, rows) {
+    pub fn start(&self, terminal_id: Uuid, conversation_id: Uuid, cwd: &str, cols: u16, rows: u16, command: Option<&str>) {
+        if let Err(error) = self.try_start(terminal_id, conversation_id, cwd, cols, rows, command) {
             let explanation = base64_of(format!("{error:#}\r\n").as_bytes());
             let _ = self.out.send(NodeToControl::TerminalOutput { terminal_id, data: explanation });
-            let _ = self.out.send(NodeToControl::TerminalExited { terminal_id });
+            let _ = self.out.send(NodeToControl::TerminalExited { terminal_id, exit_code: None });
         }
     }
 
@@ -252,30 +282,34 @@ impl TerminalManager {
         }
     }
 
-    fn try_start(&self, terminal_id: Uuid, conversation_id: Uuid, cwd: &str, cols: u16, rows: u16) -> Result<()> {
+    fn try_start(&self, terminal_id: Uuid, conversation_id: Uuid, cwd: &str, cols: u16, rows: u16, command: Option<&str>) -> Result<()> {
         let open = self.running.lock().map_err(|_| anyhow::anyhow!("terminal table poisoned"))?.len();
         anyhow::ensure!(open < MAX_TERMINALS, "This node already has {MAX_TERMINALS} terminals open. Close one before opening another.");
         anyhow::ensure!(std::path::Path::new(cwd).is_dir(), "Could not start a terminal in {cwd}. Check that the folder exists on this node.");
 
-        let builder = match &self.tmux {
+        let (builder, exit_source) = match &self.tmux {
             Some(tmux) => {
-                let created = self.create_session(tmux, terminal_id, conversation_id, cwd, cols, rows)?;
+                let created = self.create_session(tmux, terminal_id, conversation_id, cwd, cols, rows, command)?;
                 anyhow::ensure!(created, "Could not start a terminal on this node.");
-                tmux.pty_command(&["attach-session", "-t", &session_target(terminal_id)])
+                let builder = tmux.pty_command(&["attach-session", "-t", &session_target(terminal_id)]);
+                let exit_source = if command.is_some() { ExitSource::Pane { tmux: tmux.clone(), status: Arc::new(Mutex::new(None)) } } else { ExitSource::Unreported };
+
+                (builder, exit_source)
             }
             None => {
-                let mut builder = CommandBuilder::from_argv(self.shell_in(cwd).into_iter().map(Into::into).collect());
+                let mut builder = CommandBuilder::from_argv(self.shell_command(cwd, command).into_iter().map(Into::into).collect());
                 builder.cwd(cwd);
                 builder.env("TERM", "xterm-256color");
                 scrub(&mut builder);
-                builder
+
+                (builder, ExitSource::Child)
             }
         };
 
-        self.attach(terminal_id, conversation_id, cols, rows, builder, Vec::new())
+        self.attach(terminal_id, conversation_id, cols, rows, builder, Vec::new(), exit_source)
     }
 
-    fn attach(&self, terminal_id: Uuid, conversation_id: Uuid, cols: u16, rows: u16, builder: CommandBuilder, history: Vec<u8>) -> Result<()> {
+    fn attach(&self, terminal_id: Uuid, conversation_id: Uuid, cols: u16, rows: u16, builder: CommandBuilder, history: Vec<u8>, exit_source: ExitSource) -> Result<()> {
         let pair = native_pty_system().openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).context("Could not open a terminal on this node.")?;
         let mut child = pair.slave.spawn_command(builder).context("Could not start a terminal on this node.")?;
         drop(pair.slave);
@@ -289,6 +323,11 @@ impl TerminalManager {
 
         let out = self.out.clone();
         let running = self.running.clone();
+
+        if let ExitSource::Pane { tmux, status } = &exit_source {
+            Self::watch_pane(tmux.clone(), terminal_id, status.clone(), running.clone());
+        }
+
         std::thread::spawn(move || {
             let mut buffer = [0u8; 4096];
 
@@ -306,19 +345,65 @@ impl TerminalManager {
                 let _ = out.send(NodeToControl::TerminalOutput { terminal_id, data: base64_of(&buffer[..read]) });
             }
 
-            let _ = child.wait();
+            let waited = child.wait();
             if let Ok(mut running) = running.lock() {
                 running.remove(&terminal_id);
             }
 
-            let _ = out.send(NodeToControl::TerminalExited { terminal_id });
+            let exit_code = match exit_source {
+                ExitSource::Child => waited.ok().map(|status| status.exit_code() as i32),
+                ExitSource::Pane { status, .. } => status.lock().ok().and_then(|status| *status),
+                ExitSource::Unreported => None,
+            };
+
+            let _ = out.send(NodeToControl::TerminalExited { terminal_id, exit_code });
         });
 
         Ok(())
     }
 
+    fn watch_pane(tmux: Tmux, terminal_id: Uuid, status: Arc<Mutex<Option<i32>>>, running: Arc<Mutex<HashMap<Uuid, TerminalProcess>>>) {
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(PANE_POLL);
+
+                if !running.lock().is_ok_and(|running| running.contains_key(&terminal_id)) {
+                    return;
+                }
+
+                let Some(exit_code) = tmux.pane_exit(terminal_id) else {
+                    continue;
+                };
+
+                if let Ok(mut status) = status.lock() {
+                    *status = Some(exit_code);
+                }
+
+                let deadline = std::time::Instant::now() + PANE_ATTACH_WAIT;
+
+                while std::time::Instant::now() < deadline && !running.lock().is_ok_and(|running| running.get(&terminal_id).is_some_and(|process| process.scrollback.total > 0)) {
+                    std::thread::sleep(PANE_POLL_FAST);
+                }
+
+                std::thread::sleep(PANE_FLUSH);
+                tmux.kill_session(terminal_id);
+
+                return;
+            }
+        });
+    }
+
     fn shell_in(&self, cwd: &str) -> Vec<String> {
         [crate::direnv::exec_prefix(Path::new(cwd)), vec![self.shell.clone()]].concat()
+    }
+
+    fn shell_command(&self, cwd: &str, command: Option<&str>) -> Vec<String> {
+        let shell = self.shell_in(cwd);
+
+        match command {
+            Some(command) => [shell, vec!["-lc".to_string(), command.to_string()]].concat(),
+            None => shell,
+        }
     }
 
     fn find_tmux(directory: &Path) -> Option<Tmux> {
@@ -338,13 +423,15 @@ impl TerminalManager {
         Some(Tmux { program, socket: directory.join("tmux.sock") })
     }
 
-    fn create_session(&self, tmux: &Tmux, terminal_id: Uuid, conversation_id: Uuid, cwd: &str, cols: u16, rows: u16) -> Result<bool> {
+    fn create_session(&self, tmux: &Tmux, terminal_id: Uuid, conversation_id: Uuid, cwd: &str, cols: u16, rows: u16, command: Option<&str>) -> Result<bool> {
         let name = terminal_id.to_string();
         let target = format!("{}:", session_target(terminal_id));
         let size = (cols.to_string(), rows.to_string());
-        let shell = self.shell_in(cwd);
+        let shell = self.shell_command(cwd, command);
+        let shell = if command.is_some() { [vec!["sh".to_string(), "-c".to_string(), COMMAND_PANE_WRAPPER.to_string(), "sh".to_string()], shell].concat() } else { shell };
         let history = TMUX_HISTORY_LINES.to_string();
         let conversation = conversation_id.to_string();
+        let command_options: &[&str] = if command.is_some() { &[";", "set-option", "-w", "-t", &target, "remain-on-exit", "on", ";", "set-option", "-t", &target, TMUX_COMMAND_OPTION, "1"] } else { &[] };
         let status = tmux
             .command(&[
                 "start-server", ";",
@@ -361,6 +448,7 @@ impl TerminalManager {
                 "set-option", "-t", &target, "prefix", "None", ";",
                 "set-option", "-t", &target, TMUX_CONVERSATION_OPTION, &conversation,
             ])
+            .args(command_options)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -383,7 +471,8 @@ impl TerminalManager {
             }
 
             let builder = tmux.pty_command(&["attach-session", "-t", &session_target(session.terminal_id)]);
-            let attached = self.attach(session.terminal_id, session.conversation_id, session.cols, session.rows, builder, tmux.history(session.terminal_id));
+            let exit_source = if session.command { ExitSource::Pane { tmux: tmux.clone(), status: Arc::new(Mutex::new(None)) } } else { ExitSource::Unreported };
+            let attached = self.attach(session.terminal_id, session.conversation_id, session.cols, session.rows, builder, tmux.history(session.terminal_id), exit_source);
 
             if let Err(error) = attached {
                 tracing::warn!("could not reattach terminal {}: {error:#}", session.terminal_id);
@@ -476,7 +565,7 @@ mod tests {
         let terminal_id = Uuid::from_u128(11);
         let conversation_id = Uuid::from_u128(12);
 
-        manager.start(terminal_id, conversation_id, "/", 90, 30);
+        manager.start(terminal_id, conversation_id, "/", 90, 30, None);
         manager.input(terminal_id, &STANDARD.encode("echo before-$((20+22))\n"));
         read_until(&mut messages, "before-42").await;
         simulate_node_restart(manager).await;
@@ -502,7 +591,7 @@ mod tests {
         };
         let terminal_id = Uuid::from_u128(13);
 
-        manager.start(terminal_id, Uuid::from_u128(14), "/", 80, 24);
+        manager.start(terminal_id, Uuid::from_u128(14), "/", 80, 24, None);
         manager.input(terminal_id, &STANDARD.encode("echo old-$((20+22)); seq 1 60\n"));
         read_until(&mut messages, "old-42").await;
         read_until(&mut messages, "60").await;
@@ -524,7 +613,7 @@ mod tests {
         };
         let terminal_id = Uuid::from_u128(15);
 
-        manager.start(terminal_id, Uuid::from_u128(16), "/", 80, 24);
+        manager.start(terminal_id, Uuid::from_u128(16), "/", 80, 24, None);
         manager.input(terminal_id, &STANDARD.encode("echo ready\n"));
         read_until(&mut messages, "ready").await;
         assert_eq!(manager.tmux.as_ref().unwrap().sessions().len(), 1);
@@ -536,7 +625,7 @@ mod tests {
             next = next_message(&mut messages).await;
         }
 
-        assert_eq!(next, NodeToControl::TerminalExited { terminal_id });
+        assert!(matches!(next, NodeToControl::TerminalExited { terminal_id: ended, .. } if ended == terminal_id), "{next:?}");
         assert!(manager.tmux.as_ref().unwrap().sessions().is_empty());
         end_tmux(&manager);
     }
@@ -570,7 +659,7 @@ mod tests {
             std::env::set_var("TMUX_TEST_HARMLESS", "harmless-value");
         }
 
-        manager.start(terminal_id, Uuid::from_u128(18), "/", 80, 24);
+        manager.start(terminal_id, Uuid::from_u128(18), "/", 80, 24, None);
         manager.input(terminal_id, &STANDARD.encode("echo seen-[$MYCELIUM_TMUX_TEST_NODE]-[$TMUX_TEST_API_TOKEN]-[$TMUX_TEST_HARMLESS]\n"));
 
         let seen = read_until(&mut messages, "-[harmless-value]").await;
@@ -586,7 +675,7 @@ mod tests {
         let terminal_id = Uuid::from_u128(1);
         let folder = tempfile::tempdir().unwrap();
 
-        manager.start(terminal_id, Uuid::from_u128(100), folder.path().to_str().unwrap(), 80, 24);
+        manager.start(terminal_id, Uuid::from_u128(100), folder.path().to_str().unwrap(), 80, 24, None);
         manager.input(terminal_id, &STANDARD.encode("pwd; echo sum-$((20+22))\n"));
 
         let seen = read_until(&mut messages, "sum-42").await;
@@ -604,7 +693,7 @@ mod tests {
             std::env::set_var("TERMINAL_TEST_HARMLESS", "harmless-value");
         }
 
-        manager.start(terminal_id, Uuid::from_u128(100), "/", 80, 24);
+        manager.start(terminal_id, Uuid::from_u128(100), "/", 80, 24, None);
         manager.input(terminal_id, &STANDARD.encode("echo seen-[$MYCELIUM_TERMINAL_TEST_NODE]-[$TERMINAL_TEST_API_TOKEN]-[$TERMINAL_TEST_HARMLESS]\n"));
 
         let seen = read_until(&mut messages, "-[harmless-value]").await;
@@ -616,7 +705,7 @@ mod tests {
         let (manager, mut messages) = shell_manager();
         let terminal_id = Uuid::from_u128(2);
 
-        manager.start(terminal_id, Uuid::from_u128(100), "/", 80, 24);
+        manager.start(terminal_id, Uuid::from_u128(100), "/", 80, 24, None);
         manager.resize(terminal_id, 100, 30);
         manager.input(terminal_id, &STANDARD.encode("stty size\n"));
 
@@ -628,7 +717,7 @@ mod tests {
         let (manager, mut messages) = shell_manager();
         let terminal_id = Uuid::from_u128(3);
 
-        manager.start(terminal_id, Uuid::from_u128(100), "/", 80, 24);
+        manager.start(terminal_id, Uuid::from_u128(100), "/", 80, 24, None);
         manager.input(terminal_id, &STANDARD.encode("exit\n"));
 
         let mut next = next_message(&mut messages).await;
@@ -636,7 +725,76 @@ mod tests {
             next = next_message(&mut messages).await;
         }
 
-        assert_eq!(next, NodeToControl::TerminalExited { terminal_id });
+        assert!(matches!(next, NodeToControl::TerminalExited { terminal_id: ended, .. } if ended == terminal_id), "{next:?}");
+    }
+
+    async fn exit_of(messages: &mut mpsc::UnboundedReceiver<NodeToControl>) -> (String, Option<i32>) {
+        let mut seen = String::new();
+
+        loop {
+            match next_message(messages).await {
+                NodeToControl::TerminalOutput { data, .. } => seen.push_str(&String::from_utf8_lossy(&STANDARD.decode(data).unwrap())),
+                NodeToControl::TerminalExited { exit_code, .. } => return (seen, exit_code),
+                _ => {}
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_command_terminal_runs_the_command_in_the_folder_and_reports_its_exit_code() {
+        let (manager, mut messages) = shell_manager();
+        let folder = tempfile::tempdir().unwrap();
+
+        manager.start(Uuid::from_u128(30), Uuid::from_u128(100), folder.path().to_str().unwrap(), 80, 24, Some("pwd; exit 3"));
+
+        let (seen, exit_code) = exit_of(&mut messages).await;
+
+        assert!(seen.contains(folder.path().file_name().unwrap().to_str().unwrap()), "{seen}");
+        assert_eq!(exit_code, Some(3));
+    }
+
+    #[tokio::test]
+    async fn a_command_terminal_whose_command_succeeds_reports_exit_code_zero() {
+        let (manager, mut messages) = shell_manager();
+
+        manager.start(Uuid::from_u128(31), Uuid::from_u128(100), "/", 80, 24, Some("echo deleted"));
+
+        let (seen, exit_code) = exit_of(&mut messages).await;
+
+        assert!(seen.contains("deleted"), "{seen}");
+        assert_eq!(exit_code, Some(0));
+    }
+
+    #[tokio::test]
+    async fn a_tmux_command_terminal_reports_the_exit_code_of_its_command() {
+        let directory = tempfile::tempdir().unwrap();
+        let Some((manager, mut messages)) = tmux_manager(directory.path()) else {
+            return;
+        };
+
+        manager.start(Uuid::from_u128(32), Uuid::from_u128(100), "/", 80, 24, Some("echo refused; exit 1"));
+
+        let (seen, exit_code) = exit_of(&mut messages).await;
+
+        assert!(seen.contains("refused"), "{seen}");
+        assert_eq!(exit_code, Some(1), "{seen:?}");
+        end_tmux(&manager);
+    }
+
+    #[tokio::test]
+    async fn a_tmux_command_terminal_whose_command_succeeds_reports_exit_code_zero() {
+        let directory = tempfile::tempdir().unwrap();
+        let Some((manager, mut messages)) = tmux_manager(directory.path()) else {
+            return;
+        };
+
+        manager.start(Uuid::from_u128(33), Uuid::from_u128(100), "/", 80, 24, Some("echo deleted"));
+
+        let (seen, exit_code) = exit_of(&mut messages).await;
+
+        assert!(seen.contains("deleted"), "{seen}");
+        assert_eq!(exit_code, Some(0));
+        end_tmux(&manager);
     }
 
     #[tokio::test]
@@ -644,7 +802,7 @@ mod tests {
         let (manager, mut messages) = shell_manager();
         let terminal_id = Uuid::from_u128(4);
 
-        manager.start(terminal_id, Uuid::from_u128(100), "/", 80, 24);
+        manager.start(terminal_id, Uuid::from_u128(100), "/", 80, 24, None);
         manager.input(terminal_id, &STANDARD.encode("echo ready\n"));
         read_until(&mut messages, "ready").await;
 
@@ -655,7 +813,7 @@ mod tests {
             next = next_message(&mut messages).await;
         }
 
-        assert_eq!(next, NodeToControl::TerminalExited { terminal_id });
+        assert!(matches!(next, NodeToControl::TerminalExited { terminal_id: ended, .. } if ended == terminal_id), "{next:?}");
     }
 
     #[tokio::test]
@@ -663,13 +821,13 @@ mod tests {
         let (manager, mut messages) = shell_manager();
         let terminal_id = Uuid::from_u128(5);
 
-        manager.start(terminal_id, Uuid::from_u128(100), "/nonexistent/folder", 80, 24);
+        manager.start(terminal_id, Uuid::from_u128(100), "/nonexistent/folder", 80, 24, None);
 
         let NodeToControl::TerminalOutput { data, .. } = next_message(&mut messages).await else {
             panic!("expected an explanation first");
         };
         assert!(String::from_utf8(STANDARD.decode(data).unwrap()).unwrap().contains("Could not start a terminal"));
-        assert_eq!(next_message(&mut messages).await, NodeToControl::TerminalExited { terminal_id });
+        assert!(matches!(next_message(&mut messages).await, NodeToControl::TerminalExited { terminal_id: ended, .. } if ended == terminal_id));
     }
 
     #[test]
@@ -721,7 +879,7 @@ mod tests {
         let terminal_id = Uuid::from_u128(6);
         let conversation_id = Uuid::from_u128(7);
 
-        manager.start(terminal_id, conversation_id, "/", 80, 24);
+        manager.start(terminal_id, conversation_id, "/", 80, 24, None);
         drop(messages);
         manager.input(terminal_id, &STANDARD.encode("echo sum-$((20+22))\n"));
 
@@ -744,11 +902,11 @@ mod tests {
         let (manager, mut messages) = shell_manager();
 
         for index in 0..MAX_TERMINALS {
-            manager.start(Uuid::from_u128(1000 + index as u128), Uuid::from_u128(7), "/", 80, 24);
+            manager.start(Uuid::from_u128(1000 + index as u128), Uuid::from_u128(7), "/", 80, 24, None);
         }
 
         let refused = Uuid::from_u128(2000);
-        manager.start(refused, Uuid::from_u128(7), "/", 80, 24);
+        manager.start(refused, Uuid::from_u128(7), "/", 80, 24, None);
 
         let seen = read_until(&mut messages, "Close one before opening another.").await;
         assert!(seen.contains("32 terminals"));

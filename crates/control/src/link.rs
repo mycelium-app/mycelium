@@ -364,10 +364,10 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             Ok(())
         }
-        NodeToControl::TerminalExited { terminal_id } => {
+        NodeToControl::TerminalExited { terminal_id, exit_code } => {
             if let Some(owner) = state.hub.terminal_owner(terminal_id).filter(|owner| owner.node_id == node_id) {
                 state.hub.finish_terminal(terminal_id);
-                state.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id });
+                state.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id, exit_code });
             }
 
             Ok(())

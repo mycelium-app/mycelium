@@ -357,7 +357,7 @@ impl Daemon {
             ControlToNode::LoginInput { login_id, text } => self.logins.input(login_id, &text),
             ControlToNode::StopLogin { login_id } => self.logins.stop(login_id),
             ControlToNode::RemoveLogin { agent, account } => self.remove_login(agent, &account),
-            ControlToNode::StartTerminal { terminal_id, conversation_id, cwd, cols, rows } => self.terminals.start(terminal_id, conversation_id, &cwd, cols, rows),
+            ControlToNode::StartTerminal { terminal_id, conversation_id, cwd, cols, rows, command } => self.terminals.start(terminal_id, conversation_id, &cwd, cols, rows, command.as_deref()),
             ControlToNode::TerminalInput { terminal_id, data } => self.terminals.input(terminal_id, &data),
             ControlToNode::ResizeTerminal { terminal_id, cols, rows } => self.terminals.resize(terminal_id, cols, rows),
             ControlToNode::StopTerminal { terminal_id } => self.terminals.stop(terminal_id),
