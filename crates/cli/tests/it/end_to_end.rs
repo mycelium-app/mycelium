@@ -554,7 +554,8 @@ async fn a_claude_session_keeps_its_mycelium_credentials_in_a_private_file_that_
     let conversation = environment.start_conversation(node, "hello").await;
     api.wait_for_status(conversation, "review").await;
 
-    let headers_file = sessions_dir(&environment.node_home).join(conversation.to_string()).join("mcp-headers.json");
+    let conversation_dir = sessions_dir(&environment.node_home).join(conversation.to_string());
+    let headers_file = std::fs::read_dir(&conversation_dir).unwrap().flatten().map(|entry| entry.path()).find(|path| path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with("mcp-headers"))).unwrap();
     let mode = std::fs::metadata(&headers_file).unwrap().permissions().mode() & 0o777;
     let headers: Value = serde_json::from_str(&std::fs::read_to_string(&headers_file).unwrap()).unwrap();
     assert_eq!(mode, 0o600);

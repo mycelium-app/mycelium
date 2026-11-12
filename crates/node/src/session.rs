@@ -35,6 +35,7 @@ pub struct Launch {
     pub agent_env: Vec<(String, String)>,
     pub mcp_server: Value,
     pub mcp_in_claude_options: bool,
+    pub mcp_headers_file: Option<PathBuf>,
     pub instructions: Option<String>,
     pub cwd: PathBuf,
     pub resume: Option<String>,
@@ -137,6 +138,10 @@ struct SavedState {
     started: Option<NodeToControl>,
 }
 
+fn mcp_headers_run_path(dir: &Path) -> PathBuf {
+    dir.join("mcp_headers_run")
+}
+
 fn snapshot_path(dir: &Path) -> PathBuf {
     dir.join("state.json")
 }
@@ -215,6 +220,26 @@ pub fn spawn_session(spec: SessionSpec, out: mpsc::UnboundedSender<NodeToControl
         *slot = Some(acp_session_id.clone());
     }
 
+    let mcp_headers_file = match &spec.launch {
+        Some(launch) => {
+            if let Some(file) = launch.mcp_headers_file.as_ref().and_then(|file| file.file_name()) {
+                let _ = std::fs::write(mcp_headers_run_path(&spec.dir), file.as_encoded_bytes());
+            }
+
+            launch.mcp_headers_file.clone()
+        }
+        None => {
+            let recorded = std::fs::read_to_string(mcp_headers_run_path(&spec.dir)).unwrap_or_else(|_| crate::config::MCP_HEADERS_FILE.to_string());
+            let current = (!already_ended).then_some(recorded);
+            let leftovers = std::fs::read_dir(&spec.dir).into_iter().flatten().flatten().filter(|entry| entry.file_name().to_str().is_some_and(|name| name.starts_with(crate::config::MCP_HEADERS_PREFIX) && Some(name) != current.as_deref()));
+            for leftover in leftovers {
+                let _ = std::fs::remove_file(leftover.path());
+            }
+
+            current.map(|name| spec.dir.join(name))
+        }
+    };
+
     let acked_now = acked.load(Ordering::SeqCst);
     let mut state = match saved {
         Some(saved) => SessionState::restore(spec.conversation_id, saved.state, acked_now),
@@ -235,6 +260,7 @@ pub fn spawn_session(spec: SessionSpec, out: mpsc::UnboundedSender<NodeToControl
         dir: spec.dir.clone(),
         base,
         attach_after,
+        mcp_headers_file,
         out,
         handle: handle.clone(),
         outbox: VecDeque::new(),
@@ -272,6 +298,7 @@ struct Actor {
     dir: PathBuf,
     base: i64,
     attach_after: usize,
+    mcp_headers_file: Option<PathBuf>,
     out: mpsc::UnboundedSender<NodeToControl>,
     handle: SessionHandle,
     outbox: VecDeque<(i64, NodeToControl)>,
@@ -374,7 +401,9 @@ impl Actor {
     }
 
     fn forget_mcp_headers(&self) {
-        let _ = std::fs::remove_file(self.dir.join(crate::config::MCP_HEADERS_FILE));
+        if let Some(file) = &self.mcp_headers_file {
+            let _ = std::fs::remove_file(file);
+        }
     }
 
     fn interpret(&mut self, state: &mut SessionState, entry: Value) -> Vec<Action> {
@@ -692,7 +721,7 @@ mod tests {
     #[tokio::test]
     async fn a_state_directory_too_deep_for_a_unix_socket_is_refused_with_the_fix() {
         let dir = PathBuf::from("/tmp").join("d".repeat(120));
-        let launch = Launch { agent: AgentId::Claude, account: None, keeper_binary: PathBuf::from("/bin/true"), agent_command: vec![], agent_env: vec![], mcp_server: Value::Null, mcp_in_claude_options: false, instructions: None, cwd: PathBuf::from("/"), resume: None, fork: false };
+        let launch = Launch { agent: AgentId::Claude, account: None, keeper_binary: PathBuf::from("/bin/true"), agent_command: vec![], agent_env: vec![], mcp_server: Value::Null, mcp_in_claude_options: false, mcp_headers_file: None, instructions: None, cwd: PathBuf::from("/"), resume: None, fork: false };
 
         let error = launch_keeper(&dir, &launch).await.unwrap_err().to_string();
 
@@ -709,5 +738,97 @@ mod tests {
         continue_sequence(dir.path(), 5);
 
         assert_eq!((base, journal_head(dir.path()), next_failure_seq(dir.path())), (41, 41, 42));
+    }
+
+    fn actor_for_run(dir: &Path, headers_file: &Path) -> Actor {
+        let (messages, _inbox) = mpsc::unbounded_channel();
+        let (out, _replies) = mpsc::unbounded_channel();
+        let handle = SessionHandle { messages, acked: Arc::new(AtomicI64::new(0)), ended: Arc::new(AtomicBool::new(false)), acp_session_id: Arc::new(Mutex::new(None)), busy: Arc::new(AtomicBool::new(false)), closing: Arc::new(AtomicBool::new(false)), launched_as: None, last_active: Arc::new(AtomicU64::new(0)) };
+
+        Actor { conversation_id: Uuid::from_u128(1), dir: dir.to_path_buf(), base: 0, attach_after: 0, mcp_headers_file: Some(headers_file.to_path_buf()), out, handle, outbox: VecDeque::new(), started: None, received_prompts: HashSet::new(), written_prompts: HashSet::new() }
+    }
+
+    fn headers_helper_prints(config: &crate::config::NodeConfig, headers_file: &Path) -> Value {
+        let server = config.mcp_server_reading(headers_file);
+        let printed = std::process::Command::new("sh").arg("-c").arg(server["headersHelper"].as_str().unwrap()).output().unwrap();
+
+        serde_json::from_slice(&printed.stdout).unwrap_or(Value::Null)
+    }
+
+    fn config_in(dir: &Path) -> crate::config::NodeConfig {
+        crate::config::NodeConfig {
+            control_plane: "https://mycelium.example/".into(),
+            node_id: Uuid::nil(),
+            token: "abc".into(),
+            state_dir: dir.to_path_buf(),
+            projects_root: dir.to_path_buf(),
+            max_sessions: 8,
+            kubernetes: crate::config::KubernetesConfig::default(),
+        }
+    }
+
+    #[test]
+    fn a_previous_runs_exit_leaves_the_headers_file_the_new_run_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = config_in(dir.path());
+        let conversation_dir = config.sessions_dir().join(Uuid::from_u128(1).to_string());
+        let previous_file = config.save_mcp_headers(Uuid::from_u128(1), Uuid::from_u128(10), "myc_session_previous").unwrap();
+        let mut previous = actor_for_run(&conversation_dir, &previous_file);
+        let current_file = config.save_mcp_headers(Uuid::from_u128(1), Uuid::from_u128(11), "myc_session_current").unwrap();
+        let mut state = SessionState::new(Uuid::from_u128(1), None, 0);
+
+        previous.interpret(&mut state, json!({"exit": 0}));
+
+        assert!(!previous_file.exists());
+        assert_eq!(headers_helper_prints(&config, &current_file), json!({"Authorization": "Bearer myc_session_current"}));
+    }
+
+    #[test]
+    fn a_runs_own_exit_removes_its_headers_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = config_in(dir.path());
+        let conversation_dir = config.sessions_dir().join(Uuid::from_u128(1).to_string());
+        let headers_file = config.save_mcp_headers(Uuid::from_u128(1), Uuid::from_u128(10), "myc_session_example").unwrap();
+        let mut actor = actor_for_run(&conversation_dir, &headers_file);
+        let mut state = SessionState::new(Uuid::from_u128(1), None, 0);
+
+        actor.interpret(&mut state, json!({"exit": 0}));
+
+        assert!(!headers_file.exists());
+    }
+
+    #[tokio::test]
+    async fn reattaching_to_a_live_run_keeps_its_headers_file_and_removes_the_files_of_dead_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = config_in(dir.path());
+        let conversation_dir = config.sessions_dir().join(Uuid::from_u128(1).to_string());
+        let dead_file = config.save_mcp_headers(Uuid::from_u128(1), Uuid::from_u128(10), "myc_session_dead").unwrap();
+        let live_file = config.save_mcp_headers(Uuid::from_u128(1), Uuid::from_u128(11), "myc_session_live").unwrap();
+        std::fs::write(mcp_headers_run_path(&conversation_dir), live_file.file_name().unwrap().as_encoded_bytes()).unwrap();
+        std::fs::write(conversation_dir.join("journal.jsonl"), "").unwrap();
+        let _keeper = tokio::net::UnixListener::bind(socket_path(&conversation_dir)).unwrap();
+        let (out, _replies) = mpsc::unbounded_channel();
+
+        let handle = spawn_session(SessionSpec { conversation_id: Uuid::from_u128(1), dir: conversation_dir.clone(), launch: None, pods: None }, out);
+
+        assert!(!handle.ended());
+        assert!(!dead_file.exists());
+        assert_eq!(headers_helper_prints(&config, &live_file), json!({"Authorization": "Bearer myc_session_live"}));
+    }
+
+    #[tokio::test]
+    async fn reattaching_to_an_ended_run_removes_every_headers_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = config_in(dir.path());
+        let conversation_dir = config.sessions_dir().join(Uuid::from_u128(1).to_string());
+        let ended_file = config.save_mcp_headers(Uuid::from_u128(1), Uuid::from_u128(10), "myc_session_ended").unwrap();
+        std::fs::write(mcp_headers_run_path(&conversation_dir), ended_file.file_name().unwrap().as_encoded_bytes()).unwrap();
+        std::fs::write(conversation_dir.join("journal.jsonl"), "").unwrap();
+        let (out, _replies) = mpsc::unbounded_channel();
+
+        let handle = spawn_session(SessionSpec { conversation_id: Uuid::from_u128(1), dir: conversation_dir.clone(), launch: None, pods: None }, out);
+
+        assert!(handle.ended());
+        assert!(!ended_file.exists());
     }
 }

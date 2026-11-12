@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 const NODE_TOKEN_PREFIX: &str = "myc_node_";
 pub const API_TOKEN_FILE: &str = "api-token";
+pub const MCP_HEADERS_PREFIX: &str = "mcp-headers";
 pub const MCP_HEADERS_FILE: &str = "mcp-headers.json";
 pub const SSH_HOST_KEY_FILE: &str = "ssh_host_ed25519_key";
 
@@ -139,8 +140,8 @@ impl NodeConfig {
         Ok(path)
     }
 
-    pub fn save_mcp_headers(&self, conversation_id: Uuid, session_token: &str) -> Result<PathBuf> {
-        let path = self.sessions_dir().join(conversation_id.to_string()).join(MCP_HEADERS_FILE);
+    pub fn save_mcp_headers(&self, conversation_id: Uuid, run_id: Uuid, session_token: &str) -> Result<PathBuf> {
+        let path = self.sessions_dir().join(conversation_id.to_string()).join(format!("{MCP_HEADERS_PREFIX}-{run_id}.json"));
         let headers = json!({"Authorization": format!("Bearer {session_token}")});
         write_private_file(&path, headers.to_string().as_bytes())?;
 
@@ -458,7 +459,7 @@ mod tests {
         let mut config = sample();
         config.state_dir = dir.path().to_path_buf();
 
-        let headers_file = config.save_mcp_headers(Uuid::from_u128(5), "myc_session_example").unwrap();
+        let headers_file = config.save_mcp_headers(Uuid::from_u128(5), Uuid::from_u128(6), "myc_session_example").unwrap();
         let server = config.mcp_server_reading(&headers_file);
         let helper = server["headersHelper"].as_str().unwrap();
         let printed = std::process::Command::new("sh").arg("-c").arg(helper).output().unwrap();
