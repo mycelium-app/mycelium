@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.20
+
+- You can record a Claude limit reset by hand, with its kind and expiry, from the Claude account's menu on Settings, Providers. Recorded resets show in the Usage card like Codex banked resets, soonest expiry first, and Use reset marks one used in Mycelium without contacting Anthropic. Expired and used ones drop off.
+- One malformed tool can no longer hide every Mycelium tool from an agent. A session that starts without its Mycelium tools says so in the conversation, and a client that reconnects after the control plane restarts is told to fetch its tools again.
+
 ## v0.34.19
 
 - The Usage card marks the account an assistant's chat runs on as This chat, as it does in any other conversation.
