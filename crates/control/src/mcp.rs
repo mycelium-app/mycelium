@@ -97,7 +97,7 @@ fn area_of(tool: &str) -> Option<Area> {
         "create_project" | "update_project" => Some(Area::Projects),
         "open_outline" => Some(Area::Outline),
         "open_screen" => Some(Area::Screens),
-        "find_conversations" | "start_conversation" | "flag_for_person" | "add_action_item" | "resolve_action_item" | "archive_conversation" | "read_conversation" | "show_conversation" | "send_to_conversation" | "withdraw_message" | "watch_conversation" | "watch_pipeline" | "watch_release" | "wake_at" | "list_watches" | "unwatch" => Some(Area::Conversations),
+        "find_conversations" | "start_conversation" | "manage_conversation" | "flag_for_person" | "add_action_item" | "resolve_action_item" | "archive_conversation" | "read_conversation" | "show_conversation" | "send_to_conversation" | "withdraw_message" | "watch_conversation" | "watch_pipeline" | "watch_release" | "wake_at" | "list_watches" | "unwatch" => Some(Area::Conversations),
         "request_api_access" => Some(Area::ApiAccess),
         "decide" => Some(Area::Decide),
         "request_ssh_access" => Some(Area::SshAccess),

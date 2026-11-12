@@ -514,6 +514,83 @@ async fn taking_over_a_managed_conversation_brings_it_back_to_the_person() {
     assert_eq!(conversation(&fleet.server, new_chat).await.get("managed_by"), None);
 }
 
+async fn make_assistant(fleet: &Fleet, conversation: Uuid, group: Uuid) -> Uuid {
+    let assistant: Uuid = sqlx::query_scalar("insert into assistants (owner, name, description, group_id, conversation_id) select owner, 'Infrastructure', '', $2, id from conversations where id = $1 returning id").bind(conversation).bind(group).fetch_one(&fleet.server.pool).await.unwrap();
+    sqlx::query("update conversations set assistant_id = $2 where id = $1").bind(conversation).bind(assistant).execute(&fleet.server.pool).await.unwrap();
+
+    assistant
+}
+
+#[tokio::test]
+async fn an_assistant_adopts_a_conversation_in_its_group_with_manage_conversation_and_watches_it() {
+    let mut fleet = fleet().await;
+    make_assistant(&fleet, fleet.yucca_chat, fleet.yucca).await;
+    let other = working_conversation(&fleet.server, &mut fleet.link, "Bump the UI kit", "/work/yucca/ui").await;
+
+    let adopted = call(&fleet.server, &fleet.link, fleet.yucca_chat, "manage_conversation", json!({"conversation": other.to_string()})).await;
+
+    assert_eq!(adopted["isError"], false, "{adopted}");
+    assert_eq!(conversation(&fleet.server, other).await["managed_by"], json!(fleet.yucca_chat.to_string()));
+    let watches = text(&call(&fleet.server, &fleet.link, fleet.yucca_chat, "list_watches", json!({})).await);
+    assert!(watches.contains("Bump the UI kit"), "{watches}");
+}
+
+#[tokio::test]
+async fn manage_conversation_refuses_a_conversation_in_an_unconnected_group() {
+    let fleet = fleet().await;
+    make_assistant(&fleet, fleet.yucca_chat, fleet.yucca).await;
+
+    let refused = call(&fleet.server, &fleet.link, fleet.yucca_chat, "manage_conversation", json!({"conversation": fleet.immich_chat.to_string()})).await;
+
+    assert_eq!(refused["isError"], true);
+    assert_eq!(text(&refused), "Nothing was managed. The yucca and Immich groups are not connected. Ask the person to connect them in Settings, Agent connections.");
+    assert_eq!(conversation(&fleet.server, fleet.immich_chat).await.get("managed_by"), None);
+}
+
+#[tokio::test]
+async fn manage_conversation_is_refused_for_a_conversation_that_is_not_an_assistants() {
+    let mut fleet = fleet().await;
+    let other = working_conversation(&fleet.server, &mut fleet.link, "Bump the UI kit", "/work/yucca/ui").await;
+
+    let refused = call(&fleet.server, &fleet.link, fleet.yucca_chat, "manage_conversation", json!({"conversation": other.to_string()})).await;
+
+    assert_eq!((refused["isError"].clone(), text(&refused)), (json!(true), "Nothing was managed. Only an assistant's conversation can manage another conversation.".to_string()));
+    assert_eq!(conversation(&fleet.server, other).await.get("managed_by"), None);
+}
+
+#[tokio::test]
+async fn taking_over_a_conversation_an_assistant_adopted_brings_it_back_to_the_person() {
+    let mut fleet = fleet().await;
+    make_assistant(&fleet, fleet.yucca_chat, fleet.yucca).await;
+    let other = working_conversation(&fleet.server, &mut fleet.link, "Bump the UI kit", "/work/yucca/ui").await;
+    call(&fleet.server, &fleet.link, fleet.yucca_chat, "manage_conversation", json!({"conversation": other.to_string()})).await;
+
+    let (status, taken) = fleet.server.user.json(fleet.server.user.patch(&format!("/api/v1/conversations/{other}")).json(&json!({"take_over": true}))).await;
+
+    assert_eq!(status, 200, "{taken}");
+    assert_eq!(conversation(&fleet.server, other).await.get("managed_by"), None);
+}
+
+#[tokio::test]
+async fn patching_manage_by_assistant_lets_the_person_have_an_assistant_manage_conversation_in_its_group_and_not_outside_it() {
+    let mut fleet = fleet().await;
+    let assistant = make_assistant(&fleet, fleet.yucca_chat, fleet.yucca).await;
+    let other = working_conversation(&fleet.server, &mut fleet.link, "Bump the UI kit", "/work/yucca/ui").await;
+    let mut stream = fleet.server.user.stream().await;
+
+    let (status, adopted) = fleet.server.user.json(fleet.server.user.patch(&format!("/api/v1/conversations/{other}")).json(&json!({"manage_by_assistant": assistant}))).await;
+    let (outside_status, outside) = fleet.server.user.json(fleet.server.user.patch(&format!("/api/v1/conversations/{}", fleet.immich_chat)).json(&json!({"manage_by_assistant": assistant}))).await;
+
+    assert_eq!(status, 200, "{adopted}");
+    assert_eq!(adopted["managed_by"], json!(fleet.yucca_chat.to_string()));
+    assert_eq!((outside_status, outside["error"].clone()), (400, json!("assistant_not_in_group")));
+    let streamed = stream.until(|message| match message {
+        StreamMessage::Conversation(conversation) if conversation.id == other && conversation.managed_by.is_some() => Some(conversation),
+        _ => None,
+    }).await;
+    assert_eq!(streamed.managed_by, Some(fleet.yucca_chat));
+}
+
 #[tokio::test]
 async fn conversations_started_before_management_are_managed_by_their_starter_after_the_migration() {
     let mut fleet = fleet().await;

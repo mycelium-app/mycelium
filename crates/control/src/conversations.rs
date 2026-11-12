@@ -2,6 +2,8 @@ use crate::assistants;
 use crate::auth::AuthUser;
 use crate::chats;
 use crate::continuation;
+use crate::conversation_connections;
+use crate::group_connections;
 use crate::error::{ApiError, ApiResult};
 use crate::idempotency;
 use crate::instructions;
@@ -400,6 +402,11 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
         return Err(ApiError::bad_request("snooze_in_the_past", "Choose a time in the future to snooze this conversation until."));
     }
 
+    let adopter = match request.manage_by_assistant {
+        Some(assistant_id) => Some(adopting_conversation(&state, user.id, assistant_id, id).await?),
+        None => None,
+    };
+
     let mut tx = state.pool.begin().await?;
     let before = lock_owned(&mut tx, id, user.id).await?;
     let account = request.account.as_deref().map(str::trim).filter(|account| !account.is_empty());
@@ -529,6 +536,10 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
         put_away(&state, &before).await?;
     }
 
+    let row = match adopter {
+        Some(manager) => manage(&state, user.id, manager, id).await?,
+        None => row,
+    };
     let conversation = row.to_proto()?;
     state.publish(Some(user.id), StreamMessage::Conversation(conversation.clone()));
 
@@ -537,6 +548,31 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     }
 
     Ok(Json(conversation))
+}
+
+async fn adopting_conversation(state: &AppState, owner: Uuid, assistant_id: Uuid, target: Uuid) -> ApiResult<Uuid> {
+    let assistant = sqlx::query_as::<_, (String, Option<Uuid>)>("select name, conversation_id from assistants where id = $1 and owner = $2").bind(assistant_id).bind(owner).fetch_optional(&state.pool).await?;
+    let Some((name, conversation_id)) = assistant else {
+        return Err(ApiError::not_found("That assistant"));
+    };
+    let Some(conversation_id) = conversation_id else {
+        return Err(ApiError::conflict("assistant_not_started", format!("{name} has no conversation yet. Start one with {name} first.")));
+    };
+    find_owned(&state.pool, target, owner).await?;
+
+    if !group_connections::connected(state, owner, conversation_id, target).await? {
+        return Err(ApiError::bad_request("assistant_not_in_group", format!("{name} is not in this conversation's group, or a group connected to it. Choose an assistant from this group.")));
+    }
+
+    Ok(conversation_id)
+}
+
+pub async fn manage(state: &AppState, owner: Uuid, manager: Uuid, target: Uuid) -> ApiResult<ConversationRow> {
+    conversation_connections::connect(state, owner, manager, target).await?;
+    crate::watches::watch_conversation(state, owner, manager, target, false).await?;
+    let managed = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set managed_by = $2 where id = $1 returning {CONVERSATION_COLUMNS}"))).bind(target).bind(manager).fetch_one(&state.pool).await?;
+
+    Ok(managed)
 }
 
 pub async fn archive_for(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<ConversationRow> {

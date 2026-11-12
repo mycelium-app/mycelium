@@ -50,6 +50,17 @@ pub fn definitions() -> Value {
             },
         },
         {
+            "name": "manage_conversation",
+            "description": "Take over managing one of the person's existing conversations in this group, or in a connected group, as if you had started it: it moves to Managed by assistant, stops notifying the person, and this conversation watches it and can reply with send_to_conversation. Bring it back to the person with flag_for_person; the person can also take it over. Only an assistant's conversation can call this. It needs the same access as read_conversation.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "conversation": {"type": "string", "description": "The id of the conversation to manage, or its exact title."},
+                },
+                "required": ["conversation"],
+            },
+        },
+        {
             "name": "flag_for_person",
             "description": "Bring a conversation this one manages to the person, when it needs them: it leaves Managed by assistant, shows in its normal place with your reason and notifies them. A managed conversation can also flag itself. The flag clears when the person writes in it.",
             "inputSchema": {
@@ -450,13 +461,28 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 Err(error) => return Ok(nothing(error.message().to_string())),
             };
 
-            conversation_connections::connect(state, owner, conversation_id, started.id).await?;
-            crate::watches::watch_conversation(state, owner, conversation_id, started.id, false).await?;
-            let managed = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set managed_by = $2 where id = $1 returning {CONVERSATION_COLUMNS}"))).bind(started.id).bind(conversation_id).fetch_one(&state.pool).await?;
+            let managed = crate::conversations::manage(state, owner, conversation_id, started.id).await?;
             state.publish(Some(owner), StreamMessage::Conversation(managed.to_proto()?));
             let node_name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(started.node_id).fetch_one(&state.pool).await?;
 
             ToolReply::text(&format!("Started {} ({}) in {target_name} on {node_name}. The reason was: {reason}", message_proposals::label(started.id, &started.title), started.id), false)
+        }
+        "manage_conversation" => {
+            let target = match readable_target(&caller, &arguments, "manage_conversation", "managed").await? {
+                Ok(target) => target,
+                Err(reply) => return Ok(reply),
+            };
+            let ReadableTarget { owner, conversation_id, target_id, label, .. } = target;
+            let is_assistant = sqlx::query_scalar::<_, bool>("select assistant_id is not null from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+
+            if !is_assistant {
+                return Ok(ToolReply::text("Nothing was managed. Only an assistant's conversation can manage another conversation.", true));
+            }
+
+            let managed = crate::conversations::manage(state, owner, conversation_id, target_id).await?;
+            state.publish(Some(owner), StreamMessage::Conversation(managed.to_proto()?));
+
+            ToolReply::text(&format!("Now managing {label} ({target_id}). It is under Managed by assistant with no notifications, and this conversation watches it. Bring it to the person with flag_for_person."), false)
         }
         "flag_for_person" => {
             let Some(reason) = arguments.get("reason").and_then(Value::as_str).map(str::trim).filter(|reason| !reason.is_empty()) else {

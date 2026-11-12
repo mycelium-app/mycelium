@@ -41,6 +41,7 @@ import mycelium.api.Artifact
 import mycelium.api.ArtifactAccessRequest
 import mycelium.api.CreateArtifactRequest
 import mycelium.api.PatchArtifactRequest
+import mycelium.api.Assistant
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.CreateGroupConnectionRequest
@@ -1444,6 +1445,13 @@ class Store(
     fun takeOver(conversation: Conversation) {
         act {
             val updated = api.patchConversation(conversation.id, PatchConversationRequest(takeOver = true))
+            mutableState.update { it.copy(conversations = it.conversations + (updated.id to updated)) }
+        }
+    }
+
+    fun manageByAssistant(conversation: Conversation, assistant: Assistant) {
+        act {
+            val updated = api.patchConversation(conversation.id, PatchConversationRequest(manageByAssistant = assistant.id))
             mutableState.update { it.copy(conversations = it.conversations + (updated.id to updated)) }
         }
     }

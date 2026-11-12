@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.semantics
 import mycelium.ProviderDictation
 import mycelium.state.VoicePhase
+import mycelium.api.Assistant
 import mycelium.api.Conversation
 import mycelium.api.Workflow
 import mycelium.api.WorkflowControlRequest
@@ -618,6 +619,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     .onSizeChanged { chatWidth = with(density) { it.width.toDp() } },
             ) {
                 Column(if (compact && terminalShown) Modifier.height(0.dp).clipToBounds().clearAndSetSemantics {} else Modifier.weight(1f).fillMaxWidth()) {
+                val manager = conversation.managedBy?.let { state.conversations[it] }?.takeIf { it.archivedAt == null }
+
                 ConversationHeader(
                     slots = header,
                     conversation = conversation,
@@ -639,7 +642,10 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     onRename = { title -> store.rename(conversation, title) },
                     onPin = { store.pin(conversation, conversation.pinnedAt == null) },
                     onSnooze = { until -> store.snooze(conversation, until) },
-                    manager = conversation.managedBy?.let { state.conversations[it] }?.takeIf { it.archivedAt == null },
+                    manager = manager,
+                    managerName = manager?.let { found -> found.assistantId?.let { state.assistants[it]?.name } ?: found.title.ifBlank { found.id } },
+                    groupAssistants = if (conversation.assistantId == null && manager == null) state.assistants.values.filter { it.groupId != null && it.groupId == conversation.groupId && it.archivedAt == null && it.builtinKey == null }.sortedBy { it.name } else emptyList(),
+                    onManage = { assistant -> store.manageByAssistant(conversation, assistant) },
                     onTakeOver = { store.takeOver(conversation) },
                     onCloseSession = { store.closeSession(conversation) },
                     onArchive = {
@@ -976,6 +982,9 @@ private fun ConversationHeader(
     onPin: () -> Unit,
     onSnooze: (String?) -> Unit,
     manager: Conversation?,
+    managerName: String?,
+    groupAssistants: List<Assistant>,
+    onManage: (Assistant) -> Unit,
     onTakeOver: () -> Unit,
     onCloseSession: () -> Unit,
     onArchive: () -> Unit,
@@ -994,6 +1003,7 @@ private fun ConversationHeader(
     var moveOpen by remember { mutableStateOf(false) }
     var projectMenuOpen by remember { mutableStateOf(false) }
     var snoozeMenuOpen by remember { mutableStateOf(false) }
+    var manageMenuOpen by remember { mutableStateOf(false) }
     var ideMenuOpen by remember { mutableStateOf(false) }
     var watchingMenuOpen by remember { mutableStateOf(false) }
     val archived = conversation.archivedAt != null
@@ -1165,7 +1175,11 @@ private fun ConversationHeader(
                     MenuItem(if (conversation.snoozedUntil == null) "Snooze" else "Wake now", onClick = { menuOpen = false; if (conversation.snoozedUntil == null) snoozeMenuOpen = true else onSnooze(null) }, leading = MyIcon.Clock)
 
                     if (manager != null) {
-                        MenuItem("Take over", onClick = { menuOpen = false; onTakeOver() }, hint = "from ${manager.title.ifBlank { manager.id }}", leading = MyIcon.Hand)
+                        MenuItem("Take over", onClick = { menuOpen = false; onTakeOver() }, hint = "from $managerName", leading = MyIcon.Hand)
+                    } else if (groupAssistants.size == 1) {
+                        MenuItem("Let ${groupAssistants.single().name} manage this", onClick = { menuOpen = false; onManage(groupAssistants.single()) }, leading = MyIcon.Agent)
+                    } else if (groupAssistants.size > 1) {
+                        MenuItem("Let an assistant manage this", onClick = { menuOpen = false; manageMenuOpen = true }, leading = MyIcon.Agent)
                     }
 
                     if (conversation.hasWorkspace) {
@@ -1198,6 +1212,16 @@ private fun ConversationHeader(
 
     if (snoozeMenuOpen) {
         SnoozeMenu(onSnooze = onSnooze, onDismiss = { snoozeMenuOpen = false })
+    }
+
+    if (manageMenuOpen) {
+        MenuPopup(onDismiss = { manageMenuOpen = false }) {
+            MenuLabel("Let manage this")
+
+            for (assistant in groupAssistants) {
+                MenuItem(assistant.name, onClick = { manageMenuOpen = false; onManage(assistant) }, leading = MyIcon.Agent)
+            }
+        }
     }
 
     if (confirmingDelete) {
