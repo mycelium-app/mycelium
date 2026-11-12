@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.34.27
+
+- A repository is one project, with a checkout on each node it is on. Projects lists each repository once with its nodes, the project page shows and manages its checkouts, starting a conversation picks the project and then the node, and New project offers to add a checkout when the repository is already a project. Existing duplicate projects of one repository are merged when the control plane starts, keeping every conversation.
+- A flagged item in Needs you can be opened or dismissed without replying, the chevron only expands it, and the project and chat title are one link to the conversation.
+- An assistant can manage an existing conversation, through manage_conversation or "Let <assistant> manage this" in the conversation's menu.
+- Agents can message an assistant by name or id, and read or watch its chat, with the usual approval across groups.
+- An agent can ask for full API access, shown as its own choice on the approval card that you can untick down to narrower scopes.
+
 ## v0.34.26
 
 - Adding an MCP server offers Sign in whenever its authorisation server can be found, not only when it accepts dynamic registration. Mycelium uses its own client metadata document where the server reads one, or a client ID and secret you registered yourself, with the callback address shown to copy. The setup waits for the browser, says why when sign-in fails or is not offered, and keeps Token as the other choice. Re-authenticating an integration in Settings waits for the result too.
