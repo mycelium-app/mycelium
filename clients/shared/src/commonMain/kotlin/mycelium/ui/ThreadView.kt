@@ -28,6 +28,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
@@ -101,7 +102,9 @@ import mycelium.state.clockTime
 import mycelium.state.quietFor
 import mycelium.state.stalled
 import mycelium.state.workflowPinKey
+import mycelium.state.markdownImages
 import mycelium.state.parsedMarkdown
+import mycelium.state.remoteThreadImage
 import mycelium.state.DiffLine
 import mycelium.state.FileDiff
 import mycelium.state.PlanStatus
@@ -175,12 +178,14 @@ fun ThreadView(
     val gallery = remember(items) {
         items.flatMap {
             when (it) {
-                is ThreadItem.UserMessage -> it.images
+                is ThreadItem.UserMessage -> it.images + markdownImages(parsedMarkdown(it.text)).map(::remoteThreadImage)
+                is ThreadItem.AgentMessage -> markdownImages(parsedMarkdown(it.text)).map(::remoteThreadImage)
                 is ThreadItem.ToolCall -> it.images
                 else -> emptyList()
             }
-        }.filter { it.sameAs == null }
+        }.filter { it.sameAs == null }.distinctBy { it.key }
     }
+    val shownImages = remember { mutableStateSetOf<String>() }
     val lastFailure = remember(items) { items.indexOfLast { it is ThreadItem.Failure } }
     val subagents = LocalThreadSubagents.current
     val workflowCards = pinnedWorkflows(LocalConversationWorkflows.current?.workflows?.filter { it.kind == WorkflowKinds.Mycelium }.orEmpty(), dismissedPins, now)
@@ -258,7 +263,7 @@ fun ThreadView(
                                 onScrollToTop = if (asked + 1 >= index) null else ({ scope.launch { showTopOf(items.lastIndex - (asked + 1)) } }),
                             )
                         } else {
-                            CompositionLocalProvider(LocalImageJump provides jumpToImage, LocalImageGallery provides gallery, LocalPinnedKeys provides pinnedKeys) {
+                            CompositionLocalProvider(LocalImageJump provides jumpToImage, LocalImageGallery provides gallery, LocalShownImages provides shownImages, LocalPinnedKeys provides pinnedKeys) {
                                 ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) onDismissFailure else null, if (index == lastFailure) limitActions else null, agent, runsOnModel)
                             }
                         }
@@ -607,6 +612,7 @@ internal fun MarkdownBlocks(blocks: List<MarkdownBlock>, textStyle: TextStyle = 
                         }
                     }
                 }
+                is MarkdownBlock.Images -> ImagesBlock(block.images)
                 MarkdownBlock.Rule -> Hairline()
                 is MarkdownBlock.Table -> TableBlock(block, textStyle)
             }
@@ -757,7 +763,9 @@ private fun ListBlock(items: List<MarkdownListItem>, textStyle: TextStyle, block
                 }
 
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                    Prose(item.text, textStyle)
+                    if (item.text.isNotEmpty()) {
+                        Prose(item.text, textStyle)
+                    }
 
                     if (item.children.isNotEmpty()) {
                         MarkdownBlocks(item.children, textStyle, blockSpacing)

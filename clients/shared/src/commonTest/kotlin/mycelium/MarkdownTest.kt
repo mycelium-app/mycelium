@@ -3,6 +3,7 @@ package mycelium
 import mycelium.state.CalloutKind
 import mycelium.state.ColumnAlign
 import mycelium.state.Footnote
+import mycelium.state.InlineImageRef
 import mycelium.state.MarkdownBlock
 import mycelium.state.MarkdownListItem
 import mycelium.state.markdownBlocks
@@ -166,5 +167,71 @@ class MarkdownTest {
             ),
             markdownBlocks("Claim[^1] and more[^note].\n\n[^1]: First source.\n[^note]: Second.\n"),
         )
+    }
+
+    private fun ref(alt: String, host: String, name: String, page: String? = null) = InlineImageRef(alt, "https://$host/$name.png", host, page)
+
+    @Test
+    fun imagesOnConsecutiveLinesFormOneGalleryWithTheirPageUrls() {
+        val text = "Four options:\n\n![One](https://a.example.org/1.png \"https://shop.example.com/1\")\n![Two](https://a.example.org/2.png)\n![Three](https://b.example.org/3.png)\n![Four](https://b.example.org/4.png)\n\nTell me the weight."
+
+        assertEquals(
+            listOf(
+                MarkdownBlock.Paragraph("Four options:"),
+                MarkdownBlock.Images(
+                    listOf(
+                        ref("One", "a.example.org", "1", "https://shop.example.com/1"),
+                        ref("Two", "a.example.org", "2"),
+                        ref("Three", "b.example.org", "3"),
+                        ref("Four", "b.example.org", "4"),
+                    ),
+                ),
+                MarkdownBlock.Paragraph("Tell me the weight."),
+            ),
+            markdownBlocks(text),
+        )
+    }
+
+    @Test
+    fun anImageInsideAListItemIsLiftedOutAfterItsText() {
+        val blocks = markdownBlocks("- Strips ![Strips](https://a.example.org/s.png) hold 7 kg\n- Hooks")
+
+        assertEquals(
+            listOf(
+                MarkdownBlock.Bullets(
+                    listOf(
+                        item("Strips hold 7 kg", children = listOf(MarkdownBlock.Images(listOf(ref("Strips", "a.example.org", "s"))))),
+                        item("Hooks"),
+                    ),
+                ),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
+    fun anImageInsideAParagraphIsLiftedOutAfterThatParagraphsText() {
+        assertEquals(
+            listOf(MarkdownBlock.Paragraph("This one: it is brass."), MarkdownBlock.Images(listOf(ref("Hook", "a.example.org", "h")))),
+            markdownBlocks("This one: ![Hook](https://a.example.org/h.png) it is brass."),
+        )
+    }
+
+    @Test
+    fun anImageWithNoAltTextStaysALink() {
+        assertEquals(listOf(MarkdownBlock.Paragraph("![](https://a.example.org/h.png)")), markdownBlocks("![](https://a.example.org/h.png)"))
+    }
+
+    @Test
+    fun anImageOverPlainHttpStaysALink() {
+        assertEquals(listOf(MarkdownBlock.Paragraph("![Hook](http://a.example.org/h.png)")), markdownBlocks("![Hook](http://a.example.org/h.png)"))
+    }
+
+    @Test
+    fun theHostOmitsThePortAndUserInfo() {
+        val image = (markdownBlocks("![Hook](https://me@a.example.org:8443/h.png?x=1)").single() as MarkdownBlock.Images).images.single()
+
+        assertEquals("a.example.org", image.host)
+        assertEquals("https://me@a.example.org:8443/h.png?x=1", image.url)
     }
 }

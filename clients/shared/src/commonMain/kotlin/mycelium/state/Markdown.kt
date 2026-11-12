@@ -19,8 +19,12 @@ sealed interface MarkdownBlock {
 
     data class Footnotes(val items: List<Footnote>) : MarkdownBlock
 
+    data class Images(val images: List<InlineImageRef>) : MarkdownBlock
+
     data object Rule : MarkdownBlock
 }
+
+data class InlineImageRef(val alt: String, val url: String, val host: String, val pageUrl: String?)
 
 data class MarkdownListItem(val text: String, val checked: Boolean? = null, val children: List<MarkdownBlock> = emptyList())
 
@@ -36,7 +40,39 @@ private val CalloutLine = Regex("^\\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)]\\s*$
 private val FootnoteLine = Regex("^\\[\\^([^\\]\\s]+)]:\\s*(.*)$")
 private val TaskText = Regex("^\\[([ xX])](?:\\s+(.*))?$", RegexOption.DOT_MATCHES_ALL)
 private val RuleLine = Regex("^\\s*([-*_])(\\s*\\1){2,}\\s*$")
+private val ImageMarkup = Regex("!\\[([^\\]]*)]\\(([^)\\s]+)(?:\\s+\"([^\"]*)\")?\\)")
 private val TableDivider = Regex("^\\s*\\|?\\s*:?-+:?\\s*(\\|\\s*:?-+:?\\s*)*\\|?\\s*$")
+
+private fun imageRefOf(match: MatchResult): InlineImageRef? {
+    val alt = match.groupValues[1].trim()
+    val url = match.groupValues[2]
+    val host = url.removePrefix("https://").takeIf { url.startsWith("https://") }?.substringBefore('/')?.substringBefore('?')?.substringBefore('#')?.substringAfterLast('@')?.substringBefore(':')
+
+    if (alt.isEmpty() || host.isNullOrEmpty()) {
+        return null
+    }
+
+    return InlineImageRef(alt, url, host, match.groupValues[3].ifEmpty { null })
+}
+
+private fun imageOnLine(line: String): InlineImageRef? = ImageMarkup.matchEntire(line.trim())?.let { imageRefOf(it) }
+
+private fun withoutImages(text: String): Pair<String, List<InlineImageRef>> {
+    val lifted = mutableListOf<InlineImageRef>()
+    val kept = ImageMarkup.replace(text) { match ->
+        val ref = imageRefOf(match)
+
+        if (ref == null) {
+            match.value
+        } else {
+            lifted += ref
+
+            ""
+        }
+    }
+
+    return if (lifted.isEmpty()) text to lifted else kept.lines().joinToString("\n") { it.trim() }.replace(Regex(" {2,}"), " ").trim() to lifted
+}
 
 private fun alignOf(cell: String): ColumnAlign = when {
     cell.startsWith(":") && cell.endsWith(":") -> ColumnAlign.Center
@@ -165,8 +201,9 @@ fun markdownBlocks(text: String): List<MarkdownBlock> {
                     val body = if (continues) first + "\n" + (nested.first() as MarkdownBlock.Paragraph).text else first
                     val children = if (continues) nested.drop(1) else nested
                     val task = TaskText.find(body)
+                    val (text, lifted) = withoutImages(task?.groupValues?.get(2) ?: body)
 
-                    MarkdownListItem(task?.groupValues?.get(2) ?: body, task?.let { it.groupValues[1] != " " }, children)
+                    MarkdownListItem(text, task?.let { it.groupValues[1] != " " }, if (lifted.isEmpty()) children else listOf(MarkdownBlock.Images(lifted)) + children)
                 }
 
                 blocks += if (ordered) MarkdownBlock.Numbered(start, items) else MarkdownBlock.Bullets(items)
@@ -189,6 +226,25 @@ fun markdownBlocks(text: String): List<MarkdownBlock> {
                 }
             }
 
+            imageOnLine(line) != null -> {
+                val gallery = mutableListOf<InlineImageRef>()
+
+                while (index < lines.size) {
+                    val image = imageOnLine(lines[index])
+
+                    if (image != null) {
+                        gallery += image
+                        index++
+                    } else if (lines[index].isBlank() && (index + 1 until lines.size).firstOrNull { lines[it].isNotBlank() }?.let { imageOnLine(lines[it]) } != null) {
+                        index++
+                    } else {
+                        break
+                    }
+                }
+
+                blocks += MarkdownBlock.Images(gallery)
+            }
+
             else -> {
                 val paragraph = mutableListOf<String>()
 
@@ -197,7 +253,15 @@ fun markdownBlocks(text: String): List<MarkdownBlock> {
                     index++
                 }
 
-                blocks += MarkdownBlock.Paragraph(paragraph.joinToString("\n"))
+                val (text, lifted) = withoutImages(paragraph.joinToString("\n"))
+
+                if (text.isNotEmpty()) {
+                    blocks += MarkdownBlock.Paragraph(text)
+                }
+
+                if (lifted.isNotEmpty()) {
+                    blocks += MarkdownBlock.Images(lifted)
+                }
             }
         }
     }
@@ -209,8 +273,19 @@ fun markdownBlocks(text: String): List<MarkdownBlock> {
     return blocks
 }
 
+fun markdownImages(blocks: List<MarkdownBlock>): List<InlineImageRef> = blocks.flatMap { block ->
+    when (block) {
+        is MarkdownBlock.Images -> block.images
+        is MarkdownBlock.Bullets -> block.items.flatMap { markdownImages(it.children) }
+        is MarkdownBlock.Numbered -> block.items.flatMap { markdownImages(it.children) }
+        is MarkdownBlock.Quote -> markdownImages(block.blocks)
+        is MarkdownBlock.Callout -> markdownImages(block.blocks)
+        else -> emptyList()
+    }
+}
+
 private fun startsBlock(line: String): Boolean {
     val trimmed = line.trimStart()
 
-    return trimmed.startsWith("```") || trimmed.startsWith(">") || FootnoteLine.matches(trimmed) || HeadingLine.matches(trimmed) || ListLine.matches(line) || RuleLine.matches(line)
+    return trimmed.startsWith("```") || trimmed.startsWith(">") || FootnoteLine.matches(trimmed) || HeadingLine.matches(trimmed) || ListLine.matches(line) || RuleLine.matches(line) || imageOnLine(line) != null
 }

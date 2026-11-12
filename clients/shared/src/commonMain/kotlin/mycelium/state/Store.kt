@@ -33,6 +33,7 @@ import mycelium.api.DirectoryEntry
 import mycelium.api.Experiments
 import mycelium.api.ApiException
 import mycelium.api.ControlPlaneUnreachable
+import mycelium.api.RemoteImageResult
 import mycelium.api.Artifact
 import mycelium.api.ArtifactAccessRequest
 import mycelium.api.CreateArtifactRequest
@@ -106,6 +107,7 @@ class Store(
     private val streamedConversations = MutableStateFlow<Set<String>>(emptySet())
     private val typed = Channel<Pair<String, String>>(Channel.UNLIMITED)
     private val attachmentCache = mutableMapOf<String, ByteArray>()
+    private val remoteImageCache = mutableMapOf<Pair<String, String>, ByteArray>()
     private val previewCache = LinkedHashMap<String, ByteArray>()
     private val experimentsLock = Mutex()
 
@@ -1189,6 +1191,36 @@ class Store(
         attachmentCache[sha256] = bytes
 
         return bytes
+    }
+
+    fun remoteImages(conversationId: String) = RemoteImages(
+        fetch = { url -> remoteImage(conversationId, url) { api.remoteImage(conversationId, url) } },
+        load = { url -> remoteImage(conversationId, url) { api.loadRemoteImage(conversationId, url) } },
+    )
+
+    private suspend fun remoteImage(conversationId: String, url: String, request: suspend () -> RemoteImageResult): RemoteImageResult {
+        val key = conversationId to url
+        remoteImageCache[key]?.let { return RemoteImageResult.Bytes(it) }
+
+        val result = try {
+            request()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failed: ApiException) {
+            RemoteImageResult.Refused(failed.message)
+        } catch (_: Exception) {
+            RemoteImageResult.Refused(ControlPlaneUnreachable)
+        }
+
+        if (result is RemoteImageResult.Bytes) {
+            if (remoteImageCache.size >= MaxCachedAttachments) {
+                remoteImageCache.clear()
+            }
+
+            remoteImageCache[key] = result.bytes
+        }
+
+        return result
     }
 
     suspend fun artifactThumbnail(artifact: Artifact): ByteArray? {

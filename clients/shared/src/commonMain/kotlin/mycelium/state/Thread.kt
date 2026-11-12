@@ -106,7 +106,11 @@ private fun durationText(ms: Long): String {
     }
 }
 
-data class ThreadImage(val sha256: String, val name: String, val mediaType: String, val data: String? = null, val sameAs: String? = null)
+data class ThreadImage(val sha256: String, val name: String, val mediaType: String, val data: String? = null, val sameAs: String? = null, val url: String? = null, val host: String? = null, val pageUrl: String? = null) {
+    val key: String get() = url ?: sha256
+}
+
+fun remoteThreadImage(ref: InlineImageRef) = ThreadImage("", ref.alt, "", url = ref.url, host = ref.host, pageUrl = ref.pageUrl)
 
 sealed interface ThreadItem {
     val key: String
@@ -335,10 +339,10 @@ private fun withSameImagesMarked(items: List<ThreadItem>): List<ThreadItem> {
     val firstSeen = mutableMapOf<String, String>()
 
     fun marked(key: String, images: List<ThreadImage>): List<ThreadImage> = images.map { image ->
-        val earlier = firstSeen[image.sha256]
+        val earlier = firstSeen[image.key]
 
         if (earlier == null) {
-            firstSeen[image.sha256] = key
+            firstSeen[image.key] = key
             image
         } else {
             image.copy(sameAs = earlier)

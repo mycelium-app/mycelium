@@ -1188,6 +1188,26 @@ class MyceliumApi(
     suspend fun attachmentBytes(sha256: String): ByteArray =
         call("/attachments/$sha256") { client.get(it) { authorise() } }.body()
 
+    suspend fun remoteImage(id: String, url: String): RemoteImageResult =
+        remoteImageResult(client.get("$root/api/v1/conversations/$id/remote-images") { authorise(); parameter("url", url) })
+
+    suspend fun loadRemoteImage(id: String, url: String): RemoteImageResult =
+        remoteImageResult(client.post("$root/api/v1/conversations/$id/remote-images") { authorise(); json(RemoteImageRequest(url)) })
+
+    private suspend fun remoteImageResult(response: HttpResponse): RemoteImageResult {
+        if (response.status.isSuccess()) {
+            return RemoteImageResult.Bytes(response.body())
+        }
+
+        val refusal = runCatching { response.body<RemoteImageError>() }.getOrNull()
+
+        return when {
+            refusal?.error == "image_needs_click" -> RemoteImageResult.NeedsClick(refusal.host.orEmpty())
+            refusal != null && response.status.value == 422 -> RemoteImageResult.Refused(refusal.message, refusal.error == "image_private_address")
+            else -> response.ensureSuccess().let { RemoteImageResult.Bytes(it.body()) }
+        }
+    }
+
     suspend fun queue(id: String): List<QueuedPrompt> = call("/conversations/$id/queue") { client.get(it) { authorise() } }.body()
 
     suspend fun watches(id: String): List<Watch> = call("/conversations/$id/watches") { client.get(it) { authorise() } }.body()

@@ -109,7 +109,8 @@ fun ImageViewer(images: List<ThreadImage>, start: Int, onClose: () -> Unit) {
     var window by remember { mutableStateOf(Size.Zero) }
     val image = images[index]
     val loaded by rememberLoadedImage(image)
-    val bitmap = loaded.second
+    val bitmap = (loaded as? ImageState.Shown)?.bitmap
+    val touch = LocalTouch.current
     val focus = remember { FocusRequester() }
     val center = Offset(window.width / 2, window.height / 2)
 
@@ -230,7 +231,7 @@ fun ImageViewer(images: List<ThreadImage>, start: Int, onClose: () -> Unit) {
                 contentScale = ContentScale.Fit,
             )
         } else {
-            Label(if (loaded.first) "${image.name} could not be shown" else "Loading ${image.name}", style = Tokens.Type.Meta, color = Color.White)
+            Label(if (loaded is ImageState.Loading) "Loading ${image.name}" else "${image.name} could not be shown", style = Tokens.Type.Meta, color = Color.White)
         }
 
         Row(
@@ -243,10 +244,20 @@ fun ImageViewer(images: List<ThreadImage>, start: Int, onClose: () -> Unit) {
             }
 
             Box(Modifier.weight(1f))
-            Label(zoomPercent(transform.scale), style = Tokens.Type.Meta, color = Color.White)
-            MyButton({ zoomTo(transform.scale / KeyImageZoomStep) }, icon = MyIcon.Minus, description = "Zoom out", variant = ButtonVariant.Outline)
-            MyButton({ zoomTo(transform.scale * KeyImageZoomStep) }, icon = MyIcon.Plus, description = "Zoom in", variant = ButtonVariant.Outline)
+
+            if (!touch) {
+                Label(zoomPercent(transform.scale), style = Tokens.Type.Meta, color = Color.White)
+                MyButton({ zoomTo(transform.scale / KeyImageZoomStep) }, icon = MyIcon.Minus, description = "Zoom out", variant = ButtonVariant.Outline)
+                MyButton({ zoomTo(transform.scale * KeyImageZoomStep) }, icon = MyIcon.Plus, description = "Zoom in", variant = ButtonVariant.Outline)
+            }
+
             MyButton(onClose, icon = MyIcon.Close, description = "Close image", variant = ButtonVariant.Outline)
+        }
+
+        val host = image.host
+
+        if (host != null) {
+            ImageCaption(image.name, host, image.pageUrl ?: image.url, Modifier.align(Alignment.BottomCenter).padding(Tokens.Space.S3))
         }
 
         if (index > 0) {

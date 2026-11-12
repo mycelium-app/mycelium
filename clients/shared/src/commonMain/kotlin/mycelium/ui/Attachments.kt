@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +43,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import mycelium.api.Attachment
+import mycelium.api.RemoteImageResult
+import mycelium.state.RemoteImages
 import mycelium.state.DraftAttachment
 import mycelium.state.PickedFile
 import mycelium.state.ThreadImage
@@ -111,17 +115,56 @@ val LocalImageJump = staticCompositionLocalOf<(String) -> Unit> { {} }
 
 val LocalImageGallery = staticCompositionLocalOf<List<ThreadImage>> { emptyList() }
 
+val LocalRemoteImages = staticCompositionLocalOf<RemoteImages?> { null }
+
+val LocalShownImages = staticCompositionLocalOf<MutableSet<String>?> { null }
+
 fun bitmapOf(bytes: ByteArray): ImageBitmap? = runCatching { bytes.decodeToImageBitmap() }.getOrNull()
 
+sealed interface ImageState {
+    data object Loading : ImageState
+
+    class Shown(val bitmap: ImageBitmap) : ImageState
+
+    data class NeedsClick(val host: String) : ImageState
+
+    data class NotShown(val reason: String, val privateAddress: Boolean = false) : ImageState
+}
+
 @Composable
-fun rememberLoadedImage(image: ThreadImage): State<Pair<Boolean, ImageBitmap?>> {
+fun rememberLoadedImage(image: ThreadImage, pressed: Boolean = false): State<ImageState> {
     val loadBytes = LocalAttachmentBytes.current
+    val remote = LocalRemoteImages.current
+    val shown = LocalShownImages.current
 
-    return produceState<Pair<Boolean, ImageBitmap?>>(false to null, image.sha256) {
-        val bytes = image.data?.let(::decodeBase64) ?: loadBytes(image.sha256)
+    val state = produceState<ImageState>(ImageState.Loading, image.key, pressed, remote) {
+        value = ImageState.Loading
 
-        value = true to bytes?.let(::bitmapOf)
+        val url = image.url
+        val couldNotShow = ImageState.NotShown("${image.name} could not be shown")
+
+        value = when {
+            url == null -> {
+                val bytes = image.data?.let(::decodeBase64) ?: loadBytes(image.sha256)
+
+                bytes?.let(::bitmapOf)?.let { ImageState.Shown(it) } ?: couldNotShow
+            }
+            remote == null -> ImageState.NotShown("Images are not available here.")
+            else -> when (val result = if (pressed) remote.load(url) else remote.fetch(url)) {
+                is RemoteImageResult.Bytes -> bitmapOf(result.bytes)?.let { ImageState.Shown(it) } ?: couldNotShow
+                is RemoteImageResult.NeedsClick -> ImageState.NeedsClick(result.host)
+                is RemoteImageResult.Refused -> ImageState.NotShown(result.message, result.privateAddress)
+            }
+        }
     }
+
+    LaunchedEffect(state.value) {
+        if (image.url != null && state.value is ImageState.Shown) {
+            shown?.add(image.key)
+        }
+    }
+
+    return state
 }
 
 @Composable
@@ -240,7 +283,7 @@ fun ThreadImageView(image: ThreadImage, alt: String, tileHeight: Dp? = null) {
     }
 
     val loaded by rememberLoadedImage(image)
-    val bitmap = loaded.second
+    val bitmap = (loaded as? ImageState.Shown)?.bitmap
     var enlarged by remember { mutableStateOf(false) }
 
     when {
@@ -253,15 +296,23 @@ fun ThreadImageView(image: ThreadImage, alt: String, tileHeight: Dp? = null) {
                 .clickable(onClickLabel = "Open larger", role = Role.Button) { enlarged = true },
             contentScale = ContentScale.Fit,
         )
-        loaded.first -> Label("$alt could not be shown", style = Tokens.Type.Meta, color = colors.textMuted)
+        loaded is ImageState.NotShown -> Label("$alt could not be shown", style = Tokens.Type.Meta, color = colors.textMuted)
         else -> Label("Loading $alt", style = Tokens.Type.Meta, color = colors.textMuted)
     }
 
     if (enlarged && bitmap != null) {
-        val gallery = LocalImageGallery.current.takeIf { list -> list.any { it.sha256 == image.sha256 } } ?: listOf(image)
+        EnlargedImage(image, onClose = { enlarged = false })
+    }
+}
 
-        Dialog(onDismissRequest = { enlarged = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            ImageViewer(gallery, gallery.indexOfFirst { it.sha256 == image.sha256 }, onClose = { enlarged = false })
+@Composable
+fun EnlargedImage(image: ThreadImage, onClose: () -> Unit) {
+    val shown = LocalShownImages.current
+    val gallery = LocalImageGallery.current.filter { it.url == null || shown == null || it.key in shown }.takeIf { list -> list.any { it.key == image.key } } ?: listOf(image)
+
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        DisableSelection {
+            ImageViewer(gallery, gallery.indexOfFirst { it.key == image.key }, onClose = onClose)
         }
     }
 }

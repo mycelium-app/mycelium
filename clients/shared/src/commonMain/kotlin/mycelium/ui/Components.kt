@@ -270,6 +270,7 @@ fun MyButton(
     stateDescription: String? = null,
     maxWidth: Dp? = null,
     iconColour: Color? = null,
+    wraps: Boolean = false,
 ) {
     val colors = MyTheme.colors
     val source = remember { MutableInteractionSource() }
@@ -335,7 +336,7 @@ fun MyButton(
                     text,
                     (if (fill) Modifier.weight(1f) else Modifier).then(if (textMaxWidth != null) Modifier.widthIn(max = textMaxWidth) else Modifier),
                     style = textStyle.themed().copy(color = contentColor),
-                    softWrap = false,
+                    softWrap = wraps,
                     overflow = if (textMaxWidth != null) TextOverflow.Ellipsis else TextOverflow.Visible,
                 )
             }
