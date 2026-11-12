@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.22
+
+- elect.horse, the daily gerrymandering puzzle, is in the Wellness puzzles. Mycelium reads today's result from the game when you open it, with the seats won as the score, or you can enter it by hand.
+- The desktop app zooms out to 50%: Ctrl+- steps through 75, 67, 60 and 50%.
+
 ## v0.34.21
 
 - Switching to another tab and back keeps the Outline panel as it was: the open document, collection and account, the expanded folders, the tree's scroll position and whether the panel is open. On the desktop the document itself keeps its page, scroll and history without reloading.
