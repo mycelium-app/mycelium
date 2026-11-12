@@ -8,6 +8,10 @@ import mycelium.api.InstructionProposal
 import mycelium.api.MessageProposal
 import mycelium.api.StartProposal
 import mycelium.api.StartProposalStep
+import mycelium.api.Event
+import mycelium.api.EventKinds
+import mycelium.api.MyceliumJson
+import mycelium.state.ThreadBuilder
 import mycelium.state.AppState
 import mycelium.state.VoiceAssistantKey
 import mycelium.ui.inboxItems
@@ -98,5 +102,21 @@ class InboxModelTest {
         val items = inboxItems(AppState(conversations = chats, startProposals = mapOf("p1" to startProposal("p1", "i"))))
 
         assertEquals(listOf("i/start-p1"), items.map { it.key })
+    }
+
+    @Test
+    fun aStreamingConversationLeavesTheThreadsOfOtherWaitingConversationsAsTheyWere() {
+        val chats = mapOf("a" to conversation("a", ConversationStatus.Working), "b" to conversation("b", ConversationStatus.Working))
+        val proposals = (1..12).associate { "m$it" to messageProposal("m$it", "a") }
+        val reply = { conversationId: String, seq: Long -> Event(conversationId, seq, EventKinds.AcpUpdate, MyceliumJson.parseToJsonElement("""{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"word $seq "}}}""")) }
+        val waitingOn = (1L..600L).map { reply("a", it) }
+        val builders = mutableMapOf<String, ThreadBuilder>()
+
+        val before = inboxItems(AppState(conversations = chats, events = mapOf("a" to waitingOn, "b" to listOf(reply("b", 1))), messageProposals = proposals), builders)
+        val streamed = AppState(conversations = chats, events = mapOf("a" to waitingOn, "b" to listOf(reply("b", 1), reply("b", 2))), messageProposals = proposals)
+        val after = inboxItems(streamed, builders)
+
+        assertEquals(inboxItems(streamed), after)
+        assertTrue(after.zip(before).all { (now, earlier) -> now.thread === earlier.thread })
     }
 }

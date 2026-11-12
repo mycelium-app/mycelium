@@ -23,7 +23,7 @@ import mycelium.state.Store
 import mycelium.state.VoiceAssistantKey
 import mycelium.state.ThreadItem
 import mycelium.state.ToolStatus
-import mycelium.state.buildThread
+import mycelium.state.ThreadBuilder
 import mycelium.state.myceliumCall
 import mycelium.state.projectName
 
@@ -134,7 +134,9 @@ private fun waitingApprovals(state: AppState): List<WaitingApproval> =
         WaitingApproval("instructions", proposal.id, proposal.conversationId, proposal.createdAt, InboxRequest.Instructions(proposal))
     }
 
-fun inboxItems(state: AppState): List<InboxItem> {
+fun inboxItems(state: AppState, builders: MutableMap<String, ThreadBuilder> = mutableMapOf()): List<InboxItem> {
+    val threadOf = { id: String -> builders.getOrPut(id) { ThreadBuilder() }.build(state.events[id].orEmpty()) }
+
     fun item(conversation: Conversation, key: String, waitingSince: String, context: String?, request: InboxRequest, thread: List<ThreadItem>): InboxItem {
         val project = conversation.projectId?.let { state.projects[it] }
 
@@ -143,14 +145,14 @@ fun inboxItems(state: AppState): List<InboxItem> {
 
     val fromApprovals = waitingApprovals(state).mapNotNull { approval ->
         val conversation = approval.conversationId?.let { state.conversations[it] }?.takeIf { it.archivedAt == null } ?: return@mapNotNull null
-        val thread = buildThread(state.events[conversation.id].orEmpty())
+        val thread = threadOf(conversation.id)
         val context = approval.reason ?: thread.filterIsInstance<ThreadItem.AgentMessage>().lastOrNull()?.text
 
         item(conversation, "${approval.kind}-${approval.id}", approval.createdAt, context, approval.request, thread)
     }
     val approving = fromApprovals.map { it.conversation.id }.toSet()
     val fromConversations = inboxConversations(state).flatMap { conversation ->
-        val thread = buildThread(state.events[conversation.id].orEmpty())
+        val thread = threadOf(conversation.id)
         val pending = pendingRequests(thread, state).filter { it.request is InboxRequest.Approval }
         val waitingSince = conversation.flaggedAt ?: conversation.updatedAt
 
@@ -188,6 +190,8 @@ fun rememberInbox(store: Store, state: AppState): List<InboxItem> {
         }
     }
 
+    val builders = remember { mutableMapOf<String, ThreadBuilder>() }
+
     LaunchedEffect(store, state.connected) {
         attempt { store.refreshStartProposals() }
         attempt { store.refreshMessageProposals() }
@@ -197,7 +201,7 @@ fun rememberInbox(store: Store, state: AppState): List<InboxItem> {
         attempt { store.refreshInstructionProposals() }
     }
 
-    return remember(state.conversations, state.events, state.messageProposals, state.startProposals, state.apiAccessRequests, state.sshAccessRequests, state.artifactAccessRequests, state.instructionProposals, state.workflows, state.projects, state.assistants) { inboxItems(state) }
+    return remember(state.conversations, state.events, state.messageProposals, state.startProposals, state.apiAccessRequests, state.sshAccessRequests, state.artifactAccessRequests, state.instructionProposals, state.workflows, state.projects, state.assistants) { inboxItems(state, builders) }
 }
 
 data class TokenSample(val at: Instant, val total: Long, val conversations: Map<String, Long>)
