@@ -238,7 +238,7 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
     }
 
     SideEffect {
-        store.viewing = (route as? Route.Chat)?.id ?: (route as? Route.Assistant)?.let { state.assistants[it.id]?.conversationId }
+        store.viewing = viewedConversation(route, state)
         store.wellness.presence = activityTargetOf(route, state)
     }
     val colors = MyTheme.colors
@@ -400,7 +400,7 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
     }
 
     SideEffect {
-        store.viewing = (route as? Route.Chat)?.id ?: (route as? Route.Assistant)?.let { state.assistants[it.id]?.conversationId }
+        store.viewing = viewedConversation(route, state)
         store.wellness.presence = activityTargetOf(route, state)
     }
     var drawerOpen by remember { mutableStateOf(false) }
@@ -868,7 +868,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         }
 
         if (usageOpen) {
-            val current = (route as? Route.Chat)?.let { state.conversations[it.id] }
+            val current = viewedConversation(route, state)?.let { state.conversations[it] }
 
             UsageCard(chatAccountFirst(agentAccounts(state.nodes.values), current?.agent, current?.let { state.nodes[it.nodeId]?.name }, current?.account), Modifier.padding(Tokens.Space.S1_5), providerUsage, current?.providerId, onOpenHistory = { onRoute(Route.UsageHistory) }, onUseReset = { account, key -> useBankedReset(store, account, key) })
         }
@@ -1326,3 +1326,6 @@ private fun rememberGroupFilter(platform: Platform, state: AppState, hours: Hour
 
     return GroupFilterChoice(if (known) saved else AllGroups) { chosen -> saved = chosen; platform.savePreference(GroupFilterPreference, chosen) }
 }
+
+private fun viewedConversation(route: Route, state: AppState): String? =
+    (route as? Route.Chat)?.id ?: (route as? Route.Assistant)?.let { state.assistants[it.id]?.conversationId }

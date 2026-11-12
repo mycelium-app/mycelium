@@ -82,6 +82,8 @@ private const val UsageCardNodes = """[{"id":"n1","name":"laptop","hostname":"la
 private const val UsageCardConversations = """[{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Open chat","status":"done","account":"work@example.com",
 "acp_session_id":"s","mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}]"""
 
+private const val UsageCardAssistants = """[{"id":"as1","name":"Archivist","group_id":null,"preferences":{"models":[],"nodes":[],"chat_first":true},"conversation_id":"c1","state":"idle","created_at":"2026-10-22T10:00:00Z"}]"""
+
 class UsageCardTest {
     @get:Rule
     val rule = createComposeRule()
@@ -89,7 +91,7 @@ class UsageCardTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private fun showShell(openRouter: Boolean = false, failAfterFirst: Boolean = false): AtomicInteger {
+    private fun showShell(openRouter: Boolean = false, failAfterFirst: Boolean = false, initialRoute: Route = Route.Chat("c1")): AtomicInteger {
         val usageRequests = AtomicInteger()
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
@@ -102,6 +104,7 @@ class UsageCardTest {
                 path.endsWith("/model-provider-usage") -> if (openRouter) """[{"provider_id":"p1","name":"Work key","read_at":"2099-01-01T10:00:00Z","spend":{"total":12.345,"daily":0.125,"weekly":2.0,"monthly":8.5,"limit_remaining":87.655}}]""" else "[]"
                 path.endsWith("/nodes") -> if (openRouter) "[]" else UsageCardNodes
                 path.endsWith("/conversations") -> UsageCardConversations
+                path.endsWith("/assistants") -> UsageCardAssistants
                 else -> "{}"
             }
 
@@ -109,7 +112,7 @@ class UsageCardTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
-        rule.setContent { MyceliumTheme(true) { Shell(store, UsageCardPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Chat("c1")) } }
+        rule.setContent { MyceliumTheme(true) { Shell(store, UsageCardPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = initialRoute) } }
 
         return usageRequests
     }
@@ -375,6 +378,15 @@ class UsageCardTest {
         rule.onNodeWithContentDescription("Usage").performClick()
 
         rule.onNodeWithText("This chat").assertDoesNotExist()
+    }
+
+    @Test
+    fun anAssistantsChatShowsItsAccountAsThisChat() {
+        showShell(initialRoute = Route.Assistant("as1"))
+
+        rule.onNodeWithContentDescription("Usage").performClick()
+
+        rule.onNodeWithText("This chat").assertIsDisplayed()
     }
 }
 
