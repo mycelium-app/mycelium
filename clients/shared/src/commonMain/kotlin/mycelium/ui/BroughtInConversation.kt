@@ -98,7 +98,7 @@ fun BroughtInConversation(actions: BroughtInActions, conversationId: String, tit
             }
 
             for (request in requests) {
-                RequestCard(store, state, conversationId, request)
+                RequestCard(store, state, conversationId, request, actions.onOpen)
             }
         }
 

@@ -464,8 +464,8 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
              voice_mode = coalesce($16, voice_mode),
              snoozed_until = case when $13 then null else coalesce($14, snoozed_until) end,
              managed_by = case when $15 then null else managed_by end,
-             flagged_at = case when $15 then null else flagged_at end,
-             flag_reason = case when $15 then null else flag_reason end,
+             flagged_at = case when $15 or $17 then null else flagged_at end,
+             flag_reason = case when $15 or $17 then null else flag_reason end,
              pull_request_label = case when $10 or $11 is not null then null else pull_request_label end,
              pull_request_url = case when $10 or $11 is not null then null else pull_request_url end,
              pull_request_state = case when $10 or $11 is not null then null else pull_request_state end,
@@ -490,6 +490,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .bind(request.snoozed_until)
     .bind(request.take_over == Some(true))
     .bind(request.voice_mode)
+    .bind(request.clear_flag == Some(true))
     .fetch_one(&mut *tx)
     .await?;
     let teach_change = match request.teach_me {

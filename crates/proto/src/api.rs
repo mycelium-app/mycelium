@@ -321,6 +321,8 @@ pub struct PatchConversationRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub take_over: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clear_flag: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub use_default_account: Option<bool>,

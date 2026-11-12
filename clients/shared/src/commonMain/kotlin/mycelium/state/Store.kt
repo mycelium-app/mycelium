@@ -1448,6 +1448,13 @@ class Store(
         }
     }
 
+    fun clearFlag(conversationId: String) {
+        act {
+            val updated = api.patchConversation(conversationId, PatchConversationRequest(clearFlag = true))
+            mutableState.update { it.copy(conversations = it.conversations + (updated.id to updated)) }
+        }
+    }
+
     fun setConversationProject(conversation: Conversation, projectId: String?) {
         mutableState.update { it.copy(conversations = it.conversations + (conversation.id to conversation.copy(projectId = projectId))) }
 

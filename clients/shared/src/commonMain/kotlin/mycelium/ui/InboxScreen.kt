@@ -266,6 +266,15 @@ private fun InboxItemRow(store: Store, state: AppState, item: InboxItem, focused
     val recent = item.thread.filter { it is ThreadItem.UserMessage || it is ThreadItem.AgentMessage }.takeLast(RecentMessages)
 
     val outline = if (focused) Modifier.border(FocusOutline, colors.accent, BlockShape) else Modifier
+    val flagged = item.request is InboxRequest.Flag
+
+    fun openConversation() {
+        if (flagged) {
+            store.clearFlag(conversation.id)
+        }
+
+        onOpenConversation(conversation.id)
+    }
 
     Column(Modifier.fillMaxWidth().then(outline).semantics { selected = focused }.padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
@@ -275,16 +284,18 @@ private fun InboxItemRow(store: Store, state: AppState, item: InboxItem, focused
                 ProjectIcon(item.project)
             }
 
-            Row(
-                Modifier.weight(1f).pressable({ onOpenConversation(conversation.id) }, description = "Open ${item.name}", shape = ControlShape),
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (item.projectName != null) {
-                    Label(item.projectName, style = Tokens.Type.UiStrong, maxLines = 1)
-                }
+            Row(Modifier.weight(1f)) {
+                Row(
+                    Modifier.weight(1f, fill = false).pressable(::openConversation, description = "Open ${item.name}", shape = ControlShape),
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (item.projectName != null) {
+                        Label(item.projectName, Modifier.weight(1f, fill = false), Tokens.Type.UiStrong, maxLines = 1, decoration = LabelDecoration.Underline)
+                    }
 
-                Label(item.name, Modifier.weight(1f), maxLines = 1)
+                    Label(item.name, Modifier.weight(1f, fill = false), maxLines = 1, decoration = LabelDecoration.Underline)
+                }
             }
 
             Label(relativeTime(item.waitingSince), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
@@ -305,12 +316,12 @@ private fun InboxItemRow(store: Store, state: AppState, item: InboxItem, focused
             }
         }
 
-        RequestCard(store, state, conversation.id, item.request)
+        RequestCard(store, state, conversation.id, item.request, onOpenConversation)
     }
 }
 
 @Composable
-fun RequestCard(store: Store, state: AppState, conversationId: String, request: InboxRequest) {
+fun RequestCard(store: Store, state: AppState, conversationId: String, request: InboxRequest, onOpenConversation: (String) -> Unit) {
     when (request) {
         is InboxRequest.Approval -> ToolApprovalCard(request.permission, onAnswer = { requestId, option -> store.act { store.api.answerPermission(conversationId, requestId, option) } })
         is InboxRequest.Mycelium -> MyceliumCard(request.call, request.parsed)
@@ -323,13 +334,18 @@ fun RequestCard(store: Store, state: AppState, conversationId: String, request: 
                 MyceliumWorkflowCard(workflow)
             }
         }
-        is InboxRequest.Flag -> FlagCard(request.text, onReply = { store.send(conversationId, it) })
+        is InboxRequest.Flag -> FlagCard(
+            request.text,
+            onReply = { store.send(conversationId, it) },
+            onOpen = { store.clearFlag(conversationId); onOpenConversation(conversationId) },
+            onDismiss = { store.clearFlag(conversationId) },
+        )
         is InboxRequest.ActionItem -> ActionItemCard(request, onDone = { store.completeActionItem(state.conversations.getValue(conversationId), request.item.id) })
     }
 }
 
 @Composable
-private fun FlagCard(text: String, onReply: (String) -> Unit) {
+private fun FlagCard(text: String, onReply: (String) -> Unit, onOpen: () -> Unit, onDismiss: () -> Unit) {
     val colors = MyTheme.colors
     var reply by remember { mutableStateOf("") }
 
@@ -353,8 +369,10 @@ private fun FlagCard(text: String, onReply: (String) -> Unit) {
 
             TextInput(reply, { reply = it }, "Reply", Modifier.fillMaxWidth(), placeholder = "Reply to this chat", onSubmit = ::send)
 
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                MyButton(::send, text = "Send reply", variant = ButtonVariant.Outline)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+                MyButton(::send, text = "Send reply", variant = ButtonVariant.Primary)
+                MyButton(onOpen, text = "Open conversation", variant = ButtonVariant.Outline)
+                MyButton(onDismiss, text = "Dismiss", variant = ButtonVariant.Outline)
             }
         }
     }

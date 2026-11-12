@@ -45,7 +45,7 @@ class InboxMarkdownCardsTest {
         rule.setContent {
             MyceliumTheme(true) {
                 CompositionLocalProvider(LocalStartProposals provides starts, LocalPlatform provides platform, LocalArtifactAccessControls provides ArtifactAccessControls(store, state)) {
-                    RequestCard(store, state, "c1", InboxRequest.Mycelium(call, parsed))
+                    RequestCard(store, state, "c1", InboxRequest.Mycelium(call, parsed), {})
                 }
             }
         }

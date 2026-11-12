@@ -1159,6 +1159,23 @@ async fn renaming_and_archiving_a_conversation_are_streamed() {
 }
 
 #[tokio::test]
+async fn clearing_a_flag_is_streamed_and_keeps_the_conversation_otherwise_as_it_was() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    sqlx::query("update conversations set flagged_at = now(), flag_reason = 'Choose the export format' where id = $1").bind(id).execute(&server.pool).await.unwrap();
+    let mut stream = server.user.stream().await;
+
+    let (status, cleared) = server.user.json(server.user.patch(&format!("/api/v1/conversations/{id}")).json(&json!({"clear_flag": true}))).await;
+
+    assert_eq!(status, 200, "{cleared}");
+    assert_eq!((cleared.get("flagged_at"), cleared.get("flag_reason")), (None, None));
+    let streamed = conversation_where(&mut stream, id, |conversation| conversation.flagged_at.is_none()).await;
+    assert_eq!(streamed.flag_reason, None);
+    assert_eq!(server.conversation(id).await.get("flagged_at"), None);
+}
+
+#[tokio::test]
 async fn deleting_an_archived_conversation_is_streamed_as_its_removal() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

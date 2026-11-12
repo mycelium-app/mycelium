@@ -78,6 +78,7 @@ data class PatchConversationRequest(
     @SerialName("snoozed_until") val snoozedUntil: String? = null,
     @SerialName("clear_snooze") val clearSnooze: Boolean? = null,
     @SerialName("take_over") val takeOver: Boolean? = null,
+    @SerialName("clear_flag") val clearFlag: Boolean? = null,
     val account: String? = null,
     @SerialName("use_default_account") val useDefaultAccount: Boolean? = null,
     @SerialName("provider_id") val providerId: String? = null,
