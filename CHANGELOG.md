@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.23
+
+- A message you send arrives once, even after a double tap, a retry or a reconnect, and a double tap on Start makes one conversation or chat. Voice sends are covered too.
+
 ## v0.34.22
 
 - elect.horse, the daily gerrymandering puzzle, is in the Wellness puzzles. Mycelium reads today's result from the game when you open it, with the seats won as the score, or you can enter it by hand.
