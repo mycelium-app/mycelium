@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Mutex;
 use uuid::Uuid;
 
-pub const PUZZLES: [&str; 5] = ["wordle", "connections", "daily-orbs", "catfishing", "enclose-horse"];
+pub const PUZZLES: [&str; 6] = ["wordle", "connections", "daily-orbs", "catfishing", "enclose-horse", "elect-horse"];
 const PUZZLE_STATS_DAYS: i64 = 30;
 const HEARTBEAT_CAP_SECONDS: i32 = 90;
 const HEARTBEAT_FUTURE_MINUTES: i64 = 5;
@@ -442,7 +442,7 @@ pub async fn note_break(State(state): State<AppState>, user: AuthUser, Path(id):
 
 fn require_puzzle(puzzle: &str) -> ApiResult<()> {
     if !PUZZLES.contains(&puzzle) {
-        return Err(ApiError::new(StatusCode::NOT_FOUND, "puzzle_not_found", "That puzzle is not on the list. Choose wordle, connections, daily-orbs, catfishing or enclose-horse."));
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "puzzle_not_found", "That puzzle is not on the list. Choose wordle, connections, daily-orbs, catfishing, enclose-horse or elect-horse."));
     }
 
     Ok(())

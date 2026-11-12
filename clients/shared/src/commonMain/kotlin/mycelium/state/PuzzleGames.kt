@@ -196,6 +196,7 @@ fun Puzzle.recordHint(): String = when (measure) {
     "mistakes" -> "Enter 0 to 4. Four mistakes ends the game."
     "orbs" -> "Six or more solves the day."
     "correct" -> "Out of $CatfishingQuestionCount."
+    "seats" -> "The seats your party won."
     else -> "The score the game gave you."
 }
 
@@ -204,6 +205,7 @@ private fun Puzzle.recordScoreError(): String = when (measure) {
     "mistakes" -> "Enter the number of mistakes, from 0 to 4"
     "orbs" -> "Enter the number of orbs you collected"
     "correct" -> "Enter how many you got right, from 0 to $CatfishingQuestionCount"
+    "seats" -> "Enter the number of seats your party won"
     else -> "Enter the points the game gave you"
 }
 

@@ -97,8 +97,8 @@ class WellnessScreenTest {
     fun theOverviewCountsThePuzzlesPlayedToday() {
         show()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("3 of 5").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("3 of 6").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Puzzles today").assertIsDisplayed()
-        rule.onNodeWithText("Connections, Daily Orbs left").assertIsDisplayed()
+        rule.onNodeWithText("Connections, Daily Orbs, elect.horse left").assertIsDisplayed()
     }
 }

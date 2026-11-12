@@ -297,3 +297,14 @@ async fn a_result_entered_by_hand_keeps_its_score_and_time_and_a_negative_one_is
     let (status, body) = server.user.json(server.user.put("/api/v1/wellness/puzzles/daily-orbs/today").json(&json!({"score": 5, "source": "native"}))).await;
     assert_eq!((status, body["error"].clone()), (400, json!("puzzle_source_invalid")));
 }
+
+#[tokio::test]
+async fn elect_horse_is_on_the_list_and_keeps_a_result_entered_by_hand() {
+    let server = Server::start().await;
+
+    let (status, _) = server.user.json(server.user.put("/api/v1/wellness/puzzles/elect-horse/today").json(&json!({"solved": true, "score": 5, "seconds": 135}))).await;
+    assert_eq!(status, 204);
+
+    let elect = summary(&server, "elect-horse").await;
+    assert_eq!((elect["today"]["solved"].clone(), elect["today"]["score"].clone(), elect["today"]["seconds"].clone()), (json!(true), json!(5), json!(135)));
+}

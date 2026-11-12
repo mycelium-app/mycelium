@@ -8,6 +8,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlin.time.Instant
 import mycelium.api.PuzzleResult
 
@@ -19,6 +20,7 @@ val Puzzles = listOf(
     Puzzle("daily-orbs", "Daily Orbs", "https://dailyorbs.com", "dailyorbs.com", "/", "daily-orbs-\\d{4}-\\d{2}-\\d{2}$", "orbs"),
     Puzzle("catfishing", "Catfishing", "https://catfishing.net", "catfishing.net", "/", "^game-\\d+$", "correct"),
     Puzzle("enclose-horse", "enclose.horse", "https://enclose.horse", "enclose.horse", "/", "^enclose_submissions$", "points"),
+    Puzzle("elect-horse", "elect.horse", "https://elect.horse", "elect.horse", "/", "^elect_submissions$", "seats"),
 )
 
 fun puzzleOf(id: String): Puzzle? = Puzzles.firstOrNull { it.id == id }
@@ -71,6 +73,7 @@ fun parseGameState(puzzle: Puzzle, storageJson: String, today: String): GameRead
         "wordle", "connections" -> values.filterValues { it?.get("states") is JsonArray }
         "daily-orbs" -> values.filterValues { it?.get("puzzles") is JsonArray }
         "catfishing" -> values.filterValues { it?.get("s")?.jsonPrimitive?.intOrNull != null }
+        "elect-horse" -> values.filterValues { it != null }
         else -> emptyMap()
     }
 
@@ -82,6 +85,7 @@ fun parseGameState(puzzle: Puzzle, storageJson: String, today: String): GameRead
         "wordle" -> recognisedValues.values.firstNotNullOfOrNull { nytResult(it, today, ::wordleResult) }
         "connections" -> recognisedValues.values.firstNotNullOfOrNull { nytResult(it, today, ::connectionsResult) }
         "daily-orbs" -> recognisedValues.entries.firstOrNull { it.key.endsWith("daily-orbs-$today") }?.value?.let(::orbsResult)
+        "elect-horse" -> recognisedValues.values.firstNotNullOfOrNull { it?.get(today) as? JsonObject }?.let(::electResult)
         else -> recognisedValues.entries.firstOrNull { it.key == "game-${catfishingDay(today)}" }?.value?.let(::catfishingResult)
     }
 
@@ -157,6 +161,18 @@ private fun catfishingResult(game: JsonObject): PuzzleResult? {
     return if (completed && corrects != null) PuzzleResult(score = corrects) else null
 }
 
+private fun electResult(day: JsonObject): PuzzleResult? {
+    val solved = when (day["outcome"]?.jsonPrimitive?.contentOrNull) {
+        "won" -> true
+        "lost" -> false
+        "draw" -> null
+        else -> return null
+    }
+    val seconds = day["durationMs"]?.jsonPrimitive?.longOrNull?.let { (it / 1000).toInt() }
+
+    return PuzzleResult(solved = solved, score = day["seats"]?.jsonPrimitive?.intOrNull, seconds = seconds)
+}
+
 private fun plural(count: Int, word: String, many: String = "${word}s"): String = "$count ${if (count == 1) word else many}"
 
 fun Puzzle.scoreLabel(result: PuzzleResult): String? {
@@ -167,6 +183,7 @@ fun Puzzle.scoreLabel(result: PuzzleResult): String? {
         "mistakes" -> if (score == null) null else if (score == 0) "no mistakes" else plural(score, "mistake")
         "orbs" -> score?.let { plural(it, "orb") }
         "correct" -> score?.let { "$it of $CatfishingQuestions" }
+        "seats" -> score?.let { plural(it, "seat") }
         else -> score?.let { plural(it, "point") }
     }
 }

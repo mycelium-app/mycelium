@@ -39,6 +39,7 @@ class PuzzlesTest {
     private val orbs = puzzleOf("daily-orbs")!!
     private val catfishing = puzzleOf("catfishing")!!
     private val enclose = puzzleOf("enclose-horse")!!
+    private val elect = puzzleOf("elect-horse")!!
     private val today = "2026-10-27"
 
     private fun storage(key: String, value: String): String = """{"$key": ${JsonPrimitive(value)}}"""
@@ -156,6 +157,9 @@ class PuzzlesTest {
         assertEquals("Solved, 6 orbs", puzzleStatus(orbs, PuzzleResult(solved = true, score = 6)))
         assertEquals("Not solved, 2 orbs", puzzleStatus(orbs, PuzzleResult(solved = false, score = 2)))
         assertEquals("Played, 87 points", puzzleStatus(enclose, PuzzleResult(score = 87)))
+        assertEquals("Solved, 5 seats", puzzleStatus(elect, PuzzleResult(solved = true, score = 5)))
+        assertEquals("Not solved, 1 seat", puzzleStatus(elect, PuzzleResult(solved = false, score = 1)))
+        assertEquals("Played, 3 seats", puzzleStatus(elect, PuzzleResult(score = 3)))
     }
 
     @Test
@@ -169,6 +173,21 @@ class PuzzlesTest {
         assertEquals(read(null), parseGameState(enclose, """{"enclose_submissions": $oldSubmissions, "__daily_levels__": $levels}""", today))
         assertEquals(GameReading.NoStorage, parseGameState(enclose, """{"__daily_levels__": $levels}""", today))
         assertEquals(GameReading.Unrecognised, parseGameState(enclose, """{"enclose_submissions": $notAnObject, "__daily_levels__": $levels}""", today))
+    }
+
+    @Test
+    fun electHorseIsReadFromTodaysNormalDailyInTheSubmissions() {
+        val won = JsonPrimitive("""{"2026-10-27":{"date":"2026-10-27","mode":"normal","seats":5,"outcome":"won","durationMs":134500},"2026-10-27#expert":{"date":"2026-10-27","mode":"expert","seats":2,"outcome":"lost","durationMs":90000},"2026-10-26":{"date":"2026-10-26","seats":4,"outcome":"won","durationMs":60000}}""")
+        val lost = JsonPrimitive("""{"2026-10-27":{"date":"2026-10-27","seats":1,"outcome":"lost","durationMs":61000}}""")
+        val draw = JsonPrimitive("""{"2026-10-27":{"date":"2026-10-27","seats":3,"outcome":"draw"}}""")
+        val yesterdayOnly = JsonPrimitive("""{"2026-10-26":{"date":"2026-10-26","seats":4,"outcome":"won","durationMs":60000}}""")
+
+        assertEquals(read(PuzzleResult(solved = true, score = 5, seconds = 134)), parseGameState(elect, """{"elect_submissions": $won}""", today))
+        assertEquals(read(PuzzleResult(solved = false, score = 1, seconds = 61)), parseGameState(elect, """{"elect_submissions": $lost}""", today))
+        assertEquals(read(PuzzleResult(score = 3)), parseGameState(elect, """{"elect_submissions": $draw}""", today))
+        assertEquals(read(null), parseGameState(elect, """{"elect_submissions": $yesterdayOnly}""", today))
+        assertEquals(GameReading.Unrecognised, parseGameState(elect, """{"elect_submissions": ${JsonPrimitive("[]")}}""", today))
+        assertTrue(elect.isOnThisSite("https://elect.horse/"))
     }
 
     @Test
@@ -244,6 +263,7 @@ class PuzzlesTest {
         assertEquals(RecordInput.Valid(PuzzleResult(solved = false, score = 5)), orbs.recordInput("5", ""))
         assertEquals(RecordInput.Valid(PuzzleResult(score = 7)), catfishing.recordInput("7", ""))
         assertEquals(RecordInput.Valid(PuzzleResult(score = 87)), enclose.recordInput("87", ""))
+        assertEquals(RecordInput.Valid(PuzzleResult(score = 5, seconds = 135)), elect.recordInput("5", "2:15"))
     }
 
     @Test
@@ -254,13 +274,14 @@ class PuzzlesTest {
         assertEquals(RecordInput.Invalid("Enter how many you got right, from 0 to 10", null), catfishing.recordInput("11", ""))
         assertEquals(RecordInput.Invalid(null, "Enter the time like 4:30"), orbs.recordInput("6", "soon"))
         assertEquals(RecordInput.Invalid("Enter the points the game gave you", "Enter the time like 4:30"), enclose.recordInput("-1", "x"))
+        assertEquals(RecordInput.Invalid("Enter the number of seats your party won", null), elect.recordInput("", ""))
     }
 
     @Test
     fun theOverviewCountsPuzzlesPlayedTodayAndNamesTheOnesLeft() {
         val summaries = Puzzles.map { PuzzleSummary(it.id, today, if (it.id == "daily-orbs") null else PuzzleResult(solved = true)) }
 
-        assertEquals(4 to listOf("Daily Orbs"), puzzlesToday(summaries))
+        assertEquals(Puzzles.size - 1 to listOf("Daily Orbs"), puzzlesToday(summaries))
         assertEquals(0 to Puzzles.map { it.name }, puzzlesToday(emptyList()))
     }
 
