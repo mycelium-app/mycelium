@@ -3,6 +3,7 @@ package mycelium.state
 import mycelium.api.Conversation
 import mycelium.api.ExistingWorktree
 import mycelium.api.Project
+import mycelium.api.ProjectCheckout
 
 fun worktreeFolder(projectPath: String, branch: String): String {
     val name = projectPath.trimEnd('/').substringAfterLast('/')
@@ -16,6 +17,9 @@ fun existingWorktreeFolder(worktree: ExistingWorktree): String = worktree.path.t
 
 fun checkedOutBranch(project: Project, conversations: Collection<Conversation>): String? =
     conversations.filter { it.cwd.trimEnd('/') == project.path.trimEnd('/') && !it.branch.isNullOrBlank() }.maxByOrNull { it.updatedAt }?.branch
+
+fun checkedOutBranch(checkout: ProjectCheckout, conversations: Collection<Conversation>): String? =
+    conversations.filter { it.nodeId == checkout.nodeId && it.cwd.trimEnd('/') == checkout.path.trimEnd('/') && !it.branch.isNullOrBlank() }.maxByOrNull { it.updatedAt }?.branch
 
 fun worktreeHint(project: Project, branch: String, conversations: Collection<Conversation>): String {
     val from = checkedOutBranch(project, conversations)?.let { ", from $it" }.orEmpty()

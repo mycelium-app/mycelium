@@ -136,10 +136,10 @@ class ProjectsTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithText("immich").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("acme-backups").assertExists()
         rule.onNodeWithText("acme-org").assertExists()
-        rule.onNodeWithContentDescription("Set up on laptop").assertExists()
+        rule.onNodeWithContentDescription("Checkout on laptop").assertExists()
         rule.onNodeWithText("laptop").assertExists()
         rule.onNodeWithText("homelab").assertExists()
-        rule.onNodeWithContentDescription("Set up on atlas").assertExists()
+        rule.onNodeWithContentDescription("Checkout on atlas").assertExists()
     }
 
     @Test
@@ -150,7 +150,7 @@ class ProjectsTest {
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } }
 
         rule.onNodeWithText("immich").assertExists()
-        rule.onNodeWithContentDescription("Set up on laptop").assertExists()
+        rule.onNodeWithContentDescription("Checkout on laptop").assertExists()
     }
 
     @Test

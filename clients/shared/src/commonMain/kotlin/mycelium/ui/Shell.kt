@@ -173,6 +173,8 @@ sealed interface Route {
 
     data object Projects : Route
 
+    data class Project(val id: String) : Route
+
     data object Issues : Route
 
     data object Archive : Route
@@ -617,7 +619,8 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
                     Route.Nodes -> NodesScreen(store, state, platform, onOpenNode = { onRoute(Route.Node(it)) })
                     is Route.Node -> NodePage(store, state, route.id, platform, onBack = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
                     Route.Wellness -> WellnessScreen(store, platform, onOpenAssistant = { onRoute(Route.Assistant(it)) }, onOpenConversation = { onRoute(Route.Chat(it)) })
-                    Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) })
+                    Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) }, onOpenProject = { onRoute(Route.Project(it)) })
+                    is Route.Project -> ProjectPage(store, state, route.id, onBack = { onRoute(Route.Projects) }, onNewConversation = { onRoute(Route.NewIn(it)) })
                     Route.Issues -> IssuesScreen(store, state, onOpened = { onRoute(Route.Chat(it.id)) })
                     Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
                     Route.Apps -> AppsScreen(store, state, platform, onOpenApp = { onRoute(Route.App(it)) }, onViewApp = { onRoute(Route.App(it, viewing = true)) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onNewConversation = { onRoute(Route.New) })
@@ -891,7 +894,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
 
                 if (mode == WorkspacesMode) {
                     MyButton({ onRoute(Route.Nodes) }, text = "Nodes".takeIf { labelled }, icon = MyIcon.Server, description = "Nodes", muted = true, selected = route == Route.Nodes || route is Route.Node)
-                    MyButton({ onRoute(Route.Projects) }, text = "Projects".takeIf { labelled }, icon = MyIcon.Folder, description = "Projects", muted = true, selected = route == Route.Projects)
+                    MyButton({ onRoute(Route.Projects) }, text = "Projects".takeIf { labelled }, icon = MyIcon.Folder, description = "Projects", muted = true, selected = route == Route.Projects || route is Route.Project)
                     MyButton({ onRoute(Route.Issues) }, text = "Issues".takeIf { labelled }, icon = MyIcon.Issue, description = "Issues", muted = true, selected = route == Route.Issues)
                 }
 

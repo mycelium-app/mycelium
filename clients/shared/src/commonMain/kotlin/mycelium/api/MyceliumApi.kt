@@ -660,6 +660,9 @@ class MyceliumApi(
     suspend fun setProjectIcon(projectId: String, icon: String?): Project =
         call("/projects/$projectId") { client.patch(it) { authorise(); json(PatchProjectRequest(icon = icon, clearIcon = icon == null)) } }.body()
 
+    suspend fun setProjectTestCommand(projectId: String, testCommand: String): Project =
+        call("/projects/$projectId") { client.patch(it) { authorise(); json(PatchProjectRequest(testCommand = testCommand)) } }.body()
+
     suspend fun uploadProjectAvatar(projectId: String, mediaType: String, bytes: ByteArray): Project =
         call("/projects/$projectId/avatar") {
             client.post(it) {
@@ -864,12 +867,17 @@ class MyceliumApi(
     suspend fun createProject(request: CreateProjectRequest): Project =
         call("/projects") { client.post(it) { authorise(); json(request) } }.body()
 
-    suspend fun checkoutProject(id: String, nodeId: String): Project =
-        call("/projects/$id/checkout") { client.post(it) { authorise(); json(CheckoutProjectRequest(nodeId)) } }.body()
+    suspend fun checkoutProject(id: String, nodeId: String, path: String? = null, newFolder: String? = null): Project =
+        call("/projects/$id/checkout") { client.post(it) { authorise(); json(CheckoutProjectRequest(nodeId, path, newFolder)) } }.body()
+
+    suspend fun removeCheckout(id: String, nodeId: String) {
+        call("/projects/$id/checkouts/$nodeId") { client.delete(it) { authorise() } }
+    }
 
     suspend fun worktrees(): List<Worktree> = call("/worktrees") { client.get(it) { authorise() } }.body()
 
-    suspend fun existingWorktrees(projectId: String): List<ExistingWorktree> = call("/projects/$projectId/worktrees") { client.get(it) { authorise() } }.body()
+    suspend fun existingWorktrees(projectId: String, nodeId: String? = null): List<ExistingWorktree> =
+        call("/projects/$projectId/worktrees") { client.get(it) { authorise(); nodeId?.let { node -> parameter("node_id", node) } } }.body()
 
     suspend fun artifacts(): List<Artifact> = call("/artifacts") { client.get(it) { authorise() } }.body()
 

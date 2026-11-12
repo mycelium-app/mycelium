@@ -44,7 +44,7 @@ private fun forgeName(forge: Forge): String =
     if (forge.kind == "github") "GitHub" else forge.baseUrl.substringAfter("://").trimEnd('/')
 
 private fun newConversationProject(projects: List<Project>, state: AppState): Project =
-    projects.firstOrNull { state.nodes[it.nodeId]?.online == true } ?: projects.first()
+    projects.firstOrNull { held -> held.places.any { state.nodes[it.nodeId]?.online == true } } ?: projects.first()
 
 private const val NotSetUpAnywhere = "none"
 
@@ -65,7 +65,7 @@ private val ProjectActionsExtra = Tokens.Size.IconSm + Tokens.Space.S1_5 * 5 + T
 private val CompactActionsExtra = Tokens.Size.IconSm + Tokens.Space.S1_5 * 5 + Tokens.Space.S1 * 2
 
 @Composable
-fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) -> Unit) {
+fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) -> Unit, onOpenProject: (String) -> Unit = {}) {
     val colors = MyTheme.colors
     var filtered by remember { mutableStateOf<Repositories?>(null) }
     var query by remember { mutableStateOf("") }
@@ -117,12 +117,12 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
     val visibleProjects = state.projects.values.filter { inGroup(it.groupId, groupFilter) }
     val listing = if (filtering) filtered ?: state.repositoryListing else state.repositoryListing
     val connected = forges.orEmpty()
-    val folders = if (forgeId == null && organisation == null) registeredFolders(visibleProjects).filter { it.name.contains(query.trim(), ignoreCase = true) && (nodeFilter == null || it.nodeId == nodeFilter) } else emptyList()
+    val folders = if (forgeId == null && organisation == null) registeredFolders(visibleProjects).filter { it.name.contains(query.trim(), ignoreCase = true) && (nodeFilter == null || it.places.any { place -> place.nodeId == nodeFilter }) } else emptyList()
     val organisations = listing?.organisations.orEmpty().filter { forgeId == null || it.forgeId == forgeId }.map { it.name }.distinct()
     val setUpListed = setUpRepositories(visibleProjects, listing?.repositories.orEmpty()).filter { repository ->
         val matchesSearch = (forgeId == null || repository.forgeId == forgeId) && (organisation == null || repository.owner == organisation) && repository.fullName.contains(query.trim(), ignoreCase = true)
 
-        matchesSearch && (nodeFilter == null || projectsOfRepository(visibleProjects, repository).any { it.nodeId == nodeFilter })
+        matchesSearch && (nodeFilter == null || projectsOfRepository(visibleProjects, repository).any { held -> held.places.any { it.nodeId == nodeFilter } })
     }
     val notSetUp = listing?.repositories.orEmpty().filter { repository ->
         (nodeFilter == null || nodeFilter == NotSetUpAnywhere) && projectsOfRepository(visibleProjects, repository).isEmpty()
@@ -270,7 +270,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                     listOf(
                         Col("Repository", 80.dp, weight = 1f),
                         Col("Forge", 72.dp, max = 160.dp, priority = 1),
-                        Col("Set up on", 120.dp, max = 280.dp, overflow = Overflow.Wrap, priority = 1),
+                        Col("Checkouts", 120.dp, max = 280.dp, overflow = Overflow.Wrap, priority = 1),
                         Col("", 190.dp, align = ColumnAlign.End, rigid = true),
                     ),
                     rows.size,
@@ -281,7 +281,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                                 val key = "${repository.forgeId}/${repository.fullName}"
                                 val setUp = projectsOfRepository(visibleProjects, repository)
                                 val forge = connected.firstOrNull { it.id == repository.forgeId }
-                                val elsewhere = state.nodes.values.filter { node -> node.online && setUp.none { it.nodeId == node.id } }.sortedBy { it.name }
+                                val elsewhere = state.nodes.values.filter { node -> node.online && setUp.none { held -> held.places.any { it.nodeId == node.id } } }.sortedBy { it.name }
 
                                 when (column) {
                                     0 -> TableCell.Slot("${repository.name} ${repository.owner} updated 12 minutes ago", Tokens.Size.IconMd + Tokens.Space.S1_5 * 3) {
@@ -289,14 +289,22 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                                             Box(Modifier.size(Tokens.Size.IconMd)) {
                                                 ProjectIcon(setUp.firstOrNull(), Tokens.Size.IconMd)
                                             }
-                                            Label(repository.name, style = Tokens.Type.UiStrong, maxLines = 1)
+                                            val opened = setUp.firstOrNull()
+
+                                            if (opened == null) {
+                                                Label(repository.name, style = Tokens.Type.UiStrong, maxLines = 1)
+                                            } else {
+                                                Box(Modifier.pressable({ onOpenProject(opened.id) }, description = "Open ${repository.name}", shape = ControlShape)) {
+                                                    Label(repository.name, style = Tokens.Type.UiStrong, maxLines = 1)
+                                                }
+                                            }
                                             Label(repository.owner, Modifier.weight(1f, fill = false), color = colors.textFaint, maxLines = 1)
                                             repository.updatedAt?.let { Label("updated ${timestamp(it, ago = true)}", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1) }
                                         }
                                     }
 
                                     1 -> TableCell.Text(forge?.let(::forgeName).orEmpty(), color = colors.textMuted)
-                                    2 -> TableCell.Slot(setUp.mapNotNull { state.nodes[it.nodeId]?.name }.joinToString(" "), Tokens.Size.IconMd + Tokens.Size.IconMd) {
+                                    2 -> TableCell.Slot(setUp.flatMap { it.places }.mapNotNull { state.nodes[it.nodeId]?.name }.joinToString(" "), Tokens.Size.IconMd + Tokens.Size.IconMd) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
 
                                             NodeMarks(setUp, state)
@@ -393,8 +401,8 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                                         }
                                     }
 
-                                    1 -> TableCell.Text("")
-                                    2 -> TableCell.Slot(state.nodes[folder.nodeId]?.name.orEmpty(), Tokens.Size.IconMd) {
+                                    1 -> TableCell.Text("Folder", color = colors.textMuted)
+                                    2 -> TableCell.Slot(folder.places.mapNotNull { state.nodes[it.nodeId]?.name }.joinToString(" "), Tokens.Size.IconMd) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
                                             NodeMarks(listOf(folder), state)
                                         }
@@ -442,10 +450,10 @@ private fun NewConversationButton(onClick: () -> Unit, name: String, compact: Bo
 
 @Composable
 private fun NodeMarks(projects: List<Project>, state: AppState) {
-    for (project in projects) {
-        val node = state.nodes[project.nodeId] ?: continue
+    for (place in projects.flatMap { it.places }.distinctBy { it.nodeId }) {
+        val node = state.nodes[place.nodeId] ?: continue
 
-        Row(Modifier.semantics { contentDescription = "Set up on ${node.name}" }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.semantics { contentDescription = "Checkout on ${node.name}" }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
             Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconMd)
             Label(node.name, maxLines = 1)
         }

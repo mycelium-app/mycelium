@@ -10,7 +10,19 @@ data class DirectoryEntry(val name: String, val path: String, val repository: Bo
 data class Directories(val root: String, val path: String, val parent: String? = null, val directories: List<DirectoryEntry> = emptyList(), val truncated: Boolean = false)
 
 @Serializable
-data class CheckoutProjectRequest(@SerialName("node_id") val nodeId: String)
+data class CheckoutProjectRequest(
+    @SerialName("node_id") val nodeId: String,
+    val path: String? = null,
+    @SerialName("new_folder") val newFolder: String? = null,
+)
+
+@Serializable
+data class ProjectCheckout(
+    val id: String = "",
+    @SerialName("node_id") val nodeId: String,
+    val path: String,
+    @SerialName("created_at") val createdAt: String = "",
+)
 
 @Serializable
 data class Project(
@@ -24,13 +36,18 @@ data class Project(
     @SerialName("group_id") val groupId: String? = null,
     val icon: String? = null,
     @SerialName("avatar_sha256") val avatarSha256: String? = null,
-)
+    @SerialName("test_command") val testCommand: String? = null,
+    val checkouts: List<ProjectCheckout> = emptyList(),
+) {
+    val places: List<ProjectCheckout> get() = checkouts.ifEmpty { listOf(ProjectCheckout(id, nodeId, path, createdAt)) }
+}
 
 @Serializable
 data class PatchProjectRequest(
     @SerialName("group_id") val groupId: String? = null,
     val icon: String? = null,
     @SerialName("clear_icon") val clearIcon: Boolean = false,
+    @SerialName("test_command") val testCommand: String? = null,
 )
 
 @Serializable
