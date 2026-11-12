@@ -12,8 +12,8 @@ use uuid::Uuid;
 const LISTED: i64 = 100;
 
 fn proposal_columns() -> String {
-    format!("p.id, p.conversation_id, p.target_id, t.title as target_title, coalesce(n.name, '') as target_node, pr.name as target_project, p.message, p.reason, p.state, p.created_at, p.decided_at,
-    s.title as source_title, t.archived_at is not null as target_archived, coalesce(t.managed_by = p.conversation_id, false) as source_manages_target,
+    format!("p.id, p.conversation_id, p.target_id, coalesce((select a.name from assistants a where a.conversation_id = t.id), t.title) as target_title, coalesce(n.name, '') as target_node, pr.name as target_project, p.message, p.reason, p.state, p.created_at, p.decided_at,
+    coalesce((select a.name from assistants a where a.conversation_id = s.id), s.title) as source_title, t.archived_at is not null as target_archived, coalesce(t.managed_by = p.conversation_id, false) as source_manages_target,
     (select g.name from groups g where g.id = (select {CONVERSATION_GROUP_SQL} from conversations where id = p.conversation_id)) as source_group,
     (select g.name from groups g where g.id = (select {CONVERSATION_GROUP_SQL} from conversations where id = p.target_id)) as target_group")
 }
@@ -85,11 +85,26 @@ fn publish(state: &AppState, owner: Uuid, row: ProposalRow) -> MessageProposal {
     proposal
 }
 
-pub async fn resolve(state: &AppState, owner: Uuid, target: &str) -> ApiResult<Result<Uuid, String>> {
-    resolve_for_sender(state, owner, target, None).await
+struct SessionlessAssistant {
+    id: Uuid,
+    name: String,
+    group_id: Option<Uuid>,
 }
 
-async fn resolve_for_sender(state: &AppState, owner: Uuid, target: &str, sender: Option<Uuid>) -> ApiResult<Result<Uuid, String>> {
+enum Resolved {
+    Conversation(Uuid),
+    SessionlessAssistant(SessionlessAssistant),
+}
+
+pub async fn resolve(state: &AppState, owner: Uuid, target: &str) -> ApiResult<Result<Uuid, String>> {
+    Ok(match resolve_for_sender(state, owner, target, None).await? {
+        Ok(Resolved::Conversation(id)) => Ok(id),
+        Ok(Resolved::SessionlessAssistant(SessionlessAssistant { name, .. })) => Err(format!("The assistant {name} has no chat yet. Send it a message with send_to_conversation to start one.")),
+        Err(reason) => Err(reason),
+    })
+}
+
+async fn resolve_for_sender(state: &AppState, owner: Uuid, target: &str, sender: Option<Uuid>) -> ApiResult<Result<Resolved, String>> {
     let candidates = sqlx::query_as::<_, (Uuid, bool, bool)>("select id, archived_at is not null, coalesce(managed_by = $3, false) from conversations where owner = $1 and (id::text = lower($2) or title = $2) order by updated_at desc").bind(owner).bind(target).bind(sender).fetch_all(&state.pool).await?;
     let live: Vec<Uuid> = candidates.iter().filter(|(_, archived, _)| !archived).map(|(id, ..)| *id).collect();
     let usable = if live.is_empty() {
@@ -98,18 +113,38 @@ async fn resolve_for_sender(state: &AppState, owner: Uuid, target: &str, sender:
         live
     };
 
-    Ok(match (candidates.is_empty(), usable.as_slice()) {
-        (true, _) => Err(format!("None of the person's conversations is {target}. Look one up with find_conversations.")),
-        (false, []) => Err(format!("The conversation {target} is archived.")),
-        (false, [only]) => Ok(*only),
-        (false, _) => Err(format!("More than one conversation is titled {target}. Use its id, from find_conversations.")),
+    if candidates.is_empty() {
+        return resolve_assistant(state, owner, target).await;
+    }
+
+    Ok(match usable.as_slice() {
+        [] => Err(format!("The conversation {target} is archived.")),
+        [only] => Ok(Resolved::Conversation(*only)),
+        _ => Err(format!("More than one conversation is titled {target}. Use its id, from find_conversations.")),
+    })
+}
+
+async fn resolve_assistant(state: &AppState, owner: Uuid, target: &str) -> ApiResult<Result<Resolved, String>> {
+    let found = sqlx::query_as::<_, (Uuid, String, Option<Uuid>, Option<Uuid>, bool)>("select id, name, conversation_id, group_id, archived_at is not null from assistants where owner = $1 and (id::text = lower($2) or lower(name) = lower($2))")
+        .bind(owner)
+        .bind(target)
+        .fetch_all(&state.pool)
+        .await?;
+
+    Ok(match found.as_slice() {
+        [] => Err(format!("None of the person's conversations or assistants is {target}. Look a conversation up with find_conversations, or an assistant's id with assistant_list.")),
+        [(_, name, _, _, true)] => Err(format!("The assistant {name} is archived.")),
+        [(_, _, Some(conversation_id), ..)] => Ok(Resolved::Conversation(*conversation_id)),
+        [(id, name, None, group_id, false)] => Ok(Resolved::SessionlessAssistant(SessionlessAssistant { id: *id, name: name.clone(), group_id: *group_id })),
+        _ => Err(format!("More than one assistant is named {target}. Use its id, from assistant_list.")),
     })
 }
 
 pub async fn propose(state: &AppState, conversation_id: Uuid, target: &str, message: &str, reason: &str) -> ApiResult<Result<(MessageProposal, Option<prompts::Sent>, u64), String>> {
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     let target_id = match resolve_for_sender(state, owner, target, Some(conversation_id)).await? {
-        Ok(target_id) => target_id,
+        Ok(Resolved::Conversation(target_id)) => target_id,
+        Ok(Resolved::SessionlessAssistant(assistant)) => return start_assistant_chat(state, owner, conversation_id, assistant, message, reason).await,
         Err(reason) => return Ok(Err(format!("Nothing was proposed. {reason}"))),
     };
 
@@ -136,6 +171,37 @@ pub async fn propose(state: &AppState, conversation_id: Uuid, target: &str, mess
     }
 
     Ok(Ok((proposal, None, superseded)))
+}
+
+async fn start_assistant_chat(state: &AppState, owner: Uuid, conversation_id: Uuid, assistant: SessionlessAssistant, message: &str, reason: &str) -> ApiResult<Result<(MessageProposal, Option<prompts::Sent>, u64), String>> {
+    let SessionlessAssistant { id: assistant_id, name, group_id } = assistant;
+    let own_group = crate::group_connections::group_of(state, conversation_id).await?;
+    let reachable = match (own_group, group_id) {
+        (Some(own), Some(target)) => own == target || crate::group_connections::active(state, owner, own, target).await?,
+        _ => false,
+    };
+
+    if !reachable {
+        return Ok(Err(format!("Nothing was proposed. The assistant {name} has no chat to hold a message for the person to approve, and its group is not connected to this conversation's. Ask the person to connect the groups in Settings, Agent connections, or to start a chat with {name}.")));
+    }
+
+    let source = sqlx::query_scalar::<_, String>("select coalesce((select a.name from assistants a where a.conversation_id = s.id), s.title) from conversations s where s.id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+    let text = format!("From {}:\n\n{message}", label(conversation_id, &source));
+    let woken = crate::assistants::wake(state, owner, assistant_id, PromptRequest { text, ..Default::default() }, &crate::assistants::StartOverrides::default()).await;
+    let conversation = match woken {
+        Ok(conversation) => conversation,
+        Err(error) => return Ok(Err(format!("Nothing was proposed. {}", error.message()))),
+    };
+    let id = sqlx::query_scalar::<_, Uuid>("insert into message_proposals (owner, conversation_id, target_id, message, reason, state, decided_at) values ($1, $2, $3, $4, $5, 'sent', now()) returning id")
+        .bind(owner)
+        .bind(conversation_id)
+        .bind(conversation.id)
+        .bind(crate::store::text_without_nul(message))
+        .bind(crate::store::text_without_nul(reason))
+        .fetch_one(&state.pool)
+        .await?;
+
+    Ok(Ok((publish(state, owner, find_owned(state, id, owner).await?), Some(prompts::Sent::Delivered), 0)))
 }
 
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<MessageProposal>>> {

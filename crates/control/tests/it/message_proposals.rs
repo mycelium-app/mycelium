@@ -389,3 +389,104 @@ async fn a_newer_proposal_to_the_same_conversation_supersedes_the_older_one() {
     assert_eq!(states[&elsewhere], "proposed");
     assert_eq!(states[&proposal_id(&newer)], "proposed");
 }
+
+async fn group(server: &Server, name: &str) -> String {
+    let (_, group) = server.user.json(server.user.post("/api/v1/groups").json(&json!({"name": name}))).await;
+
+    group["id"].as_str().unwrap().to_string()
+}
+
+async fn assistant_with_chat(server: &Server, link: &mut NodeLink, name: &str, group: &str) -> (String, Uuid) {
+    let (status, assistant) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": name, "group_id": group}))).await;
+    assert_eq!(status, 201, "{assistant}");
+    let id = assistant["id"].as_str().unwrap().to_string();
+    let chat = working_conversation(server, link, "New chat").await;
+    sqlx::query("update conversations set assistant_id = $2 where id = $1").bind(chat).bind(Uuid::parse_str(&id).unwrap()).execute(&server.pool).await.unwrap();
+    sqlx::query("update assistants set conversation_id = $2 where id = $1").bind(Uuid::parse_str(&id).unwrap()).bind(chat).execute(&server.pool).await.unwrap();
+
+    (id, chat)
+}
+
+#[tokio::test]
+async fn a_message_to_an_assistant_in_the_same_group_lands_in_its_own_chat_by_id_and_by_name() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let ops = group(&server, "Ops").await;
+    let (_, sender_chat) = assistant_with_chat(&server, &mut link, "Planner", &ops).await;
+    let (infrastructure_id, infrastructure_chat) = assistant_with_chat(&server, &mut link, "Infrastructure", &ops).await;
+    let sub_chat = working_conversation(&server, &mut link, "Side chat").await;
+    sqlx::query("update conversations set assistant_id = $2, parent_id = $3, side_kind = 'subagent' where id = $1").bind(sub_chat).bind(Uuid::parse_str(&infrastructure_id).unwrap()).bind(infrastructure_chat).execute(&server.pool).await.unwrap();
+
+    let by_name = propose(&server, &link, sender_chat, "infrastructure").await;
+    let by_id = propose(&server, &link, sender_chat, &infrastructure_id).await;
+
+    assert!(text(&by_name).starts_with("Queued for Infrastructure"), "{by_name}");
+    assert!(text(&by_id).starts_with("Queued for Infrastructure"), "{by_id}");
+    let queued = queue(&server, infrastructure_chat).await;
+    assert_eq!(queued.len(), 2);
+    assert_eq!(queued[0]["text"], json!("From Planner:\n\nThe schema is ready"));
+    assert_eq!(queue(&server, sub_chat).await.len(), 0);
+}
+
+#[tokio::test]
+async fn a_message_to_an_assistant_in_an_unconnected_group_waits_for_the_person() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let (ops, finance) = (group(&server, "Ops").await, group(&server, "Finance").await);
+    let (_, sender_chat) = assistant_with_chat(&server, &mut link, "Planner", &ops).await;
+    let (_, accounts_chat) = assistant_with_chat(&server, &mut link, "Accounts", &finance).await;
+
+    let result = propose(&server, &link, sender_chat, "Accounts").await;
+
+    assert!(text(&result).starts_with("Waiting for the person to approve sending this to Accounts"), "{result}");
+    assert_eq!(queue(&server, accounts_chat).await.len(), 0);
+    let waiting = proposals(&server).await;
+    assert_eq!((waiting[0]["state"].clone(), waiting[0]["target_id"].clone()), (json!("proposed"), json!(accounts_chat)));
+
+    let id = waiting[0]["id"].as_str().unwrap();
+    let (status, approved) = server.user.json(server.user.post(&format!("/api/v1/message-proposals/{id}/approve"))).await;
+    assert_eq!((status, approved["state"].clone()), (200, json!("sent")), "{approved}");
+    assert_eq!(queue(&server, accounts_chat).await[0]["text"], json!("From Planner:\n\nThe schema is ready"));
+}
+
+#[tokio::test]
+async fn the_receiving_assistant_replies_by_naming_the_sender() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let ops = group(&server, "Ops").await;
+    let (_, planner_chat) = assistant_with_chat(&server, &mut link, "Planner", &ops).await;
+    let (_, infrastructure_chat) = assistant_with_chat(&server, &mut link, "Infrastructure", &ops).await;
+    propose(&server, &link, planner_chat, "Infrastructure").await;
+
+    let reply = call(&server, &link, infrastructure_chat, "send_to_conversation", json!({"conversation": "Planner", "message": "Done", "reason": "Answering you"})).await;
+
+    assert!(text(&reply).starts_with("Queued for Planner"), "{reply}");
+    assert_eq!(queue(&server, planner_chat).await[0]["text"], json!("From Infrastructure:\n\nDone"));
+}
+
+#[tokio::test]
+async fn reading_and_watching_an_assistant_resolve_to_its_current_chat() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let ops = group(&server, "Ops").await;
+    let (_, planner_chat) = assistant_with_chat(&server, &mut link, "Planner", &ops).await;
+    let (infrastructure_id, infrastructure_chat) = assistant_with_chat(&server, &mut link, "Infrastructure", &ops).await;
+
+    let read = text(&call(&server, &link, planner_chat, "read_conversation", json!({"conversation": infrastructure_id})).await);
+    let watched = text(&call(&server, &link, planner_chat, "watch_conversation", json!({"conversation": "Infrastructure"})).await);
+
+    assert!(read.contains(&infrastructure_chat.to_string()), "{read}");
+    assert!(watched.contains("Infrastructure") || watched.contains(&infrastructure_chat.to_string()), "{watched}");
+}
+
+#[tokio::test]
+async fn an_unknown_assistant_name_says_how_to_find_the_id() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let source = working_conversation(&server, &mut link, "Plan the release").await;
+
+    let result = propose(&server, &link, source, "Nobody").await;
+
+    assert_eq!(result["isError"], true);
+    assert!(text(&result).contains("assistants") && text(&result).contains("assistant_list") && text(&result).contains("find_conversations"), "{result}");
+}
