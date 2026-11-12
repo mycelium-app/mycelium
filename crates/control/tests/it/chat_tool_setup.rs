@@ -65,6 +65,6 @@ async fn probing_a_server_without_sign_in_reports_no_oauth() {
     let (status, probed) = server.user.json(server.user.post("/api/v1/chat-tool-servers/probe").json(&json!({"url": address}))).await;
     let (bad_status, bad) = server.user.json(server.user.post("/api/v1/chat-tool-servers/probe").json(&json!({"url": "not a url"}))).await;
 
-    assert_eq!((status, probed), (200, json!({"oauth": false})));
+    assert_eq!((status, probed), (200, json!({"oauth": false, "sign_in": "none", "reason": "The server asks for sign-in but publishes no authorisation details."})));
     assert_eq!(bad_status, 400, "{bad}");
 }

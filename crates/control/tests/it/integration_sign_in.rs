@@ -11,14 +11,49 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 
-#[derive(Default)]
+struct Options {
+    without_registration: bool,
+    token_lifetime: i64,
+    challenge: Option<&'static str>,
+    protected_path: &'static str,
+    authorisation_paths: Vec<&'static str>,
+    issuer_path: &'static str,
+    authorisation_extra: Value,
+    protected_extra: Value,
+}
+
+impl Default for Options {
+    fn default() -> Options {
+        Options {
+            without_registration: false,
+            token_lifetime: 3600,
+            challenge: Some("Bearer resource_metadata=\"{base}/.well-known/oauth-protected-resource/mcp\""),
+            protected_path: "/.well-known/oauth-protected-resource/mcp",
+            authorisation_paths: vec!["/.well-known/oauth-authorization-server"],
+            issuer_path: "",
+            authorisation_extra: Value::Null,
+            protected_extra: Value::Null,
+        }
+    }
+}
+
 struct App {
     base: Mutex<String>,
     registrations: Mutex<Vec<Value>>,
     token_requests: Mutex<Vec<Vec<(String, String)>>>,
     mcp_authorisations: Mutex<Vec<String>>,
-    without_registration: bool,
-    token_lifetime: i64,
+    options: Options,
+}
+
+fn merged(mut document: Value, extra: &Value) -> Value {
+    for (key, value) in extra.as_object().into_iter().flatten() {
+        match value {
+            Value::Null => document.as_object_mut().unwrap().remove(key),
+            other => document.as_object_mut().unwrap().insert(key.clone(), other.clone()),
+        };
+    }
+
+    document
 }
 
 type Shared = State<Arc<App>>;
@@ -28,9 +63,10 @@ async fn mcp(State(app): Shared, headers: HeaderMap, Json(body): Json<Value>) ->
     app.mcp_authorisations.lock().unwrap().push(authorisation.clone());
 
     if !authorisation.starts_with("Bearer access-") {
-        let challenge = format!("Bearer resource_metadata=\"{}/.well-known/oauth-protected-resource/mcp\"", app.base.lock().unwrap());
-
-        return (StatusCode::UNAUTHORIZED, [(header::WWW_AUTHENTICATE, challenge)]).into_response();
+        return match app.options.challenge {
+            Some(challenge) => (StatusCode::UNAUTHORIZED, [(header::WWW_AUTHENTICATE, challenge.replace("{base}", &app.base.lock().unwrap()))]).into_response(),
+            None => StatusCode::UNAUTHORIZED.into_response(),
+        };
     }
 
     if body.get("id").is_none() {
@@ -48,18 +84,21 @@ async fn mcp(State(app): Shared, headers: HeaderMap, Json(body): Json<Value>) ->
 }
 
 async fn protected_resource(State(app): Shared) -> Json<Value> {
-    Json(json!({"resource": format!("{}/mcp", app.base.lock().unwrap()), "authorization_servers": [app.base.lock().unwrap().clone()]}))
+    let base = app.base.lock().unwrap().clone();
+    let document = json!({"resource": format!("{base}/mcp"), "authorization_servers": [format!("{base}{}", app.options.issuer_path)], "scopes_supported": ["read", "write"]});
+
+    Json(merged(document, &app.options.protected_extra))
 }
 
 async fn authorisation_server(State(app): Shared) -> Json<Value> {
     let base = app.base.lock().unwrap().clone();
-    let mut metadata = json!({"authorization_endpoint": format!("{base}/authorize"), "token_endpoint": format!("{base}/token"), "scopes_supported": ["read", "write"]});
+    let mut metadata = json!({"issuer": format!("{base}{}", app.options.issuer_path), "authorization_endpoint": format!("{base}/authorize"), "token_endpoint": format!("{base}/token"), "code_challenge_methods_supported": ["S256"]});
 
-    if !app.without_registration {
+    if !app.options.without_registration {
         metadata["registration_endpoint"] = json!(format!("{base}/register"));
     }
 
-    Json(metadata)
+    Json(merged(metadata, &app.options.authorisation_extra))
 }
 
 async fn register(State(app): Shared, Json(body): Json<Value>) -> Json<Value> {
@@ -83,22 +122,27 @@ async fn token(State(app): Shared, body: String) -> Json<Value> {
         return Json(json!({"access_token": "access-3", "refresh_token": "refresh-3", "expires_in": 3600}));
     }
 
-    Json(json!({"access_token": "access-1", "refresh_token": "refresh-1", "expires_in": app.token_lifetime}))
+    Json(json!({"access_token": "access-1", "refresh_token": "refresh-1", "expires_in": app.options.token_lifetime}))
 }
 
-async fn start_app(without_registration: bool, token_lifetime: i64) -> (String, Arc<App>) {
-    let app = Arc::new(App { without_registration, token_lifetime, ..App::default() });
-    let router = Router::new()
-        .route("/mcp", post(mcp))
-        .route("/.well-known/oauth-protected-resource/mcp", get(protected_resource))
-        .route("/.well-known/oauth-authorization-server", get(authorisation_server))
-        .route("/register", post(register))
-        .route("/token", post(token))
-        .with_state(app.clone());
-    let base = serve(router).await;
+async fn start_with(options: Options) -> (String, Arc<App>) {
+    let protected_path = options.protected_path;
+    let authorisation_paths = options.authorisation_paths.clone();
+    let app = Arc::new(App { base: Mutex::default(), registrations: Mutex::default(), token_requests: Mutex::default(), mcp_authorisations: Mutex::default(), options });
+    let mut router = Router::new().route("/mcp", post(mcp)).route(protected_path, get(protected_resource)).route("/register", post(register)).route("/token", post(token));
+
+    for path in authorisation_paths {
+        router = router.route(path, get(authorisation_server));
+    }
+
+    let base = serve(router.with_state(app.clone())).await;
     *app.base.lock().unwrap() = base.clone();
 
     (base, app)
+}
+
+async fn start_app(without_registration: bool, token_lifetime: i64) -> (String, Arc<App>) {
+    start_with(Options { without_registration, token_lifetime, ..Options::default() }).await
 }
 
 async fn begin(server: &Server, body: Value) -> (u16, Value) {
@@ -215,7 +259,7 @@ async fn probing_an_app_that_refuses_client_registration_does_not_offer_oauth() 
 
     let (status, probed) = server.user.json(server.user.post("/api/v1/chat-tool-servers/probe").json(&json!({"url": format!("{base}/mcp")}))).await;
 
-    assert_eq!((status, probed), (200, json!({"oauth": false})));
+    assert_eq!((status, probed), (200, json!({"oauth": false, "sign_in": "client_id", "authorization_server": base})));
 }
 
 async fn listed_tools(server: &Server, node_token: &str) -> Vec<Value> {
@@ -302,4 +346,148 @@ async fn signing_in_again_to_someone_elses_integration_is_refused() {
     let (status, refused) = begin(&server, json!({"name": "Docs", "url": base, "kind": "outline", "server_id": "00000000-0000-0000-0000-000000000001"})).await;
 
     assert_eq!(status, 404, "{refused}");
+}
+
+async fn probe(server: &Server, address: &str) -> Value {
+    let (status, probed) = server.user.json(server.user.post("/api/v1/chat-tool-servers/probe").json(&json!({"url": address}))).await;
+    assert_eq!(status, 200, "{probed}");
+
+    probed
+}
+
+const NO_DETAILS: &str = "The server asks for sign-in but publishes no authorisation details.";
+
+#[tokio::test]
+async fn probing_an_app_that_registers_clients_offers_registration_and_names_its_authorisation_server() {
+    let server = Server::start().await;
+    let (base, _) = start_app(false, 3600).await;
+
+    let probed = probe(&server, &format!("{base}/mcp")).await;
+
+    assert_eq!(probed, json!({"oauth": true, "sign_in": "registration", "authorization_server": base}));
+}
+
+#[tokio::test]
+async fn probing_finds_the_resource_metadata_in_the_challenge_wherever_it_is_hosted() {
+    let server = Server::start().await;
+    let (base, _) = start_with(Options { challenge: Some("Bearer resource_metadata={base}/custom-metadata"), protected_path: "/custom-metadata", ..Options::default() }).await;
+
+    let probed = probe(&server, &format!("{base}/mcp")).await;
+
+    assert_eq!(probed["sign_in"], "registration", "{probed}");
+}
+
+#[tokio::test]
+async fn probing_without_a_challenge_looks_for_resource_metadata_beside_the_endpoint_path() {
+    let server = Server::start().await;
+    let (base, _) = start_with(Options { challenge: None, ..Options::default() }).await;
+
+    let probed = probe(&server, &format!("{base}/mcp")).await;
+
+    assert_eq!(probed["sign_in"], "registration", "{probed}");
+}
+
+#[tokio::test]
+async fn probing_without_a_challenge_falls_back_to_resource_metadata_at_the_root() {
+    let server = Server::start().await;
+    let (base, _) = start_with(Options { challenge: None, protected_path: "/.well-known/oauth-protected-resource", ..Options::default() }).await;
+
+    let probed = probe(&server, &format!("{base}/mcp")).await;
+
+    assert_eq!(probed["sign_in"], "registration", "{probed}");
+}
+
+#[tokio::test]
+async fn probing_reads_authorisation_server_metadata_from_each_place_the_specification_allows() {
+    let server = Server::start().await;
+    let layouts: [(&str, &str); 4] = [
+        ("/tenant", "/.well-known/oauth-authorization-server/tenant"),
+        ("/tenant", "/.well-known/openid-configuration/tenant"),
+        ("/tenant", "/tenant/.well-known/openid-configuration"),
+        ("", "/.well-known/openid-configuration"),
+    ];
+
+    for (issuer_path, authorisation_path) in layouts {
+        let (base, _) = start_with(Options { issuer_path, authorisation_paths: vec![authorisation_path], ..Options::default() }).await;
+
+        let probed = probe(&server, &format!("{base}/mcp")).await;
+
+        assert_eq!((probed["sign_in"].as_str(), probed["authorization_server"].as_str()), (Some("registration"), Some(format!("{base}{issuer_path}").as_str())), "{authorisation_path}: {probed}");
+    }
+}
+
+#[tokio::test]
+async fn probing_refuses_authorisation_server_metadata_issued_for_another_issuer() {
+    let server = Server::start().await;
+    let (base, _) = start_with(Options { authorisation_extra: json!({"issuer": "https://elsewhere.example.test"}), ..Options::default() }).await;
+
+    let probed = probe(&server, &format!("{base}/mcp")).await;
+
+    assert_eq!(probed, json!({"oauth": false, "sign_in": "none", "reason": NO_DETAILS}));
+}
+
+#[tokio::test]
+async fn probing_refuses_an_authorisation_server_that_lists_methods_without_s256() {
+    let server = Server::start().await;
+    let (base, _) = start_with(Options { authorisation_extra: json!({"code_challenge_methods_supported": ["plain"]}), ..Options::default() }).await;
+
+    let probed = probe(&server, &format!("{base}/mcp")).await;
+
+    assert_eq!(probed, json!({"oauth": false, "sign_in": "none", "reason": NO_DETAILS}));
+}
+
+#[tokio::test]
+async fn probing_accepts_an_authorisation_server_that_lists_no_challenge_methods() {
+    let server = Server::start().await;
+    let (base, _) = start_with(Options { authorisation_extra: json!({"code_challenge_methods_supported": null}), ..Options::default() }).await;
+
+    let probed = probe(&server, &format!("{base}/mcp")).await;
+
+    assert_eq!(probed["sign_in"], "registration", "{probed}");
+}
+
+#[tokio::test]
+async fn probing_a_server_that_asks_for_sign_in_without_authorisation_details_says_so() {
+    let server = Server::start().await;
+    let (base, _) = start_with(Options { authorisation_paths: vec![], ..Options::default() }).await;
+
+    let probed = probe(&server, &format!("{base}/mcp")).await;
+
+    assert_eq!(probed, json!({"oauth": false, "sign_in": "none", "reason": NO_DETAILS}));
+}
+
+#[tokio::test]
+async fn probing_an_address_that_neither_challenges_nor_publishes_metadata_says_it_does_not_ask_for_sign_in() {
+    let server = Server::start().await;
+    let (base, _) = start_app(false, 3600).await;
+
+    let probed = probe(&server, &format!("{base}/open")).await;
+
+    assert_eq!(probed, json!({"oauth": false, "sign_in": "none", "reason": "This server does not ask for sign-in."}));
+}
+
+#[tokio::test]
+async fn probing_reports_a_client_id_metadata_document_when_the_authorisation_server_supports_one() {
+    let server = Server::start().await;
+    let (base, _) = start_with(Options { authorisation_extra: json!({"client_id_metadata_document_supported": true}), ..Options::default() }).await;
+
+    let probed = probe(&server, &format!("{base}/mcp")).await;
+
+    assert_eq!((probed["sign_in"].as_str(), probed["oauth"].as_bool()), (Some("metadata_document"), Some(true)), "{probed}");
+}
+
+#[tokio::test]
+async fn the_scope_asked_for_is_the_challenges_else_the_resources_supported_scopes_else_none() {
+    let server = Server::start().await;
+    let (challenged, _) = start_with(Options { challenge: Some("Bearer scope=\"files:read\", resource_metadata=\"{base}/.well-known/oauth-protected-resource/mcp\""), ..Options::default() }).await;
+    let (listed, _) = start_app(false, 3600).await;
+    let (unlisted, _) = start_with(Options { protected_extra: json!({"scopes_supported": null}), ..Options::default() }).await;
+
+    let from_challenge = sign_in(&server, &challenged).await;
+    let from_resource = sign_in(&server, &listed).await;
+    let neither = sign_in(&server, &unlisted).await;
+
+    assert_eq!(param(&from_challenge, "scope"), "files:read");
+    assert_eq!(param(&from_resource, "scope"), "read write");
+    assert!(!neither.iter().any(|(name, _)| name == "scope"), "{neither:?}");
 }

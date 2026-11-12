@@ -1,7 +1,7 @@
 use crate::auth::AuthUser;
 use crate::chat_tool_servers::{DEFAULT_KEY_HEADER, fetch_tools};
 use crate::error::{ApiError, ApiResult};
-use crate::mcp_oauth::offers_sign_in;
+use crate::mcp_oauth::discover;
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::State;
@@ -14,6 +14,11 @@ pub struct ProbeRequest {
 #[derive(serde::Serialize)]
 pub struct Probe {
     oauth: bool,
+    sign_in: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    authorization_server: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<&'static str>,
 }
 
 #[derive(serde::Deserialize)]
@@ -40,9 +45,15 @@ fn address(entered: &str) -> ApiResult<url::Url> {
 
 pub async fn probe(State(state): State<AppState>, _user: AuthUser, Json(request): Json<ProbeRequest>) -> ApiResult<Json<Probe>> {
     let parsed = address(&request.url)?;
-    let oauth = offers_sign_in(&state, &parsed).await;
 
-    Ok(Json(Probe { oauth }))
+    Ok(Json(match discover(&state, &parsed).await {
+        Ok(discovered) => {
+            let sign_in = discovered.authorisation.sign_in();
+
+            Probe { oauth: matches!(sign_in, "registration" | "metadata_document"), sign_in, authorization_server: Some(discovered.authorisation.issuer), reason: None }
+        }
+        Err(reason) => Probe { oauth: false, sign_in: "none", authorization_server: None, reason: Some(reason) },
+    }))
 }
 
 pub async fn test(State(state): State<AppState>, _user: AuthUser, Json(request): Json<TestRequest>) -> ApiResult<Json<Tested>> {
