@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.24
+
+- A Claude conversation keeps its Mycelium tools when its session restarts, for example on a move to another account at a usage limit or a model change. Each run of an agent now has its own credentials file, so the end of an earlier run no longer removes the file a newer run is using.
+
 ## v0.34.23
 
 - A message you send arrives once, even after a double tap, a retry or a reconnect, and a double tap on Start makes one conversation or chat. Voice sends are covered too.
