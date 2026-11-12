@@ -335,13 +335,11 @@ private object DesktopPlatform : Platform {
     }
 
     fun stepScale(keyCode: Int): Boolean {
-        val current = scale.value
-        val next = when (keyCode) {
-            AwtKeyEvent.VK_EQUALS, AwtKeyEvent.VK_PLUS, AwtKeyEvent.VK_ADD -> ScaleSteps.firstOrNull { it > current + 0.01f }
-            AwtKeyEvent.VK_MINUS, AwtKeyEvent.VK_SUBTRACT -> ScaleSteps.lastOrNull { it < current - 0.01f }
-            AwtKeyEvent.VK_0, AwtKeyEvent.VK_NUMPAD0 -> 1f
-            else -> return false
+        if (keyCode !in ScaleCodes) {
+            return false
         }
+
+        val next = nextScale(scale.value, keyCode)
 
         if (next != null) {
             scale.value = next
@@ -396,7 +394,13 @@ private object FileDrop : DragAndDropTarget {
     }
 }
 
-private val ScaleSteps = listOf(0.8f, 0.9f, 1f, 1.1f, 1.25f, 1.5f, 1.75f, 2f)
+private val ScaleSteps = listOf(0.5f, 0.6f, 0.67f, 0.75f, 0.8f, 0.9f, 1f, 1.1f, 1.25f, 1.5f, 1.75f, 2f)
+
+internal fun nextScale(current: Float, keyCode: Int): Float? = when (keyCode) {
+    AwtKeyEvent.VK_EQUALS, AwtKeyEvent.VK_PLUS, AwtKeyEvent.VK_ADD -> ScaleSteps.firstOrNull { it > current + 0.01f }
+    AwtKeyEvent.VK_MINUS, AwtKeyEvent.VK_SUBTRACT -> ScaleSteps.lastOrNull { it < current - 0.01f }
+    else -> 1f
+}
 
 private val ScaleCodes = setOf(
     AwtKeyEvent.VK_EQUALS, AwtKeyEvent.VK_PLUS, AwtKeyEvent.VK_ADD,
