@@ -562,7 +562,8 @@ async fn an_existing_folder_whose_remote_uses_an_ssh_config_alias_becomes_the_pr
     let ((status, project), _) = create_project(&server, &mut link, body.clone(), Ok(json!({"path": "/aliased", "repository": true, "remotes": ["git@forge-alias:acme-org/acme-backups.git"], "resolved_remotes": ["ssh://git@127.0.0.1/acme-org/acme-backups.git"]}))).await;
     assert_eq!((status, project["repository"].clone()), (201, json!("acme-org/acme-backups")), "{project}");
 
-    let ((status, error), _) = create_project(&server, &mut link, body, Ok(json!({"path": "/aliased", "repository": true, "remotes": ["git@forge-alias:acme-org/acme-backups.git"], "resolved_remotes": ["ssh://git@unrelated.test/acme-org/acme-backups.git"]}))).await;
+    let mut second_node = server.online_node("desk").await;
+    let ((status, error), _) = create_project(&server, &mut second_node, body, Ok(json!({"path": "/aliased", "repository": true, "remotes": ["git@forge-alias:acme-org/acme-backups.git"], "resolved_remotes": ["ssh://git@unrelated.test/acme-org/acme-backups.git"]}))).await;
     assert_eq!((status, error["error"].clone()), (400, json!("folder_other_repository")));
 }
 
