@@ -428,8 +428,9 @@ fn permission_answer_and_login_bodies_round_trip() {
     round_trip(&StartLoginResponse { login_id: id() });
     round_trip(&LoginInputRequest { text: "x".into() });
     round_trip(&DrainRequest { draining: true });
-    round_trip(&PromptRequest { text: "go".into(), attachments: vec![], spoken: false });
-    round_trip(&PromptRequest { text: "go".into(), attachments: vec![], spoken: true });
+    round_trip(&PromptRequest { text: "go".into(), attachments: vec![], spoken: false, client_id: None });
+    round_trip(&PromptRequest { text: "go".into(), attachments: vec![], spoken: true, client_id: None });
+    round_trip(&PromptRequest { text: "go".into(), attachments: vec![], spoken: false, client_id: Some(Uuid::nil()) });
     round_trip(&SavePrivacyRequest { voice_enabled: true });
     round_trip(&SpeechRequest { text: "hi".into(), voice: Some("alloy".into()), speed: None });
     round_trip(&PatchQueueRequest { text: Some("edit".into()), attachments: None, editing: Some(true) });
