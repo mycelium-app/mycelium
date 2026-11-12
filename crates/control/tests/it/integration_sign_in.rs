@@ -21,6 +21,7 @@ struct Options {
     authorisation_extra: Value,
     protected_extra: Value,
     registered_secret: Option<&'static str>,
+    token_failure: bool,
 }
 
 impl Default for Options {
@@ -35,6 +36,7 @@ impl Default for Options {
             authorisation_extra: Value::Null,
             protected_extra: Value::Null,
             registered_secret: None,
+            token_failure: false,
         }
     }
 }
@@ -113,23 +115,27 @@ async fn register(State(app): Shared, Json(body): Json<Value>) -> Json<Value> {
     }
 }
 
-async fn token(State(app): Shared, headers: HeaderMap, body: String) -> Json<Value> {
+async fn token(State(app): Shared, headers: HeaderMap, body: String) -> Response {
     app.token_authorisations.lock().unwrap().push(headers.get("authorization").and_then(|value| value.to_str().ok()).unwrap_or_default().to_string());
     let form: Vec<(String, String)> = url::form_urlencoded::parse(body.as_bytes()).into_owned().collect();
     let refreshing = form.iter().any(|(name, value)| name == "grant_type" && value == "refresh_token");
     app.token_requests.lock().unwrap().push(form);
 
+    if app.options.token_failure {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": "invalid_grant", "error_description": "the code has expired"}))).into_response();
+    }
+
     if refreshing {
-        return Json(json!({"access_token": "access-2", "refresh_token": "refresh-2", "expires_in": 3600}));
+        return Json(json!({"access_token": "access-2", "refresh_token": "refresh-2", "expires_in": 3600})).into_response();
     }
 
     let exchanges = app.token_requests.lock().unwrap().iter().filter(|form| form.iter().any(|(name, value)| name == "grant_type" && value == "authorization_code")).count();
 
     if exchanges > 1 {
-        return Json(json!({"access_token": "access-3", "refresh_token": "refresh-3", "expires_in": 3600}));
+        return Json(json!({"access_token": "access-3", "refresh_token": "refresh-3", "expires_in": 3600})).into_response();
     }
 
-    Json(json!({"access_token": "access-1", "refresh_token": "refresh-1", "expires_in": app.options.token_lifetime}))
+    Json(json!({"access_token": "access-1", "refresh_token": "refresh-1", "expires_in": app.options.token_lifetime})).into_response()
 }
 
 async fn start_with(options: Options) -> (String, Arc<App>) {
@@ -171,11 +177,30 @@ async fn sign_in(server: &Server, base: &str) -> Vec<(String, String)> {
     query_of(started["authorize_url"].as_str().unwrap())
 }
 
-async fn callback(server: &Server, state: &str) -> (u16, String) {
+async fn callback_with(server: &Server, query: &str) -> (u16, String) {
     let anonymous = server.anonymous();
-    let response = anonymous.http.get(format!("{}/integrations/oauth/callback?code=code-1&state={state}", server.base)).send().await.unwrap();
+    let response = anonymous.http.get(format!("{}/integrations/oauth/callback?{query}", server.base)).send().await.unwrap();
 
     (response.status().as_u16(), response.text().await.unwrap())
+}
+
+async fn callback(server: &Server, state: &str) -> (u16, String) {
+    callback_with(server, &format!("code=code-1&state={state}")).await
+}
+
+async fn add_integration(server: &Server, base: &str, sign_in: &str) -> (u16, Value) {
+    server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Docs", "kind": "outline", "url": base, "sign_in": sign_in}))).await
+}
+
+async fn finish_sign_in(server: &Server, base: &str, query: &[(String, String)]) {
+    let state = param(query, "state");
+    callback(server, &state).await;
+    let (status, added) = add_integration(server, base, &state).await;
+    assert_eq!(status, 201, "{added}");
+}
+
+async fn sign_in_status(server: &Server, sign_in: &str) -> (u16, Value) {
+    server.user.json(server.user.get(&format!("/integrations/oauth/{sign_in}"))).await
 }
 
 #[tokio::test]
@@ -195,15 +220,18 @@ async fn signing_in_with_oauth_registers_mycelium_and_sends_the_person_to_the_ap
 }
 
 #[tokio::test]
-async fn the_oauth_callback_connects_the_integration_and_its_tools_are_listed_with_the_new_token() {
+async fn the_oauth_callback_holds_the_sign_in_until_the_integration_is_added_and_then_its_tools_are_listed_with_the_new_token() {
     let server = Server::start().await;
     let (base, app) = start_app(false, 3600).await;
     let query = sign_in(&server, &base).await;
 
     let (status, page) = callback(&server, &param(&query, "state")).await;
+    let (_, before_adding) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
+    let (added_status, added) = add_integration(&server, &base, &param(&query, "state")).await;
     let (_, listed) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
 
-    assert_eq!(status, 200, "{page}");
+    assert_eq!(before_adding, json!([]));
+    assert_eq!((status, added_status), (200, 201), "{page} {added}");
     assert!(page.contains("Docs is connected. You can close this tab and return to Mycelium."), "{page}");
     assert_eq!((listed[0]["kind"].as_str(), listed[0]["oauth"].as_bool(), listed[0]["settings"].clone()), (Some("mcp"), Some(true), json!({"app": "outline"})));
     assert_eq!(listed[0]["tools"][0]["name"], "search");
@@ -236,7 +264,7 @@ async fn an_expired_oauth_token_is_refreshed_before_a_tool_call() {
     let (_, node_token) = server.join("node", "laptop").await;
     let (base, app) = start_app(false, 1).await;
     let query = sign_in(&server, &base).await;
-    callback(&server, &param(&query, "state")).await;
+    finish_sign_in(&server, &base, &query).await;
     let anonymous = server.anonymous();
     let call = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "docs__search", "arguments": {}}});
 
@@ -282,7 +310,7 @@ async fn a_failed_oauth_refresh_tells_the_person_to_sign_in_again_in_the_tool_li
     let (_, node_token) = server.join("node", "laptop").await;
     let (base, _) = start_app(false, 1).await;
     let query = sign_in(&server, &base).await;
-    callback(&server, &param(&query, "state")).await;
+    finish_sign_in(&server, &base, &query).await;
     sqlx::query("update chat_tool_servers set oauth = jsonb_set(oauth, '{token_endpoint}', '\"http://127.0.0.1:1/token\"')").execute(&server.pool).await.unwrap();
 
     let tools = listed_tools(&server, &node_token).await;
@@ -297,7 +325,7 @@ async fn a_rejected_oauth_token_with_no_known_expiry_is_refreshed_and_the_tools_
     let (_, node_token) = server.join("node", "laptop").await;
     let (base, app) = start_app(false, 3600).await;
     let query = sign_in(&server, &base).await;
-    callback(&server, &param(&query, "state")).await;
+    finish_sign_in(&server, &base, &query).await;
     sqlx::query("update chat_tool_servers set bearer_token = 'stale', oauth_expires_at = null").execute(&server.pool).await.unwrap();
 
     let tools = listed_tools(&server, &node_token).await;
@@ -312,7 +340,7 @@ async fn signing_in_again_updates_the_existing_integration_and_keeps_its_tool_na
     let (_, node_token) = server.join("node", "laptop").await;
     let (base, app) = start_app(false, 3600).await;
     let query = sign_in(&server, &base).await;
-    callback(&server, &param(&query, "state")).await;
+    finish_sign_in(&server, &base, &query).await;
     let (_, listed) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
     let id = listed[0]["id"].as_str().unwrap().to_string();
     server.user.json(server.user.patch(&format!("/api/v1/chat-tool-servers/{id}")).json(&json!({"name": "Work docs"}))).await;
@@ -338,7 +366,7 @@ async fn adding_an_oauth_integration_with_a_name_already_taken_is_refused() {
     let server = Server::start().await;
     let (base, _) = start_app(false, 3600).await;
     let query = sign_in(&server, &base).await;
-    callback(&server, &param(&query, "state")).await;
+    finish_sign_in(&server, &base, &query).await;
 
     let (status, refused) = begin(&server, json!({"name": "Docs", "url": base, "kind": "outline"})).await;
 
@@ -558,7 +586,7 @@ async fn a_client_id_entered_by_the_person_is_used_without_registering_and_sends
     let (base, app) = start_with(Options { without_registration: true, ..Options::default() }).await;
     let query = pre_registered_sign_in(&server, &base, None).await;
 
-    callback(&server, &param(&query, "state")).await;
+    finish_sign_in(&server, &base, &query).await;
 
     let exchange = app.token_requests.lock().unwrap()[0].clone();
     assert_eq!(param(&query, "client_id"), "pre-1");
@@ -584,7 +612,7 @@ async fn a_client_secret_is_sent_in_the_body_when_the_server_takes_it_there_on_e
     let (_, node_token) = server.join("node", "laptop").await;
     let (base, app) = start_with(Options { without_registration: true, token_lifetime: 1, authorisation_extra: json!({"token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"]}), ..Options::default() }).await;
     let query = pre_registered_sign_in(&server, &base, Some("pre-secret")).await;
-    callback(&server, &param(&query, "state")).await;
+    finish_sign_in(&server, &base, &query).await;
 
     listed_tools(&server, &node_token).await;
 
@@ -604,7 +632,7 @@ async fn a_client_secret_is_sent_as_basic_authentication_when_that_is_all_the_se
     let (base, app) = start_with(Options { without_registration: true, authorisation_extra: json!({"token_endpoint_auth_methods_supported": ["client_secret_basic"]}), ..Options::default() }).await;
     let query = pre_registered_sign_in(&server, &base, Some("pre-secret")).await;
 
-    callback(&server, &param(&query, "state")).await;
+    finish_sign_in(&server, &base, &query).await;
 
     let exchange = app.token_requests.lock().unwrap()[0].clone();
     let expected = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode("pre-1:pre-secret"));
@@ -618,10 +646,170 @@ async fn a_secret_returned_by_registration_is_kept_and_sent_on_exchange() {
     let (base, app) = start_with(Options { registered_secret: Some("dcr-secret"), authorisation_extra: json!({"token_endpoint_auth_methods_supported": ["client_secret_post"]}), ..Options::default() }).await;
     let query = sign_in(&server, &base).await;
 
-    callback(&server, &param(&query, "state")).await;
+    finish_sign_in(&server, &base, &query).await;
 
     let exchange = app.token_requests.lock().unwrap()[0].clone();
     assert_eq!((param(&exchange, "client_id"), param(&exchange, "client_secret")), ("client-1".to_string(), "dcr-secret".to_string()));
     let listed = server.user.get("/api/v1/chat-tool-servers").send().await.unwrap().text().await.unwrap();
     assert!(!listed.contains("dcr-secret"), "{listed}");
+}
+
+#[tokio::test]
+async fn a_sign_in_is_waiting_then_connected_and_the_integration_exists_once_it_is_added() {
+    let server = Server::start().await;
+    let (base, _) = start_app(false, 3600).await;
+    let (_, started) = begin(&server, json!({"name": "Docs", "url": base, "kind": "outline"})).await;
+    let id = started["sign_in"].as_str().unwrap().to_string();
+
+    let waiting = sign_in_status(&server, &id).await;
+    callback(&server, &id).await;
+    let connected = sign_in_status(&server, &id).await;
+    let (added, _) = add_integration(&server, &base, &id).await;
+    let gone = sign_in_status(&server, &id).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
+
+    assert_eq!(waiting, (200, json!({"state": "waiting"})));
+    assert_eq!(connected, (200, json!({"state": "connected"})));
+    assert_eq!((added, gone.0, listed.as_array().map(Vec::len)), (201, 404, Some(1)));
+    assert_eq!(listed[0]["oauth"], true);
+}
+
+#[tokio::test]
+async fn adding_an_integration_with_an_unknown_sign_in_is_refused_and_one_for_another_address_keeps_the_sign_in() {
+    let server = Server::start().await;
+    let (base, _) = start_app(false, 3600).await;
+    let (other, _) = start_app(false, 3600).await;
+    let query = sign_in(&server, &base).await;
+    let id = param(&query, "state");
+    callback(&server, &id).await;
+
+    let (unknown, refused) = add_integration(&server, &base, "unknown").await;
+    let (mismatch, mismatched) = add_integration(&server, &other, &id).await;
+    let (added, _) = add_integration(&server, &base, &id).await;
+
+    assert_eq!((unknown, refused["error"].as_str()), (409, Some("sign_in_expired")));
+    assert_eq!((mismatch, mismatched["error"].as_str()), (400, Some("sign_in_mismatch")));
+    assert_eq!(added, 201);
+}
+
+#[tokio::test]
+async fn an_authorisation_server_error_fails_the_sign_in_with_the_reason_in_plain_words() {
+    let server = Server::start().await;
+    let (base, app) = start_app(false, 3600).await;
+    let reasons = [
+        ("access_denied", "127.0.0.1 refused the sign-in: access denied"),
+        ("invalid_client", "127.0.0.1 refused the sign-in: it does not recognise this client ID"),
+        ("unauthorized_client", "127.0.0.1 refused the sign-in: it does not recognise this client ID"),
+        ("invalid_scope", "127.0.0.1 refused the sign-in: it does not allow the access Mycelium asked for"),
+        ("server_error", "127.0.0.1 refused the sign-in: it had a problem, try again later"),
+        ("temporarily_unavailable", "127.0.0.1 refused the sign-in: it had a problem, try again later"),
+    ];
+
+    for (error, reason) in reasons {
+        let (_, started) = begin(&server, json!({"name": "Docs", "url": base, "kind": "outline"})).await;
+        let id = started["sign_in"].as_str().unwrap();
+
+        let (status, _) = callback_with(&server, &format!("error={error}&state={id}")).await;
+        let failed = sign_in_status(&server, id).await;
+
+        assert_eq!((status, failed), (400, (200, json!({"state": "failed", "reason": reason}))), "{error}");
+    }
+
+    let (_, listed) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
+    assert_eq!(listed, json!([]));
+    assert!(app.token_requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn an_authorisation_server_error_without_a_known_code_fails_with_its_own_description() {
+    let server = Server::start().await;
+    let (base, _) = start_app(false, 3600).await;
+    let (_, started) = begin(&server, json!({"name": "Docs", "url": base, "kind": "outline"})).await;
+    let id = started["sign_in"].as_str().unwrap();
+
+    callback_with(&server, &format!("error=odd_error&error_description=Your%20plan%20does%20not%20allow%20apps&state={id}")).await;
+
+    assert_eq!(sign_in_status(&server, id).await, (200, json!({"state": "failed", "reason": "127.0.0.1 refused the sign-in: Your plan does not allow apps"})));
+}
+
+#[tokio::test]
+async fn a_token_exchange_the_server_refuses_fails_the_sign_in_with_the_servers_description() {
+    let server = Server::start().await;
+    let (base, _) = start_with(Options { token_failure: true, ..Options::default() }).await;
+    let (_, started) = begin(&server, json!({"name": "Docs", "url": base, "kind": "outline"})).await;
+    let id = started["sign_in"].as_str().unwrap();
+
+    let (status, _) = callback(&server, id).await;
+
+    assert_eq!(status, 502);
+    assert_eq!(sign_in_status(&server, id).await, (200, json!({"state": "failed", "reason": "127.0.0.1 did not give Mycelium access: the code has expired"})));
+}
+
+#[tokio::test]
+async fn an_answer_from_another_issuer_is_refused_before_the_code_is_exchanged() {
+    let server = Server::start().await;
+    let (base, app) = start_app(false, 3600).await;
+    let (_, started) = begin(&server, json!({"name": "Docs", "url": base, "kind": "outline"})).await;
+    let id = started["sign_in"].as_str().unwrap();
+
+    callback_with(&server, &format!("code=code-1&iss=https%3A%2F%2Fevil.example.test&state={id}")).await;
+
+    let (_, failed) = sign_in_status(&server, id).await;
+    assert_eq!(failed["state"], "failed");
+    assert!(app.token_requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn an_answer_without_an_issuer_is_refused_when_the_server_says_it_sends_one_and_accepted_with_the_right_one() {
+    let server = Server::start().await;
+    let (base, _) = start_with(Options { authorisation_extra: json!({"authorization_response_iss_parameter_supported": true}), ..Options::default() }).await;
+    let (_, without) = begin(&server, json!({"name": "Docs", "url": base, "kind": "outline"})).await;
+    let (_, with) = begin(&server, json!({"name": "Docs", "url": base, "kind": "outline"})).await;
+    let without = without["sign_in"].as_str().unwrap();
+    let with = with["sign_in"].as_str().unwrap();
+
+    callback_with(&server, &format!("code=code-1&state={without}")).await;
+    callback_with(&server, &format!("code=code-1&iss={}&state={with}", base.replace(':', "%3A").replace('/', "%2F"))).await;
+
+    assert_eq!(sign_in_status(&server, without).await.1["state"], "failed");
+    assert_eq!(sign_in_status(&server, with).await.1["state"], "connected");
+}
+
+#[tokio::test]
+async fn cancelling_a_sign_in_discards_it_and_a_late_callback_connects_nothing() {
+    let server = Server::start().await;
+    let (base, app) = start_app(false, 3600).await;
+    let (_, started) = begin(&server, json!({"name": "Docs", "url": base, "kind": "outline"})).await;
+    let id = started["sign_in"].as_str().unwrap();
+
+    let cancelled = server.user.delete(&format!("/integrations/oauth/{id}")).send().await.unwrap().status().as_u16();
+    let (status, page) = callback(&server, id).await;
+
+    assert_eq!(cancelled, 204);
+    assert_eq!(sign_in_status(&server, id).await.0, 404);
+    assert_eq!(status, 400, "{page}");
+    assert!(app.token_requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_sign_in_that_does_not_exist_is_not_found() {
+    let server = Server::start().await;
+
+    assert_eq!(sign_in_status(&server, "unknown").await.0, 404);
+}
+
+#[tokio::test]
+async fn signing_in_again_reports_connected_with_the_existing_integration() {
+    let server = Server::start().await;
+    let (base, _) = start_app(false, 3600).await;
+    let query = sign_in(&server, &base).await;
+    finish_sign_in(&server, &base, &query).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
+    let existing = listed[0]["id"].as_str().unwrap().to_string();
+    let (_, started) = begin(&server, json!({"name": "Docs", "url": base, "kind": "outline", "server_id": existing})).await;
+    let id = started["sign_in"].as_str().unwrap();
+
+    callback(&server, id).await;
+
+    assert_eq!(sign_in_status(&server, id).await, (200, json!({"state": "connected", "server": existing})));
 }

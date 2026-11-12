@@ -4,7 +4,7 @@ use crate::forge_cache::ForgeCache;
 use crate::rate_limit::RateLimiter;
 use crate::store::publish_node;
 use crate::versions::LatestVersions;
-use mycelium_proto::api::{CpuPoint, MoveProgress, MoveState, NodeResources};
+use mycelium_proto::api::{CpuPoint, MoveProgress, MoveState, NodeResources, OAuthSignInState, OAuthSignInStatus};
 use mycelium_proto::link::{ControlToNode, FolderFile, ResourceSample};
 use serde_json::Value;
 use mycelium_proto::stream::StreamMessage;
@@ -77,6 +77,15 @@ pub struct SteerAnswer {
 
 const OAUTH_SIGN_IN_LIFETIME: std::time::Duration = std::time::Duration::from_secs(600);
 
+#[derive(Clone)]
+pub enum OAuthOutcome {
+    Waiting,
+    Held(crate::mcp_oauth::Tokens),
+    Connected,
+    Failed(String),
+}
+
+#[derive(Clone)]
 pub struct PendingOAuth {
     pub owner: Uuid,
     pub name: String,
@@ -87,6 +96,10 @@ pub struct PendingOAuth {
     pub verifier: String,
     pub forge_id: Option<Uuid>,
     pub server: Option<Uuid>,
+    pub issuer: String,
+    pub issuer_identified: bool,
+    pub host: String,
+    pub outcome: OAuthOutcome,
     pub created: std::time::Instant,
 }
 
@@ -596,9 +609,52 @@ impl Hub {
     }
 
     pub fn take_oauth(&self, sign_in: &str) -> Option<PendingOAuth> {
-        let pending = self.oauth_sign_ins.lock().ok()?.remove(sign_in)?;
+        let mut sign_ins = self.oauth_sign_ins.lock().ok()?;
+        let waiting = sign_ins.get(sign_in).is_some_and(|pending| matches!(pending.outcome, OAuthOutcome::Waiting) && pending.created.elapsed() < OAUTH_SIGN_IN_LIFETIME);
 
-        (pending.created.elapsed() < OAUTH_SIGN_IN_LIFETIME).then_some(pending)
+        if !waiting {
+            return None;
+        }
+
+        sign_ins.remove(sign_in)
+    }
+
+    pub fn settle_oauth(&self, sign_in: String, mut pending: PendingOAuth, outcome: OAuthOutcome) {
+        pending.outcome = outcome;
+
+        if let Ok(mut sign_ins) = self.oauth_sign_ins.lock() {
+            sign_ins.insert(sign_in, pending);
+        }
+    }
+
+    pub fn oauth_status(&self, sign_in: &str, owner: Uuid) -> Option<OAuthSignInStatus> {
+        let sign_ins = self.oauth_sign_ins.lock().ok()?;
+        let pending = sign_ins.get(sign_in).filter(|pending| pending.owner == owner && pending.created.elapsed() < OAUTH_SIGN_IN_LIFETIME)?;
+
+        Some(match &pending.outcome {
+            OAuthOutcome::Waiting => OAuthSignInStatus { state: OAuthSignInState::Waiting, reason: None, server: None },
+            OAuthOutcome::Held(_) => OAuthSignInStatus { state: OAuthSignInState::Connected, reason: None, server: None },
+            OAuthOutcome::Connected => OAuthSignInStatus { state: OAuthSignInState::Connected, reason: None, server: pending.server },
+            OAuthOutcome::Failed(reason) => OAuthSignInStatus { state: OAuthSignInState::Failed, reason: Some(reason.clone()), server: None },
+        })
+    }
+
+    pub fn held_oauth(&self, sign_in: &str, owner: Uuid) -> Option<(PendingOAuth, crate::mcp_oauth::Tokens)> {
+        let sign_ins = self.oauth_sign_ins.lock().ok()?;
+        let pending = sign_ins.get(sign_in).filter(|pending| pending.owner == owner && pending.created.elapsed() < OAUTH_SIGN_IN_LIFETIME)?;
+
+        match &pending.outcome {
+            OAuthOutcome::Held(tokens) => Some((pending.clone(), tokens.clone())),
+            _ => None,
+        }
+    }
+
+    pub fn cancel_oauth(&self, sign_in: &str, owner: Uuid) {
+        if let Ok(mut sign_ins) = self.oauth_sign_ins.lock()
+            && sign_ins.get(sign_in).is_some_and(|pending| pending.owner == owner)
+        {
+            sign_ins.remove(sign_in);
+        }
     }
 
     pub fn track_lastfm(&self, sign_in: String, pending: PendingLastFm) {

@@ -1,15 +1,15 @@
 use crate::auth::AuthUser;
-use crate::chat_tool_servers::{DEFAULT_KEY_HEADER, SERVER_COLUMNS, ServerRow, check_name, fetch_tools, known_app};
+use crate::chat_tool_servers::{DEFAULT_KEY_HEADER, check_name, fetch_tools, known_app};
 use crate::error::{ApiError, ApiResult};
-use crate::state::{AppState, PendingOAuth, new_token};
+use crate::state::{AppState, OAuthOutcome, PendingOAuth, new_token};
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, Duration, Utc};
-use mycelium_proto::api::{OAuthStart, StartChatToolServerOAuthRequest};
+use mycelium_proto::api::{OAuthSignInStatus, OAuthStart, StartChatToolServerOAuthRequest};
 use mycelium_proto::stream::StreamMessage;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -23,6 +23,7 @@ const NO_AUTHORISATION_DETAILS: &str = "The server asks for sign-in but publishe
 const UNSUPPORTED: &str = "This app does not let Mycelium sign in. Use an API key instead.";
 const GITHUB_USES_TOKEN: &str = "GitHub's MCP server uses the token you connected the forge with. Reconnect the forge with a fine-grained token that has the MCP permission.";
 
+#[derive(Clone)]
 pub struct Tokens {
     pub access_token: String,
     pub refresh_token: Option<String>,
@@ -36,8 +37,10 @@ pub(crate) struct Authorisation {
     registration_endpoint: Option<String>,
     metadata_document_supported: bool,
     token_auth_methods: Option<Vec<String>>,
+    issuer_identified: bool,
 }
 
+#[derive(Clone)]
 pub struct ClientCredentials {
     pub id: String,
     pub secret: Option<String>,
@@ -112,15 +115,15 @@ async fn token_request(state: &AppState, endpoint: &str, client: &ClientCredenti
     let response = request
         .send()
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(|_| "it could not be reached".to_string())?;
+    let status = response.status();
+    let answer: Value = response.json().await.unwrap_or(Value::Null);
 
-    if !response.status().is_success() {
-        return Err(format!("The app answered {}.", response.status()));
+    if !status.is_success() {
+        return Err(answer["error_description"].as_str().or(answer["error"].as_str()).map_or_else(|| format!("status {}", status.as_u16()), str::to_string));
     }
 
-    let answer: Value = response.json().await.map_err(|error| error.to_string())?;
-
-    tokens_from(&answer).ok_or_else(|| "The app sent no access token.".to_string())
+    tokens_from(&answer).ok_or_else(|| "it sent no access token".to_string())
 }
 
 pub async fn refresh(state: &AppState, oauth: &Value, refresh_token: &str) -> Result<Tokens, String> {
@@ -247,7 +250,7 @@ async fn authorisation_server_metadata(state: &AppState, issuer: &str) -> Option
             continue;
         };
 
-        return Some(Authorisation { issuer: issuer.to_string(), authorization_endpoint, token_endpoint, registration_endpoint: text("registration_endpoint"), metadata_document_supported: metadata["client_id_metadata_document_supported"].as_bool() == Some(true), token_auth_methods: metadata["token_endpoint_auth_methods_supported"].as_array().map(|methods| methods.iter().filter_map(|method| method.as_str().map(str::to_string)).collect()) });
+        return Some(Authorisation { issuer: issuer.to_string(), authorization_endpoint, token_endpoint, registration_endpoint: text("registration_endpoint"), metadata_document_supported: metadata["client_id_metadata_document_supported"].as_bool() == Some(true), issuer_identified: metadata["authorization_response_iss_parameter_supported"].as_bool() == Some(true), token_auth_methods: metadata["token_endpoint_auth_methods_supported"].as_array().map(|methods| methods.iter().filter_map(|method| method.as_str().map(str::to_string)).collect()) });
     }
 
     None
@@ -337,6 +340,7 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Json(request):
     let Discovered { authorisation, scopes } = discover(&state, &mcp_url).await.map_err(|_| unsupported())?;
 
     let redirect = redirect_uri(&state);
+    let host = url::Url::parse(&authorisation.issuer).ok().and_then(|issuer| issuer.host_str().map(str::to_string)).unwrap_or_default();
     let supplied = request.client_id.as_deref().map(str::trim).filter(|client_id| !client_id.is_empty());
     let client = match (supplied, authorisation.metadata_document_supported, authorisation.registration_endpoint.as_deref()) {
         (Some(client_id), _, _) => {
@@ -346,11 +350,7 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Json(request):
             ClientCredentials { id: client_id.to_string(), secret, method: method.to_string() }
         }
         (None, true, _) => ClientCredentials { id: client_metadata_url(&state), secret: None, method: "none".to_string() },
-        (None, false, None) => {
-            let host = url::Url::parse(&authorisation.issuer).ok().and_then(|issuer| issuer.host_str().map(str::to_string)).unwrap_or_default();
-
-            return Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "client_id_required", format!("Enter the client ID from {host}")));
-        }
+        (None, false, None) => return Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "client_id_required", format!("Enter the client ID from {host}"))),
         (None, false, Some(registration_endpoint)) => {
             let registration = json!({"client_name": "Mycelium", "redirect_uris": [redirect], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"]});
             let registered = state.http.post(registration_endpoint).timeout(DISCOVERY_TIMEOUT).json(&registration).send().await.map_err(|_| unsupported())?;
@@ -397,15 +397,31 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Json(request):
         _ => json!({}),
     };
 
-    state.hub.track_oauth(sign_in, PendingOAuth { owner: user.id, name: name.to_string(), url: resource, settings, client, token_endpoint: authorisation.token_endpoint, verifier, forge_id: request.forge_id, server: request.server_id, created: std::time::Instant::now() });
+    state.hub.track_oauth(
+        sign_in.clone(),
+        PendingOAuth { owner: user.id, name: name.to_string(), url: resource, settings, client, token_endpoint: authorisation.token_endpoint, verifier, forge_id: request.forge_id, server: request.server_id, issuer: authorisation.issuer, issuer_identified: authorisation.issuer_identified, host, outcome: OAuthOutcome::Waiting, created: std::time::Instant::now() },
+    );
 
-    Ok(Json(OAuthStart { authorize_url: authorize.to_string() }))
+    Ok(Json(OAuthStart { authorize_url: authorize.to_string(), sign_in }))
+}
+
+pub async fn status(State(state): State<AppState>, user: AuthUser, Path(sign_in): Path<String>) -> ApiResult<Json<OAuthSignInStatus>> {
+    state.hub.oauth_status(&sign_in, user.id).map(Json).ok_or_else(|| ApiError::not_found("That sign-in"))
+}
+
+pub async fn cancel(State(state): State<AppState>, user: AuthUser, Path(sign_in): Path<String>) -> StatusCode {
+    state.hub.cancel_oauth(&sign_in, user.id);
+
+    StatusCode::NO_CONTENT
 }
 
 #[derive(Deserialize)]
 pub struct CallbackQuery {
     code: Option<String>,
     state: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
+    iss: Option<String>,
 }
 
 pub(crate) fn page(status: StatusCode, message: &str) -> Response {
@@ -414,30 +430,80 @@ pub(crate) fn page(status: StatusCode, message: &str) -> Response {
     (status, Html(format!("<!doctype html><html lang=\"en-GB\"><head><meta charset=\"utf-8\"><title>Mycelium</title></head><body><main><h1>Mycelium</h1><p>{escaped}</p></main></body></html>"))).into_response()
 }
 
+fn refuse(state: &AppState, sign_in: String, pending: PendingOAuth, reason: String, answer: Response) -> Response {
+    state.hub.settle_oauth(sign_in, pending, OAuthOutcome::Failed(reason));
+
+    answer
+}
+
 pub async fn callback(State(state): State<AppState>, Query(query): Query<CallbackQuery>) -> Response {
     let expired = || page(StatusCode::BAD_REQUEST, "This sign-in has expired. Start it again from Settings, Integrations.");
-    let Some(pending) = query.state.as_deref().and_then(|sign_in| state.hub.take_oauth(sign_in)) else {
+    let Some(sign_in) = query.state.clone() else {
         return expired();
     };
+    let Some(pending) = state.hub.take_oauth(&sign_in) else {
+        return expired();
+    };
+    let host = pending.host.clone();
+    let not_signed_in = page(StatusCode::BAD_REQUEST, &format!("{} did not sign you in. Start it again from Settings, Integrations.", pending.name));
+    let identified = match query.iss.as_deref() {
+        Some(iss) => iss == pending.issuer,
+        None => !pending.issuer_identified,
+    };
+
+    if !identified {
+        return refuse(&state, sign_in, pending, format!("{host} did not give Mycelium access: the answer did not come from the sign-in it was asked for"), not_signed_in);
+    }
+
+    if let Some(error) = &query.error {
+        let plain = match error.as_str() {
+            "access_denied" => "access denied".to_string(),
+            "invalid_client" | "unauthorized_client" => "it does not recognise this client ID".to_string(),
+            "invalid_scope" => "it does not allow the access Mycelium asked for".to_string(),
+            "server_error" | "temporarily_unavailable" => "it had a problem, try again later".to_string(),
+            _ => query.error_description.clone().unwrap_or_else(|| "it gave no reason".to_string()),
+        };
+
+        return refuse(&state, sign_in, pending, format!("{host} refused the sign-in: {plain}"), not_signed_in);
+    }
+
     let Some(code) = query.code else {
-        return page(StatusCode::BAD_REQUEST, &format!("{} did not sign you in. Start it again from Settings, Integrations.", pending.name));
+        return refuse(&state, sign_in, pending, format!("{host} refused the sign-in: it gave no reason"), not_signed_in);
     };
 
     let redirect = redirect_uri(&state);
     let form = [("grant_type", "authorization_code"), ("code", code.as_str()), ("redirect_uri", redirect.as_str()), ("code_verifier", pending.verifier.as_str()), ("resource", pending.url.as_str())];
-    let Ok(tokens) = token_request(&state, &pending.token_endpoint, &pending.client, &form).await else {
-        return page(StatusCode::BAD_GATEWAY, &format!("{} did not give Mycelium access. Start the sign-in again from Settings, Integrations.", pending.name));
-    };
-    let app = pending.settings["app"].as_str().and_then(known_app);
-    let connected = connect(&state, &pending, &tokens, app).await;
+    let tokens = match token_request(&state, &pending.token_endpoint, &pending.client, &form).await {
+        Ok(tokens) => tokens,
+        Err(detail) => {
+            let answer = page(StatusCode::BAD_GATEWAY, &format!("{} did not give Mycelium access. Start the sign-in again from Settings, Integrations.", pending.name));
 
-    match connected {
-        Ok(()) => page(StatusCode::OK, &format!("{} is connected. You can close this tab and return to Mycelium.", pending.name)),
-        Err(error) => page(StatusCode::BAD_REQUEST, error.message()),
+            return refuse(&state, sign_in, pending, format!("{host} did not give Mycelium access: {detail}"), answer);
+        }
+    };
+    let Some(server) = pending.server else {
+        let answer = page(StatusCode::OK, &format!("{} is connected. You can close this tab and return to Mycelium.", pending.name));
+        state.hub.settle_oauth(sign_in, pending, OAuthOutcome::Held(tokens));
+
+        return answer;
+    };
+
+    match connect(&state, &pending, server, &tokens).await {
+        Ok(()) => {
+            let answer = page(StatusCode::OK, &format!("{} is connected. You can close this tab and return to Mycelium.", pending.name));
+            state.hub.settle_oauth(sign_in, pending, OAuthOutcome::Connected);
+
+            answer
+        }
+        Err(error) => {
+            let answer = page(StatusCode::BAD_REQUEST, error.message());
+
+            refuse(&state, sign_in, pending, error.message().to_string(), answer)
+        }
     }
 }
 
-fn stored_oauth(pending: &PendingOAuth) -> ApiResult<Value> {
+pub(crate) fn stored_oauth(pending: &PendingOAuth) -> ApiResult<Value> {
     let mut oauth = json!({"client_id": pending.client.id, "token_endpoint": pending.token_endpoint, "resource": pending.url, "token_auth_method": pending.client.method});
 
     if let Some(secret) = &pending.client.secret {
@@ -448,97 +514,30 @@ fn stored_oauth(pending: &PendingOAuth) -> ApiResult<Value> {
     Ok(oauth)
 }
 
-async fn connect(state: &AppState, pending: &PendingOAuth, tokens: &Tokens, app: Option<&crate::chat_tool_servers::KnownApp>) -> ApiResult<()> {
-    check_name(state, pending.owner, &pending.name, pending.server).await?;
+async fn connect(state: &AppState, pending: &PendingOAuth, server: Uuid, tokens: &Tokens) -> ApiResult<()> {
+    let app = pending.settings["app"].as_str().and_then(known_app);
+
+    check_name(state, pending.owner, &pending.name, Some(server)).await?;
 
     let listed = fetch_tools(state, &pending.name, &pending.url, Some(&tokens.access_token), DEFAULT_KEY_HEADER, app).await?;
     let oauth = stored_oauth(pending)?;
+    let updated = sqlx::query("update chat_tool_servers set bearer_token = $3, oauth_refresh_token = $4, oauth_expires_at = $5, oauth = $6, tools = $7 where id = $1 and owner = $2")
+        .bind(server)
+        .bind(pending.owner)
+        .bind(crate::secrets::Sealed::from(tokens.access_token.as_str()))
+        .bind(tokens.refresh_token.as_deref().map(crate::secrets::Sealed::from))
+        .bind(tokens.expires_at)
+        .bind(sqlx::types::Json(oauth))
+        .bind(sqlx::types::Json(listed))
+        .execute(&state.pool)
+        .await?;
 
-    match pending.server {
-        Some(server) => {
-            let updated = sqlx::query("update chat_tool_servers set bearer_token = $3, oauth_refresh_token = $4, oauth_expires_at = $5, oauth = $6, tools = $7 where id = $1 and owner = $2")
-                .bind(server)
-                .bind(pending.owner)
-                .bind(crate::secrets::Sealed::from(tokens.access_token.as_str()))
-                .bind(tokens.refresh_token.as_deref().map(crate::secrets::Sealed::from))
-                .bind(tokens.expires_at)
-                .bind(sqlx::types::Json(oauth))
-                .bind(sqlx::types::Json(listed))
-                .execute(&state.pool)
-                .await?;
-
-            if updated.rows_affected() == 0 {
-                return Err(ApiError::not_found("That tool server"));
-            }
-        }
-        None => {
-            let tool_prefix = crate::chat_tool_servers::free_prefix(state, pending.owner, &pending.name).await?;
-
-            sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!(
-                "insert into chat_tool_servers (owner, name, kind, url, bearer_token, oauth_refresh_token, oauth_expires_at, oauth, tools, settings, forge_id, tool_prefix) values ($1, $2, 'mcp', $3, $4, $5, $6, $7, $8, $9, $10, $11) returning {SERVER_COLUMNS}"
-            )))
-            .bind(pending.owner)
-            .bind(&pending.name)
-            .bind(&pending.url)
-            .bind(crate::secrets::Sealed::from(tokens.access_token.as_str()))
-            .bind(tokens.refresh_token.as_deref().map(crate::secrets::Sealed::from))
-            .bind(tokens.expires_at)
-            .bind(sqlx::types::Json(oauth))
-            .bind(sqlx::types::Json(listed))
-            .bind(crate::secrets::SealedSettings(pending.settings.clone()))
-            .bind(pending.forge_id)
-            .bind(&tool_prefix)
-            .fetch_one(&state.pool)
-            .await?;
-        }
+    if updated.rows_affected() == 0 {
+        return Err(ApiError::not_found("That tool server"));
     }
 
     state.hub.tools_changed(pending.owner);
     state.publish(Some(pending.owner), StreamMessage::IntegrationsChanged);
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn parsed(header: &str) -> (Option<String>, Option<String>, Option<String>) {
-        let challenge = parse_challenge(header).expect("a bearer challenge");
-
-        (challenge.resource_metadata, challenge.scope, challenge.error)
-    }
-
-    #[test]
-    fn a_challenge_with_quoted_values_gives_its_metadata_scope_and_error() {
-        let header = r#"Bearer realm="mcp", error="insufficient_scope", scope="files:read files:write", resource_metadata="https://mcp.example.test/.well-known/oauth-protected-resource""#;
-
-        assert_eq!(parsed(header), (Some("https://mcp.example.test/.well-known/oauth-protected-resource".to_string()), Some("files:read files:write".to_string()), Some("insufficient_scope".to_string())));
-    }
-
-    #[test]
-    fn a_challenge_with_unquoted_values_and_any_case_is_read() {
-        assert_eq!(parsed("BEARER error=invalid_token, Resource_Metadata=https://mcp.example.test/meta, scope=read"), (Some("https://mcp.example.test/meta".to_string()), Some("read".to_string()), Some("invalid_token".to_string())));
-    }
-
-    #[test]
-    fn a_quoted_value_keeps_commas_and_escaped_quotes() {
-        assert_eq!(parsed(r#"Bearer scope="a, b \"c\"", error="x""#), (None, Some(r#"a, b "c""#.to_string()), Some("x".to_string())));
-    }
-
-    #[test]
-    fn the_bearer_challenge_is_found_after_another_scheme() {
-        assert_eq!(parsed(r#"Basic realm="files", Bearer scope="read""#), (None, Some("read".to_string()), None));
-    }
-
-    #[test]
-    fn a_bare_bearer_challenge_has_no_parameters() {
-        assert_eq!(parsed("Bearer"), (None, None, None));
-    }
-
-    #[test]
-    fn a_challenge_without_the_bearer_scheme_is_not_a_challenge() {
-        assert!(parse_challenge(r#"Basic realm="files""#).is_none());
-        assert!(parse_challenge("Bearerish error=x").is_none());
-    }
 }

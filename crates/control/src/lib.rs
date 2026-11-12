@@ -195,6 +195,7 @@ fn router(state: AppState) -> Router {
         .route("/auth/callback", get(auth::callback))
         .route("/integrations/oauth/callback", get(mcp_oauth::callback))
         .route("/integrations/oauth/client.json", get(mcp_oauth::client_metadata))
+        .route("/integrations/oauth/{sign_in}", get(mcp_oauth::status).delete(mcp_oauth::cancel))
         .route("/integrations/lastfm/callback", get(lastfm::callback))
         .route("/integrations/freeagent/callback", get(freeagent::callback))
         .route("/novnc/{*path}", get(novnc::serve))

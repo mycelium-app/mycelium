@@ -328,6 +328,15 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         request.bearer_token = Some(app.credentials().secret);
     }
 
+    let held = match request.sign_in.as_deref() {
+        Some(sign_in) => Some(state.hub.held_oauth(sign_in, user.id).ok_or_else(|| ApiError::conflict("sign_in_expired", "This sign-in has expired. Sign in again."))?),
+        None => None,
+    };
+
+    if let Some((_, tokens)) = &held {
+        request.bearer_token = Some(tokens.access_token.clone());
+    }
+
     let named_by_company = request.kind.as_deref() == Some("freeagent") && request.name.trim().is_empty();
     let name = if named_by_company { free_name(&state, user.id, "FreeAgent", None).await? } else { request.name.trim().to_string() };
     let name = name.as_str();
@@ -363,6 +372,10 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
             }
         }
     };
+
+    if held.as_ref().is_some_and(|(pending, _)| pending.url != address) {
+        return Err(ApiError::bad_request("sign_in_mismatch", "This sign-in was for a different address. Sign in again."));
+    }
 
     if let (Some(app), None) = (app, token) {
         return Err(ApiError::bad_request("api_key_required", app.key_prompt));
@@ -410,7 +423,11 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
     };
     let kind = app.map_or(kind, |app| app.stored_kind);
     let tool_prefix = free_prefix(&state, user.id, name).await?;
-    let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("insert into chat_tool_servers (owner, name, tool_prefix, kind, url, account, bearer_token, tools, settings, token_expires_at, policy) values ($1, $2, $11, $3, $4, $5, $6, $7, $8, $9, $10) returning {SERVER_COLUMNS}")))
+    let (refresh_token, expires_at, oauth, forge_id) = match &held {
+        Some((pending, tokens)) => (tokens.refresh_token.as_deref().map(Sealed::from), tokens.expires_at, Some(sqlx::types::Json(crate::mcp_oauth::stored_oauth(pending)?)), pending.forge_id),
+        None => (None, None, None, None),
+    };
+    let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("insert into chat_tool_servers (owner, name, tool_prefix, kind, url, account, bearer_token, tools, settings, token_expires_at, policy, oauth_refresh_token, oauth_expires_at, oauth, forge_id) values ($1, $2, $11, $3, $4, $5, $6, $7, $8, $9, $10, $12, $13, $14, $15) returning {SERVER_COLUMNS}")))
         .bind(user.id)
         .bind(name)
         .bind(kind)
@@ -422,8 +439,16 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         .bind(request.token_expires_at)
         .bind(sqlx::types::Json(request.policy.clone().unwrap_or_else(|| IntegrationPolicy { preset: Integration::parse(kind).map_or(ApprovalPreset::AskAll, Integration::default_preset), ..Default::default() })))
         .bind(&tool_prefix)
+        .bind(refresh_token)
+        .bind(expires_at)
+        .bind(oauth)
+        .bind(forge_id)
         .fetch_one(&state.pool)
         .await?;
+
+    if let Some(sign_in) = &request.sign_in {
+        state.hub.cancel_oauth(sign_in, user.id);
+    }
 
     if let Some(groups) = &request.groups {
         replace_groups(&state, user.id, row.id, groups).await?;

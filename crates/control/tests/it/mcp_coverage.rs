@@ -168,6 +168,8 @@ const EXCEPTIONS: &[(&str, &str, &str)] = &[
     ("POST", "/api/v1/schedules/{id}/confirm", "approving an approval card from an agent would let it approve its own request"),
     ("GET", "/integrations/oauth/callback", "OAuth callback"),
     ("GET", "/integrations/oauth/client.json", "public client metadata document"),
+    ("GET", "/integrations/oauth/{sign_in}", "setup dialog polls the sign-in it started"),
+    ("DELETE", "/integrations/oauth/{sign_in}", "setup dialog cancels the sign-in it started"),
     ("GET", "/integrations/lastfm/callback", "OAuth callback"),
     ("GET", "/integrations/freeagent/callback", "OAuth callback"),
     ("POST", "/api/v1/forges", "connecting a forge takes the person's token"),
