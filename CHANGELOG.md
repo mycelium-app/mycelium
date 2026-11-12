@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.27
+
+- Publishes the changes listed under v0.34.26, whose desktop and web build did not complete, so v0.34.26 was never released.
+
 ## v0.34.28
 
 - The Discord and Stoat message tools read past one page: get_messages takes before or after a message id and up to 500 messages, and each result says what it covered and where to carry on. Discord search pages through its results too.
