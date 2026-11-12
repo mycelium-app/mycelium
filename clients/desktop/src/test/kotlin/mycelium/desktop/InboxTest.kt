@@ -151,7 +151,7 @@ class InboxTest {
         show("input")
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Approve pnpm db:migrate").fetchSemanticsNodes().isNotEmpty() }
 
-        val left = rule.onNodeWithText("harbour", useUnmergedTree = true).getUnclippedBoundsInRoot().left
+        val left = rule.onNodeWithText("harbour Bump the UI kit", useUnmergedTree = true).getUnclippedBoundsInRoot().left
 
         assertEquals(rule.onNodeWithText("Needs you", useUnmergedTree = true).getUnclippedBoundsInRoot().left, left)
     }
@@ -185,7 +185,7 @@ class InboxTest {
         show("working", events = lastMessage, assistantId = "a1", assistants = "[$AssistantJson]", messageProposals = "[$MessageProposalJson]")
         rule.waitUntil(5_000) { rule.onAllNodesWithText("The notes are ready for example.com").fetchSemanticsNodes().isNotEmpty() }
 
-        rule.onNodeWithContentDescription("Open Archivist").assertExists()
+        rule.onNodeWithContentDescription("harbour Archivist").assertExists()
         rule.onAllNodesWithText("Unrelated chatter from earlier").assertCountEquals(0)
     }
 

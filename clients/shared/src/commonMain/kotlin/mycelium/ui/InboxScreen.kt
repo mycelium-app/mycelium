@@ -50,6 +50,12 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -285,17 +291,22 @@ private fun InboxItemRow(store: Store, state: AppState, item: InboxItem, focused
             }
 
             Row(Modifier.weight(1f)) {
-                Row(
-                    Modifier.weight(1f, fill = false).pressable(::openConversation, description = "Open ${item.name}", shape = ControlShape),
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                val link = buildAnnotatedString {
                     if (item.projectName != null) {
-                        Label(item.projectName, Modifier.weight(1f, fill = false), Tokens.Type.UiStrong, maxLines = 1, decoration = LabelDecoration.Underline)
+                        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(item.projectName) }
+                        append(" ")
                     }
 
-                    Label(item.name, Modifier.weight(1f, fill = false), maxLines = 1, decoration = LabelDecoration.Underline)
+                    append(item.name)
                 }
+
+                BasicText(
+                    link,
+                    Modifier.weight(1f, fill = false).pressable(::openConversation, description = listOfNotNull(item.projectName, item.name).joinToString(" "), shape = ControlShape),
+                    style = Tokens.Type.Ui.themed().copy(color = colors.text, textDecoration = TextDecoration.Underline),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
 
             Label(relativeTime(item.waitingSince), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)

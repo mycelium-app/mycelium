@@ -90,7 +90,7 @@ class InboxFlagTest {
 
             MyceliumTheme(true) { InboxScreen(store, state, onOpenConversation = { opened += it }, onOpenUsageHistory = {}) }
         }
-        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("Open Restaurant receipt split breakdown").fetchSemanticsNodes().isNotEmpty() }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("receipts Restaurant receipt split breakdown").fetchSemanticsNodes().isNotEmpty() }
     }
 
     private fun clearedFlags() = patches.filter { it.second.contains("\"clear_flag\":true") }
@@ -132,7 +132,7 @@ class InboxFlagTest {
     fun theTitleLinkOfAFlaggedItemOpensTheChatAndClearsTheFlag() = runDesktopComposeUiTest(width = 1440, height = 900) {
         showInbox()
 
-        onNodeWithContentDescription("Open Restaurant receipt split breakdown").performClick()
+        onNodeWithContentDescription("receipts Restaurant receipt split breakdown").performClick()
 
         waitUntil(timeoutMillis = 5_000) { clearedFlags().isNotEmpty() }
         assertEquals(listOf("c2"), opened.toList())
@@ -142,7 +142,7 @@ class InboxFlagTest {
     fun theTitleLinkOfAnItemThatIsNotFlaggedOnlyOpensTheChat() = runDesktopComposeUiTest(width = 1440, height = 900) {
         showInbox()
 
-        onNodeWithContentDescription("Open Bump the UI kit to 0.31.2").performClick()
+        onNodeWithContentDescription("harbour Bump the UI kit to 0.31.2").performClick()
         waitForIdle()
 
         assertEquals(listOf("c1"), opened.toList())
@@ -154,11 +154,11 @@ class InboxFlagTest {
         val store = store()
 
         setContent { MyceliumTheme(true) { Shell(store, AppsPlatform(), Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Inbox) } }
-        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("Open Restaurant receipt split breakdown").fetchSemanticsNodes().isNotEmpty() }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("receipts Restaurant receipt split breakdown").fetchSemanticsNodes().isNotEmpty() }
         saveShot("5.26-inbox")
 
         onNodeWithContentDescription("Show more of Restaurant receipt split breakdown").performClick()
-        onNodeWithContentDescription("Open Restaurant receipt split breakdown").requestFocus()
+        onNodeWithContentDescription("receipts Restaurant receipt split breakdown").requestFocus()
         saveShot("5.39-inbox-flagged-item-expanded")
         assertTrue(java.io.File("/tmp/mycelium-build-flag-adopt/shots/5.39-inbox-flagged-item-expanded.png").length() > 10_000)
     }
