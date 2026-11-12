@@ -146,7 +146,14 @@ fun ProjectPage(store: Store, state: AppState, projectId: String, onBack: () -> 
                                     }
 
                                     1 -> TableCell.Text(place.path, Tokens.Type.Code, colors.textMuted)
-                                    2 -> TableCell.Text(checkedOutBranch(place, state.conversations.values).orEmpty(), color = colors.textMuted)
+                                    2 -> checkedOutBranch(place, state.conversations.values)?.let { branch ->
+                                        TableCell.Slot(measureAs = branch, extra = Tokens.Size.IconSm + Tokens.Space.S1) {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(MyIcon.Branch, colors.textMuted, Tokens.Size.IconSm)
+                                                Label(branch, color = colors.textMuted, maxLines = 1)
+                                            }
+                                        }
+                                    } ?: TableCell.Text("")
                                     3 -> TableCell.Text(state.conversations.values.count { it.projectId == project.id && it.nodeId == place.nodeId }.toString(), color = colors.textMuted)
                                     else -> if (places.size > 1) {
                                         TableCell.Slot {
