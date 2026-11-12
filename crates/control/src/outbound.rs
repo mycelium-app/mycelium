@@ -1,7 +1,8 @@
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use std::fmt::Debug;
 use std::future::Future;
-use std::net::{IpAddr, SocketAddr};
+use crate::config::PublicFetchRouting;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -38,18 +39,84 @@ pub fn refused_address(address: IpAddr) -> bool {
     }
 }
 
-struct Resolver;
+pub fn refused_public_address(address: IpAddr) -> bool {
+    match address {
+        IpAddr::V4(address) => {
+            let octets = address.octets();
+            let carrier_grade_nat = octets[0] == 100 && octets[1] & 0xc0 == 64;
+            let benchmarking = octets[0] == 198 && octets[1] & 0xfe == 18;
+
+            refused_address(IpAddr::V4(address)) || address.is_loopback() || address.is_private() || carrier_grade_nat || benchmarking || octets[0] == 0
+        }
+        IpAddr::V6(address) => {
+            let segments = address.segments();
+            let unique_local = segments[0] & 0xfe00 == 0xfc00;
+            let six_to_four = (segments[0] == 0x2002).then(|| Ipv4Addr::new((segments[1] >> 8) as u8, segments[1] as u8, (segments[2] >> 8) as u8, segments[2] as u8));
+            let nat64 = (segments[0] == 0x0064 && segments[1] == 0xff9b && segments[2..6] == [0, 0, 0, 0]).then(|| Ipv4Addr::new((segments[6] >> 8) as u8, segments[6] as u8, (segments[7] >> 8) as u8, segments[7] as u8));
+
+            match address.to_ipv4_mapped().or(six_to_four).or(nat64) {
+                Some(embedded) => refused_public_address(IpAddr::V4(embedded)),
+                None => refused_address(IpAddr::V6(address)) || address.is_loopback() || unique_local,
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct RefusedDestination(pub String);
+
+impl std::fmt::Display for RefusedDestination {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for RefusedDestination {}
+
+pub fn was_refused(error: &reqwest::Error) -> bool {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+
+    while let Some(current) = source {
+        if current.is::<RefusedDestination>() {
+            return true;
+        }
+
+        source = current.source();
+    }
+
+    format!("{error:?}").contains("RefusedDestination(")
+}
+
+#[derive(Clone)]
+struct Policy {
+    refuses: fn(IpAddr) -> bool,
+    routing: PublicFetchRouting,
+}
+
+impl Policy {
+    fn refuses(&self, address: IpAddr) -> bool {
+        (self.refuses)(address) && !(self.routing.allow_loopback && address.is_loopback())
+    }
+}
+
+struct Resolver {
+    policy: Policy,
+}
 
 impl Resolve for Resolver {
     fn resolve(&self, name: Name) -> Resolving {
         let host = name.as_str().to_string();
+        let policy = self.policy.clone();
 
         Box::pin(async move {
-            let found = tokio::net::lookup_host((host.as_str(), 0)).await?;
-            let allowed: Vec<SocketAddr> = found.filter(|address| !refused_address(address.ip())).collect();
+            let found: Vec<SocketAddr> = match policy.routing.hosts.iter().find(|(mapped, _)| *mapped == host) {
+                Some((_, address)) => vec![*address],
+                None => tokio::net::lookup_host((host.as_str(), 0)).await?.collect(),
+            };
+            let allowed: Vec<SocketAddr> = found.into_iter().filter(|address| !policy.refuses(address.ip())).collect();
 
             if allowed.is_empty() {
-                return Err(BoxError::from(format!("{host} resolves only to link-local or metadata addresses, which Mycelium does not connect to")));
+                return Err(BoxError::from(RefusedDestination(format!("{host} resolves only to addresses Mycelium does not connect to"))));
             }
 
             let addresses: Addrs = Box::new(allowed.into_iter());
@@ -60,18 +127,21 @@ impl Resolve for Resolver {
 }
 
 #[derive(Clone)]
-struct LiteralGuard;
+struct LiteralGuard {
+    policy: Policy,
+}
 
 #[derive(Clone)]
 struct LiteralGuarded<S> {
     inner: S,
+    policy: Policy,
 }
 
 impl<S> Layer<S> for LiteralGuard {
     type Service = LiteralGuarded<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        LiteralGuarded { inner }
+        LiteralGuarded { inner, policy: self.policy.clone() }
     }
 }
 
@@ -106,32 +176,62 @@ where
             _ => None,
         };
 
-        if destination.is_none() || literal.is_some_and(refused_address) {
-            return Box::pin(async { Err(BoxError::from("that address is link-local or a metadata address, which Mycelium does not connect to")) });
+        if destination.is_none() || literal.is_some_and(|address| self.policy.refuses(address)) {
+            return Box::pin(async { Err(BoxError::from(RefusedDestination("that address is link-local or a metadata address, which Mycelium does not connect to".to_string()))) });
         }
 
         Box::pin(self.inner.call(request))
     }
 }
 
-pub fn client() -> reqwest::Result<reqwest::Client> {
-    reqwest::Client::builder().timeout(Duration::from_secs(10)).redirect(reqwest::redirect::Policy::none()).dns_resolver(Resolver).connector_layer(LiteralGuard).build()
+fn builder(policy: Policy) -> reqwest::ClientBuilder {
+    reqwest::Client::builder().timeout(Duration::from_secs(10)).redirect(reqwest::redirect::Policy::none()).dns_resolver(Resolver { policy: policy.clone() }).connector_layer(LiteralGuard { policy })
 }
 
-pub async fn get_following_redirects(http: &reqwest::Client, address: &str) -> reqwest::Result<reqwest::Response> {
+pub fn client() -> reqwest::Result<reqwest::Client> {
+    builder(Policy { refuses: refused_address, routing: PublicFetchRouting::default() }).build()
+}
+
+pub fn public_client(routing: &PublicFetchRouting) -> reqwest::Result<reqwest::Client> {
+    let mut headers = reqwest::header::HeaderMap::new();
+
+    headers.insert(reqwest::header::ACCEPT, reqwest::header::HeaderValue::from_static("image/avif,image/webp,image/png,image/jpeg,image/gif"));
+
+    let mut builder = builder(Policy { refuses: refused_public_address, routing: routing.clone() }).https_only(true).user_agent("mycelium").default_headers(headers);
+
+    if let Some(pem) = &routing.trusted_root_pem {
+        builder = builder.add_root_certificate(reqwest::Certificate::from_pem(pem)?);
+    }
+
+    builder.build()
+}
+
+pub enum Stopped<Refusal> {
+    Request(reqwest::Error),
+    Refused(Refusal),
+}
+
+pub struct Followed {
+    pub response: reqwest::Response,
+    pub chain: Vec<Url>,
+}
+
+pub async fn get_following_redirects<Refusal>(http: &reqwest::Client, address: &str, mut check: impl FnMut(&Url) -> Result<(), Refusal>) -> Result<Followed, Stopped<Refusal>> {
     let mut target = address.to_string();
-    let mut hops = 0;
+    let mut chain = Vec::new();
 
     loop {
-        let response = http.get(&target).send().await?;
+        if let Ok(parsed) = Url::parse(&target) {
+            check(&parsed).map_err(Stopped::Refused)?;
+            chain.push(parsed);
+        }
+
+        let response = http.get(&target).send().await.map_err(Stopped::Request)?;
         let next = response.headers().get(reqwest::header::LOCATION).and_then(|value| value.to_str().ok()).and_then(|location| response.url().join(location).ok());
 
         match next {
-            Some(next) if response.status().is_redirection() && hops < REDIRECT_HOPS => {
-                target = next.to_string();
-                hops += 1;
-            }
-            _ => return Ok(response),
+            Some(next) if response.status().is_redirection() && chain.len() <= REDIRECT_HOPS => target = next.to_string(),
+            _ => return Ok(Followed { response, chain }),
         }
     }
 }
@@ -207,5 +307,82 @@ mod tests {
         for allowed in ["127.0.0.1", "192.168.1.20", "10.0.0.5", "100.64.0.1", "::1", "fd12::1", "93.184.216.34"] {
             assert!(!refused_address(allowed.parse().unwrap()), "{allowed}");
         }
+    }
+
+    #[test]
+    fn the_public_guard_refuses_private_loopback_and_embedded_private_addresses_but_allows_public_ones() {
+        let refused = ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.20", "100.64.0.1", "0.1.2.3", "198.18.0.1", "::1", "fd12::1", "::ffff:192.168.1.20", "169.254.169.254", "2002:c0a8:0114::1", "64:ff9b::c0a8:0114"];
+        let allowed = ["93.184.215.14", "2001:db8::1"];
+
+        for address in refused {
+            assert!(refused_public_address(address.parse().unwrap()), "{address}");
+        }
+
+        for address in allowed {
+            assert!(!refused_public_address(address.parse().unwrap()), "{address}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_public_client_refuses_loopback_by_literal_and_by_name() {
+        let client = public_client(&PublicFetchRouting::default()).unwrap();
+
+        for address in ["https://127.0.0.1/", "https://localhost/", "https://[::1]/"] {
+            let error = client.get(address).send().await.unwrap_err();
+
+            assert!(was_refused(&error), "{address}: {error:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_public_client_refuses_plain_http() {
+        let error = public_client(&PublicFetchRouting::default()).unwrap().get("http://example.com/").send().await.unwrap_err();
+
+        assert!(error.is_builder() || error.to_string().contains("https"), "{error:?}");
+    }
+
+    #[tokio::test]
+    async fn following_redirects_stops_before_requesting_a_hop_the_check_rejects_and_returns_the_chain_it_followed() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let requests = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = requests.clone();
+
+        tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut buffer = [0u8; 1024];
+                let read = stream.read(&mut buffer).await.unwrap();
+                let first = String::from_utf8_lossy(&buffer[..read]).lines().next().unwrap_or_default().to_string();
+
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+                let answer = match () {
+                    _ if first.contains("/start") => "HTTP/1.1 302 Found\r\nlocation: /middle\r\ncontent-length: 0\r\n\r\n".to_string(),
+                    _ if first.contains("/middle") => format!("HTTP/1.1 302 Found\r\nlocation: http://127.0.0.1:{port}/final\r\ncontent-length: 0\r\n\r\n"),
+                    _ => "HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n".to_string(),
+                };
+
+                stream.write_all(answer.as_bytes()).await.unwrap();
+            }
+        });
+
+        let start = format!("http://127.0.0.1:{port}/start");
+        let rejected = get_following_redirects(&client().unwrap(), &start, |hop| if hop.path() == "/final" { Err(hop.to_string()) } else { Ok(()) }).await;
+
+        match rejected {
+            Err(Stopped::Refused(hop)) => assert!(hop.ends_with("/final"), "{hop}"),
+            _ => panic!("the rejected hop was followed"),
+        }
+
+        assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 2);
+
+        let accepted = get_following_redirects(&client().unwrap(), &start, |_| Ok::<(), ()>(())).await.ok().unwrap();
+        let paths: Vec<&str> = accepted.chain.iter().map(Url::path).collect();
+
+        assert_eq!(paths, ["/start", "/middle", "/final"]);
+        assert_eq!(accepted.response.status().as_u16(), 200);
     }
 }

@@ -776,6 +776,7 @@ pub struct AppState {
     pub latest: Arc<LatestVersions>,
     pub readiness: Arc<Mutex<Readiness>>,
     pub http: reqwest::Client,
+    pub http_public: reqwest::Client,
     pub forge_cache: Arc<ForgeCache>,
 }
 

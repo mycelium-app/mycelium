@@ -54,6 +54,13 @@ fn shared_prefix(left: u128, right: u128, width: u8, prefix: u8) -> bool {
     prefix == 0 || (left ^ right) >> (width - prefix) == 0
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct PublicFetchRouting {
+    pub hosts: Vec<(String, std::net::SocketAddr)>,
+    pub trusted_root_pem: Option<Vec<u8>>,
+    pub allow_loopback: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub database_url: String,
@@ -92,6 +99,7 @@ pub struct Config {
     pub database_pool_size: u32,
     pub database_acquire_timeout: Duration,
     pub stream_recheck_interval: Duration,
+    pub public_fetch: PublicFetchRouting,
 }
 
 type Lookup<'a> = &'a dyn Fn(&str) -> Option<String>;
@@ -175,6 +183,7 @@ impl Config {
             database_pool_size: optional(lookup, "MYCELIUM_DATABASE_POOL_SIZE").map(|size| size.trim().parse()).transpose()?.unwrap_or(DATABASE_POOL_SIZE),
             database_acquire_timeout: optional(lookup, "MYCELIUM_DATABASE_ACQUIRE_TIMEOUT_SECONDS").map(|seconds| seconds.trim().parse().map(Duration::from_secs)).transpose()?.unwrap_or(DATABASE_ACQUIRE_TIMEOUT),
             stream_recheck_interval: STREAM_RECHECK_INTERVAL,
+            public_fetch: PublicFetchRouting::default(),
         })
     }
 

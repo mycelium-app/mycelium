@@ -42,7 +42,12 @@ fn parse(text: &str) -> Option<Version> {
 }
 
 async fn fetch(state: &AppState, url: &str) -> Result<String> {
-    let response = crate::outbound::get_following_redirects(&state.http, url).await.context("the request failed")?;
+    let followed = crate::outbound::get_following_redirects(&state.http, url, |_| Ok::<(), std::convert::Infallible>(())).await;
+    let response = match followed {
+        Ok(followed) => followed.response,
+        Err(crate::outbound::Stopped::Request(error)) => return Err(error).context("the request failed"),
+        Err(crate::outbound::Stopped::Refused(never)) => match never {},
+    };
 
     if !response.status().is_success() {
         bail!("it answered {}", response.status());

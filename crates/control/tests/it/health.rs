@@ -66,6 +66,7 @@ async fn readyz_is_503_and_healthz_stays_200_when_the_database_is_unreachable_at
             database_pool_size: 30,
             database_acquire_timeout: std::time::Duration::from_secs(30),
             stream_recheck_interval: mycelium_control::STREAM_RECHECK_INTERVAL,
+            public_fetch: Default::default(),
         };
 
         tokio::spawn(mycelium_control::run(config, listener));
@@ -195,6 +196,7 @@ async fn a_failed_migration_keeps_the_process_up_and_reports_the_error() {
             database_pool_size: 30,
             database_acquire_timeout: std::time::Duration::from_secs(30),
             stream_recheck_interval: mycelium_control::STREAM_RECHECK_INTERVAL,
+            public_fetch: Default::default(),
     };
 
     tokio::spawn(mycelium_control::run(config, listener));

@@ -406,6 +406,7 @@ impl Server {
             database_pool_size: 30,
             database_acquire_timeout: std::time::Duration::from_secs(30),
             stream_recheck_interval: mycelium_control::STREAM_RECHECK_INTERVAL,
+            public_fetch: Default::default(),
         };
         configure(&mut config);
         let has_dev_login = config.dev_login.is_some();
