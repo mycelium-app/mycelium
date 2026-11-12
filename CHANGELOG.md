@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.17
+
+- The desktop app stays responsive while agents stream into long conversations. Pinned cards no longer re-read every earlier reply, which pushed recent messages out of the formatting cache, and Needs you no longer rebuilds a whole conversation for each of its waiting approvals on every streamed word.
+
 ## v0.34.16
 
 - A side chat or fork of an agent chat stays in Chats under its parent instead of also showing in Workspaces, and shares its parent's folder, which is kept until no conversation uses it.
