@@ -43,7 +43,7 @@ impl AuthUser {
 
     pub fn require_full_access(&self) -> ApiResult<()> {
         if self.scopes.is_some() || self.expires_at.is_some() {
-            return Err(ApiError::new(StatusCode::FORBIDDEN, "scope_not_granted", "This token does not cover that. Ask the person for access that does."));
+            return Err(ApiError::new(StatusCode::FORBIDDEN, "full_access_required", "That needs full access. No API scope covers it."));
         }
 
         Ok(())

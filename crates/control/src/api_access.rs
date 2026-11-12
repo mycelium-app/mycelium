@@ -32,12 +32,19 @@ const TOKEN_LABEL: &str = "Agent access";
 
 const REQUEST_COLUMNS: &str = "id, conversation_id, scopes, hours, reason, state, created_at, decided_at, server_id, (select name from chat_tool_servers s where s.id = api_access_requests.server_id) as integration";
 
-const FULL_ACCESS_ENDINGS: [&str; 5] = ["/terminal", "/permission", "/config", "/move", "/git/push"];
+const FULL_ACCESS_ENDINGS: [(&str, &str); 5] = [
+    ("/terminal", "Using a conversation's terminal"),
+    ("/permission", "Changing a conversation's permission mode"),
+    ("/config", "Changing a conversation's settings"),
+    ("/move", "Moving a conversation"),
+    ("/git/push", "Pushing from a conversation"),
+];
+const FULL_ACCESS_FALLBACK: &str = "That";
 
 enum Need {
     Anyone,
     Scope(&'static str),
-    Full,
+    Full { what: &'static str, hint: &'static str },
 }
 
 #[derive(sqlx::FromRow)]
@@ -74,11 +81,20 @@ fn need(method: &Method, route: &str) -> Need {
     }
 
     if route == "/api/v1/conversations" || route.starts_with("/api/v1/conversations/") {
-        let creating = !reading && route == "/api/v1/conversations";
-        let sensitive = FULL_ACCESS_ENDINGS.iter().any(|ending| route.ends_with(ending)) || route.contains("/responses/") || route.contains("/environment");
+        if !reading && route == "/api/v1/conversations" {
+            return Need::Full { what: "Starting a conversation", hint: " Use the start_conversation tool, which asks the person." };
+        }
 
-        if creating || sensitive {
-            return Need::Full;
+        if let Some((_, what)) = FULL_ACCESS_ENDINGS.iter().find(|(ending, _)| route.ends_with(ending)) {
+            return Need::Full { what, hint: "" };
+        }
+
+        if route.contains("/responses/") {
+            return Need::Full { what: "Answering a held response", hint: "" };
+        }
+
+        if route.contains("/environment") {
+            return Need::Full { what: "Driving a conversation's environment", hint: "" };
         }
 
         return Need::Scope(if reading { "conversations:read" } else { "conversations:write" });
@@ -91,14 +107,14 @@ fn need(method: &Method, route: &str) -> Need {
     }
 
     if !reading {
-        return Need::Full;
+        return Need::Full { what: FULL_ACCESS_FALLBACK, hint: "" };
     }
 
     match route {
         "/api/v1/attachments/{sha256}" | "/api/v1/search" | "/api/v1/activity/conversations" => Need::Scope("conversations:read"),
         "/api/v1/nodes" | "/api/v1/worktrees" => Need::Scope("nodes:read"),
         "/api/v1/usage-limit" | "/api/v1/instructions" | "/api/v1/extensions" | "/api/v1/projects" | "/api/v1/groups" | "/api/v1/memories" | "/api/v1/memory-banks" => Need::Scope("settings:read"),
-        _ => Need::Full,
+        _ => Need::Full { what: FULL_ACCESS_FALLBACK, hint: "" },
     }
 }
 
@@ -117,28 +133,38 @@ pub async fn gate_scoped_tokens(State(state): State<AppState>, request: Request,
     let method = request.method().clone();
     let path = request.uri().path().to_string();
     let route = request.extensions().get::<MatchedPath>().map(|matched| matched.as_str().to_string()).unwrap_or_else(|| request.uri().path().to_string());
-    let other_conversation = match (bound_conversation, conversation_in(&path)) {
+    let unreachable = match (bound_conversation, conversation_in(&path)) {
         (Some(bound), Some(asked)) if asked != bound => {
             let linked = conversation_connections::active(&state, owner, bound, asked).await.unwrap_or(false);
             let reachable = linked || group_connections::connected(&state, owner, bound, asked).await.unwrap_or(false);
 
-            !reachable
+            (!reachable).then_some((bound, asked))
         }
-        _ => false,
+        _ => None,
     };
-    let allowed = !other_conversation && match integration_proxy::server_of(&path) {
-        Some(server_id) => scopes.iter().any(|granted| granted.starts_with(&integration_proxy::token_scope(server_id, ""))),
-        None => match need(&method, &route) {
-            Need::Anyone => true,
-            Need::Scope(scope) => scopes.iter().any(|granted| granted == scope),
-            Need::Full => scopes.iter().any(|granted| granted == FULL_SCOPE),
+    let refusal = match unreachable {
+        Some((bound, asked)) => {
+            let reached = group_name(&state, bound).await;
+            let target = group_name(&state, asked).await;
+
+            Some(ApiError::new(StatusCode::FORBIDDEN, "group_not_connected", format!("This token can reach conversations in {reached} and groups connected to it. {target} is not connected.")))
+        }
+        None => match integration_proxy::server_of(&path) {
+            Some(server_id) if scopes.iter().any(|granted| granted.starts_with(&integration_proxy::token_scope(server_id, ""))) => None,
+            Some(_) => Some(ApiError::new(StatusCode::FORBIDDEN, "scope_not_granted", "This token does not include that integration. Ask the person for access that includes it.")),
+            None => match need(&method, &route) {
+                Need::Anyone => None,
+                Need::Scope(scope) if scopes.iter().any(|granted| granted == scope) => None,
+                Need::Scope(scope) => Some(ApiError::new(StatusCode::FORBIDDEN, "scope_not_granted", format!("This token does not include {scope}. Ask the person for access that includes it."))),
+                Need::Full { .. } if scopes.iter().any(|granted| granted == FULL_SCOPE) => None,
+                Need::Full { what, hint } => Some(ApiError::new(StatusCode::FORBIDDEN, "full_access_required", format!("{what} needs full access, which this token does not include.{hint}"))),
+            },
         },
     };
 
-    let response = if allowed {
-        next.run(request).await
-    } else {
-        ApiError::new(StatusCode::FORBIDDEN, "scope_not_granted", "This token does not cover that. Ask the person for access that does.").into_response()
+    let response = match refusal {
+        Some(error) => error.into_response(),
+        None => next.run(request).await,
     };
 
     let logged = sqlx::query("insert into api_token_calls (token_id, method, route, status) values ($1, $2, $3, $4)")
@@ -164,6 +190,16 @@ pub async fn gate_scoped_tokens(State(state): State<AppState>, request: Request,
     }
 
     response
+}
+
+async fn group_name(state: &AppState, conversation: Uuid) -> String {
+    let group = group_connections::group_of(state, conversation).await.unwrap_or(None);
+    let Some(group) = group else {
+        return "no group".to_string();
+    };
+    let name = sqlx::query_scalar::<_, String>("select name from groups where id = $1").bind(group).fetch_optional(&state.pool).await.unwrap_or(None);
+
+    name.unwrap_or_else(|| "no group".to_string())
 }
 
 fn conversation_in(path: &str) -> Option<Uuid> {

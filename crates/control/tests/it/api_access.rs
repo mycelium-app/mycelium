@@ -117,6 +117,16 @@ async fn ask(server: &Server, link: &NodeLink, conversation: Uuid) -> Value {
     tool(server, link, conversation, "request_api_access", json!({"scopes": ["conversations:read", "nodes:read"], "reason": "Reading the events to find the stuck turn"})).await
 }
 
+async fn refusal_with(server: &Server, token: &str, method: &str, path: &str) -> (u16, Value) {
+    let anonymous = server.anonymous();
+    let method = reqwest::Method::from_bytes(method.as_bytes()).unwrap();
+    let response = anonymous.http.request(method, format!("{}{path}", server.base)).header("authorization", format!("Bearer {token}")).send().await.unwrap();
+    let status = response.status().as_u16();
+    let body = response.json::<Value>().await.unwrap_or(Value::Null);
+
+    (status, body)
+}
+
 async fn approve(server: &Server, id: &str, body: Value) -> (u16, Value) {
     server.user.json(server.user.post(&format!("/api/v1/api-access-requests/{id}/approve")).json(&body)).await
 }
@@ -220,6 +230,61 @@ async fn a_token_granted_for_one_conversation_reads_and_writes_others_in_its_gro
     }
 
     assert_eq!(statuses, vec![200, 200, 0, 403, 403, 1]);
+}
+
+#[tokio::test]
+async fn a_refusal_names_whether_the_route_needs_full_access_or_a_scope_the_token_lacks() {
+    let server = Server::start().await;
+    let any = Uuid::new_v4();
+    let table: Vec<(&[&str], &str, String, &str, &str)> = vec![
+        (WRITE, "POST", "/api/v1/conversations".into(), "full_access_required", "Starting a conversation needs full access, which this token does not include. Use the start_conversation tool, which asks the person."),
+        (WRITE, "POST", format!("/api/v1/conversations/{any}/move"), "full_access_required", "Moving a conversation needs full access, which this token does not include."),
+        (WRITE, "POST", format!("/api/v1/conversations/{any}/git/push"), "full_access_required", "Pushing from a conversation needs full access, which this token does not include."),
+        (WRITE, "POST", format!("/api/v1/conversations/{any}/environment"), "full_access_required", "Driving a conversation's environment needs full access, which this token does not include."),
+        (READ, "GET", "/api/v1/sessions".into(), "full_access_required", "That needs full access, which this token does not include."),
+        (READ, "POST", format!("/api/v1/conversations/{any}/prompt"), "scope_not_granted", "This token does not include conversations:write. Ask the person for access that includes it."),
+        (WRITE, "GET", "/api/v1/conversations".into(), "scope_not_granted", "This token does not include conversations:read. Ask the person for access that includes it."),
+        (READ, "GET", "/api/v1/nodes".into(), "scope_not_granted", "This token does not include nodes:read. Ask the person for access that includes it."),
+    ];
+
+    for (scopes, method, path, code, message) in table {
+        let (_, token) = insert_token(&server, Some(scopes), None).await;
+        let (status, body) = refusal_with(&server, &token, method, &path).await;
+
+        assert_eq!((status, body["error"].as_str(), body["message"].as_str()), (403, Some(code), Some(message)), "{scopes:?} {method} {path}");
+    }
+}
+
+#[tokio::test]
+async fn creating_a_conversation_with_a_write_token_is_refused_and_creates_nothing() {
+    let server = Server::start().await;
+    let (_, token) = insert_token(&server, Some(WRITE), None).await;
+    let before = sqlx::query_scalar::<_, i64>("select count(*) from conversations").fetch_one(&server.pool).await.unwrap();
+
+    let (status, body) = refusal_with(&server, &token, "POST", "/api/v1/conversations").await;
+    let after = sqlx::query_scalar::<_, i64>("select count(*) from conversations").fetch_one(&server.pool).await.unwrap();
+
+    assert_eq!((status, body["error"].as_str(), after), (403, Some("full_access_required"), before));
+}
+
+#[tokio::test]
+async fn a_conversation_outside_the_connected_groups_is_refused_naming_both_groups() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let own = grouped(&server, &mut link, "Mycelium", "/srv/atlas").await;
+    let outside = grouped(&server, &mut link, "Orion", "/srv/orion").await;
+    let ungrouped = working_conversation(&server, &mut link).await;
+    let (token_id, token) = insert_token(&server, Some(READ), None).await;
+    sqlx::query("update client_tokens set conversation_id = $2 where id = $1").bind(token_id).bind(own).execute(&server.pool).await.unwrap();
+
+    let (outside_status, outside_body) = refusal_with(&server, &token, "GET", &format!("/api/v1/conversations/{outside}/events")).await;
+    let (ungrouped_status, ungrouped_body) = refusal_with(&server, &token, "GET", &format!("/api/v1/conversations/{ungrouped}/events")).await;
+
+    assert_eq!(outside_status, 403);
+    assert_eq!(outside_body["error"], "group_not_connected");
+    assert_eq!(outside_body["message"], "This token can reach conversations in Mycelium and groups connected to it. Orion is not connected.");
+    assert_eq!(ungrouped_status, 403);
+    assert_eq!(ungrouped_body["message"], "This token can reach conversations in Mycelium and groups connected to it. no group is not connected.");
 }
 
 #[tokio::test]
