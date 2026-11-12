@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.28
+
+- The Discord and Stoat message tools read past one page: get_messages takes before or after a message id and up to 500 messages, and each result says what it covered and where to carry on. Discord search pages through its results too.
+
 ## v0.34.27
 
 - A repository is one project, with a checkout on each node it is on. Projects lists each repository once with its nodes, the project page shows and manages its checkouts, starting a conversation picks the project and then the node, and New project offers to add a checkout when the repository is already a project. Existing duplicate projects of one repository are merged when the control plane starts, keeping every conversation.
