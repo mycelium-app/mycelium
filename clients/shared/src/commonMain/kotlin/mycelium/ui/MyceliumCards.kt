@@ -1,5 +1,6 @@
 package mycelium.ui
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -19,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import mycelium.api.ApiAccessRequest
+import mycelium.api.Assistant
 import mycelium.api.SshAccessRequest
 import mycelium.api.Artifact
 import mycelium.api.ArtifactKinds
@@ -41,14 +43,15 @@ import mycelium.state.ToolStatus
 
 private const val CollapsedLimit = 3
 private const val ExcerptLines = 3
+private const val FullScope = "full"
 private const val DefaultSshMinutes = 30
 private val SshMinuteChoices = listOf(15, 30, 60, 120, 240)
 
-class MessageProposals(val proposals: Map<String, MessageProposal>, val refresh: suspend () -> Unit, val approve: suspend (MessageProposal) -> Unit, val decline: suspend (MessageProposal) -> Unit, val connect: suspend (MessageProposal) -> Unit, val connectGroups: suspend (MessageProposal) -> Unit)
+class MessageProposals(val proposals: Map<String, MessageProposal>, val refresh: suspend () -> Unit, val approve: suspend (MessageProposal) -> Unit, val decline: suspend (MessageProposal) -> Unit, val connect: suspend (MessageProposal) -> Unit, val connectGroups: suspend (MessageProposal) -> Unit, val assistants: Map<String, Assistant> = emptyMap())
 
 val LocalMessageProposals = compositionLocalOf<MessageProposals?> { null }
 
-fun messageProposals(store: Store, state: AppState) = MessageProposals(state.messageProposals, { store.refreshMessageProposals() }, { proposal -> store.approveMessageProposal(proposal) }, { proposal -> store.declineMessageProposal(proposal) }, { proposal -> store.approveAndConnectMessageProposal(proposal) }, { proposal -> store.approveAndConnectGroupsMessageProposal(proposal) })
+fun messageProposals(store: Store, state: AppState) = MessageProposals(state.messageProposals, { store.refreshMessageProposals() }, { proposal -> store.approveMessageProposal(proposal) }, { proposal -> store.declineMessageProposal(proposal) }, { proposal -> store.approveAndConnectMessageProposal(proposal) }, { proposal -> store.approveAndConnectGroupsMessageProposal(proposal) }, state.assistants)
 
 class StartProposals(val proposals: Map<String, StartProposal>, val refresh: suspend () -> Unit, val approve: suspend (StartProposal, Map<String, StartProposalChoice>) -> Unit, val connect: suspend (StartProposal, Map<String, StartProposalChoice>) -> Unit, val decline: suspend (StartProposal) -> Unit, val store: Store? = null)
 
@@ -98,6 +101,9 @@ internal fun proposedMessage(parsed: MyceliumCall, proposals: Map<String, Messag
 @Composable
 private fun proposedMessage(parsed: MyceliumCall): MessageProposal? = proposedMessage(parsed, LocalMessageProposals.current?.proposals.orEmpty())
 
+@Composable
+private fun targetAssistant(proposal: MessageProposal?): Assistant? = proposal?.let { sent -> LocalMessageProposals.current?.assistants?.values?.firstOrNull { it.conversationId == sent.targetId } }
+
 internal fun proposedStart(parsed: MyceliumCall, proposals: Map<String, StartProposal>): StartProposal? {
     val starting = parsed as? MyceliumCall.StartProposed ?: return null
 
@@ -131,9 +137,13 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
     val failed = call.status == ToolStatus.Failed
     val finished = call.status == ToolStatus.Done
     val verb = if (call.status == ToolStatus.Running || call.status == ToolStatus.Pending) "${parsed.tool.running}…" else null
+    val proposal = proposedMessage(parsed)
+    val assistant = targetAssistant(proposal)
+    val messagingAssistant = assistant.takeIf { verb == null && !failed }
     val heading = when {
         failed -> parsed.tool.label
         verb != null -> runningHeading(parsed, verb)
+        messagingAssistant != null -> "Proposed a message to"
         else -> doneHeading(parsed, LocalArtifactOpener.current?.artifacts.orEmpty())
     }
     val icon = when (parsed) {
@@ -151,7 +161,6 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
         is MyceliumCall.CreateArtifact -> if (parsed.kind.isEmpty()) MyIcon.Layers else artifactIcon(parsed.kind)
         is MyceliumCall.UpdateArtifact, is MyceliumCall.DesignSetArtboard, is MyceliumCall.ReadArtifact -> MyIcon.Layers
     }
-    val proposal = proposedMessage(parsed)
     val start = proposedStart(parsed)
     val artifactAccess = LocalArtifactAccessControls.current?.state?.artifactAccessRequests?.values?.firstOrNull { it.id == (parsed as? MyceliumCall.RequestArtifactAccess)?.requestId }
     val access = requestedAccess(parsed)
@@ -167,10 +176,17 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
         else -> null
     }
 
-    Card(Modifier.semantics { contentDescription = heading }) {
+    Card(Modifier.semantics { contentDescription = if (messagingAssistant != null) "$heading ${messagingAssistant.name}" else heading }) {
         CardHead {
             Icon(icon, colors.textMuted, Tokens.Size.IconSm)
-            Label(heading, Modifier.weight(1f), Tokens.Type.UiStrong, maxLines = 1)
+
+            if (messagingAssistant != null) {
+                Label(heading, style = Tokens.Type.UiStrong, maxLines = 1)
+                AssistantAvatar(messagingAssistant)
+                Label(messagingAssistant.name, Modifier.weight(1f), Tokens.Type.UiStrong, maxLines = 1)
+            } else {
+                Label(heading, Modifier.weight(1f), Tokens.Type.UiStrong, maxLines = 1)
+            }
 
             when {
                 failed -> StatusMark("Failed", Tone.Failed, MyIcon.Failed)
@@ -219,7 +235,7 @@ private fun doneHeading(parsed: MyceliumCall, artifacts: Map<String, Artifact>):
     is MyceliumCall.SendToConversation -> if (parsed.target.isNotEmpty()) "Proposed a message to ${parsed.target}" else "Proposed a message"
     is MyceliumCall.StartProposed -> "Proposed ${if (parsed.tool == MyceliumTool.StartWorkflow) "a workflow" else "a subagent"}: ${parsed.title}"
     is MyceliumCall.RequestArtifactAccess -> "Asked for artefact access"
-    is MyceliumCall.RequestApiAccess -> "Asked for API access"
+    is MyceliumCall.RequestApiAccess -> if ("full" in parsed.scopes) "Asked for full API access" else "Asked for API access"
     is MyceliumCall.RequestSshAccess -> "Asked for SSH access to ${parsed.node}"
     is MyceliumCall.Walkthrough -> "Wrote a walkthrough: ${parsed.steps.size} ${if (parsed.steps.size == 1) "step" else "steps"}"
     is MyceliumCall.CreateArtifact -> "Created ${if (parsed.kind.isEmpty()) "artefact" else artifactKindName(parsed.kind).lowercase()} “${parsed.title}”"
@@ -375,7 +391,9 @@ private fun SendToConversationBody(parsed: MyceliumCall.SendToConversation) {
     if (proposal != null) {
         val place = listOfNotNull(proposal.targetNode.ifEmpty { null }, proposal.targetProject).joinToString(" · ")
 
-        Label(proposal.targetTitle, style = Tokens.Type.UiStrong, maxLines = 1)
+        if (targetAssistant(proposal) == null) {
+            Label(proposal.targetTitle, style = Tokens.Type.UiStrong, maxLines = 1)
+        }
 
         if (place.isNotEmpty()) {
             Label(place, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
@@ -538,11 +556,29 @@ private fun RequestApiAccessBody(parsed: MyceliumCall.RequestApiAccess) {
 
     val waiting = access != null && request != null && request.waiting
 
-    for (scopeName in request?.scopes ?: parsed.scopes) {
+    val asked = request?.scopes ?: parsed.scopes
+    val narrow = asked.filter { it != FullScope }
+    val fullTicked = FullScope in ticked
+
+    if (waiting && FullScope in asked) {
+        Column(Modifier.fillMaxWidth().border(Tokens.Size.Hairline, colors.borderControl, BlockShape).padding(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(fullTicked, "Allow full access", { ticked = if (fullTicked) ticked - FullScope else ticked + FullScope }, checkedState = "Allowed", uncheckedState = "Not allowed")
+                Label(apiScopeLabel(FullScope), style = Tokens.Type.UiStrong)
+            }
+            Label("Every API route, within this conversation's access and only until it expires.", Modifier.padding(start = Tokens.Space.S6), Tokens.Type.Meta, colors.textMuted)
+        }
+
+        if (narrow.isNotEmpty()) {
+            Label(if (fullTicked) "Or only, if you untick full access" else "Or only", Modifier.padding(top = Tokens.Space.S1), Tokens.Type.Meta, colors.textMuted)
+        }
+    }
+
+    for (scopeName in if (waiting) narrow else asked) {
         if (waiting) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(scopeName in ticked, "Allow ${apiScopeLabel(scopeName).replaceFirstChar { it.lowercase() }}", { ticked = if (scopeName in ticked) ticked - scopeName else ticked + scopeName }, checkedState = "Allowed", uncheckedState = "Not allowed")
-                Label(apiScopeLabel(scopeName), style = Tokens.Type.Ui)
+                Checkbox(fullTicked || scopeName in ticked, "Allow ${apiScopeLabel(scopeName).replaceFirstChar { it.lowercase() }}", { if (!fullTicked) { ticked = if (scopeName in ticked) ticked - scopeName else ticked + scopeName } }, checkedState = "Allowed", uncheckedState = "Not allowed", inherited = fullTicked)
+                Label(apiScopeLabel(scopeName), style = Tokens.Type.Ui, color = if (fullTicked) colors.textMuted else colors.text)
             }
         } else {
             Label(apiScopeLabel(scopeName), style = Tokens.Type.Ui)
@@ -558,10 +594,12 @@ private fun RequestApiAccessBody(parsed: MyceliumCall.RequestApiAccess) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
             MyButton(
                 {
-                    if (ticked.isEmpty()) {
+                    val approved = if (fullTicked) listOf(FullScope) else request.scopes.filter { name -> name in ticked }
+
+                    if (approved.isEmpty()) {
                         action.failure = "Choose at least one kind of access to approve, or decline the request."
                     } else if (!action.running) {
-                        action { access.approve(request, request.scopes.filter { name -> name in ticked }) }
+                        action { access.approve(request, approved) }
                     }
                 },
                 text = "Approve",

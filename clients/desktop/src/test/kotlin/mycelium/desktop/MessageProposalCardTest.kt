@@ -65,7 +65,7 @@ class MessageProposalCardTest {
 
     private val requests = java.util.concurrent.CopyOnWriteArrayList<Pair<HttpMethod, String>>()
 
-    private fun show(groups: String = "", experiments: String = "{}") {
+    private fun show(groups: String = "", experiments: String = "{}", assistants: String = "[]") {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -73,6 +73,7 @@ class MessageProposalCardTest {
             request.body.toByteArray()
             val body = when {
                 path.endsWith("/experiments") -> experiments
+                path.endsWith("/assistants") -> assistants
                 path.endsWith("/connect") || path.endsWith("/connect-groups") -> proposal("sent", groups)
                 path.endsWith("/conversation-connections") -> "[]"
                 path.endsWith("/approve") -> proposal("sent")
@@ -85,7 +86,10 @@ class MessageProposalCardTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         val items = buildThread(sendToConversation())
-        runBlocking { store.refreshExperiments() }
+        runBlocking {
+            store.refreshExperiments()
+            store.refreshAssistants()
+        }
 
         rule.setContent {
             MyceliumTheme(true) {
@@ -112,6 +116,17 @@ class MessageProposalCardTest {
         rule.onNodeWithText("You asked for the schema").assertExists()
         rule.onNodeWithText("Send").assertExists()
         rule.onNodeWithText("Don't send").assertExists()
+    }
+
+    @Test
+    fun aProposalToAnAssistantNamesTheAssistantInTheHeadInsteadOfAConversationTitle() {
+        show(assistants = """[{"id":"a1","name":"Infrastructure","preferences":{},"state":"idle","session_count":1,"conversation_id":"c2","created_at":"2026-10-22T10:00:00Z"}]""")
+
+        rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Infrastructure").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Proposed a message to").assertExists()
+        rule.onNodeWithText("Fix billing export").assertDoesNotExist()
+        rule.onNodeWithText("The schema is ready").assertExists()
+        rule.onNodeWithText("Send").assertExists()
     }
 
     @Test

@@ -9,6 +9,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -41,9 +44,9 @@ import kotlin.test.assertTrue
 
 private const val RequestId = "99999999-9999-9999-9999-999999999999"
 
-private fun requestApiAccess(): List<Event> {
+private fun requestApiAccess(scopes: String = """["conversations:read","nodes:read"]"""): List<Event> {
     val output = Json.encodeToString(serializer<String>(), "Waiting for the person to approve API access (request $RequestId).")
-    val input = """{"scopes":["conversations:read","nodes:read"],"hours":4,"reason":"Read the events to find the stuck turn"}"""
+    val input = """{"scopes":$scopes,"hours":4,"reason":"Read the events to find the stuck turn"}"""
 
     return listOf(
         Event("c1", 1, "acp_update", Json.parseToJsonElement("""{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"t1","title":"mcp__mycelium__request_api_access","kind":"other","status":"pending","rawInput":{}}}""")),
@@ -53,6 +56,8 @@ private fun requestApiAccess(): List<Event> {
 
 private fun accessRequest(state: String, scopes: String = """["conversations:read","nodes:read"]""") =
     """{"id":"$RequestId","conversation_id":"c1","scopes":$scopes,"hours":4,"reason":"Read the events to find the stuck turn","state":"$state","created_at":"2026-10-23T10:00:00Z"}"""
+
+private val Full = """["full","conversations:read","nodes:read"]"""
 
 private data class Sent(val method: HttpMethod, val path: String, val body: String)
 
@@ -65,7 +70,7 @@ class ApiAccessCardTest {
 
     private val sent = java.util.concurrent.CopyOnWriteArrayList<Sent>()
 
-    private fun show() {
+    private fun show(requested: String = """["conversations:read","nodes:read"]""") {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -73,14 +78,14 @@ class ApiAccessCardTest {
             val body = when {
                 path.endsWith("/approve") -> accessRequest("approved", """["conversations:read"]""")
                 path.endsWith("/decline") -> accessRequest("declined")
-                path.endsWith("/api-access-requests") -> "[${accessRequest("requested")}]"
+                path.endsWith("/api-access-requests") -> "[${accessRequest("requested", requested)}]"
                 else -> "{}"
             }
 
             respond(body, HttpStatusCode.OK, json)
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
-        val items = buildThread(requestApiAccess())
+        val items = buildThread(requestApiAccess(requested))
 
         rule.setContent {
             MyceliumTheme(true) {
@@ -124,6 +129,45 @@ class ApiAccessCardTest {
         waitForText("Approved")
         rule.onNodeWithText("Approve").assertDoesNotExist()
         rule.onNodeWithText("Decline").assertDoesNotExist()
+    }
+
+    @Test
+    fun aRequestForFullAccessShowsItTickedAndApprovingSendsOnlyFull() {
+        show(Full)
+        waitForText("Approve")
+
+        rule.onNodeWithText("Asked for full API access").assertExists()
+        rule.onNodeWithText("Full access").assertExists()
+        rule.onNodeWithText("Every API route, within this conversation's access and only until it expires.").assertExists()
+        rule.onNodeWithText("Or only, if you untick full access").assertExists()
+        rule.onNodeWithContentDescription("Allow full access").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Allowed"))
+        rule.onNodeWithText("Approve").performClick()
+
+        rule.waitUntil(timeoutMillis = 5_000) { sent.toList().any { it.path.endsWith("/approve") } }
+        assertEquals("""{"scopes":["full"]}""", sent.toList().first { it.path.endsWith("/approve") }.body)
+    }
+
+    @Test
+    fun untickingFullAccessApprovesOnlyTheNarrowScopesLeftTicked() {
+        show(Full)
+        waitForText("Approve")
+
+        rule.onNodeWithContentDescription("Allow full access").performClick()
+        rule.onNodeWithText("Or only").assertExists()
+        rule.onNodeWithContentDescription("Allow read nodes").performClick()
+        rule.onNodeWithText("Approve").performClick()
+
+        rule.waitUntil(timeoutMillis = 5_000) { sent.toList().any { it.path.endsWith("/approve") } }
+        assertEquals("""{"scopes":["conversations:read"]}""", sent.toList().first { it.path.endsWith("/approve") }.body)
+    }
+
+    @Test
+    fun aRequestWithoutFullAccessShowsNoFullAccessBlock() {
+        show()
+        waitForText("Approve")
+
+        rule.onNodeWithText("Full access").assertDoesNotExist()
+        rule.onNodeWithText("Asked for API access").assertExists()
     }
 
     @Test
