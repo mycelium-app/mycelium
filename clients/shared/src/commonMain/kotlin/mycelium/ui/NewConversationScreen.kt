@@ -141,15 +141,15 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val projects = state.projects.values.filter { inGroup(it.groupId, groupFilter) }.sortedBy { it.name }
     val newestConversations = state.conversations.values.sortedByDescending { it.updatedAt }
     val chosenCheckout = if (withoutProject || newProjectChosen) null else resolveProject(state, chosenProject, checkedOut)
-    val keptNodeId = if (anyNode) null else chosenCheckout?.nodeId ?: nodeId
-    val entries = projectEntries(projects, nodes, newestConversations, keptNodeId)
-    val recent = newestConversations.mapNotNull { conversation -> state.projects[conversation.projectId]?.let { held -> entries.firstOrNull { repositoryKey(it) == repositoryKey(held) } } }.distinct().take(RecentProjects)
+    val keptNodeId = if (anyNode) null else nodeId
+    val recent = newestConversations.mapNotNull { conversation -> state.projects[conversation.projectId] }.distinct().take(RecentProjects)
     val project = if (withoutProject || newProjectChosen) null else chosenCheckout ?: recent.firstOrNull()
+    val projectNode = project?.let { held -> runOnNode(held, nodes, newestConversations, keptNodeId) }
 
-    LaunchedEffect(inExistingWorktree, project?.id) {
+    LaunchedEffect(inExistingWorktree, project?.id, projectNode?.id) {
         if (inExistingWorktree && project != null) {
             existingWorktrees = null
-            existingWorktreesError = attempt { existingWorktrees = store.api.existingWorktrees(project.id) }
+            existingWorktreesError = attempt { existingWorktrees = store.api.existingWorktrees(project.id, projectNode?.id) }
         }
     }
 
@@ -165,7 +165,6 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
         }
     }
 
-    val projectNode = project?.let { held -> nodes.firstOrNull { it.id == held.nodeId } }
     val choosingNode = project != null && !anyNode && setup == null && nodes.isNotEmpty() && projectNode == null
     val creatingProject = !withoutProject && project == null && (newProjectChosen || cwd.isBlank())
     val newProjectName = draft.name.trim()
@@ -225,12 +224,13 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
         setup = ProjectSetup.Running(target, onNode)
         setupJob = scope.launch {
             val failure = attempt {
-                val checkout = store.api.checkoutProject(target.id, onNode.id)
+                val checkout = store.addCheckout(target.id, onNode.id)
 
                 store.refreshProjects()
                 checkedOut = checkout
                 chosenProject = checkout.id
                 withoutProject = false
+                nodeId = onNode.id
                 setup = null
             }
 
@@ -371,9 +371,9 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
 
                             if (projectMenuOpen) {
                                 ProjectMenu(
-                                    entries,
+                                    projects,
                                     state.nodes,
-                                    project?.let { held -> entries.firstOrNull { repositoryKey(it) == repositoryKey(held) }?.id },
+                                    project?.id,
                                     "Project",
                                     onDismiss = { projectMenuOpen = false },
                                     recent = recent,
@@ -446,7 +446,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                             }
                         } else node?.let { placed ->
                             {
-                                val from = project?.let { checkedOutBranch(it, state.conversations.values) }
+                                val from = project?.checkoutOn(placed.id)?.let { checkedOutBranch(it, state.conversations.values) }
                                 val where = when {
                                     creatingProject -> "New folder"
                                     project == null && cwd.isBlank() -> "Choose a folder"
@@ -480,6 +480,8 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
 
                                         if (runOnMenuOpen) {
                                             MenuPopup(onDismiss = { runOnMenuOpen = false }, width = PlaceMenuWidth) {
+                                                MenuLabel("Run on")
+
                                                 MenuItem(
                                                     "Any node",
                                                     onClick = { setupJob?.cancel(); sendAfterSetup = false; setup = null; anyNode = true; runOnMenuOpen = false },
@@ -490,38 +492,64 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
 
                                                 Hairline(Modifier.padding(vertical = Tokens.Space.S1))
 
-                                                for (option in nodes) {
-                                                    val cloning = choosingNode && project != null && cloneable(project)
+                                                val checkoutNodes = project?.let { held -> nodes.filter { held.checkoutOn(it.id) != null } }.orEmpty()
+                                                val otherNodes = nodes.filter { it !in checkoutNodes }
+                                                val lastUsed = project?.let { lastUsedNode(it, nodes, newestConversations) }
+
+                                                fun leaveSetup() {
+                                                    setupJob?.cancel()
+                                                    sendAfterSetup = false
+                                                    setup = null
+                                                    runOnMenuOpen = false
+                                                    anyNode = false
+                                                    cwdError = null
+                                                }
+
+                                                if (project != null && checkoutNodes.isNotEmpty()) {
+                                                    MenuLabel("Checkouts of ${project.name}")
+
+                                                    for (option in checkoutNodes) {
+                                                        MenuItem(
+                                                            option.name,
+                                                            onClick = {
+                                                                leaveSetup()
+                                                                chosenProject = project.id
+                                                                withoutProject = false
+                                                                nodeId = option.id
+                                                            },
+                                                            checked = !anyNode && !choosingNode && option.id == placed.id,
+                                                            hint = if (option.id == lastUsed?.id) "Last used" else project.checkoutOn(option.id)?.let { checkedOutBranch(it, state.conversations.values) },
+                                                            leading = nodeIcon(option),
+                                                            leadingColour = nodeColour(option),
+                                                        )
+                                                    }
+
+                                                    if (otherNodes.isNotEmpty()) {
+                                                        Hairline(Modifier.padding(vertical = Tokens.Space.S1))
+                                                    }
+                                                }
+
+                                                for (option in otherNodes) {
+                                                    val cloning = project != null && cloneable(project)
 
                                                     MenuItem(
                                                         if (cloning) "Clone onto ${option.name}" else option.name,
                                                         onClick = {
-                                                            val held = project?.let { checkoutOn(state, it, option.id) }
-
-                                                            setupJob?.cancel()
-                                                            sendAfterSetup = false
-                                                            setup = null
-                                                            runOnMenuOpen = false
+                                                            leaveSetup()
 
                                                             when {
                                                                 project == null -> Unit
-                                                                held != null -> {
-                                                                    chosenProject = held.id
-                                                                    withoutProject = false
-                                                                }
-                                                                cloneable(project) -> startSetup(project, option)
+                                                                cloning -> startSetup(project, option)
                                                                 else -> {
                                                                     withoutProject = true
                                                                     worktree = false
                                                                 }
                                                             }
 
-                                                            anyNode = false
-                                                            cwdError = null
                                                             nodeId = option.id
                                                         },
-                                                        checked = !anyNode && !choosingNode && option.id == placed.id,
-                                                        hint = project?.takeIf { !cloning }?.let { held -> checkoutOn(state, held, option.id)?.path ?: if (cloneable(held)) "Not set up yet, clones ${held.name}" else "No checkout, choose a folder" },
+                                                        checked = project == null && !anyNode && option.id == placed.id,
+                                                        hint = if (project != null && !cloning) "No checkout, choose a folder" else null,
                                                         leading = nodeIcon(option),
                                                         leadingColour = nodeColour(option),
                                                     )

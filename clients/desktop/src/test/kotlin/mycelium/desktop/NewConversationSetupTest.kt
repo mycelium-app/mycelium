@@ -44,6 +44,9 @@ private fun node(id: String, name: String) = """{"id":"$id","name":"$name","host
 
 private const val HarbourOnAtlas = """{"id":"p1","node_id":"$Atlas","name":"harbour","path":"/p/harbour","forge_id":"f1","repository":"example-org/harbour","created_at":"2026-10-22T10:00:00Z"}"""
 
+private const val HarbourOnAtlasAndWillow = """{"id":"p1","node_id":"$Atlas","name":"harbour","path":"/p/harbour","forge_id":"f1","repository":"example-org/harbour",
+"checkouts":[{"id":"k1","node_id":"$Atlas","path":"/p/harbour","created_at":"2026-10-22T10:00:00Z"},{"id":"k2","node_id":"$Willow","path":"/srv/harbour","created_at":"2026-10-22T10:00:00Z"}],"created_at":"2026-10-22T10:00:00Z"}"""
+
 private const val HarbourOnWillow = """{"id":"p2","node_id":"$Willow","name":"harbour","path":"/srv/harbour","forge_id":"f1","repository":"example-org/harbour","created_at":"2026-10-22T10:00:00Z"}"""
 
 private const val CreatedJson = """{"id":"c1","owner":"u","node_id":"$Willow","agent":"claude","cwd":"/srv/harbour","title":"New","status":"working",
@@ -141,8 +144,8 @@ class NewConversationSetupTest {
         show(store(HttpStatusCode.Created, HarbourOnWillow))
 
         rule.onNodeWithContentDescription("Run on atlas").performClick()
-        rule.onNodeWithText("Not set up yet, clones harbour").assertExists()
-        rule.onNodeWithText("willow").performClick()
+        rule.onNodeWithText("Checkouts of harbour").assertExists()
+        rule.onNodeWithText("Clone onto willow").performClick()
 
         rule.waitUntil(5_000) { runCatching { rule.onNodeWithContentDescription("Run on willow").assertExists() }.isSuccess }
         rule.onRoot().performKeyInput { pressKey(Key.Escape) }
@@ -159,7 +162,7 @@ class NewConversationSetupTest {
         show(store(HttpStatusCode.BadRequest, """{"error":"clone_failed","message":"Could not clone example-org/harbour. Check the forge token."}"""))
 
         rule.onNodeWithContentDescription("Run on atlas").performClick()
-        rule.onNodeWithText("willow").performClick()
+        rule.onNodeWithText("Clone onto willow").performClick()
 
         rule.waitUntil(5_000) { runCatching { rule.onNodeWithText("Setup failed on willow").assertExists() }.isSuccess }
         rule.onNodeWithText("Retry setup").assertExists()
@@ -190,7 +193,7 @@ class NewConversationSetupTest {
         show(store(HttpStatusCode.Created, HarbourOnWillow))
 
         rule.onNodeWithContentDescription("Run on atlas").performClick()
-        rule.onNodeWithText("willow").performClick()
+        rule.onNodeWithText("Clone onto willow").performClick()
         rule.waitUntil(5_000) { runCatching { rule.onNodeWithContentDescription("Run on willow").assertExists() }.isSuccess }
         rule.onNodeWithContentDescription("Work in the existing checkout").performClick()
         rule.onNodeWithText("New worktree").performClick()
@@ -206,7 +209,7 @@ class NewConversationSetupTest {
         show(store(HttpStatusCode.Created, HarbourOnWillow))
 
         rule.onNodeWithContentDescription("Run on atlas").performClick()
-        rule.onNodeWithText("willow").performClick()
+        rule.onNodeWithText("Clone onto willow").performClick()
         rule.waitUntil(5_000) { checkouts.isNotEmpty() }
         rule.onNodeWithText("Cloning harbour on willow").assertExists()
         rule.onNodeWithContentDescription("Message").performTextInput("Restore the copy")
@@ -227,7 +230,7 @@ class NewConversationSetupTest {
         show(store(HttpStatusCode.Created, HarbourOnWillow))
 
         rule.onNodeWithContentDescription("Run on atlas").performClick()
-        rule.onNodeWithText("willow").performClick()
+        rule.onNodeWithText("Clone onto willow").performClick()
         rule.waitUntil(5_000) { runCatching { rule.onNodeWithContentDescription("Run on willow").assertExists() }.isSuccess }
         rule.onRoot().performKeyInput { pressKey(Key.Escape) }
         rule.onNodeWithContentDescription("Message").performTextInput("Restore the copy")
@@ -245,7 +248,7 @@ class NewConversationSetupTest {
         show(store(HttpStatusCode.Created, HarbourOnWillow))
 
         rule.onNodeWithContentDescription("Run on atlas").performClick()
-        rule.onNodeWithText("willow").performClick()
+        rule.onNodeWithText("Clone onto willow").performClick()
         rule.waitUntil(5_000) { checkouts.isNotEmpty() }
         rule.onNodeWithContentDescription("Message").performTextInput("Keep this draft")
         rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }
@@ -262,7 +265,7 @@ class NewConversationSetupTest {
         show(store(HttpStatusCode.BadRequest, """{"error":"clone_failed","message":"Check the forge sign-in."}"""))
 
         rule.onNodeWithContentDescription("Run on atlas").performClick()
-        rule.onNodeWithText("willow").performClick()
+        rule.onNodeWithText("Clone onto willow").performClick()
         rule.waitUntil(5_000) { runCatching { rule.onNodeWithText("Setup failed on willow").assertExists() }.isSuccess }
         rule.onNodeWithContentDescription("Message").performTextInput("Keep this draft")
         rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }
@@ -333,7 +336,7 @@ class NewConversationNodeChoiceTest {
 
     @Test
     fun aProjectCheckedOutOnTwoNodesIsListedOnceWithoutAnyNodeName() {
-        show("[$HarbourOnAtlas,$HarbourOnWillow,$OnlyOnWillow]", "p1")
+        show("[$HarbourOnAtlasAndWillow,$OnlyOnWillow]", "p1")
 
         rule.onNodeWithContentDescription("Project: harbour").performClick()
 
@@ -422,7 +425,7 @@ class PlacePickerNodeChoiceTest {
 
     @Test
     fun aProjectCheckedOutOnTwoNodesIsListedOnceWithoutNodeNames() {
-        show("[$HarbourOnAtlas,$HarbourOnWillow]")
+        show("[$HarbourOnAtlasAndWillow]")
 
         rule.onNodeWithContentDescription("Project: No project").performClick()
 

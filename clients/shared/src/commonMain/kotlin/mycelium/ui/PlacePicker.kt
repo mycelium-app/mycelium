@@ -44,7 +44,7 @@ data class PlaceTarget(val node: NodeSummary, val agent: String, val project: Pr
 fun Place.target(state: AppState): PlaceTarget? {
     val project = resolveProject(state, projectId, checkedOut)
     val nodes = startableNodes(state)
-    val node = if (project != null) nodes.firstOrNull { it.id == project.nodeId } else nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
+    val node = if (project != null) runOnNode(project, nodes, state.conversations.values.sortedByDescending { it.updatedAt }, nodeId) else nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
     val agents = node?.agents?.filter { it.available }.orEmpty()
     val chosen = agents.firstOrNull { it.agent == agent }?.agent ?: agents.firstOrNull()?.agent
 
@@ -62,7 +62,7 @@ fun NoAgentNotice(node: NodeSummary) {
 }
 
 @Composable
-fun NodeChooser(nodes: List<NodeSummary>, node: NodeSummary?, cloning: Boolean = false, onChoose: (String) -> Unit) {
+fun NodeChooser(nodes: List<NodeSummary>, node: NodeSummary?, cloneOn: Set<String> = emptySet(), onChoose: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
 
     Box {
@@ -73,7 +73,7 @@ fun NodeChooser(nodes: List<NodeSummary>, node: NodeSummary?, cloning: Boolean =
                 MenuLabel("Run on")
 
                 for (option in nodes) {
-                    MenuItem(if (cloning) "Clone onto ${option.name}" else option.name, onClick = { onChoose(option.id); open = false }, checked = option.id == node?.id, leading = nodeIcon(option), leadingColour = nodeColour(option))
+                    MenuItem(if (option.id in cloneOn) "Clone onto ${option.name}" else option.name, onClick = { onChoose(option.id); open = false }, checked = option.id == node?.id, leading = nodeIcon(option), leadingColour = nodeColour(option))
                 }
             }
         }
@@ -92,9 +92,8 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
 
     val projects = state.projects.values.sortedBy { it.name }
     val project = resolveProject(state, place.projectId, place.checkedOut)
-    val projectNode = project?.let { held -> nodes.firstOrNull { it.id == held.nodeId } }
+    val projectNode = project?.let { held -> runOnNode(held, nodes, state.conversations.values.sortedByDescending { it.updatedAt }, place.nodeId) }
     val choosingNode = project != null && nodes.isNotEmpty() && projectNode == null
-    val entries = projectEntries(projects, nodes, state.conversations.values.sortedByDescending { it.updatedAt }, project?.nodeId ?: place.nodeId)
     val target = place.target(state)
     val node = projectNode ?: nodes.firstOrNull { it.id == place.nodeId }?.takeIf { project == null } ?: nodes.firstOrNull()
     val agents = node?.agents?.filter { it.available }.orEmpty()
@@ -114,7 +113,7 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
                 )
 
                 if (projectMenu) {
-                    ProjectMenu(entries, state.nodes, project?.let { held -> entries.firstOrNull { repositoryKey(it) == repositoryKey(held) }?.id }, "Work in", onDismiss = { projectMenu = false }, showNodes = false) {
+                    ProjectMenu(projects, state.nodes, project?.id, "Work in", onDismiss = { projectMenu = false }, showNodes = false) {
                         place.projectId = it
                         projectMenu = false
                     }
@@ -132,18 +131,18 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
         Label("Node", style = Tokens.Type.MetaStrong, color = colors.textMuted)
 
-        NodeChooser(nodes, node.takeIf { !choosingNode }, cloning = choosingNode && project != null && cloneable(project)) { chosenId ->
-            val held = project?.let { checkoutOn(state, it, chosenId) }
+        val cloneOn = project?.takeIf { cloneable(it) }?.let { held -> nodes.filter { held.checkoutOn(it.id) == null }.map { it.id }.toSet() }.orEmpty()
 
+        NodeChooser(nodes, node.takeIf { !choosingNode }, cloneOn) { chosenId ->
             when {
                 project == null -> place.nodeId = chosenId
-                held != null -> place.projectId = held.id
+                project.checkoutOn(chosenId) != null -> place.nodeId = chosenId
                 cloneable(project) -> store.act {
-                    val checkout = store.api.checkoutProject(project.id, chosenId)
+                    val checkout = store.addCheckout(project.id, chosenId)
 
-                    store.refreshProjects()
                     place.checkedOut = checkout
                     place.projectId = checkout.id
+                    place.nodeId = chosenId
                 }
                 else -> {
                     place.projectId = null
@@ -250,16 +249,18 @@ private fun NewProjectForm(option: NewProjectOption) {
     }
 }
 
+private fun nodeNames(project: Project, nodes: Map<String, NodeSummary>): String = project.places.mapNotNull { nodes[it.nodeId]?.name }.joinToString(", ")
+
 @Composable
 fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, selected: String?, label: String, onDismiss: () -> Unit, setUpFolder: String? = null, onSetUp: () -> Unit = {}, recent: List<Project> = emptyList(), noProjectLabel: String = "No project", showNodes: Boolean = true, onNewProject: (() -> Unit)? = null, newProject: NewProjectOption? = null, onSelect: (String?) -> Unit) {
     var query by remember { mutableStateOf("") }
     val matching = projects.filter { project ->
-        listOf(project.name, project.path, nodes[project.nodeId]?.name.orEmpty().takeIf { showNodes }.orEmpty()).any { it.contains(query.trim(), ignoreCase = true) }
+        listOf(project.name, project.path, nodeNames(project, nodes).takeIf { showNodes }.orEmpty()).any { it.contains(query.trim(), ignoreCase = true) }
     }
 
-    val severalNodes = showNodes && projects.map { it.nodeId }.distinct().size > 1
+    val severalNodes = showNodes && projects.flatMap { held -> held.places.map { it.nodeId } }.distinct().size > 1
     val duplicateNames = projects.groupingBy { it.name }.eachCount().filterValues { it > 1 }.keys
-    val hintFor = { option: Project -> if (showNodes) nodes[option.nodeId]?.name else projectName(option.path).takeIf { option.name in duplicateNames } }
+    val hintFor = { option: Project -> if (showNodes) nodeNames(option, nodes).ifEmpty { null } else projectName(option.path).takeIf { option.name in duplicateNames } }
     val searching = query.isNotBlank()
     val recentShown = recent.filter { it in matching }.takeIf { !searching }.orEmpty()
     val rest = matching.filter { it !in recentShown }

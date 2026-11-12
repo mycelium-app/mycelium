@@ -22,6 +22,7 @@ import androidx.compose.ui.semantics.semantics
 import mycelium.api.Conversation
 import mycelium.api.NodeSummary
 import mycelium.api.Project
+import mycelium.api.ProjectCheckout
 import mycelium.state.AppState
 
 sealed interface ProjectSetup {
@@ -39,25 +40,21 @@ data class SetupActions(
     val onStartOnAnyNode: () -> Unit,
 )
 
-fun checkoutOn(state: AppState, project: Project, nodeId: String): Project? = when {
-    project.nodeId == nodeId -> project
-    project.repository == null -> null
-    else -> state.projects.values.firstOrNull { it.nodeId == nodeId && it.forgeId == project.forgeId && it.repository == project.repository }
-}
+fun Project.checkoutOn(nodeId: String): ProjectCheckout? = places.firstOrNull { it.nodeId == nodeId }
+
+fun lastUsedNode(project: Project, onlineNodes: List<NodeSummary>, newestConversations: List<Conversation>): NodeSummary? =
+    newestConversations.firstNotNullOfOrNull { conversation ->
+        conversation.takeIf { it.projectId == project.id }?.let { onlineNodes.firstOrNull { node -> node.id == it.nodeId && project.checkoutOn(node.id) != null } }
+    }
+
+fun runOnNode(project: Project, onlineNodes: List<NodeSummary>, newestConversations: List<Conversation>, keptNodeId: String?): NodeSummary? =
+    onlineNodes.firstOrNull { it.id == keptNodeId && project.checkoutOn(it.id) != null }
+        ?: lastUsedNode(project, onlineNodes, newestConversations)
+        ?: onlineNodes.firstOrNull { project.checkoutOn(it.id) != null }
 
 fun cloneable(project: Project): Boolean = project.forgeId != null && project.repository != null
 
 fun resolveProject(state: AppState, id: String?, checkedOut: Project?): Project? = state.projects[id] ?: checkedOut?.takeIf { it.id == id }
-
-fun repositoryKey(project: Project): String = if (project.repository == null) project.id else "${project.forgeId}/${project.repository}"
-
-fun projectEntries(projects: List<Project>, onlineNodes: List<NodeSummary>, newestConversations: List<Conversation>, keptNodeId: String?): List<Project> =
-    projects.groupBy(::repositoryKey).values.map { group ->
-        val online = group.filter { held -> onlineNodes.any { it.id == held.nodeId } }
-        val lastUsed = newestConversations.firstNotNullOfOrNull { conversation -> online.firstOrNull { it.id == conversation.projectId } }
-
-        online.firstOrNull { it.nodeId == keptNodeId } ?: lastUsed ?: online.firstOrNull() ?: group.first()
-    }.sortedBy { it.name }
 
 @Composable
 fun SetupStrip(setup: ProjectSetup, actions: SetupActions) {
