@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.34.26
+
+- Adding an MCP server offers Sign in whenever its authorisation server can be found, not only when it accepts dynamic registration. Mycelium uses its own client metadata document where the server reads one, or a client ID and secret you registered yourself, with the callback address shown to copy. The setup waits for the browser, says why when sign-in fails or is not offered, and keeps Token as the other choice. Re-authenticating an integration in Settings waits for the result too.
+- A signed-in integration is refreshed after any rejected token, including calls through the integration API proxy, and one that needs more access says which.
+
+Desktop and Android apps older than v0.34.26 cannot add a new integration by browser sign-in against this control plane; signing an existing one in again still works.
+
 ## v0.34.25
 
 - In a narrow Usage card the bars get shorter instead of the percentages and reset times being cut off, so "100%" and "23h 59m" always show in full and the columns still line up.
