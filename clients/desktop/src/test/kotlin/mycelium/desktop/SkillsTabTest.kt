@@ -13,7 +13,6 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -51,7 +50,7 @@ internal class LearningRequests {
 
     fun api(): MyceliumApi {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
-        val engine = MockEngine { request ->
+        val engine = SynchronousMockEngine { request ->
             val path = request.url.encodedPath
             seen += request.method.value to path
 
@@ -61,7 +60,7 @@ internal class LearningRequests {
                 path.endsWith("/skills/hidden") -> {
                     hidden = request.method.value == "PUT"
 
-                    return@MockEngine respond("", HttpStatusCode.NoContent)
+                    return@SynchronousMockEngine respond("", HttpStatusCode.NoContent)
                 }
                 path.endsWith("/exercises/e1/solution") -> SolutionJson
                 path.endsWith("/wellness/learned") -> LearnedJson
@@ -96,12 +95,14 @@ class SkillsTabTest {
 
         runBlocking { store.wellness.load() }
         rule.setContent { MyceliumTheme(true) { WellnessScreen(store, OpeningPlatform()) } }
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Suggested exercise").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("Suggested exercise").fetchSemanticsNodes().isNotEmpty())
     }
 
     private fun openSkills() {
         rule.onNodeWithText("Skills").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Rust").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("Rust").fetchSemanticsNodes().isNotEmpty())
     }
 
     @Test
@@ -128,7 +129,8 @@ class SkillsTabTest {
         openSkills()
 
         rule.onNodeWithContentDescription("Hide Kotlin").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("24%").fetchSemanticsNodes().isEmpty() }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("24%").fetchSemanticsNodes().isEmpty())
         assertTrue(requests.sent("PUT", "/skills/hidden"))
     }
 
@@ -138,54 +140,68 @@ class SkillsTabTest {
         openSkills()
 
         rule.onNodeWithContentDescription("Hide Kotlin").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("24%").fetchSemanticsNodes().isEmpty() }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("24%").fetchSemanticsNodes().isEmpty())
 
         rule.onNodeWithText("Hidden").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Unhide Kotlin").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithContentDescription("Unhide Kotlin").fetchSemanticsNodes().isNotEmpty())
 
         rule.onNodeWithContentDescription("Unhide Kotlin").performClick()
-        rule.waitUntil(5_000) { requests.sent("DELETE", "/skills/hidden") }
+        rule.waitForIdle()
+        assertTrue(requests.sent("DELETE", "/skills/hidden"))
 
         rule.onNodeWithText("All").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("24%").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("24%").fetchSemanticsNodes().isNotEmpty())
     }
 
     @Test
     fun showASolutionOpensTheSourceDiffAndEscapeClosesIt() {
         show()
         rule.onNodeWithContentDescription("Start Debounce the sidebar group filter").performClick()
-        rule.waitUntil(5_000) { requests.sent("POST", "/exercises/e1/start") }
+        rule.waitForIdle()
+        assertTrue(requests.sent("POST", "/exercises/e1/start"))
         openSkills()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("learn/debounce-1").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("learn/debounce-1").fetchSemanticsNodes().isNotEmpty())
 
         rule.onNodeWithContentDescription("Show a solution to Debounce the sidebar group filter").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("src/Filter.kt").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("src/Filter.kt").fetchSemanticsNodes().isNotEmpty())
 
         rule.onAllNodes(isRoot()).onLast().performKeyInput { pressKey(Key.Escape) }
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("src/Filter.kt").fetchSemanticsNodes().isEmpty() }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("src/Filter.kt").fetchSemanticsNodes().isEmpty())
     }
 
     @Test
     fun openingTheConversationFromASolutionClosesItAndLoadsTheConversation() {
         show()
         rule.onNodeWithContentDescription("Start Debounce the sidebar group filter").performClick()
-        rule.waitUntil(5_000) { requests.sent("POST", "/exercises/e1/start") }
+        rule.waitForIdle()
+        assertTrue(requests.sent("POST", "/exercises/e1/start"))
         openSkills()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("learn/debounce-1").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("learn/debounce-1").fetchSemanticsNodes().isNotEmpty())
 
         rule.onNodeWithContentDescription("Show a solution to Debounce the sidebar group filter").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("src/Filter.kt").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("src/Filter.kt").fetchSemanticsNodes().isNotEmpty())
         rule.onNodeWithText("Open the conversation").performClick()
 
-        rule.waitUntil(5_000) { requests.sent("GET", "/conversations/c-src/events") }
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("src/Filter.kt").fetchSemanticsNodes().isEmpty() }
+        rule.waitForIdle()
+        assertTrue(requests.sent("GET", "/conversations/c-src/events"))
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("src/Filter.kt").fetchSemanticsNodes().isEmpty())
     }
 
     @Test
     fun recentlyLearnedListsWhatTheAgentNoted() {
         show()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("combine versus zip for StateFlow").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("combine versus zip for StateFlow").fetchSemanticsNodes().isNotEmpty())
         rule.onNodeWithText("Teach me in Usage card flicker").performScrollTo().assertIsDisplayed()
     }
 
@@ -194,16 +210,20 @@ class SkillsTabTest {
         show()
 
         rule.onNodeWithContentDescription("Start Debounce the sidebar group filter").performClick()
-        rule.waitUntil(5_000) { requests.sent("POST", "/exercises/e1/start") }
+        rule.waitForIdle()
+        assertTrue(requests.sent("POST", "/exercises/e1/start"))
 
         openSkills()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("learn/debounce-1").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("learn/debounce-1").fetchSemanticsNodes().isNotEmpty())
 
         rule.onNodeWithContentDescription("Run tests for Debounce the sidebar group filter").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Tests: 5 passed, 1 failed (newGroupAppearsWithoutTyping).").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("Tests: 5 passed, 1 failed (newGroupAppearsWithoutTyping).").fetchSemanticsNodes().isNotEmpty())
 
         rule.onNodeWithContentDescription("Ask for a review of Debounce the sidebar group filter").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Close, one snapshot problem.").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("Close, one snapshot problem.").fetchSemanticsNodes().isNotEmpty())
         rule.onNodeWithText("This reads groups once.").assertIsDisplayed()
         rule.onNodeWithText("Filter.kt:15, good").assertIsDisplayed()
     }
