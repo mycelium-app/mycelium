@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.25
+
+- In a narrow Usage card the bars get shorter instead of the percentages and reset times being cut off, so "100%" and "23h 59m" always show in full and the columns still line up.
+
 ## v0.34.24
 
 - A Claude conversation keeps its Mycelium tools when its session restarts, for example on a move to another account at a usage limit or a model change. Each run of an agent now has its own credentials file, so the end of an earlier run no longer removes the file a newer run is using.
