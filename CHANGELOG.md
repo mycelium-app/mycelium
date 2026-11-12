@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.19
+
+- The Usage card marks the account an assistant's chat runs on as This chat, as it does in any other conversation.
+
 ## v0.34.18
 
 - Agents can show images in a reply. A new Web search integration offers search_images, and images whose exact address came from that search load in place, fetched by the control plane and never by your device. Several in a row form a gallery, and the enlarged view names the site and opens the page the image came from.
