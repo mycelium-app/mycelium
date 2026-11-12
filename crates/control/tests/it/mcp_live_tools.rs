@@ -141,6 +141,88 @@ async fn a_tool_whose_input_schema_is_a_reference_is_listed_as_the_object_it_nam
 }
 
 #[tokio::test]
+async fn a_tool_whose_input_schema_is_not_an_object_is_left_out_and_the_rest_are_still_listed() {
+    async fn handle(Json(body): Json<Value>) -> Response {
+        if body.get("id").is_none() {
+            return StatusCode::ACCEPTED.into_response();
+        }
+
+        let result = match body["method"].as_str().unwrap_or_default() {
+            "initialize" => json!({"protocolVersion": "2025-11-25", "capabilities": {"tools": {}}, "serverInfo": {"name": "notes", "version": "1"}}),
+            "tools/list" => json!({"tools": [
+                {"name": "create_note", "description": "Create a note.", "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}}}},
+                {"name": "broken_note", "description": "Has a string schema.", "inputSchema": {"type": "string"}},
+                {"name": "typeless_note", "description": "Has no schema type.", "inputSchema": {"properties": {}}},
+            ]}),
+            _ => return StatusCode::NOT_FOUND.into_response(),
+        };
+
+        Json(json!({"jsonrpc": "2.0", "id": body["id"], "result": result})).into_response()
+    }
+
+    let server = Server::start().await;
+    let token = own_session_token(&server).await;
+    let base = serve(Router::new().route("/mcp", post(handle))).await;
+    let (status, added) = server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Notes", "url": format!("{base}/mcp")}))).await;
+    assert_eq!(status, 201, "{added}");
+
+    let listed = names(&mcp(&server, &token, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})).await);
+
+    assert!(listed.contains(&"notes__create_note".to_string()));
+    assert!(listed.contains(&"recall".to_string()));
+    assert!(!listed.contains(&"notes__broken_note".to_string()));
+    assert!(!listed.contains(&"notes__typeless_note".to_string()));
+}
+
+#[tokio::test]
+async fn a_client_carrying_a_session_id_this_server_never_issued_can_list_and_call_tools() {
+    let server = Server::start().await;
+    let token = own_session_token(&server).await;
+    let anonymous = server.anonymous();
+
+    let (status, listed) = anonymous.json(anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {token}")).header("mcp-session-id", "issued-before-the-restart").json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}))).await;
+
+    assert_eq!(status, 200, "{listed}");
+    assert!(names(&listed).contains(&"recall".to_string()));
+}
+
+#[tokio::test]
+async fn a_stream_opened_after_a_restart_is_told_at_once_to_fetch_the_tools_again() {
+    let server = Server::start().await;
+    let token = own_session_token(&server).await;
+    let anonymous = server.anonymous();
+    let mut stream = anonymous.http.get(format!("{}/api/v1/mcp", anonymous.base)).header("authorization", format!("Bearer {token}")).header("accept", "text/event-stream").header("mcp-session-id", "issued-before-the-restart").send().await.unwrap();
+
+    let chunk = tokio::time::timeout(Duration::from_secs(10), stream.chunk()).await.expect("no notification arrived").unwrap().expect("the stream closed");
+
+    assert!(String::from_utf8_lossy(&chunk).contains("notifications/tools/list_changed"));
+}
+
+#[tokio::test]
+async fn a_session_that_never_lists_its_tools_gets_a_notice_in_the_conversation() {
+    let server = Server::start_with(|config| config.tools_listing_grace = Duration::from_millis(200)).await;
+    let mut link = server.online_node("laptop").await;
+    let id = server.create_conversation(link.id, None).await.id;
+    let _ = session_token_from_start(&mut link).await;
+
+    crate::common::eventually("the notice to be stored", || async { server.events(id).await.iter().any(|event| event["kind"] == "session_notice" && event["payload"]["message"].as_str().is_some_and(|message| message.contains("started without Mycelium's tools"))).then_some(()) }).await;
+}
+
+#[tokio::test]
+async fn a_session_that_lists_its_tools_gets_no_notice() {
+    let server = Server::start_with(|config| config.tools_listing_grace = Duration::from_millis(300)).await;
+    let mut link = server.online_node("laptop").await;
+    let id = server.create_conversation(link.id, None).await.id;
+    let token = session_token_from_start(&mut link).await;
+    let (status, _) = tools_with_header(&server, &token, None).await;
+    assert_eq!(status, 200);
+
+    tokio::time::sleep(Duration::from_millis(900)).await;
+
+    assert!(server.events(id).await.iter().all(|event| event["kind"] != "session_notice"));
+}
+
+#[tokio::test]
 async fn workspace_agents_list_and_call_litellm_tools_through_mycelium() {
     let server = Server::start().await;
     let (_, token) = server.join("node", "laptop").await;
@@ -238,14 +320,14 @@ async fn an_open_stream_is_told_when_a_server_is_switched_back_on() {
     server.user.json(server.user.patch(&path).json(&json!({"enabled": false}))).await;
     let mut received = String::new();
 
-    while received.matches("notifications/tools/list_changed").count() < 1 {
+    while received.matches("notifications/tools/list_changed").count() < 2 {
         let chunk = tokio::time::timeout(Duration::from_secs(10), stream.chunk()).await.expect("no notification arrived").unwrap().expect("the stream closed");
         received.push_str(&String::from_utf8_lossy(&chunk));
     }
 
     server.user.json(server.user.patch(&path).json(&json!({"enabled": true}))).await;
 
-    while received.matches("notifications/tools/list_changed").count() < 2 {
+    while received.matches("notifications/tools/list_changed").count() < 3 {
         let chunk = tokio::time::timeout(Duration::from_secs(10), stream.chunk()).await.expect("switching back on sent no notification").unwrap().expect("the stream closed");
         received.push_str(&String::from_utf8_lossy(&chunk));
     }

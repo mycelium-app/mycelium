@@ -403,6 +403,7 @@ impl Server {
             github_api_url: "http://127.0.0.1:1".into(),
             forge_cache_ttl: mycelium_control::FORGE_CACHE_TTL,
             steer_timeout: mycelium_control::STEER_TIMEOUT,
+            tools_listing_grace: mycelium_control::TOOLS_LISTING_GRACE,
             database_pool_size: 30,
             database_acquire_timeout: std::time::Duration::from_secs(30),
             stream_recheck_interval: mycelium_control::STREAM_RECHECK_INTERVAL,

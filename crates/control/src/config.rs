@@ -8,6 +8,7 @@ pub const VERSION_CHECK_INTERVAL: Duration = Duration::from_secs(3600);
 pub const SCHEDULER_TICK: Duration = Duration::from_secs(15);
 pub const FORGE_WATCH_INTERVAL: Duration = Duration::from_secs(60);
 pub const STEER_TIMEOUT: Duration = Duration::from_secs(5);
+pub const TOOLS_LISTING_GRACE: Duration = Duration::from_secs(90);
 pub const DATABASE_POOL_SIZE: u32 = 10;
 pub const DATABASE_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(3);
 pub const STREAM_RECHECK_INTERVAL: Duration = Duration::from_secs(30);
@@ -96,6 +97,7 @@ pub struct Config {
     pub github_api_url: String,
     pub forge_cache_ttl: Duration,
     pub steer_timeout: Duration,
+    pub tools_listing_grace: Duration,
     pub database_pool_size: u32,
     pub database_acquire_timeout: Duration,
     pub stream_recheck_interval: Duration,
@@ -180,6 +182,7 @@ impl Config {
             github_api_url: optional(lookup, "MYCELIUM_GITHUB_API_URL").unwrap_or_else(|| "https://api.github.com".into()).trim_end_matches('/').to_string(),
             forge_cache_ttl: crate::forge_cache::FORGE_CACHE_TTL,
             steer_timeout: STEER_TIMEOUT,
+            tools_listing_grace: TOOLS_LISTING_GRACE,
             database_pool_size: optional(lookup, "MYCELIUM_DATABASE_POOL_SIZE").map(|size| size.trim().parse()).transpose()?.unwrap_or(DATABASE_POOL_SIZE),
             database_acquire_timeout: optional(lookup, "MYCELIUM_DATABASE_ACQUIRE_TIMEOUT_SECONDS").map(|seconds| seconds.trim().parse().map(Duration::from_secs)).transpose()?.unwrap_or(DATABASE_ACQUIRE_TIMEOUT),
             stream_recheck_interval: STREAM_RECHECK_INTERVAL,

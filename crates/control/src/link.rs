@@ -779,7 +779,7 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
     pump(state, conversation_id, before.acp_session_id.is_none()).await
 }
 
-async fn record(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: Option<i64>, kind: EventKind, payload: Value, transition: Option<ConversationStatus>) -> ApiResult<bool> {
+pub(crate) async fn record(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: Option<i64>, kind: EventKind, payload: Value, transition: Option<ConversationStatus>) -> ApiResult<bool> {
     let mut tx = state.pool.begin().await?;
     let Some(row) = lock_on_node(&mut tx, conversation_id, node_id).await? else {
         return Ok(false);

@@ -37,8 +37,11 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use call::{Caller, ToolCall, ToolReply};
+use futures_util::StreamExt;
 use serde_json::{Value, json};
+use std::collections::HashSet;
 use std::convert::Infallible;
+use std::sync::{LazyLock, Mutex};
 use tokio::sync::broadcast::error::RecvError;
 use uuid::Uuid;
 
@@ -147,6 +150,29 @@ fn failure(id: &Value, code: i64, message: &str) -> Response {
     Json(json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})).into_response()
 }
 
+fn servable(tools: Vec<Value>) -> Vec<Value> {
+    static REPORTED: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Mutex::default);
+
+    tools
+        .into_iter()
+        .filter(|tool| {
+            let schema = &tool["inputSchema"];
+            let valid = schema.is_object() && schema["type"] == "object";
+
+            if !valid {
+                let name = tool["name"].as_str().unwrap_or_default().to_string();
+                let first_time = REPORTED.lock().is_ok_and(|mut reported| reported.insert(name.clone()));
+
+                if first_time {
+                    tracing::error!("leaving {name} out of the MCP tool list: its inputSchema must be an object with type \"object\", and a client rejects the whole list over one that is not");
+                }
+            }
+
+            valid
+        })
+        .collect()
+}
+
 fn tool_text(text: &str, is_error: bool) -> Value {
     json!({"content": [{"type": "text", "text": text}], "isError": is_error})
 }
@@ -201,6 +227,7 @@ pub fn tools_instructions() -> String {
 pub struct AuthSession {
     node_id: Uuid,
     conversation_id: Uuid,
+    token_hash: Vec<u8>,
 }
 
 impl FromRequestParts<AppState> for AuthSession {
@@ -219,11 +246,15 @@ impl FromRequestParts<AppState> for AuthSession {
         .fetch_optional(&state.pool)
         .await?;
 
-        found.map(|(node_id, conversation_id)| AuthSession { node_id, conversation_id }).ok_or_else(ApiError::unauthorised)
+        found.map(|(node_id, conversation_id)| AuthSession { node_id, conversation_id, token_hash: hash_token(secret) }).ok_or_else(ApiError::unauthorised)
     }
 }
 
 pub async fn handle(State(state): State<AppState>, session: AuthSession, headers: HeaderMap, Json(request): Json<Value>) -> ApiResult<Response> {
+    if request.get("method").and_then(Value::as_str) == Some("tools/list") {
+        crate::mcp_tokens::mark_tools_listed(&state, &session.token_hash).await?;
+    }
+
     respond(&state, session.node_id, Some(session.conversation_id), &headers, request).await
 }
 
@@ -266,7 +297,7 @@ pub async fn respond(state: &AppState, node_id: Uuid, conversation_id: Option<Uu
 
             tools.extend(integration_tools::listed(&caller).await?);
 
-            reply(&id, json!({"tools": tools}))
+            reply(&id, json!({"tools": servable(tools)}))
         }
         "tools/call" => {
             let mut arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
@@ -307,12 +338,14 @@ pub async fn stream(State(state): State<AppState>, session: AuthSession) -> ApiR
     let caller = Caller { state: &state, node_id: session.node_id, conversation_id: Some(session.conversation_id), headers: &HeaderMap::new() };
     let owner = caller.owner().await?;
     let receiver = state.hub.subscribe_tools(owner);
-    let notifications = futures_util::stream::unfold(receiver, |mut receiver| async move {
+    let changes = futures_util::stream::unfold(receiver, |mut receiver| async move {
         match receiver.recv().await {
             Err(RecvError::Closed) => None,
             _ => Some((Ok::<Event, Infallible>(Event::default().data(TOOLS_CHANGED)), receiver)),
         }
     });
+    let on_connect = futures_util::stream::once(async { Ok::<Event, Infallible>(Event::default().data(TOOLS_CHANGED)) });
+    let notifications = on_connect.chain(changes);
 
     Ok(Sse::new(notifications).keep_alive(KeepAlive::default()).into_response())
 }
