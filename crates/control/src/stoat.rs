@@ -1,14 +1,15 @@
 use crate::chat_tool_servers::StoredTool;
 use crate::integrations::{CallOutput, Credentials};
+use crate::message_paging::{self, Direction};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
 const SEND_MESSAGE: &str = "send_message";
 const DEFAULT_LIMIT: u64 = 20;
-const MAX_LIMIT: u64 = 100;
 const MAX_SEARCH_QUERY: usize = 64;
 const IDENTIFIER_LENGTH: usize = 26;
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -24,7 +25,10 @@ pub fn normalise_settings(settings: &Value) -> Result<Value, String> {
 
 pub fn tools() -> Vec<StoredTool> {
     let channel = json!({"type": "string", "description": "The channel's id, from list_servers."});
-    let limit = json!({"type": "integer", "description": format!("How many messages to return. Defaults to {DEFAULT_LIMIT}, at most {MAX_LIMIT}.")});
+    let limit = json!({"type": "integer", "description": format!("How many messages to return. Defaults to {DEFAULT_LIMIT}, at most {} reading a channel (larger limits are read in several requests) and at most {} searching.", message_paging::MOST_MESSAGES, message_paging::PAGE_SIZE)});
+    let before = json!({"type": "string", "description": "A message id: return the messages sent before it. Pass a result's coverage.next to continue reading further back."});
+    let after = json!({"type": "string", "description": "A message id: return the messages sent after it. Pass a result's coverage.next to continue reading forwards."});
+    let coverage = "Every result of get_messages is {messages, coverage}: coverage says how many messages came back, the oldest_id and newest_id returned, whether found_oldest and found_newest (nothing older or newer remains), and next, the id to pass as before (or as after when reading forwards) to continue (null when there is nothing more).";
 
     vec![
         StoredTool {
@@ -33,12 +37,12 @@ pub fn tools() -> Vec<StoredTool> {
             input_schema: json!({"type": "object", "properties": {}}), read_only: None },
         StoredTool {
             name: "get_messages".to_string(),
-            description: "Get the most recent messages in a channel, oldest first.".to_string(),
-            input_schema: json!({"type": "object", "properties": {"channel": channel, "limit": limit}, "required": ["channel"]}), read_only: None },
+            description: format!("Get the most recent messages in a channel, oldest first. Page back with before, or forwards with after. {coverage}"),
+            input_schema: json!({"type": "object", "properties": {"channel": channel, "limit": limit, "before": before, "after": after}, "required": ["channel"]}), read_only: None },
         StoredTool {
             name: "search_messages".to_string(),
-            description: "Search one channel's messages by words. Returns the newest matches, oldest first.".to_string(),
-            input_schema: json!({"type": "object", "properties": {"channel": channel, "query": {"type": "string", "description": format!("Words to search for, at most {MAX_SEARCH_QUERY} characters.")}, "limit": limit}, "required": ["channel", "query"]}), read_only: None },
+            description: "Search one channel's messages by words. Returns the newest matches, oldest first. before and after narrow the search to messages sent before or after a message id.".to_string(),
+            input_schema: json!({"type": "object", "properties": {"channel": channel, "query": {"type": "string", "description": format!("Words to search for, at most {MAX_SEARCH_QUERY} characters.")}, "limit": limit, "before": before, "after": after}, "required": ["channel", "query"]}), read_only: None },
         StoredTool {
             name: SEND_MESSAGE.to_string(),
             description: "Send a message to a channel. Always needs the person's approval in chats, even when Always allow is on.".to_string(),
@@ -106,7 +110,18 @@ fn identifier(arguments: &Value, key: &str) -> Result<String, String> {
 }
 
 fn limit(arguments: &Value) -> u64 {
-    arguments["limit"].as_u64().unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT)
+    message_paging::total_limit(arguments["limit"].as_u64(), DEFAULT_LIMIT)
+}
+
+fn optional_identifier(arguments: &Value, key: &str) -> Result<Option<String>, String> {
+    match text(arguments, key) {
+        Some(_) => identifier(arguments, key).map(Some),
+        None => Ok(None),
+    }
+}
+
+fn message_id(message: &Value) -> Option<&str> {
+    message["_id"].as_str()
 }
 
 fn sent_at(id: &str) -> Option<String> {
@@ -229,9 +244,38 @@ async fn run(http: &reqwest::Client, credentials: &Credentials, tool: &str, argu
         "list_servers" => servers(http, credentials).await,
         "get_messages" => {
             let channel = identifier(arguments, "channel")?;
-            let body = send(request(http, credentials, reqwest::Method::GET, &format!("channels/{channel}/messages")).query(&[("limit", limit(arguments).to_string()), ("sort", "Latest".to_string()), ("include_users", "true".to_string())])).await?;
+            let (before, after) = (optional_identifier(arguments, "before")?, optional_identifier(arguments, "after")?);
 
-            Ok(messages(&body))
+            if before.is_some() && after.is_some() {
+                return Err("Give either before or after, not both.".to_string());
+            }
+
+            let direction = if after.is_some() { Direction::Forward } else { Direction::Backward };
+            let sort = if after.is_some() { "Oldest" } else { "Latest" };
+            let cursor_name = if after.is_some() { "after" } else { "before" };
+            let users = Mutex::new(Vec::<Value>::new());
+            let collected = message_paging::collect(limit(arguments), direction, before.or(after), message_id, |size, cursor| {
+                let mut query = vec![("limit", size.to_string()), ("sort", sort.to_string()), ("include_users", "true".to_string())];
+
+                if let Some(cursor) = cursor {
+                    query.push((cursor_name, cursor));
+                }
+
+                let builder = request(http, credentials, reqwest::Method::GET, &format!("channels/{channel}/messages")).query(&query);
+                let users = &users;
+
+                async move {
+                    let body = send(builder).await?;
+
+                    users.lock().unwrap().extend(body["users"].as_array().cloned().unwrap_or_default());
+
+                    Ok(if body.is_array() { body.as_array().cloned().unwrap_or_default() } else { body["messages"].as_array().cloned().unwrap_or_default() })
+                }
+            })
+            .await?;
+            let known = users.into_inner().unwrap_or_default();
+
+            Ok(json!({"messages": messages(&json!({"messages": collected.messages, "users": known})), "coverage": collected.coverage}))
         }
         "search_messages" => {
             let channel = identifier(arguments, "channel")?;
@@ -243,7 +287,17 @@ async fn run(http: &reqwest::Client, credentials: &Credentials, tool: &str, argu
                 return Err(format!("Shorten query to {MAX_SEARCH_QUERY} characters or fewer."));
             }
 
-            let body = send(request(http, credentials, reqwest::Method::POST, &format!("channels/{channel}/search")).json(&json!({"query": query, "limit": limit(arguments), "sort": "Latest", "include_users": true}))).await?;
+            let mut payload = json!({"query": query, "limit": limit(arguments).min(message_paging::PAGE_SIZE), "sort": "Latest", "include_users": true});
+
+            if let Some(before) = optional_identifier(arguments, "before")? {
+                payload["before"] = json!(before);
+            }
+
+            if let Some(after) = optional_identifier(arguments, "after")? {
+                payload["after"] = json!(after);
+            }
+
+            let body = send(request(http, credentials, reqwest::Method::POST, &format!("channels/{channel}/search")).json(&payload)).await?;
 
             Ok(messages(&body))
         }

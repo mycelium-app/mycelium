@@ -122,6 +122,7 @@ mod discord;
 mod actual;
 mod local_speech;
 mod paperless;
+mod message_paging;
 mod paging;
 mod stoat;
 mod tandoor;

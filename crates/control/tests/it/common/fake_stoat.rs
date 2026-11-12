@@ -12,7 +12,31 @@ use tokio_tungstenite::tungstenite::Message;
 
 pub const TOKEN: &str = "stoat-token-0123456789abcdef";
 pub const CHANNEL: &str = "01HZZZZZZZZZZZZZZZZZZZZZZA";
+pub const HISTORY_CHANNEL: &str = "01HHISTORY0000000000000000";
+pub const FIRST_HISTORY: u64 = 1000;
+const HISTORY_LENGTH: u64 = 800;
 const MESSAGE: &str = "01K8ZZZZZZZZZZZZZZZZZZZZZB";
+
+pub fn history_id(number: u64) -> String {
+    format!("01HMSG{number:020}")
+}
+
+fn history_number(id: &str) -> u64 {
+    id[6..].parse().unwrap()
+}
+
+fn history_page(query: &std::collections::HashMap<String, String>) -> Vec<Value> {
+    let first = FIRST_HISTORY + 1;
+    let last = FIRST_HISTORY + HISTORY_LENGTH;
+    let limit: usize = query["limit"].parse().unwrap();
+    let numbers: Vec<u64> = match (query.get("before"), query.get("after")) {
+        (Some(before), _) => (first..history_number(before)).rev().take(limit).collect(),
+        (_, Some(after)) => (history_number(after) + 1..=last).take(limit).collect(),
+        _ => (first..=last).rev().take(limit).collect(),
+    };
+
+    numbers.into_iter().map(|number| json!({"_id": history_id(number), "channel": HISTORY_CHANNEL, "author": "01USERGRACE00000000000000A", "content": format!("Note {number}")})).collect()
+}
 
 #[derive(Default)]
 pub struct FakeStoat {
@@ -43,14 +67,24 @@ async fn handle(State(shared): State<Shared>, method: Method, uri: Uri, headers:
 
     let path = uri.path_and_query().map(|value| value.to_string()).unwrap_or_default();
 
+    let seen_body = body.clone();
+
     shared.stoat.seen.lock().unwrap().push((method.clone(), path, body, header.to_string()));
 
     let users = json!([{"_id": "01USERGRACE00000000000000A", "username": "grace", "display_name": "Grace"}]);
+    let query: std::collections::HashMap<String, String> = uri.query().map(|query| url::form_urlencoded::parse(query.as_bytes()).into_owned().collect()).unwrap_or_default();
     let message = json!({"_id": MESSAGE, "channel": CHANNEL, "author": "01USERGRACE00000000000000A", "content": "Noon?", "attachments": [{"_id": "f", "filename": "menu.pdf", "size": 12}]});
 
     match (method, uri.path()) {
         (Method::GET, "/users/@me") => Json(json!({"_id": "01USERADA00000000000000000A", "username": "ada"})).into_response(),
+        (Method::GET, path) if path.ends_with("/messages") && path.contains(HISTORY_CHANNEL) => Json(json!({"messages": history_page(&query), "users": users})).into_response(),
         (Method::GET, path) if path.ends_with("/messages") => Json(json!({"messages": [message], "users": users})).into_response(),
+        (Method::POST, path) if path.ends_with("/search") && path.contains(HISTORY_CHANNEL) => {
+            let asked: Value = serde_json::from_str(&seen_body).unwrap();
+            let fields = ["limit", "before", "after"].into_iter().filter_map(|key| Some((key.to_string(), asked[key].as_str().map(str::to_string).or_else(|| asked[key].as_u64().map(|number| number.to_string()))?))).collect();
+
+            Json(json!({"messages": history_page(&fields), "users": users})).into_response()
+        }
         (Method::POST, path) if path.ends_with("/search") => Json(json!({"messages": [message], "users": users})).into_response(),
         (Method::POST, path) if path.ends_with("/messages") => Json(json!({"_id": "01K9SENT0000000000000000AA", "channel": CHANNEL})).into_response(),
         _ => StatusCode::NOT_FOUND.into_response(),

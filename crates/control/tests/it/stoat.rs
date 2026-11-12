@@ -3,7 +3,7 @@ mod fake_stoat;
 
 use axum::http::Method;
 use crate::common::Server;
-use fake_stoat::{CHANNEL, TOKEN, fake_stoat};
+use fake_stoat::{CHANNEL, FIRST_HISTORY, HISTORY_CHANNEL, TOKEN, fake_stoat, history_id};
 use serde_json::{Value, json};
 
 async fn mcp(server: &Server, token: &str, body: Value) -> Value {
@@ -23,6 +23,14 @@ async fn call(server: &Server, token: &str, id: u64, tool: &str, arguments: Valu
     let reply = if tool == "send_message" { server.approved_agent_mcp(token, body).await } else { mcp(server, token, body).await };
 
     reply["result"].clone()
+}
+
+fn ids(read: &Value) -> Vec<String> {
+    read["messages"].as_array().unwrap().iter().map(|message| message["id"].as_str().unwrap().to_string()).collect()
+}
+
+fn queries(stoat: &fake_stoat::FakeStoat) -> Vec<String> {
+    stoat.requests(Method::GET, &format!("/channels/{HISTORY_CHANNEL}/messages")).into_iter().map(|(path, _)| path.split_once('?').unwrap().1.split('|').next().unwrap().to_string()).collect()
 }
 
 fn payload(result: &Value) -> Value {
@@ -76,6 +84,8 @@ async fn stoat_tools_list_servers_read_search_and_send_messages() {
 
     assert_eq!(servers["servers"], json!([{"id": "01SERVER00000000000000000A", "name": "Lab", "channels": [{"id": CHANNEL, "name": "general", "type": "TextChannel"}]}]));
     assert_eq!(servers["direct_channels"], json!([{"id": "01DM00000000000000000000AA", "name": "Grace", "type": "DirectMessage"}]));
+    let messages = messages["messages"].clone();
+
     assert_eq!((messages[0]["content"].clone(), messages[0]["author"].clone(), messages[0]["attachments"].clone()), (json!("Noon?"), json!("Grace"), json!([{"name": "menu.pdf", "size": 12}])));
     assert!(messages[0]["sent_at"].as_str().unwrap().starts_with("20"));
     assert_eq!(found[0]["content"], "Noon?");
@@ -89,4 +99,78 @@ async fn stoat_tools_list_servers_read_search_and_send_messages() {
     let posted = stoat.requests(Method::POST, &format!("/channels/{CHANNEL}/messages"));
     assert_eq!(posted.len(), 1);
     assert_eq!(serde_json::from_str::<Value>(&posted[0].1).unwrap(), json!({"content": "Yes.", "replies": [{"id": "01K8ZZZZZZZZZZZZZZZZZZZZZB", "mention": false}]}));
+}
+
+async fn history_server() -> (Server, String, std::sync::Arc<fake_stoat::FakeStoat>) {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (base, stoat) = fake_stoat().await;
+    add_stoat(&server, &base, "Stoat", TOKEN, "bot").await;
+
+    (server, node.token.clone(), stoat)
+}
+
+#[tokio::test]
+async fn a_limit_of_250_reads_the_channel_back_in_three_requests_each_before_the_oldest_message_so_far() {
+    let (server, token, stoat) = history_server().await;
+
+    let read = payload(&call(&server, &token, 1, "get_messages", json!({"channel": HISTORY_CHANNEL, "limit": 250})).await);
+
+    let oldest_first: Vec<String> = (FIRST_HISTORY + 551..=FIRST_HISTORY + 800).map(history_id).collect();
+    let requests = queries(&stoat);
+
+    assert_eq!(ids(&read), oldest_first);
+    assert_eq!(requests.len(), 3);
+    assert!(requests[0].contains("limit=100") && !requests[0].contains("before="), "{requests:?}");
+    assert!(requests[1].contains("limit=100") && requests[1].contains(&format!("before={}", history_id(FIRST_HISTORY + 701))), "{requests:?}");
+    assert!(requests[2].contains("limit=50") && requests[2].contains(&format!("before={}", history_id(FIRST_HISTORY + 601))), "{requests:?}");
+    assert_eq!((read["coverage"]["returned"].clone(), read["coverage"]["found_newest"].clone(), read["coverage"]["next"].clone()), (json!(250), json!(true), json!(history_id(FIRST_HISTORY + 551))));
+}
+
+#[tokio::test]
+async fn after_pages_forward_oldest_first_and_next_continues_from_the_newest_returned() {
+    let (server, token, stoat) = history_server().await;
+
+    let read = payload(&call(&server, &token, 1, "get_messages", json!({"channel": HISTORY_CHANNEL, "after": history_id(FIRST_HISTORY), "limit": 250})).await);
+
+    let oldest_first: Vec<String> = (FIRST_HISTORY + 1..=FIRST_HISTORY + 250).map(history_id).collect();
+    let requests = queries(&stoat);
+
+    assert_eq!(ids(&read), oldest_first);
+    assert!(requests[1].contains(&format!("after={}", history_id(FIRST_HISTORY + 100))) && requests[1].contains("sort=Oldest"), "{requests:?}");
+    assert_eq!(read["coverage"]["next"], json!(history_id(FIRST_HISTORY + 250)));
+}
+
+#[tokio::test]
+async fn a_limit_above_500_is_clamped_to_500() {
+    let (server, token, stoat) = history_server().await;
+
+    let read = payload(&call(&server, &token, 1, "get_messages", json!({"channel": HISTORY_CHANNEL, "limit": 9999})).await);
+
+    assert_eq!(ids(&read).len(), 500);
+    assert_eq!(queries(&stoat).len(), 5);
+}
+
+#[tokio::test]
+async fn reading_to_the_start_of_the_channel_says_there_is_nothing_older() {
+    let (server, token, _) = history_server().await;
+
+    let read = payload(&call(&server, &token, 1, "get_messages", json!({"channel": HISTORY_CHANNEL, "before": history_id(FIRST_HISTORY + 4), "limit": 100})).await);
+
+    assert_eq!(ids(&read).len(), 3);
+    assert_eq!((read["coverage"]["found_oldest"].clone(), read["coverage"]["found_newest"].clone(), read["coverage"]["next"].clone()), (json!(true), json!(false), json!(null)));
+}
+
+#[tokio::test]
+async fn search_passes_before_and_after_through() {
+    let (server, token, stoat) = history_server().await;
+    let before = history_id(FIRST_HISTORY + 20);
+    let after = history_id(FIRST_HISTORY + 10);
+
+    let found = payload(&call(&server, &token, 1, "search_messages", json!({"channel": HISTORY_CHANNEL, "query": "note", "before": before, "after": after})).await);
+
+    let sent: Value = serde_json::from_str(&stoat.requests(Method::POST, &format!("/channels/{HISTORY_CHANNEL}/search"))[0].1).unwrap();
+
+    assert_eq!((sent["before"].clone(), sent["after"].clone(), sent["sort"].clone()), (json!(before), json!(after), json!("Latest")));
+    assert_eq!(found.as_array().unwrap().len(), 19);
 }

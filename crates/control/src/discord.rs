@@ -1,13 +1,13 @@
 use crate::chat_tool_servers::StoredTool;
 use crate::integrations::{CallOutput, Credentials};
+use crate::message_paging::{self, Direction};
 use serde_json::{Value, json};
 use std::time::Duration;
 
 pub const DEFAULT_ADDRESS: &str = "https://discord.com/api/v10";
 const SEND_MESSAGE: &str = "send_message";
 const DEFAULT_LIMIT: u64 = 20;
-const MAX_LIMIT: u64 = 100;
-const MAX_SEARCH_LIMIT: u64 = 25;
+const SEARCH_PAGE_SIZE: u64 = 25;
 const MAX_MESSAGE_CHARACTERS: usize = 2000;
 const SNOWFLAKE_LENGTH: usize = 20;
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -15,16 +15,19 @@ const TIMEOUT: Duration = Duration::from_secs(30);
 pub fn tools() -> Vec<StoredTool> {
     let server = json!({"type": "string", "description": "The server's id, from list_servers."});
     let channel = json!({"type": "string", "description": "The channel's id, from list_channels."});
-    let limit = json!({"type": "integer", "description": format!("How many messages to return, newest first. Defaults to {DEFAULT_LIMIT}, at most {MAX_LIMIT} (at most {MAX_SEARCH_LIMIT} when searching).")});
+    let limit = json!({"type": "integer", "description": format!("How many messages to return, newest first. Defaults to {DEFAULT_LIMIT}, at most {}. Larger limits are read in several requests.", message_paging::MOST_MESSAGES)});
+    let before = json!({"type": "string", "description": "A message id: return the messages sent before it. Pass a result's coverage.next to continue reading further back."});
+    let after = json!({"type": "string", "description": "A message id: return the messages sent after it. Pass a result's coverage.next to continue reading forwards."});
+    let coverage = "Every result is {messages, coverage}: coverage says how many messages came back, the oldest_id and newest_id returned, whether found_oldest and found_newest (nothing older or newer remains), and next, the value to pass on to continue (null when there is nothing more).";
 
     vec![
         StoredTool { name: "list_servers".to_string(), description: "List the Discord servers the bot is in, with their ids.".to_string(), input_schema: json!({"type": "object", "properties": {}}), read_only: None },
         StoredTool { name: "list_channels".to_string(), description: "List the channels of a server, with their ids, kinds and categories.".to_string(), input_schema: json!({"type": "object", "properties": {"server": server}, "required": ["server"]}), read_only: None },
-        StoredTool { name: "get_messages".to_string(), description: "Get the most recent messages in a channel, newest first.".to_string(), input_schema: json!({"type": "object", "properties": {"channel": channel, "limit": limit}, "required": ["channel"]}), read_only: None },
+        StoredTool { name: "get_messages".to_string(), description: format!("Get the most recent messages in a channel, newest first. Page back with before, or forwards with after. {coverage}"), input_schema: json!({"type": "object", "properties": {"channel": channel, "limit": limit, "before": before, "after": after}, "required": ["channel"]}), read_only: None },
         StoredTool {
             name: "search_messages".to_string(),
-            description: "Search a server's messages by words, optionally within one channel. Returns the newest matches.".to_string(),
-            input_schema: json!({"type": "object", "properties": {"server": server, "query": {"type": "string", "description": "Words to search for."}, "channel": channel, "limit": limit}, "required": ["server", "query"]}),
+            description: format!("Search a server's messages by words, optionally within one channel. Returns the newest matches. Pass a result's coverage.next as offset to continue. {coverage}"),
+            input_schema: json!({"type": "object", "properties": {"server": server, "query": {"type": "string", "description": "Words to search for."}, "channel": channel, "limit": limit, "offset": {"type": "integer", "description": "How many matches to skip."}}, "required": ["server", "query"]}),
             read_only: None,
         },
         StoredTool {
@@ -88,8 +91,12 @@ fn snowflake<'a>(arguments: &'a Value, key: &str) -> Option<&'a str> {
     text(arguments, key).filter(|value| value.len() <= SNOWFLAKE_LENGTH && value.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
-fn limit(arguments: &Value, most: u64) -> u64 {
-    arguments["limit"].as_u64().unwrap_or(DEFAULT_LIMIT).clamp(1, most)
+fn limit(arguments: &Value) -> u64 {
+    message_paging::total_limit(arguments["limit"].as_u64(), DEFAULT_LIMIT)
+}
+
+fn message_id(message: &Value) -> Option<&str> {
+    message["id"].as_str()
 }
 
 fn message_of(message: &Value) -> Value {
@@ -119,25 +126,73 @@ pub async fn call(http: &reqwest::Client, credentials: &Credentials, tool: &str,
                 return failure("Give the channel's id in channel, digits only, as listed by list_channels.");
             };
 
-            send(request(http, credentials, reqwest::Method::GET, &format!("channels/{channel}/messages?limit={}", limit(arguments, MAX_LIMIT))))
-                .await
-                .map(|body| Value::Array(listed(&body).iter().map(message_of).collect()))
+            let (direction, start) = match (text(arguments, "before"), text(arguments, "after")) {
+                (Some(_), Some(_)) => return failure("Give either before or after, not both."),
+                (None, Some(_)) => (Direction::Forward, snowflake(arguments, "after")),
+                (_, _) => (Direction::Backward, snowflake(arguments, "before")),
+            };
+
+            if (text(arguments, "before").is_some() && snowflake(arguments, "before").is_none()) || (text(arguments, "after").is_some() && snowflake(arguments, "after").is_none()) {
+                return failure("Give the message id in before or after, digits only, as returned by get_messages.");
+            }
+
+            let cursor_name = if direction == Direction::Forward { "after" } else { "before" };
+            let collected = message_paging::collect(limit(arguments), direction, start.map(str::to_string), message_id, |size, cursor| {
+                let mut path = format!("channels/{channel}/messages?limit={size}");
+
+                if let Some(cursor) = cursor {
+                    path.push_str(&format!("&{cursor_name}={cursor}"));
+                }
+
+                async move { send(request(http, credentials, reqwest::Method::GET, &path)).await.map(|body| listed(&body)) }
+            })
+            .await;
+
+            collected.map(|collected| json!({"messages": collected.messages.iter().rev().map(message_of).collect::<Vec<_>>(), "coverage": collected.coverage}))
         }
         "search_messages" => {
             let (Some(server), Some(query)) = (snowflake(arguments, "server"), text(arguments, "query")) else {
                 return failure("Give the server's id in server and the words to search for in query.");
             };
-            let mut path = format!("guilds/{server}/messages/search?{}", url::form_urlencoded::Serializer::new(String::new()).append_pair("content", query).append_pair("limit", &limit(arguments, MAX_SEARCH_LIMIT).to_string()).finish());
+            let channel = match text(arguments, "channel") {
+                Some(_) => match snowflake(arguments, "channel") {
+                    Some(channel) => Some(channel),
+                    None => return failure("Give the channel's id in channel, digits only, as listed by list_channels."),
+                },
+                None => None,
+            };
+            let first_offset = arguments["offset"].as_u64().unwrap_or(0);
+            let gathered = message_paging::gather(
+                limit(arguments),
+                SEARCH_PAGE_SIZE,
+                Some(first_offset.to_string()),
+                |size, offset| {
+                    let size = size.to_string();
+                    let offset = offset.unwrap_or_default();
+                    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
 
-            if text(arguments, "channel").is_some() {
-                let Some(channel) = snowflake(arguments, "channel") else {
-                    return failure("Give the channel's id in channel, digits only, as listed by list_channels.");
-                };
+                    serializer.append_pair("content", query).append_pair("limit", &size).append_pair("offset", &offset);
 
-                path.push_str(&format!("&channel_id={channel}"));
-            }
+                    if let Some(channel) = channel {
+                        serializer.append_pair("channel_id", channel);
+                    }
 
-            send(request(http, credentials, reqwest::Method::GET, &path)).await.map(|body| Value::Array(listed(&body["messages"]).iter().map(message_of).collect()))
+                    let path = format!("guilds/{server}/messages/search?{}", serializer.finish());
+
+                    async move { send(request(http, credentials, reqwest::Method::GET, &path)).await.map(|body| listed(&body["messages"])) }
+                },
+                |_, gathered| Some((first_offset + gathered as u64).to_string()),
+            )
+            .await;
+
+            gathered.map(|gathered| {
+                let next = if gathered.exhausted { None } else { gathered.cursor };
+                let oldest = gathered.messages.last().and_then(message_id);
+                let newest = gathered.messages.first().and_then(message_id);
+                let coverage = message_paging::coverage(gathered.messages.len(), oldest, newest, gathered.exhausted, first_offset == 0, next);
+
+                json!({"messages": gathered.messages.iter().map(message_of).collect::<Vec<_>>(), "coverage": coverage})
+            })
         }
         SEND_MESSAGE => {
             let (Some(channel), Some(content)) = (snowflake(arguments, "channel"), text(arguments, "content")) else {
