@@ -35,6 +35,7 @@ import mycelium.api.Experiments
 import mycelium.api.ApiException
 import mycelium.api.ControlPlaneUnreachable
 import mycelium.api.newClientId
+import mycelium.api.reusingIdAfterDroppedConnection
 import mycelium.api.RemoteImageResult
 import mycelium.api.Artifact
 import mycelium.api.ArtifactAccessRequest
@@ -1112,17 +1113,6 @@ class Store(
             }
         }
     }
-
-    private suspend fun <T> reusingIdAfterDroppedConnection(request: suspend () -> T): T =
-        try {
-            request()
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (rejected: ApiException) {
-            throw rejected
-        } catch (_: Exception) {
-            request()
-        }
 
     fun chooseWalkthroughScope(conversationId: String, walkthroughScope: WalkthroughScope) {
         mutableWalkthroughScopes.update { it + (conversationId to walkthroughScope) }

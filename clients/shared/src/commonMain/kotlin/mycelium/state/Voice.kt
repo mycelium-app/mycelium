@@ -18,6 +18,8 @@ import mycelium.DictationProblem
 import mycelium.Platform
 import mycelium.ProviderDictation
 import mycelium.api.ApiException
+import mycelium.api.newClientId
+import mycelium.api.reusingIdAfterDroppedConnection
 import mycelium.api.ChooseLocalSpeechModelRequest
 import mycelium.api.ChooseSpeechModelRequest
 import mycelium.api.MyceliumApi
@@ -418,17 +420,19 @@ class VoiceStore(private val api: MyceliumApi, private val scope: CoroutineScope
     private fun send(said: String) {
         val inVoiceMode = mutableState.value.voiceModeConversationId
 
+        val clientId = newClientId()
+
         mutableState.update { it.copy(open = true, phase = VoicePhase.Thinking, level = 0f, earlier = it.withTurnKept(), turn = VoiceTurn(said = said)) }
         scope.launch {
             try {
                 if (inVoiceMode != null) {
-                    api.sendPrompt(inVoiceMode, said, spoken = true)
+                    reusingIdAfterDroppedConnection { api.sendPrompt(inVoiceMode, said, spoken = true, clientId = clientId) }
                     mutableState.update { it.copy(turn = it.turn.copy(conversationId = inVoiceMode)) }
                     return@launch
                 }
 
                 val assistant = api.voiceAssistant()
-                val conversation = api.promptAssistant(assistant.id, said, spoken = true)
+                val conversation = reusingIdAfterDroppedConnection { api.promptAssistant(assistant.id, said, spoken = true, clientId = clientId) }
 
                 mutableState.update { it.copy(turn = it.turn.copy(conversationId = conversation.id)) }
             } catch (cancelled: CancellationException) {

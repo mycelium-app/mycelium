@@ -27,6 +27,7 @@ import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.JsonElement
@@ -40,6 +41,17 @@ private const val UnknownRouteMessage = "This control plane does not offer that 
 
 @OptIn(ExperimentalUuidApi::class)
 fun newClientId(): String = Uuid.random().toString()
+
+suspend fun <T> reusingIdAfterDroppedConnection(request: suspend () -> T): T =
+    try {
+        request()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (rejected: ApiException) {
+        throw rejected
+    } catch (_: Exception) {
+        request()
+    }
 
 const val ControlPlaneUnreachable = "Could not reach the control plane. Check your connection and try again."
 
