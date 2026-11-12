@@ -27,6 +27,10 @@ import mycelium.api.UsageWindow
 import mycelium.state.AgentAccount
 import mycelium.state.Store
 import mycelium.ui.AccountsSettings
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Modifier
+import mycelium.ui.MyTheme
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.UsageCard
 import org.junit.Rule
@@ -132,7 +136,7 @@ class ClaudeRecordedResetsTest {
     @Test
     fun theProvidersPageListsRecordedResetsAndRemoveDeletesOne() {
         val store = store()
-        rule.setContent { MyceliumTheme(true) { AccountsSettings(store) } }
+        rule.setContent { MyceliumTheme(true) { Box(Modifier.background(MyTheme.colors.bgPanel)) { AccountsSettings(store) } } }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Limit resets").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Expires 13 Nov").assertIsDisplayed()
