@@ -75,14 +75,14 @@ class IntegrationsRenderTest {
 
         for (phone in listOf(false, true)) {
             for (dark in listOf(true, false)) {
-                assertTrue(screen("setup-flow", dark, phone) { SetupFlow(store, "mcp", "https://example.com/mcp", emptySet(), {}, {}, {}, {}) }.length() > 5_000)
+                assertTrue(screen("setup-flow", dark, phone) { SetupFlow(store, "mcp", "https://example.com/mcp", emptySet(), {}, {}, {}) }.length() > 5_000)
                 assertTrue(
                     screen("setup-flow-over-catalogue", dark, phone) {
                         IntegrationsCatalogue(integrationsOf(servers), emptyList(), {}, {}, {}, {})
-                        SetupFlow(store, "mcp", "https://example.com/mcp", emptySet(), {}, {}, {}, {})
+                        SetupFlow(store, "mcp", "https://example.com/mcp", emptySet(), {}, {}, {})
                     }.length() > 5_000,
                 )
-                assertTrue(screen("setup-flow-email", dark, phone) { SetupFlow(store, "email", null, emptySet(), {}, {}, {}, {}) }.length() > 5_000)
+                assertTrue(screen("setup-flow-email", dark, phone) { SetupFlow(store, "email", null, emptySet(), {}, {}, {}) }.length() > 5_000)
                 assertTrue(screen("integration-account", dark, phone) { AccountPage(store, email, email.accounts.first(), pageActions, {}) {} }.length() > 5_000)
                 assertTrue(screen("decisions-settings", dark, phone) { DecisionsSettings(store) }.length() > 3_000)
             }

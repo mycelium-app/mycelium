@@ -73,13 +73,16 @@ data class ChatToolServer(
 )
 
 @Serializable
-data class CreateChatToolServerRequest(val name: String, val url: String, @SerialName("bearer_token") val bearerToken: String? = null, val kind: String? = null, val account: String? = null, val settings: JsonObject? = null, @SerialName("token_expires_at") val tokenExpiresAt: String? = null, @SerialName("app_from") val appFrom: String? = null)
+data class CreateChatToolServerRequest(val name: String, val url: String, @SerialName("bearer_token") val bearerToken: String? = null, val kind: String? = null, val account: String? = null, val settings: JsonObject? = null, @SerialName("token_expires_at") val tokenExpiresAt: String? = null, @SerialName("app_from") val appFrom: String? = null, @SerialName("sign_in") val signIn: String? = null)
 
 @Serializable
-data class StartChatToolServerOAuthRequest(val name: String, val url: String, val kind: String? = null, @SerialName("forge_id") val forgeId: String? = null, @SerialName("server_id") val serverId: String? = null)
+data class StartChatToolServerOAuthRequest(val name: String, val url: String, val kind: String? = null, @SerialName("forge_id") val forgeId: String? = null, @SerialName("server_id") val serverId: String? = null, @SerialName("client_id") val clientId: String? = null, @SerialName("client_secret") val clientSecret: String? = null)
 
 @Serializable
-data class OAuthStart(@SerialName("authorize_url") val authorizeUrl: String)
+data class OAuthStart(@SerialName("authorize_url") val authorizeUrl: String, @SerialName("sign_in") val signIn: String = "")
+
+@Serializable
+data class OAuthSignInStatus(val state: String, val reason: String? = null, val server: String? = null)
 
 @Serializable
 data class PatchChatToolServerRequest(val enabled: Boolean? = null, val name: String? = null, @SerialName("token_expires_at") val tokenExpiresAt: String? = null, @SerialName("clear_token_expiry") val clearTokenExpiry: Boolean? = null, val policy: IntegrationPolicy? = null, @SerialName("bearer_token") val bearerToken: String? = null)

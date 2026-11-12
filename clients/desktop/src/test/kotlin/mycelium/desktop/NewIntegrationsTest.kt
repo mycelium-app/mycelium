@@ -50,7 +50,7 @@ class NewIntegrationsTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
 
-        rule.setContent { MyceliumTheme(true) { SetupFlow(store, kind, null, emptySet(), {}, { finished = true }, {}, {}, app) } }
+        rule.setContent { MyceliumTheme(true) { SetupFlow(store, kind, null, emptySet(), {}, { finished = true }, {}, app) } }
     }
 
     private fun type(label: String, text: String) = rule.onNodeWithContentDescription(label).performTextInput(text)

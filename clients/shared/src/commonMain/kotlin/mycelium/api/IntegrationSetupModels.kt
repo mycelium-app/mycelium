@@ -7,7 +7,7 @@ import kotlinx.serialization.Serializable
 data class ProbeChatToolServerRequest(val url: String)
 
 @Serializable
-data class ChatToolServerProbe(val oauth: Boolean = false)
+data class ChatToolServerProbe(val oauth: Boolean = false, @SerialName("sign_in") val signIn: String = "none", @SerialName("authorization_server") val authorizationServer: String? = null, val reason: String? = null)
 
 @Serializable
 data class TestChatToolServerRequest(val url: String, val credential: String? = null)

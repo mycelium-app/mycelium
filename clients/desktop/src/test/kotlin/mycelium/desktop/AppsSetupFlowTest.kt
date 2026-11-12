@@ -44,7 +44,7 @@ class AppsSetupFlowTest {
             }
         }
 
-        rule.setContent { MyceliumTheme(true) { SetupFlow(store, kind, null, emptySet(), {}, { finished = true }, {}, {}) } }
+        rule.setContent { MyceliumTheme(true) { SetupFlow(store, kind, null, emptySet(), {}, { finished = true }, {}) } }
     }
 
     private fun type(label: String, text: String) = rule.onNodeWithContentDescription(label).performTextInput(text)

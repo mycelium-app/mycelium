@@ -76,7 +76,7 @@ class CalendarsTest {
     private fun openSetup() {
         val store = store()
 
-        rule.setContent { MyceliumTheme(true) { SetupFlow(store, "caldav", null, emptySet(), {}, { finished = true }, {}, {}) } }
+        rule.setContent { MyceliumTheme(true) { SetupFlow(store, "caldav", null, emptySet(), {}, { finished = true }, {}) } }
     }
 
     private fun waitForText(text: String) = rule.waitUntil(5_000) { rule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }

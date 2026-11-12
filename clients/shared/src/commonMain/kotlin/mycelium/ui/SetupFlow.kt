@@ -2,6 +2,8 @@ package mycelium.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -16,7 +18,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -27,7 +32,9 @@ import kotlinx.serialization.json.JsonPrimitive
 import mycelium.api.ApiException
 import mycelium.api.CalendarAccess
 import mycelium.api.ChatToolServer
+import mycelium.api.ChatToolServerProbe
 import mycelium.api.CreateChatToolServerRequest
+import mycelium.api.OAuthStart
 import mycelium.api.ProbeChatToolServerRequest
 import mycelium.api.StartChatToolServerOAuthRequest
 import mycelium.api.TestCalendarsRequest
@@ -38,7 +45,7 @@ import mycelium.state.Store
 import mycelium.state.TandoorKind
 
 private const val Token = "Token"
-private const val OAuth = "Sign in with OAuth"
+private const val SignIn = "Sign in"
 private const val NoExpiry = "none"
 private const val CustomExpiry = "custom"
 
@@ -96,7 +103,6 @@ fun SetupFlow(
     takenNames: Set<String>,
     onAdded: (ChatToolServer) -> Unit,
     onFinished: (ChatToolServer) -> Unit,
-    onSigningIn: () -> Unit,
     onDismiss: () -> Unit,
     app: ChatToolServer? = null,
 ) {
@@ -139,7 +145,13 @@ fun SetupFlow(
     }
     var step by remember { mutableStateOf(if (knownAddress != null || reusingApp) 1 else 0) }
     var address by remember { mutableStateOf(knownAddress.orEmpty()) }
-    var oauthOffered by remember { mutableStateOf(false) }
+    var probe by remember { mutableStateOf<ChatToolServerProbe?>(null) }
+    var clientId by remember { mutableStateOf("") }
+    var clientSecret by remember { mutableStateOf("") }
+    var clientIdProblem by remember { mutableStateOf<String?>(null) }
+    var pendingSignIn by remember { mutableStateOf<OAuthStart?>(null) }
+    var heldSignIn by remember { mutableStateOf<String?>(null) }
+    var signInFailure by remember { mutableStateOf<String?>(null) }
     var method by remember { mutableStateOf(Token) }
     var token by remember { mutableStateOf("") }
     var expiry by remember { mutableStateOf(NoExpiry) }
@@ -169,6 +181,12 @@ fun SetupFlow(
     val runner = rememberAction()
     val typed = address.isNotBlank() && knownAddress == null || token.isNotBlank() || name.isNotBlank() || username.isNotBlank() || apiKey.isNotBlank() || secret.isNotBlank() || imapHost.isNotBlank() || smtpHost.isNotBlank() || budgetSyncId.isNotBlank()
     val title = steps[step]
+    val signInKind = probe?.signIn ?: "none"
+    val oauthOffered = signInKind != "none"
+    val authHost = defaultIntegrationName(probe?.authorizationServer.orEmpty(), address)
+    val callbackUrl = "${store.api.baseUrl.trimEnd('/')}/integrations/oauth/callback"
+    val summaryFocus = remember { FocusRequester() }
+    val clientIdFocus = remember { FocusRequester() }
 
     fun chosenExpiry(): String? = when (expiry) {
         NoExpiry -> null
@@ -177,7 +195,7 @@ fun SetupFlow(
     }
 
     fun expiresAt(): String? = when {
-        lastFm || form || method == OAuth -> null
+        lastFm || form || method == SignIn -> null
         else -> chosenExpiry()
     }
 
@@ -359,20 +377,42 @@ fun SetupFlow(
                     return@runner
                 }
 
-                oauthOffered = store.api.probeChatToolServer(ProbeChatToolServerRequest(address.trim())).oauth
-                method = if (oauthOffered) OAuth else Token
+                val found = store.api.probeChatToolServer(ProbeChatToolServerRequest(address.trim()))
+                probe = found
+                method = if (found.signIn != "none") SignIn else Token
                 name = name.ifBlank { defaultIntegrationName(address, product) }
                 step = 1
             }
 
-            mcp && step == 1 && method == OAuth -> runner {
-                if (nameFailure() != null || name.isBlank()) {
-                    name = uniqueName(defaultIntegrationName(address, product))
+            mcp && step == 1 && method == SignIn -> {
+                signInFailure = null
+
+                if (signInKind == "client_id" && clientId.isBlank()) {
+                    clientIdProblem = "Enter the client ID from $authHost"
+
+                    return
                 }
 
-                val started = store.api.startChatToolServerOAuth(StartChatToolServerOAuthRequest(name.trim(), address.trim(), if (kind == "outline") "outline" else null))
-                platform?.openUrl(started.authorizeUrl)
-                onSigningIn()
+                clientIdProblem = null
+
+                runner {
+                    if (nameFailure() != null || name.isBlank()) {
+                        name = uniqueName(defaultIntegrationName(address, product))
+                    }
+
+                    val ownClient = signInKind == "client_id"
+                    val started = store.api.startChatToolServerOAuth(
+                        StartChatToolServerOAuthRequest(
+                            name.trim(),
+                            address.trim(),
+                            if (kind == "outline") "outline" else null,
+                            clientId = clientId.trim().takeIf { ownClient },
+                            clientSecret = clientSecret.trim().takeIf { ownClient && it.isNotEmpty() },
+                        ),
+                    )
+                    platform?.openSignIn(started.authorizeUrl) {}
+                    pendingSignIn = started
+                }
             }
 
             mcp && step == 1 -> {
@@ -417,7 +457,7 @@ fun SetupFlow(
 
         runner {
             val credential = if (caldav) secret else token
-            val request = if (form) formRequest() else CreateChatToolServerRequest(name.trim(), address.trim(), credential.trim().ifEmpty { null }, kind = kind.takeIf { it != "mcp" }, account = username.trim().takeIf { caldav }, tokenExpiresAt = expiresAt())
+            val request = if (form) formRequest() else CreateChatToolServerRequest(name.trim(), address.trim(), credential.trim().ifEmpty { null }.takeIf { method != SignIn }, kind = kind.takeIf { it != "mcp" }, account = username.trim().takeIf { caldav }, tokenExpiresAt = expiresAt(), signIn = heldSignIn.takeIf { method == SignIn })
             val added = store.api.createChatToolServer(request)
             onAdded(added)
 
@@ -448,6 +488,8 @@ fun SetupFlow(
                     failedStep = if (problem.code == "caldav_credential") 1 else 0
                     throw problem
                 }
+            } else if (method == SignIn && heldSignIn != null) {
+                testState = TestState.Passed("Connected. Signed in at $authHost.")
             } else if (lastFm) {
                 val added = store.api.createChatToolServer(lastFmRequest())
                 created = added
@@ -463,6 +505,27 @@ fun SetupFlow(
 
         if (problem != null) {
             testState = TestState.Failed(problem)
+        }
+    }
+
+    WatchSignIn(store, pendingSignIn?.signIn) { status ->
+        val settled = pendingSignIn?.signIn
+        pendingSignIn = null
+
+        when {
+            status == null -> signInFailure = "This sign-in has expired. Try again, or connect with a token."
+            status.state == "connected" -> {
+                heldSignIn = settled
+                testState = null
+                step = 2
+            }
+            else -> signInFailure = "${status.reason ?: "The sign-in did not finish"}. Try again, or connect with a token."
+        }
+    }
+
+    LaunchedEffect(clientIdProblem) {
+        if (clientIdProblem != null) {
+            runCatching { summaryFocus.requestFocus() }
         }
     }
 
@@ -560,15 +623,48 @@ fun SetupFlow(
                     TextInput(secret, { secret = it }, label = "App password", mono = true, masked = true, onSubmit = ::next)
                     Label("Create one in your calendar provider's security settings. Stored on the control plane, never shown to agents.", style = Tokens.Type.Meta, color = colors.textMuted)
                 } else {
+                    if (clientIdProblem != null && method == SignIn) {
+                        Column(
+                            Modifier.fillMaxWidth().border(Tokens.Size.Hairline, colors.statusFailed, ControlShape).padding(Tokens.Space.S3).focusRequester(summaryFocus).focusable().semantics { liveRegion = LiveRegionMode.Assertive },
+                            verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+                        ) {
+                            Label("There is a problem", Modifier.semantics { heading() }, Tokens.Type.UiStrong, colors.statusFailed)
+                            Label(clientIdProblem.orEmpty(), Modifier.clickable(role = Role.Button) { runCatching { clientIdFocus.requestFocus() } }, Tokens.Type.Ui, colors.statusFailed, decoration = LabelDecoration.Underline)
+                        }
+                    }
+
+                    if (signInFailure != null && method == SignIn && pendingSignIn == null) {
+                        Row(
+                            Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Assertive },
+                            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Icon(MyIcon.TriangleAlert, colors.statusFailed, Tokens.Size.IconSm)
+                            Label(signInFailure.orEmpty(), Modifier.weight(1f), Tokens.Type.Meta, colors.statusFailed)
+                        }
+                    }
+
                     Label("${defaultIntegrationName(address, address)} asks for a credential.")
 
-                    if (oauthOffered) {
-                        Label("How to sign in", style = Tokens.Type.Meta, color = colors.textMuted)
-                        Segmented(listOf(Token, OAuth), method, { method = it }, "How to sign in")
+                    if (oauthOffered && pendingSignIn == null) {
+                        Label("How to connect", style = Tokens.Type.Meta, color = colors.textMuted)
+                        Segmented(listOf(SignIn, Token), method, { method = it }, "How to connect")
                     }
                 }
 
-                if (method == Token) {
+                if (pendingSignIn != null) {
+                    Row(Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Top) {
+                        Icon(MyIcon.Working, colors.textMuted, Tokens.Size.IconSm)
+                        Label("Finish signing in at $authHost in your browser. This step moves on when you are done.", Modifier.weight(1f))
+                    }
+                } else if (method == Token) {
+                    if (!caldav && probe?.reason != null) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(MyIcon.Info, colors.textMuted, Tokens.Size.IconSm)
+                            Label(probe?.reason.orEmpty(), style = Tokens.Type.Meta, color = colors.textMuted)
+                        }
+                    }
+
                     if (!caldav) {
                         TextInput(token, { token = it }, label = if (kind == "outline") "Outline API key" else if (kind == "murmur") "Murmur API key" else "Token", mono = true, masked = true, onSubmit = ::next)
                         Label("Sent as a bearer token. Stored on the control plane, never shown to agents.", style = Tokens.Type.Meta, color = colors.textMuted)
@@ -584,8 +680,21 @@ fun SetupFlow(
                     }
 
                     Label(if (caldav) "Set this if your provider gave the app password an end date, so Integrations can warn you before it stops working." else "Set what the server gave the token, so Integrations can warn you before it stops working.", style = Tokens.Type.Meta, color = colors.textMuted)
-                } else {
-                    Label("Mycelium opens the server's sign-in in your browser and connects the account when you finish.", style = Tokens.Type.Meta, color = colors.textMuted)
+                } else if (signInKind == "client_id") {
+                    Label("$authHost does not let apps register themselves. Register Mycelium there with the callback URL below, then enter the client ID it gives you.")
+                    TextInput(
+                        callbackUrl,
+                        {},
+                        label = "Callback URL",
+                        mono = true,
+                        readOnly = true,
+                        hint = "Register it in $authHost's developer or admin settings, as an app that signs people in through a browser.",
+                        trailing = { MyButton({ platform?.copyToClipboard(callbackUrl) }, text = "Copy", icon = MyIcon.Copy, description = "Copy callback URL", size = ButtonSize.Sm, muted = true) },
+                    )
+                    TextInput(clientId, { clientId = it }, label = "Client ID", error = clientIdProblem, errorAbove = true, mono = true, focusRequester = clientIdFocus, onSubmit = ::next)
+                    TextInput(clientSecret, { clientSecret = it }, label = "Client secret (optional)", hint = "Only if $authHost gave you one. Stored on the control plane, never shown to agents.", mono = true, masked = true, onSubmit = ::next)
+                } else if (signInFailure == null) {
+                    Label("Your browser opens $authHost. Mycelium connects the account when you finish there.")
                 }
             }
 
@@ -705,21 +814,40 @@ fun SetupFlow(
             if (title == "Sign in") {
                 MyButton(onDismiss, text = "Done", variant = ButtonVariant.Outline)
             } else {
-                if (step > (if (knownAddress != null || reusingApp) 1 else 0) && !(lastFm && step == 1) && !(freeAgent && created != null)) {
+                if (pendingSignIn != null) {
+                    MyButton(
+                        {
+                            val cancelled = pendingSignIn?.signIn
+                            pendingSignIn = null
+
+                            if (cancelled != null) {
+                                store.act { store.api.cancelChatToolServerSignIn(cancelled) }
+                            }
+                        },
+                        text = "Cancel",
+                        muted = true,
+                    )
+                } else if (step > (if (knownAddress != null || reusingApp) 1 else 0) && !(lastFm && step == 1) && !(freeAgent && created != null)) {
                     MyButton(::back, text = "Back", muted = true)
                 } else {
                     MyButton({ if (typed && created == null) confirmingClose = true else onDismiss() }, text = "Cancel", muted = true)
                 }
 
-                if (!running) {
+                val signingIn = title == "Credential" && mcp && method == SignIn
+
+                if (pendingSignIn != null) {
+                    MyButton({ pendingSignIn?.let { platform?.openSignIn(it.authorizeUrl) {} } }, text = "Open the sign-in page again", icon = MyIcon.Globe, variant = ButtonVariant.Outline)
+                } else if (!running) {
                     MyButton(
                         if (title == "Name") ::connect else ::next,
                         text = when {
                             title == "Name" -> "Add integration"
-                            title == "Credential" && method == OAuth -> "Sign in"
+                            signingIn && signInFailure != null -> "Try again"
+                            signingIn -> "Sign in with $authHost"
                             else -> "Continue"
                         },
-                        variant = ButtonVariant.Outline,
+                        icon = if (signingIn) (if (signInFailure != null) MyIcon.Refresh else MyIcon.Globe) else null,
+                        variant = if (signingIn) ButtonVariant.Primary else ButtonVariant.Outline,
                     )
                 }
             }

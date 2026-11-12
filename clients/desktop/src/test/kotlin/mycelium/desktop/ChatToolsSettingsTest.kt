@@ -248,7 +248,7 @@ class ChatToolsSettingsTest {
     @Test
     fun reauthenticatingAnOAuthIntegrationSignsInAgainToTheSameAccount() {
         listed = OutlineJson
-        postAnswer = HttpStatusCode.OK to """{"authorize_url":"https://docs.example.com/authorize"}"""
+        postAnswer = HttpStatusCode.OK to """{"authorize_url":"https://docs.example.com/authorize","sign_in":"si-9"}"""
         val store = store()
         rule.setContent { MyceliumTheme(true) { Scrolling { ChatToolsSettings(store) } } }
 

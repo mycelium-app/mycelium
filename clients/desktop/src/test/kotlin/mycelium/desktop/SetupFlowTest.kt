@@ -54,7 +54,7 @@ class SetupFlowTest {
     }
 
     private fun open(store: Store, taken: Set<String> = emptySet(), kind: String = "mcp") {
-        rule.setContent { MyceliumTheme(true) { SetupFlow(store, kind, null, taken, {}, { finished = true }, {}, {}) } }
+        rule.setContent { MyceliumTheme(true) { SetupFlow(store, kind, null, taken, {}, { finished = true }, {}) } }
     }
 
     private fun toTestStep() {
@@ -199,7 +199,7 @@ class SetupFlowTest {
 
     private fun connectKnownAddress(kind: String, label: String) {
         val store = store()
-        rule.setContent { MyceliumTheme(true) { SetupFlow(store, kind, "https://gateway.test", emptySet(), {}, { finished = true }, {}, {}) } }
+        rule.setContent { MyceliumTheme(true) { SetupFlow(store, kind, "https://gateway.test", emptySet(), {}, { finished = true }, {}) } }
 
         rule.onNodeWithContentDescription(label).performTextInput("secret-$kind")
         rule.onNodeWithText("Continue").performClick()

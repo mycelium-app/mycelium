@@ -550,6 +550,7 @@ fun TextInput(
     hint: String? = null,
     errorAbove: Boolean = false,
     invalid: Boolean = false,
+    readOnly: Boolean = false,
     focusRequester: FocusRequester? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
@@ -575,6 +576,7 @@ fun TextInput(
             value = value,
             onValueChange = onValueChange,
             singleLine = true,
+            readOnly = readOnly,
             visualTransformation = if (masked && !revealed) PasswordVisualTransformation() else VisualTransformation.None,
             textStyle = base.themed().copy(color = colors.text),
             cursorBrush = SolidColor(colors.text),
@@ -732,7 +734,7 @@ fun Segmented(options: List<String>, selected: String, onSelect: (String) -> Uni
 
             Box(
                 (if (stretch) Modifier.weight(1f) else Modifier)
-                    .height(touchMin(Tokens.Size.ControlSm))
+                    .height(maxOf(touchMin(Tokens.Size.ControlSm), Tokens.Space.S6))
                     .pressable(
                         onClick = { onSelect(option) },
                         role = Role.RadioButton,

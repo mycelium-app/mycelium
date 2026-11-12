@@ -397,6 +397,20 @@ class MyceliumApi(
     suspend fun startChatToolServerOAuth(request: StartChatToolServerOAuthRequest): OAuthStart =
         call("/chat-tool-servers/oauth") { client.post(it) { authorise(); json(request) } }.body()
 
+    suspend fun chatToolServerSignIn(id: String): OAuthSignInStatus? {
+        val response = client.get("$root/integrations/oauth/$id") { authorise() }
+
+        if (response.status == HttpStatusCode.NotFound) {
+            return null
+        }
+
+        return response.ensureSuccess().body()
+    }
+
+    suspend fun cancelChatToolServerSignIn(id: String) {
+        client.delete("$root/integrations/oauth/$id") { authorise() }
+    }
+
     suspend fun startLastFmSignIn(id: String): OAuthStart =
         call("/chat-tool-servers/$id/lastfm-sign-in") { client.post(it) { authorise() } }.body()
 

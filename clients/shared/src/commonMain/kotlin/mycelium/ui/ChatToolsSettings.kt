@@ -63,6 +63,8 @@ private sealed interface IntegrationsView {
 
 private data class SetupRequest(val kind: String, val address: String?, val app: ChatToolServer? = null)
 
+private data class WatchedSignIn(val signIn: String, val then: CreateChatToolServerRequest? = null)
+
 private fun flowId(kind: String): String = when (kind) {
     OutlineType -> "outline"
     LiteLlmType -> "litellm"
@@ -110,7 +112,8 @@ fun ChatToolsSettings(store: Store, start: IntegrationStart? = null) {
     val live by store.state.collectAsState()
     val platform = LocalPlatform.current
     val openConversation = LocalOpenConversation.current
-    var signingIn by remember { mutableStateOf(false) }
+    var watching by remember { mutableStateOf<WatchedSignIn?>(null) }
+    var signInProblem by remember { mutableStateOf<String?>(null) }
     var loaded by remember { mutableStateOf(false) }
 
     LaunchedEffect(servers) {
@@ -120,8 +123,6 @@ fun ChatToolsSettings(store: Store, start: IntegrationStart? = null) {
     }
 
     LaunchedEffect(live.integrationsRevision) {
-        val known = servers.map { it.id }.toSet()
-
         store.act {
             servers = store.api.chatToolServers()
 
@@ -130,11 +131,6 @@ fun ChatToolsSettings(store: Store, start: IntegrationStart? = null) {
             }
 
             loaded = true
-
-            if (signingIn) {
-                signingIn = false
-                integrationsOf(servers).firstOrNull { integration -> integration.accounts.any { it.id !in known } }?.let { view = IntegrationsView.Page(it.key) }
-            }
         }
 
         store.act { forges = store.api.forges() }
@@ -158,7 +154,8 @@ fun ChatToolsSettings(store: Store, start: IntegrationStart? = null) {
         } else if (target.oauth) {
             store.act {
                 val started = store.api.startChatToolServerOAuth(StartChatToolServerOAuthRequest(target.name, target.url, if (target.settings?.get("app")?.jsonPrimitive?.content == "outline") "outline" else null, forgeId = target.forgeId, serverId = target.id))
-                platform?.openUrl(started.authorizeUrl)
+                platform?.openSignIn(started.authorizeUrl) {}
+                watching = WatchedSignIn(started.signIn)
             }
         }
     }
@@ -171,8 +168,11 @@ fun ChatToolsSettings(store: Store, start: IntegrationStart? = null) {
                 throw ApiException(422, "mcp_refused", refused)
             }
 
-            val started = store.api.startChatToolServerOAuth(StartChatToolServerOAuthRequest(forgeProduct(forge), mcpAddress(forge), forgeId = forge.id))
-            platform?.openUrl(started.authorizeUrl)
+            val name = forgeProduct(forge)
+            val address = mcpAddress(forge)
+            val started = store.api.startChatToolServerOAuth(StartChatToolServerOAuthRequest(name, address, forgeId = forge.id))
+            platform?.openSignIn(started.authorizeUrl) {}
+            watching = WatchedSignIn(started.signIn, CreateChatToolServerRequest(name, address, signIn = started.signIn))
         }
     }
 
@@ -183,7 +183,26 @@ fun ChatToolsSettings(store: Store, start: IntegrationStart? = null) {
     val integrations = integrationsOf(servers)
     val current = view
 
+    WatchSignIn(store, watching?.signIn) { status ->
+        val settled = watching
+        watching = null
+
+        if (status == null) {
+            signInProblem = "This sign-in has expired. Start it again."
+        } else if (status.state == "failed") {
+            signInProblem = "${status.reason ?: "The sign-in did not finish"}."
+        } else if (settled?.then != null) {
+            store.act {
+                val added = store.api.createChatToolServer(settled.then)
+                servers = servers.filter { it.id != added.id } + added
+                view = IntegrationsView.Page(integrationsOf(servers).first { integration -> integration.accounts.any { it.id == added.id } }.key)
+            }
+        }
+    }
+
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
+        signInProblem?.let { ErrorBanner(it, onDismiss = { signInProblem = null }) }
+
         when (current) {
             IntegrationsView.Home -> IntegrationsHome(
                 servers,
@@ -294,10 +313,6 @@ fun ChatToolsSettings(store: Store, start: IntegrationStart? = null) {
             { added ->
                 flow = null
                 view = IntegrationsView.Page(integrationsOf(servers).first { integration -> integration.accounts.any { it.id == added.id } }.key)
-            },
-            {
-                signingIn = true
-                flow = null
             },
             { flow = null },
             request.app,
