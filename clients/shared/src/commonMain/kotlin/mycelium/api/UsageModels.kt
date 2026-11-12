@@ -14,6 +14,7 @@ data class ResetCredit(
     val id: String,
     @SerialName("expires_at") val expiresAt: String? = null,
     val title: String? = null,
+    val manual: Boolean = false,
 )
 
 @Serializable
@@ -21,6 +22,16 @@ data class UseResetRequest(
     val agent: String,
     val account: String? = null,
     @SerialName("idempotency_key") val idempotencyKey: String,
+    @SerialName("credit_id") val creditId: String? = null,
+)
+
+@Serializable
+data class AddManualResetRequest(
+    val agent: String,
+    val account: String,
+    val kind: String,
+    val model: String? = null,
+    @SerialName("expires_on") val expiresOn: String,
 )
 
 @Serializable

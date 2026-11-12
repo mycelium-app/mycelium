@@ -283,7 +283,7 @@ async fn banked_resets_a_node_reports_appear_on_its_login() {
     let mut link = server.online_node("laptop").await;
     let credits = mycelium_proto::conversation::ResetCredits {
         available_count: 2,
-        credits: Some(vec![mycelium_proto::conversation::ResetCredit { id: "a".into(), expires_at: Some(chrono::Utc::now() + chrono::Duration::days(14)), title: Some("Bonus reset".into()) }]),
+        credits: Some(vec![mycelium_proto::conversation::ResetCredit { id: "a".into(), expires_at: Some(chrono::Utc::now() + chrono::Duration::days(14)), title: Some("Bonus reset".into()), manual: false }]),
     };
 
     link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, reset_credits: Some(credits), ..login("sam@example.com", LoginState::SignedIn) }] }).await;
@@ -344,15 +344,137 @@ async fn using_a_reset_on_an_account_without_banked_resets_is_refused() {
     assert_eq!((status, body["error"].as_str(), body["message"].as_str()), (409, Some("no_reset"), Some("This account has no banked resets.")));
 }
 
-#[tokio::test]
-async fn using_a_reset_on_a_claude_account_is_refused() {
-    let server = Server::start().await;
+async fn add_claude_reset(client: &common::Client, body: serde_json::Value) -> (u16, serde_json::Value) {
+    let mut request = json!({"agent": "claude", "account": "sam@example.com", "kind": "full", "expires_on": "2999-11-27"});
+    request.as_object_mut().unwrap().extend(body.as_object().unwrap().clone());
 
-    let (status, body) = server.user.json(server.user.post("/api/v1/usage/resets").json(&json!({"agent": "claude", "account": "sam@example.com", "idempotency_key": "key-1"}))).await;
-
-    assert_eq!((status, body["error"].as_str()), (400, Some("reset_unsupported")));
+    client.json(client.post("/api/v1/usage/manual-resets").json(&request)).await
 }
 
+async fn credits_of(client: &common::Client, account: &str) -> serde_json::Value {
+    let (_, nodes) = client.json(client.get("/api/v1/nodes")).await;
+    let login = nodes[0]["logins"].as_array().unwrap().iter().find(|login| login["account"] == json!(account)).unwrap().clone();
+
+    login["reset_credits"].clone()
+}
+
+async fn use_claude_reset(client: &common::Client, key: &str, credit_id: Option<&str>) -> (u16, serde_json::Value) {
+    client.json(client.post("/api/v1/usage/resets").json(&json!({"agent": "claude", "account": "sam@example.com", "idempotency_key": key, "credit_id": credit_id}))).await
+}
+
+#[tokio::test]
+async fn a_recorded_reset_joins_the_claude_accounts_banked_resets_soonest_first() {
+    let server = Server::start().await;
+    let _link = node_with_accounts(&server, vec![login("sam@example.com", LoginState::SignedIn), login("alex@example.org", LoginState::SignedIn)]).await;
+
+    let (full_status, full) = add_claude_reset(&server.user, json!({"kind": "full", "expires_on": "2999-11-27"})).await;
+    let (model_status, model) = add_claude_reset(&server.user, json!({"kind": "model", "model": "fable", "expires_on": "2999-11-13"})).await;
+
+    assert_eq!((full_status, model_status), (201, 201), "{full} {model}");
+    assert_eq!((model["title"].as_str(), model["manual"].as_bool()), (Some("Fable reset"), Some(true)));
+
+    let credits = credits_of(&server.user, "sam@example.com").await;
+    let titles: Vec<&str> = credits["credits"].as_array().unwrap().iter().map(|credit| credit["title"].as_str().unwrap()).collect();
+
+    assert_eq!((credits["available_count"].clone(), titles), (json!(2), vec!["Fable reset", "Full reset"]));
+    assert!(credits_of(&server.user, "alex@example.org").await.is_null());
+}
+
+#[tokio::test]
+async fn a_recorded_reset_expires_at_the_end_of_its_day() {
+    let server = Server::start().await;
+    let _link = node_with_accounts(&server, vec![login("sam@example.com", LoginState::SignedIn)]).await;
+
+    let (_, created) = add_claude_reset(&server.user, json!({"expires_on": "2999-11-27"})).await;
+
+    assert!(created["expires_at"].as_str().unwrap().starts_with("2999-11-27T23:59:59"), "{created}");
+}
+
+#[tokio::test]
+async fn expired_and_used_recorded_resets_are_left_out() {
+    let server = Server::start().await;
+    let _link = node_with_accounts(&server, vec![login("sam@example.com", LoginState::SignedIn)]).await;
+    let (_, expired) = add_claude_reset(&server.user, json!({"kind": "model", "model": "atlas"})).await;
+    let (_, used) = add_claude_reset(&server.user, json!({"kind": "model", "model": "orion"})).await;
+    add_claude_reset(&server.user, json!({})).await;
+
+    sqlx::query("update manual_resets set expires_at = now() - interval '1 hour' where id = $1::uuid").bind(expired["id"].as_str().unwrap()).execute(&server.pool).await.unwrap();
+    let (status, _) = use_claude_reset(&server.user, "key-1", used["id"].as_str()).await;
+    let credits = credits_of(&server.user, "sam@example.com").await;
+
+    assert_eq!((status, credits["available_count"].clone(), credits["credits"][0]["title"].clone()), (200, json!(1), json!("Full reset")));
+}
+
+#[tokio::test]
+async fn removing_a_recorded_reset_drops_it_and_only_its_owner_may() {
+    let server = Server::start().await;
+    let _link = node_with_accounts(&server, vec![login("sam@example.com", LoginState::SignedIn)]).await;
+    let (_, created) = add_claude_reset(&server.user, json!({})).await;
+    let path = format!("/api/v1/usage/manual-resets/{}", created["id"].as_str().unwrap());
+    let other = server.second_user("alex@example.org").await;
+
+    let (refused, _) = other.json(other.delete(&path)).await;
+    let (removed, _) = server.user.json(server.user.delete(&path)).await;
+
+    assert_eq!((refused, removed), (404, 204));
+    assert!(credits_of(&server.user, "sam@example.com").await.is_null());
+}
+
+#[tokio::test]
+async fn another_persons_recorded_reset_is_neither_shown_nor_usable() {
+    let server = Server::start().await;
+    let _link = node_with_accounts(&server, vec![login("sam@example.com", LoginState::SignedIn)]).await;
+    let (_, created) = add_claude_reset(&server.user, json!({})).await;
+    let other = server.second_user("alex@example.org").await;
+
+    let (status, body) = use_claude_reset(&other, "key-1", created["id"].as_str()).await;
+
+    assert_eq!((status, body["outcome"].as_str()), (200, Some("noCredit")));
+    assert!(credits_of(&other, "sam@example.com").await.is_null());
+    assert_eq!(credits_of(&server.user, "sam@example.com").await["available_count"], json!(1));
+}
+
+#[tokio::test]
+async fn using_a_recorded_reset_marks_it_used_without_waiting_on_a_node_and_repeating_the_key_marks_no_second() {
+    let server = Server::start().await;
+    let _silent_node = node_with_accounts(&server, vec![login("sam@example.com", LoginState::SignedIn)]).await;
+    add_claude_reset(&server.user, json!({"expires_on": "2999-11-13"})).await;
+    add_claude_reset(&server.user, json!({"expires_on": "2999-11-27"})).await;
+
+    let (first_status, first) = use_claude_reset(&server.user, "key-1", None).await;
+    let (repeat_status, repeat) = use_claude_reset(&server.user, "key-1", None).await;
+
+    assert_eq!((first_status, first["outcome"].as_str(), repeat_status, repeat["outcome"].as_str()), (200, Some("marked"), 200, Some("marked")));
+    assert_eq!(credits_of(&server.user, "sam@example.com").await["available_count"], json!(1));
+}
+
+#[tokio::test]
+async fn using_a_recorded_reset_when_none_are_left_says_so() {
+    let server = Server::start().await;
+    let _link = node_with_accounts(&server, vec![login("sam@example.com", LoginState::SignedIn)]).await;
+
+    let (status, body) = use_claude_reset(&server.user, "key-1", None).await;
+
+    assert_eq!((status, body["outcome"].as_str()), (200, Some("noCredit")));
+}
+
+#[tokio::test]
+async fn a_recorded_reset_is_refused_with_a_message_saying_what_to_fix() {
+    let server = Server::start().await;
+    let cases = [
+        (json!({"kind": "model"}), "reset_model_required", "Enter the model the reset is for."),
+        (json!({"kind": "other"}), "reset_kind_invalid", "Select a kind of reset."),
+        (json!({"expires_on": "31 02 2026"}), "reset_date_invalid", "Enter a real date, like 27 11 2026."),
+        (json!({"expires_on": "2001-01-01"}), "reset_date_past", "Expiry date must be in the future."),
+        (json!({"agent": "codex"}), "reset_unsupported", "Only Claude accounts take recorded resets."),
+    ];
+
+    for (body, error, message) in cases {
+        let (status, refused) = add_claude_reset(&server.user, body).await;
+
+        assert_eq!((status, refused["error"].as_str(), refused["message"].as_str()), (400, Some(error), Some(message)));
+    }
+}
 #[tokio::test]
 async fn using_a_reset_when_the_accounts_node_is_offline_says_so() {
     let server = Server::start().await;

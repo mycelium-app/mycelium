@@ -55,6 +55,8 @@ import mycelium.state.AgentAccount
 import mycelium.state.Store
 import mycelium.state.UnnamedAccount
 import mycelium.state.bankedResetsSummary
+import mycelium.state.expiryDay
+import mycelium.state.instantOrNull
 import mycelium.state.compactWindowUsage
 import mycelium.state.windowName
 
@@ -65,7 +67,7 @@ fun UsageCard(
     providers: List<ModelProviderUsage> = emptyList(),
     currentProviderId: String? = null,
     onOpenHistory: (() -> Unit)? = null,
-    onUseReset: (suspend (AgentAccount, String) -> String)? = null,
+    onUseReset: (suspend (AgentAccount, String, String?) -> String)? = null,
 ) {
     val colors = MyTheme.colors
     var now by remember { mutableStateOf(Clock.System.now()) }
@@ -138,7 +140,7 @@ private fun Hinted(hint: String, modifier: Modifier = Modifier, content: @Compos
 }
 
 @Composable
-internal fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (suspend (AgentAccount, String) -> String)?) {
+internal fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (suspend (AgentAccount, String, String?) -> String)?) {
     val platform = LocalPlatform.current
     val colors = MyTheme.colors
     val localDateTime: (Long) -> String? = { millis -> platform?.localDateTime(millis) }
@@ -206,7 +208,7 @@ internal fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (s
 
 @OptIn(ExperimentalUuidApi::class)
 @Composable
-private fun BankedResets(account: AgentAccount, banked: ResetCredits, localDateTime: (Long) -> String?, onUseReset: (suspend (AgentAccount, String) -> String)?) {
+private fun BankedResets(account: AgentAccount, banked: ResetCredits, localDateTime: (Long) -> String?, onUseReset: (suspend (AgentAccount, String, String?) -> String)?) {
     val scope = rememberCoroutineScope()
     var key by remember { mutableStateOf<String?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
@@ -226,11 +228,29 @@ private fun BankedResets(account: AgentAccount, banked: ResetCredits, localDateT
     outcome?.let { Label(it, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted) }
 
     val attempt = key
+    val recorded = banked.credits.orEmpty().filter { it.manual }.sortedBy { it.expiresAt }
 
     if (onUseReset != null && attempt != null) {
+        var chosen by remember(attempt) { mutableStateOf(recorded.firstOrNull()?.id) }
+        val chosenCredit = recorded.firstOrNull { it.id == chosen }
+        val options = recorded.map { credit -> credit.id to "${credit.title}, expires ${credit.expiresAt?.let(::instantOrNull)?.let { expiryDay(it, localDateTime) }}" }
+
         Dialog(onDismiss = { key = null; failure = null }) {
             Label("Use a banked reset?", Modifier.semantics { heading() }, Tokens.Type.Title)
-            Label("Codex resets the current usage limits for ${account.label}. You have ${banked.availableCount} banked. This cannot be undone.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+
+            if (recorded.size > 1) {
+                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                    Label("Which reset", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
+                    Segmented(options.map { it.second }, options.first { it.first == chosen }.second, { label -> chosen = options.first { it.second == label }.first }, groupLabel = "Which reset")
+                }
+            }
+
+            if (chosenCredit != null) {
+                Label("This marks the ${chosenCredit.title} as used in Mycelium. Use it in Claude's settings too.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+            } else {
+                Label("Codex resets the current usage limits for ${account.label}. You have ${banked.availableCount} banked. This cannot be undone.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+            }
+
             failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
             FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
@@ -242,19 +262,19 @@ private fun BankedResets(account: AgentAccount, banked: ResetCredits, localDateT
                             failure = null
                             scope.launch {
                                 try {
-                                    outcome = resetOutcomeMessage(onUseReset(account, attempt))
+                                    outcome = resetOutcomeMessage(onUseReset(account, attempt, chosen))
                                     key = null
                                 } catch (cancelled: CancellationException) {
                                     throw cancelled
                                 } catch (problem: Exception) {
-                                    failure = problem.message ?: "Codex could not use the reset. Try again."
+                                    failure = if (chosenCredit != null) "Mycelium could not mark the reset as used. Try again." else problem.message ?: "Codex could not use the reset. Try again."
                                 }
 
                                 working = false
                             }
                         }
                     },
-                    text = "Use reset",
+                    text = if (chosenCredit != null) "Mark as used" else "Use reset",
                     variant = ButtonVariant.Primary,
                 )
             }
@@ -262,12 +282,13 @@ private fun BankedResets(account: AgentAccount, banked: ResetCredits, localDateT
     }
 }
 
-internal suspend fun useBankedReset(store: Store, account: AgentAccount, key: String): String =
-    store.api.useReset(UseResetRequest(account.agent, account.label.takeUnless { it == UnnamedAccount }, key)).outcome
+internal suspend fun useBankedReset(store: Store, account: AgentAccount, key: String, creditId: String?): String =
+    store.api.useReset(UseResetRequest(account.agent, account.label.takeUnless { it == UnnamedAccount }, key, creditId)).outcome
 
 private fun resetOutcomeMessage(outcome: String): String = when (outcome) {
     "reset", "alreadyRedeemed" -> "Reset used."
     "nothingToReset" -> "Nothing to reset yet. Your reset is still banked."
+    "marked" -> "Marked as used."
     "noCredit" -> "No banked resets are left."
     else -> "Codex answered $outcome."
 }

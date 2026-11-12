@@ -349,6 +349,8 @@ const NOT_YET_COVERED: &[(&str, &str)] = &[
     ("GET", "/api/v1/model-providers"),
     ("GET", "/api/v1/model-provider-usage"),
     ("POST", "/api/v1/usage/resets"),
+    ("POST", "/api/v1/usage/manual-resets"),
+    ("DELETE", "/api/v1/usage/manual-resets/{id}"),
     ("GET", "/api/v1/usage/history"),
     ("PATCH", "/api/v1/model-providers/{id}"),
     ("DELETE", "/api/v1/model-providers/{id}"),

@@ -31,7 +31,7 @@ fn parse_reset_credits(result: &Value) -> Option<ResetCredits> {
             .filter_map(|row| {
                 let expires_at = row["expiresAt"].as_str().and_then(|text| text.parse::<DateTime<Utc>>().ok());
 
-                Some(ResetCredit { id: row["id"].as_str()?.to_string(), expires_at, title: row["title"].as_str().map(str::to_string) })
+                Some(ResetCredit { id: row["id"].as_str()?.to_string(), expires_at, title: row["title"].as_str().map(str::to_string), manual: false })
             })
             .collect()
     });

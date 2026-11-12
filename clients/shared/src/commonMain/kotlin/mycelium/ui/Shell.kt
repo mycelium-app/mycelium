@@ -870,7 +870,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         if (usageOpen) {
             val current = viewedConversation(route, state)?.let { state.conversations[it] }
 
-            UsageCard(chatAccountFirst(agentAccounts(state.nodes.values), current?.agent, current?.let { state.nodes[it.nodeId]?.name }, current?.account), Modifier.padding(Tokens.Space.S1_5), providerUsage, current?.providerId, onOpenHistory = { onRoute(Route.UsageHistory) }, onUseReset = { account, key -> useBankedReset(store, account, key) })
+            UsageCard(chatAccountFirst(agentAccounts(state.nodes.values), current?.agent, current?.let { state.nodes[it.nodeId]?.name }, current?.account), Modifier.padding(Tokens.Space.S1_5), providerUsage, current?.providerId, onOpenHistory = { onRoute(Route.UsageHistory) }, onUseReset = { account, key, creditId -> useBankedReset(store, account, key, creditId) })
         }
 
         if (route != Route.Inbox) {

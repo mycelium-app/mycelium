@@ -129,12 +129,43 @@ pub async fn windows_of(state: &AppState, node_id: Uuid, agent: AgentId, account
 
 const RESET_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
-pub async fn use_reset(State(state): State<AppState>, _user: AuthUser, AxumJson(request): AxumJson<UseResetRequest>) -> ApiResult<AxumJson<UseResetResponse>> {
-    if request.agent != AgentId::Codex {
-        return Err(ApiError::bad_request("reset_unsupported", "Only Codex accounts have banked resets."));
+pub async fn use_reset(State(state): State<AppState>, user: AuthUser, AxumJson(request): AxumJson<UseResetRequest>) -> ApiResult<AxumJson<UseResetResponse>> {
+    let account = request.account.as_deref().map(str::trim).filter(|account| !account.is_empty()).map(str::to_string);
+
+    if request.agent == AgentId::Claude {
+        let credit_id = request.credit_id.as_deref().and_then(|id| id.parse::<Uuid>().ok());
+        let already = sqlx::query_scalar::<_, bool>("select exists (select 1 from manual_resets where owner = $1 and agent = 'claude' and account = $2 and used_key = $3)")
+            .bind(user.id)
+            .bind(account.as_deref().unwrap_or_default())
+            .bind(&request.idempotency_key)
+            .fetch_one(&state.pool)
+            .await?;
+
+        if already {
+            return Ok(AxumJson(UseResetResponse { outcome: "marked".into() }));
+        }
+
+        let marked = sqlx::query(
+            "update manual_resets set used_at = now(), used_key = $4
+             where id = (select id from manual_resets where owner = $1 and agent = 'claude' and account = $2 and used_at is null and expires_at > now() and ($3::uuid is null or id = $3) order by expires_at, created_at limit 1 for update skip locked)",
+        )
+        .bind(user.id)
+        .bind(account.as_deref().unwrap_or_default())
+        .bind(credit_id)
+        .bind(&request.idempotency_key)
+        .execute(&state.pool)
+        .await?;
+
+        if marked.rows_affected() == 0 {
+            return Ok(AxumJson(UseResetResponse { outcome: "noCredit".into() }));
+        }
+
+        let summaries = crate::store::node_summaries(&state, None).await?;
+        crate::store::publish_summaries(&state, summaries, Some(user.id)).await?;
+
+        return Ok(AxumJson(UseResetResponse { outcome: "marked".into() }));
     }
 
-    let account = request.account.as_deref().map(str::trim).filter(|account| !account.is_empty()).map(str::to_string);
     let holders = sqlx::query_as::<_, (Uuid, Option<Json<ResetCredits>>)>(
         "select l.node_id, l.reset_credits from logins l join nodes n on n.id = l.node_id where l.agent = $1 and coalesce(l.account, '') = coalesce($2, '') and l.state = 'signed_in' and n.revoked_at is null",
     )

@@ -198,6 +198,12 @@ class MyceliumApi(
 
     suspend fun useReset(request: UseResetRequest): UseResetResponse = call("/usage/resets") { client.post(it) { authorise(); json(request) } }.body()
 
+    suspend fun addManualReset(request: AddManualResetRequest): ResetCredit = call("/usage/manual-resets") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun removeManualReset(id: String) {
+        call("/usage/manual-resets/$id") { client.delete(it) { authorise() } }
+    }
+
     suspend fun stopProcess(nodeId: String, pid: Int) {
         call("/nodes/$nodeId/processes/$pid/stop") { client.post(it) { authorise() } }
     }

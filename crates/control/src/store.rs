@@ -556,8 +556,25 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
 }
 
 pub async fn publish_node(state: &AppState, node_id: Uuid) -> ApiResult<()> {
-    for summary in node_summaries(state, Some(node_id)).await? {
-        state.publish(None, StreamMessage::Node(summary));
+    let summaries = node_summaries(state, Some(node_id)).await?;
+
+    publish_summaries(state, summaries, None).await
+}
+
+pub async fn publish_summaries(state: &AppState, summaries: Vec<NodeSummary>, only_owner: Option<Uuid>) -> ApiResult<()> {
+    let owners = match only_owner {
+        Some(owner) => vec![owner],
+        None => sqlx::query_scalar::<_, Uuid>("select id from users").fetch_all(&state.pool).await?,
+    };
+
+    for owner in owners {
+        let mut own = summaries.clone();
+
+        crate::manual_resets::merge_into(state, owner, &mut own).await?;
+
+        for summary in own {
+            state.publish(Some(owner), StreamMessage::Node(summary));
+        }
     }
 
     Ok(())

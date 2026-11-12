@@ -122,6 +122,8 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "DELETE /api/v1/artifacts/{id}",
     "POST /api/v1/artifacts/{id}/comments",
     "PATCH /api/v1/artifacts/{id}/comments/{comment_id}",
+    "POST /api/v1/usage/manual-resets",
+    "DELETE /api/v1/usage/manual-resets/{id}",
 ];
 
 const SILENT_ROUTES: &[&str] = &[
@@ -480,6 +482,25 @@ async fn node_message(stream: &mut StreamClient, node_id: Uuid, wanted: impl Fn(
             _ => None,
         })
         .await
+}
+
+#[tokio::test]
+async fn recording_and_removing_a_claude_reset_streams_the_account_with_and_without_it() {
+    let server = Server::start().await;
+    let (id, token) = server.join("node", "laptop").await;
+    let mut stream = server.user.stream().await;
+    let mut link = server.connect_node(id, &token).await;
+
+    link.hello(vec![]).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, agent: AgentId::Claude, account: Some("sam@example.com".into()), method: "token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }).await;
+    node_message(&mut stream, id, |node| node.logins.len() == 1).await;
+
+    let (_, created) = server.user.json(server.user.post("/api/v1/usage/manual-resets").json(&json!({"agent": "claude", "account": "sam@example.com", "kind": "full", "expires_on": "2999-11-27"}))).await;
+    let banked = node_message(&mut stream, id, |node| node.logins.iter().any(|login| login.reset_credits.is_some())).await;
+    assert_eq!(banked.logins[0].reset_credits.as_ref().map(|credits| credits.available_count), Some(1));
+
+    server.user.json(server.user.delete(&format!("/api/v1/usage/manual-resets/{}", created["id"].as_str().unwrap()))).await;
+    node_message(&mut stream, id, |node| node.logins.iter().all(|login| login.reset_credits.is_none())).await;
 }
 
 #[tokio::test]

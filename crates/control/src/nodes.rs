@@ -17,8 +17,12 @@ use uuid::Uuid;
 const WATCH_LEASE_SECONDS: u32 = 30;
 const STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-pub async fn list(State(state): State<AppState>, _user: AuthUser) -> ApiResult<Json<Vec<NodeSummary>>> {
-    Ok(Json(node_summaries(&state, None).await?))
+pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<NodeSummary>>> {
+    let mut summaries = node_summaries(&state, None).await?;
+
+    crate::manual_resets::merge_into(&state, user.id, &mut summaries).await?;
+
+    Ok(Json(summaries))
 }
 
 pub async fn drain(State(state): State<AppState>, _user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<DrainRequest>) -> ApiResult<StatusCode> {

@@ -93,10 +93,15 @@ fun bankedResetsSummary(credits: ResetCredits, localDateTime: (Long) -> String?,
         else -> "${credits.availableCount} resets banked"
     }
     val next = credits.credits.orEmpty().mapNotNull { credit -> credit.expiresAt?.let { instantOrNull(it) } }.minOrNull() ?: return count
-    val date = (localDateTime(next.toEpochMilliseconds()) ?: next.toString()).substringBefore('T')
+
+    return "$count, ${if (brief) "expires" else "next expires"} ${expiryDay(next, localDateTime)}"
+}
+
+fun expiryDay(at: Instant, localDateTime: (Long) -> String?): String {
+    val date = (localDateTime(at.toEpochMilliseconds()) ?: at.toString()).substringBefore('T')
     val (_, month, day) = date.split('-')
 
-    return "$count, ${if (brief) "expires" else "next expires"} ${day.toInt()} ${MonthNames[month.toInt() - 1]}"
+    return "${day.toInt()} ${MonthNames[month.toInt() - 1]}"
 }
 
 fun runsOutBeforeReset(window: UsageWindow): Boolean {

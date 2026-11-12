@@ -502,7 +502,7 @@ private fun StatsColumn(store: Store, state: AppState, stats: InboxStats, onOpen
 
         for (account in accounts) {
             Box(Modifier.padding(horizontal = Tokens.Space.S4 - Tokens.Space.S1_5)) {
-                UsageBlock(account, thisChat = false, onUseReset = { target, key -> useBankedReset(store, target, key) })
+                UsageBlock(account, thisChat = false, onUseReset = { target, key, creditId -> useBankedReset(store, target, key, creditId) })
             }
         }
 

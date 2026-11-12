@@ -80,7 +80,7 @@ class UsageApiScreenshotTest {
             MyceliumTheme(true) {
                 Box(Modifier.background(MyTheme.colors.bgPanel).padding(6.dp)) {
                     Box(Modifier.width(268.dp)) {
-                        UsageCard(accounts, providers = listOf(ModelProviderUsage("p1", "Anthropic", read, apiCost = ApiCost(6.4, 142.18, 1_200_000))), onOpenHistory = {}, onUseReset = { _, _ -> "reset" })
+                        UsageCard(accounts, providers = listOf(ModelProviderUsage("p1", "Anthropic", read, apiCost = ApiCost(6.4, 142.18, 1_200_000))), onOpenHistory = {}, onUseReset = { _, _, _ -> "reset" })
                     }
                 }
             }

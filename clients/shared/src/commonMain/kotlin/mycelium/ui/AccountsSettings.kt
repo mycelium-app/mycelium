@@ -30,6 +30,8 @@ import mycelium.state.usageProjection
 import mycelium.state.windowName
 import mycelium.state.Store
 import mycelium.state.agentAccounts
+import mycelium.state.expiryDay
+import mycelium.state.instantOrNull
 import mycelium.state.agentName
 import mycelium.state.loginMethodName
 import mycelium.state.newAccountName
@@ -45,6 +47,7 @@ fun AccountsSettings(store: Store) {
     var signIn by remember { mutableStateOf<LoginSession?>(null) }
     var prices by remember { mutableStateOf(emptyList<AccountPrice>()) }
     var pricing by remember { mutableStateOf<AgentAccount?>(null) }
+    var addingReset by remember { mutableStateOf<AgentAccount?>(null) }
     val startSignIn: (NodeSummary, String) -> Unit = { node, agent ->
         store.act {
             val started = store.api.startLogin(node.id, agent, loginMethodFor(agent), newAccountName())
@@ -128,11 +131,15 @@ fun AccountsSettings(store: Store) {
                                 else -> TableCell.Slot {
                                     RowMenu(account.label) { close ->
                                         MenuItem("Set your price", onClick = { close(); pricing = account }, leading = MyIcon.Pencil)
+
+                                        if (account.agent == "claude") {
+                                            MenuItem("Add a reset", onClick = { close(); addingReset = account }, leading = MyIcon.Plus)
+                                        }
                                     }
                                 }
                             }
                         },
-                        detail = { row -> AccountUsage(accounts[row]) },
+                        detail = { row -> AccountUsage(store, accounts[row]) },
                     )
                 }
 
@@ -156,10 +163,12 @@ fun AccountsSettings(store: Store) {
             onDismiss = { pricing = null },
         )
     }
+
+    addingReset?.let { account -> AddResetDialog(store, account.agent, account.label, onDismiss = { addingReset = null }) }
 }
 
 @Composable
-private fun AccountUsage(account: AgentAccount) {
+private fun AccountUsage(store: Store, account: AgentAccount) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
     val localDateTime: (Long) -> String? = { millis -> platform?.localDateTime(millis) }
@@ -184,6 +193,26 @@ private fun AccountUsage(account: AgentAccount) {
 
                 if (projection.isNotEmpty()) {
                     Label(projection, style = Tokens.Type.Meta, color = colors.textMuted)
+                }
+            }
+        }
+
+        val recorded = account.resetCredits?.credits.orEmpty().filter { it.manual }
+
+        if (recorded.isNotEmpty()) {
+            Hairline()
+
+            Column(Modifier.fillMaxWidth()) {
+                Label("Limit resets", Modifier.semantics { heading() }, Tokens.Type.MetaStrong)
+
+                for (credit in recorded) {
+                    val expires = credit.expiresAt?.let(::instantOrNull)?.let { expiryDay(it, localDateTime) }.orEmpty()
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                        Label(credit.title.orEmpty(), Modifier.width(UsageNameWidth), Tokens.Type.Meta, maxLines = 1)
+                        Label("Expires $expires", Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+                        MyButton({ store.act { store.api.removeManualReset(credit.id) } }, text = "Remove", description = "Remove the ${credit.title}, expires $expires", size = ButtonSize.Sm, muted = true)
+                    }
                 }
             }
         }

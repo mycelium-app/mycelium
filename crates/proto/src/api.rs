@@ -205,11 +205,23 @@ pub struct UseResetRequest {
     #[serde(default)]
     pub account: Option<String>,
     pub idempotency_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credit_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UseResetResponse {
     pub outcome: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AddManualResetRequest {
+    pub agent: AgentId,
+    pub account: String,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub expires_on: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

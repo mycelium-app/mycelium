@@ -31,6 +31,7 @@ mod conversations;
 mod git;
 mod goals;
 mod live_usage;
+mod manual_resets;
 mod assistant_actions;
 mod assistant_changes;
 mod assistant_backup;
@@ -369,6 +370,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/model-providers", get(model_providers::list).post(model_providers::create))
         .route("/api/v1/model-provider-usage", get(provider_usage::list))
         .route("/api/v1/usage/resets", post(account_usage::use_reset))
+        .route("/api/v1/usage/manual-resets", post(manual_resets::add))
+        .route("/api/v1/usage/manual-resets/{id}", delete(manual_resets::remove))
         .route("/api/v1/usage/history", get(usage_history::get))
         .route("/api/v1/model-providers/{id}", patch(model_providers::update).delete(model_providers::delete))
         .route("/api/v1/model-providers/{id}/refresh", post(model_providers::refresh))

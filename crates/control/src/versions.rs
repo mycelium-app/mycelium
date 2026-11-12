@@ -1,10 +1,9 @@
 use crate::boot::run_while_ready;
 use crate::error::ApiResult;
 use crate::state::AppState;
-use crate::store::{enum_text, node_summaries};
+use crate::store::{enum_text, node_summaries, publish_summaries};
 use anyhow::{Context, Result, bail};
 use mycelium_proto::conversation::AgentId;
-use mycelium_proto::stream::StreamMessage;
 use semver::Version;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -85,9 +84,9 @@ async fn refresh(state: &AppState) -> bool {
 
 async fn announce_refreshed(state: &AppState) -> ApiResult<()> {
     if refresh(state).await {
-        for summary in node_summaries(state, None).await? {
-            state.publish(None, StreamMessage::Node(summary));
-        }
+        let summaries = node_summaries(state, None).await?;
+
+        publish_summaries(state, summaries, None).await?;
     }
 
     Ok(())

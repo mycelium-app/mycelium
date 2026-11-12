@@ -549,6 +549,7 @@ fun TextInput(
     leadingIcon: MyIcon? = null,
     hint: String? = null,
     errorAbove: Boolean = false,
+    invalid: Boolean = false,
     focusRequester: FocusRequester? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
@@ -556,7 +557,7 @@ fun TextInput(
     val source = remember { MutableInteractionSource() }
     val focused = source.collectIsFocusedAsState()
     val height = touchMin(if (large) Tokens.Size.ControlLg else Tokens.Size.ControlMd)
-    val borderColor = if (error != null) colors.statusFailed else colors.borderControl
+    val borderColor = if (error != null || invalid) colors.statusFailed else colors.borderControl
     val base = if (mono) Tokens.Type.Code else Tokens.Type.Ui
     var revealed by remember { mutableStateOf(false) }
 
@@ -588,7 +589,7 @@ fun TextInput(
                 .background(colors.bgContent, ControlShape)
                 .border(Tokens.Size.Hairline, borderColor, ControlShape)
                 .semantics {
-                    contentDescription = if (errorAbove) listOfNotNull(label, hint, error?.let { "Error: $it" }).joinToString(". ") else if (error != null) "$label. Error: $error" else label
+                    contentDescription = if (errorAbove) listOfNotNull(label, hint, error?.let { "Error: $it" }).joinToString(". ") else if (error != null) "$label. Error: $error" else if (invalid) "$label. Error" else label
                 },
             decorationBox = { inner ->
                 Row(Modifier.fillMaxSize().padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {

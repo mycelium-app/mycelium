@@ -200,7 +200,7 @@ class UsageCardTest {
 
     @Test
     fun theUseResetButtonNamesTheAccountItResets() {
-        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(codexWithBankedResets() to false), onUseReset = { _, _ -> "reset" }) } }
+        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(codexWithBankedResets() to false), onUseReset = { _, _, _ -> "reset" }) } }
 
         rule.onNodeWithContentDescription("Use a banked reset for work@example.com").assertIsDisplayed()
     }
@@ -219,7 +219,7 @@ class UsageCardTest {
     fun anAccountWithNoBankedResetsHasNoUseResetButton() {
         val account = AgentAccount("codex", "work@example.com", "device_auth", emptyList(), windows = listOf(UsageWindow("five_hour", 5.0)), resetCredits = ResetCredits(0))
 
-        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false), onUseReset = { _, _ -> "reset" }) } }
+        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false), onUseReset = { _, _, _ -> "reset" }) } }
 
         rule.onNodeWithText("Use reset").assertDoesNotExist()
         rule.onNodeWithText("banked", substring = true).assertDoesNotExist()
@@ -229,7 +229,7 @@ class UsageCardTest {
     fun useResetAsksFirstAndCancelSpendsNothing() {
         val calls = mutableListOf<String>()
 
-        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(codexWithBankedResets() to false), onUseReset = { _, key -> calls.add(key); "reset" }) } }
+        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(codexWithBankedResets() to false), onUseReset = { _, key, _ -> calls.add(key); "reset" }) } }
         rule.onNodeWithText("Use reset").performClick()
 
         rule.onNodeWithText("Use a banked reset?").assertIsDisplayed()
@@ -243,7 +243,7 @@ class UsageCardTest {
     fun confirmingUseResetCallsItOnceAndShowsTheOutcome() {
         val calls = mutableListOf<String>()
 
-        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(codexWithBankedResets() to false), onUseReset = { _, key -> calls.add(key); "reset" }) } }
+        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(codexWithBankedResets() to false), onUseReset = { _, key, _ -> calls.add(key); "reset" }) } }
         rule.onNodeWithText("Use reset").performClick()
         rule.onAllNodesWithText("Use reset").onLast().performClick()
         rule.waitUntil { rule.onAllNodesWithText("Reset used.").fetchSemanticsNodes().isNotEmpty() }
@@ -258,7 +258,7 @@ class UsageCardTest {
 
         rule.setContent {
             MyceliumTheme(true) {
-                UsageCard(listOf(codexWithBankedResets() to false), onUseReset = { _, key -> keys.add(key); if (keys.size == 1) error("Codex did not answer.") else "reset" })
+                UsageCard(listOf(codexWithBankedResets() to false), onUseReset = { _, key, _ -> keys.add(key); if (keys.size == 1) error("Codex did not answer.") else "reset" })
             }
         }
         rule.onNodeWithText("Use reset").performClick()
