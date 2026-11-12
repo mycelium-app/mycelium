@@ -580,20 +580,37 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             let ReadableTarget { target_id, label, status, .. } = target;
 
             let super::earlier_turns::Page { messages, more } = super::earlier_turns::page(state, target_id, &arguments).await?;
-            let latest = crate::watches::latest_result(state, target_id).await?;
+            let searching = arguments.get("query").and_then(Value::as_str).is_some_and(|query| !query.trim().is_empty());
+            let newest_shown = arguments.get("before").and_then(Value::as_i64).unwrap_or(i64::MAX);
+            let oldest_shown = if more { messages.first().map_or(0, |(seq, _, _)| *seq) } else { 0 };
+            let errors = if searching {
+                Vec::new()
+            } else {
+                sqlx::query_as::<_, (i64, String, String)>("select seq, kind, coalesce(payload->>'message', '') from events where conversation_id = $1 and kind = 'error' and seq >= $2 and seq < $3 order by seq").bind(target_id).bind(oldest_shown).bind(newest_shown).fetch_all(&state.pool).await?
+            };
+            let mut shown: Vec<(i64, String, String)> = messages.iter().cloned().chain(errors).collect();
+            shown.sort_by_key(|(seq, _, _)| *seq);
+            let mut latest = crate::watches::latest_result(state, target_id).await?;
+            let failed = status == enum_text(&ConversationStatus::Failed);
+            let latest_error = shown.iter().rev().find(|(_, kind, _)| kind == "error");
+
+            if let Some((seq, _, text)) = latest_error.filter(|(seq, _, _)| failed && latest.as_ref().is_none_or(|(result_seq, _)| seq > result_seq)) {
+                latest = Some((*seq, text.clone()));
+            }
+
             let from = target_id.to_string();
             let block = |seq: i64, role: &str, text: &str| super::call::data_block("conversation_message", &[("conversation", Some(from.clone())), ("title", Some(label.clone())), ("message", Some(seq.to_string())), ("role", Some(role.to_string()))], &text.chars().take(4000).collect::<String>());
             let mut parts = vec![READ_PREFACE.to_string(), format!("{label} ({target_id}) is {status}.")];
 
             if let Some((seq, text)) = &latest {
-                parts.push(format!("Latest result:\n{}", block(*seq, "agent", text)));
+                parts.push(format!("Latest result:\n{}", block(*seq, if failed && latest_error.is_some_and(|(error_seq, _, _)| error_seq == seq) { "error" } else { "agent" }, text)));
             }
 
-            if messages.is_empty() {
+            if shown.is_empty() {
                 parts.push("No messages match.".to_string());
             }
 
-            parts.extend(messages.iter().map(|(seq, kind, text)| block(*seq, &super::earlier_turns::speaker(kind).to_lowercase(), text)));
+            parts.extend(shown.iter().map(|(seq, kind, text)| block(*seq, &if kind == "error" { "error".to_string() } else { super::earlier_turns::speaker(kind).to_lowercase() }, text)));
 
             if let (true, Some((oldest, _, _))) = (more, messages.first()) {
                 parts.push(format!("Call again with before={oldest} for older messages."));

@@ -1161,3 +1161,25 @@ async fn a_node_refusal_that_arrives_while_the_conversation_is_being_started_sti
     assert_eq!(started["isError"], false, "{started}");
     assert!(told.contains("failed") && told.contains(reason), "{told}");
 }
+
+#[tokio::test]
+async fn reading_a_conversation_the_node_refused_shows_the_refusal_reason_in_order() {
+    let mut fleet = fleet().await;
+    connect(&fleet.server, fleet.yucca, fleet.immich).await;
+    project_in(&fleet, "billing", Some(fleet.immich)).await;
+    let reason = "The folder /tmp/platform-health-oidc is outside /work. Choose a folder inside it.";
+
+    let started = call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_conversation", start_arguments("immich", "billing")).await;
+    let new_chat: Uuid = text(&started).split('(').nth(1).unwrap().split(')').next().unwrap().parse().unwrap();
+    fleet.link.expect_start_session().await;
+    fleet.link.send(NodeToControl::SessionFailed { conversation_id: new_chat, seq: 1, message: reason.into() }).await;
+    crate::common::eventually("the conversation to fail", || async { (fleet.server.conversation(new_chat).await["status"] == "failed").then_some(()) }).await;
+
+    let read = call(&fleet.server, &fleet.link, fleet.yucca_chat, "read_conversation", json!({"conversation": new_chat.to_string()})).await;
+    let read = text(&read);
+
+    assert!(read.contains("is failed."), "{read}");
+    assert!(read.contains("Latest result:") && read.contains(reason), "{read}");
+    assert!(read.contains("role=\"error\""), "{read}");
+    assert!(!read.contains("No messages match."), "{read}");
+}
