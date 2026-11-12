@@ -9,6 +9,7 @@ import mycelium.state.WorkflowAgent
 import mycelium.state.WorkflowProgress
 import mycelium.state.applyWorkflowJournal
 import mycelium.state.pinnedCards
+import mycelium.state.parsedMarkdown
 import mycelium.state.pinnedWorkflows
 import mycelium.api.Workflow
 import mycelium.api.WorkflowPlan
@@ -21,6 +22,7 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 
 private fun card(id: String, heading: String, sticky: Boolean = true) =
     "```mycelium-ui\n{\"type\":\"heading\",\"text\":\"$heading\",\"id\":\"$id\",\"sticky\":$sticky}\n```"
@@ -60,6 +62,18 @@ class PinsTest {
         val dismissed = setOf(pinnedCards(items, emptySet()).single().key)
 
         assertEquals(emptyList(), pinnedCards(items, dismissed))
+    }
+
+    @Test
+    fun findingPinsInALongConversationKeepsRenderedMarkdownCached() {
+        val visible = "Visible reply with **formatted text**"
+        val rendered = parsedMarkdown(visible)
+        val items = listOf(message("visible", visible)) +
+            (1..600).map { message("reply-$it", "Earlier reply $it with **formatted text**") } +
+            message("pin", card("plan", "Plan"))
+
+        assertEquals(listOf("Plan"), pinnedCards(items, emptySet()).map { it.label })
+        assertSame(rendered, parsedMarkdown(visible))
     }
 
     @Test

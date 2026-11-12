@@ -26,15 +26,21 @@ fun pinnedCards(items: List<ThreadItem>, dismissed: Set<String>, now: Instant = 
 
     for (item in items) {
         when (item) {
-            is ThreadItem.AgentMessage -> for (block in parsedMarkdown(item.text)) {
-                if (block !is MarkdownBlock.Code || block.language != GeneratedUiLanguage) {
+            is ThreadItem.AgentMessage -> {
+                if (!item.text.contains(GeneratedUiLanguage)) {
                     continue
                 }
 
-                val ui = parseUiBlock(block.text) ?: continue
+                for (block in parsedMarkdown(item.text)) {
+                    if (block !is MarkdownBlock.Code || block.language != GeneratedUiLanguage) {
+                        continue
+                    }
 
-                if (ui.sticky || pinned.containsKey(ui.pinKey)) {
-                    pinned[ui.pinKey] = PinnedCard(ui.pinKey, ui.label, ui = ui.node)
+                    val ui = parseUiBlock(block.text) ?: continue
+
+                    if (ui.sticky || pinned.containsKey(ui.pinKey)) {
+                        pinned[ui.pinKey] = PinnedCard(ui.pinKey, ui.label, ui = ui.node)
+                    }
                 }
             }
 
