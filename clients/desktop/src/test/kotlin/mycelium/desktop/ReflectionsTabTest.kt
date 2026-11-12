@@ -29,6 +29,7 @@ import mycelium.ui.WellnessScreen
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 private fun reflectionJson(learned: String, edited: String) =
     """{"id":"r1","week":"2026-10-19","done":"Shipped the importer","learned":"$learned","waiting":"Review from Sam","next_week":"Plan the release","edited":$edited,"drafted_at":"2026-10-23T16:00:00Z"}"""
@@ -71,7 +72,10 @@ class ReflectionsTabTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
 
-        runBlocking { store.refresh() }
+        runBlocking {
+            store.refresh()
+            store.learning.load()
+        }
         rule.setContent { MyceliumTheme(true) { WellnessScreen(store, OpeningPlatform(), onOpenAssistant = { opened += it }) } }
         rule.onNodeWithText("Reflections").performClick()
     }
@@ -100,7 +104,7 @@ class ReflectionsTabTest {
     fun editingASectionSavesItOnLeavingTheFieldAndMarksItEdited() {
         reflections = "[${reflectionJson("Lifetimes", "[]")}]"
         show()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Week of 19 October 2026").fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(rule.onAllNodesWithText("Week of 19 October 2026").fetchSemanticsNodes().isNotEmpty())
         val field = hasContentDescription("Learned, week of 19 October 2026")
 
         rule.onNode(field).performTextClearance()
