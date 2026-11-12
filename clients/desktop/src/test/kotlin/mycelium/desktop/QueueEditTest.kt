@@ -13,7 +13,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
-import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
 import io.ktor.client.request.HttpRequestData
@@ -58,7 +57,7 @@ class QueueEditTest {
 
     private fun open() {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
-        val engine = MockEngine { request ->
+        val engine = SynchronousMockEngine { request ->
             val path = request.url.encodedPath
             requests += request to String(request.body.toByteArray())
 
@@ -76,15 +75,18 @@ class QueueEditTest {
             }
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
-        runBlocking { store.refresh() }
+        runBlocking {
+            store.refresh()
+            store.open("c1")
+        }
         rule.setContent { MyceliumTheme(true) { Shell(store, QuietPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Chat("c1")) } }
     }
 
     private fun editSecond() {
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Actions for queued message 2").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Actions for queued message 2").performClick()
         rule.onNodeWithText("Edit").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Editing queued message 2").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+        rule.onNodeWithText("Editing queued message 2").assertExists()
     }
 
     private fun patches() = requests.filter { it.first.method == HttpMethod.Patch }.map { it.second }
@@ -108,23 +110,28 @@ class QueueEditTest {
 
         rule.onNodeWithContentDescription("Message").performTextInput(" on the tablet too")
         rule.onNodeWithText("Save").performClick()
-        rule.waitUntil(5_000) { patches().size == 2 }
+        rule.waitForIdle()
+
+        assertEquals(2, patches().size)
 
         val saved = patches().last()
 
         assertEquals(true, saved.contains("on the tablet too") && saved.contains("\"editing\":false") && saved.contains(sha))
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Editing queued message 2").fetchSemanticsNodes().isEmpty() }
+        rule.waitForIdle()
+
+        rule.onNodeWithText("Editing queued message 2").assertDoesNotExist()
     }
 
     @Test
     fun cancelReleasesTheHoldAndGivesBackTheDraftThePersonWasWriting() {
         open()
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Message").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Message").performTextInput("half written")
 
         editSecond()
         rule.onNodeWithText("Cancel").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Editing queued message 2").fetchSemanticsNodes().isEmpty() }
+        rule.waitForIdle()
+
+        rule.onNodeWithText("Editing queued message 2").assertDoesNotExist()
 
         rule.onNodeWithText("half written", substring = true).assertIsDisplayed()
         assertEquals(listOf("""{"editing":true}""", """{"editing":false}"""), patches())
@@ -136,7 +143,9 @@ class QueueEditTest {
         editSecond()
 
         rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Escape) }
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Editing queued message 2").fetchSemanticsNodes().isEmpty() }
+        rule.waitForIdle()
+
+        rule.onNodeWithText("Editing queued message 2").assertDoesNotExist()
 
         assertEquals(listOf("""{"editing":true}""", """{"editing":false}"""), patches())
     }
@@ -144,20 +153,18 @@ class QueueEditTest {
     @Test
     fun upInAnEmptyComposerEditsTheLastQueuedMessage() {
         open()
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Actions for queued message 2").fetchSemanticsNodes().isNotEmpty() }
-
         rule.onNodeWithContentDescription("Message").performClick()
         rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.DirectionUp) }
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Editing queued message 2").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+
+        rule.onNodeWithText("Editing queued message 2").assertExists()
         rule.onNode(hasContentDescription("Message").and(hasText("The header draws over the clock", substring = true))).assertIsDisplayed()
     }
 
     @Test
     fun upInAComposerWithTextMovesTheCaretInsteadOfEditingTheQueue() {
         open()
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Actions for queued message 2").fetchSemanticsNodes().isNotEmpty() }
-
         rule.onNodeWithContentDescription("Message").performTextInput("draft")
         rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.DirectionUp) }
         rule.waitForIdle()

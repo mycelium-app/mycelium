@@ -8,7 +8,6 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performClick
-import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
 import io.ktor.client.request.HttpRequestData
@@ -97,7 +96,7 @@ class AccountsAndSessionsTest {
 
     private fun store(nodesJson: String = NodesJson): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
-        val engine = MockEngine { request ->
+        val engine = SynchronousMockEngine { request ->
             requests += request
             val path = request.url.encodedPath
 
@@ -202,7 +201,9 @@ class AccountsAndSessionsTest {
         rule.onNodeWithContentDescription("More for Desktop app on willow").performClick()
         rule.onNodeWithText("End session").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Desktop app on willow").fetchSemanticsNodes().isEmpty() }
+        rule.waitForIdle()
+
+        assertEquals(0, rule.onAllNodesWithText("Desktop app on willow").fetchSemanticsNodes().size)
         assertEquals("/api/v1/sessions/s2", requests.last { it.method == HttpMethod.Delete }.url.encodedPath)
     }
 
