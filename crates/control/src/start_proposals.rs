@@ -133,7 +133,7 @@ pub async fn propose(state: &AppState, owner: Uuid, conversation_id: Uuid, kind:
             };
             let project = crate::projects::find_owned(state, project_id, owner).await?;
 
-            if let Err(error) = crate::worktrees::find_existing(state, &project, path).await {
+            if let Err(error) = crate::worktrees::find_existing(state, &project, chosen, path).await {
                 return Ok(Err(format!("Nothing was proposed. {}", error.message())));
             }
         }

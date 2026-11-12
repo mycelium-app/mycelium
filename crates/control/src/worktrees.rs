@@ -1,10 +1,10 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::git::relay;
-use crate::projects::{ProjectRow, find_owned};
+use crate::projects::{CheckoutRow, ProjectRow, find_owned, not_on_node};
 use crate::state::AppState;
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use mycelium_proto::api::{ExistingWorktree, Worktree};
 use mycelium_proto::link::GitCommand;
 use uuid::Uuid;
@@ -27,32 +27,33 @@ impl WorktreeRow {
     }
 }
 
-pub async fn create(state: &AppState, project: &ProjectRow, branch: &str, issue_number: Option<i64>) -> ApiResult<WorktreeRow> {
+pub async fn create(state: &AppState, checkout: &CheckoutRow, branch: &str, issue_number: Option<i64>) -> ApiResult<WorktreeRow> {
     let branch = branch.trim();
 
     if branch.is_empty() {
         return Err(ApiError::bad_request("branch_required", "Enter a name for the new branch."));
     }
 
-    let answer = relay(state, project.node_id, project.path.clone(), GitCommand::AddWorktree { branch: branch.to_string() }).await?;
+    let answer = relay(state, checkout.node_id, checkout.path.clone(), GitCommand::AddWorktree { branch: branch.to_string() }).await?;
 
-    record(state, project, branch, answer["path"].as_str().unwrap_or_default(), issue_number).await
+    record(state, checkout, branch, answer["path"].as_str().unwrap_or_default(), issue_number).await
 }
 
-pub async fn create_from_remote_branch(state: &AppState, project: &ProjectRow, branch: &str) -> ApiResult<WorktreeRow> {
-    let answer = relay(state, project.node_id, project.path.clone(), GitCommand::AddRemoteWorktree { branch: branch.to_string() }).await?;
+pub async fn create_from_remote_branch(state: &AppState, checkout: &CheckoutRow, branch: &str) -> ApiResult<WorktreeRow> {
+    let answer = relay(state, checkout.node_id, checkout.path.clone(), GitCommand::AddRemoteWorktree { branch: branch.to_string() }).await?;
 
-    record(state, project, branch, answer["path"].as_str().unwrap_or_default(), None).await
+    record(state, checkout, branch, answer["path"].as_str().unwrap_or_default(), None).await
 }
 
-async fn record(state: &AppState, project: &ProjectRow, branch: &str, path: &str, issue_number: Option<i64>) -> ApiResult<WorktreeRow> {
+async fn record(state: &AppState, checkout: &CheckoutRow, branch: &str, path: &str, issue_number: Option<i64>) -> ApiResult<WorktreeRow> {
     let row = sqlx::query_as::<_, WorktreeRow>(sqlx::AssertSqlSafe(format!(
-        "insert into worktrees (project_id, branch, path, issue_number) values ($1, $2, $3, $4)
-         on conflict (project_id, branch) do update set path = excluded.path, issue_number = excluded.issue_number
+        "insert into worktrees (project_id, checkout_id, branch, path, issue_number) values ($1, $2, $3, $4, $5)
+         on conflict (checkout_id, branch) do update set path = excluded.path, issue_number = excluded.issue_number
          returning {}",
         WORKTREE_COLUMNS.replace("worktrees.", ""),
     )))
-    .bind(project.id)
+    .bind(checkout.project_id)
+    .bind(checkout.id)
     .bind(branch)
     .bind(path)
     .bind(issue_number)
@@ -62,22 +63,29 @@ async fn record(state: &AppState, project: &ProjectRow, branch: &str, path: &str
     Ok(row)
 }
 
-async fn existing_on_node(state: &AppState, project: &ProjectRow) -> ApiResult<Vec<ExistingWorktree>> {
-    let answer = relay(state, project.node_id, project.path.clone(), GitCommand::ExistingWorktrees).await?;
+async fn existing_on_node(state: &AppState, checkout: &CheckoutRow) -> ApiResult<Vec<ExistingWorktree>> {
+    let answer = relay(state, checkout.node_id, checkout.path.clone(), GitCommand::ExistingWorktrees).await?;
 
     serde_json::from_value(answer["worktrees"].clone()).map_err(|_| ApiError::internal("The node answered with a worktree list that could not be read."))
 }
 
-pub async fn existing(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<ExistingWorktree>>> {
-    let project = find_owned(&state, id, user.id).await?;
-
-    Ok(Json(existing_on_node(&state, &project).await?))
+#[derive(serde::Deserialize)]
+pub struct ExistingQuery {
+    node_id: Option<Uuid>,
 }
 
-pub async fn find_existing(state: &AppState, project: &ProjectRow, path: &str) -> ApiResult<ExistingWorktree> {
-    let wanted = path.trim().trim_end_matches('/');
+pub async fn existing(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Query(query): Query<ExistingQuery>) -> ApiResult<Json<Vec<ExistingWorktree>>> {
+    let project = find_owned(&state, id, user.id).await?;
+    let checkout = project.checkout_on(query.node_id.unwrap_or(project.node_id)).ok_or_else(not_on_node)?;
 
-    existing_on_node(state, project)
+    Ok(Json(existing_on_node(&state, checkout).await?))
+}
+
+pub async fn find_existing(state: &AppState, project: &ProjectRow, node_id: Uuid, path: &str) -> ApiResult<ExistingWorktree> {
+    let wanted = path.trim().trim_end_matches('/');
+    let checkout = project.checkout_on(node_id).ok_or_else(not_on_node)?;
+
+    existing_on_node(state, checkout)
         .await?
         .into_iter()
         .find(|worktree| worktree.path.trim_end_matches('/') == wanted)

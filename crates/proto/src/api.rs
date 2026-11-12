@@ -1125,6 +1125,14 @@ pub struct Repositories {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProjectCheckout {
+    pub id: Uuid,
+    pub node_id: Uuid,
+    pub path: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
     pub id: Uuid,
     pub node_id: Uuid,
@@ -1138,6 +1146,10 @@ pub struct Project {
     pub icon: Option<String>,
     #[serde(default)]
     pub avatar_sha256: Option<String>,
+    #[serde(default)]
+    pub test_command: Option<String>,
+    #[serde(default)]
+    pub checkouts: Vec<ProjectCheckout>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 

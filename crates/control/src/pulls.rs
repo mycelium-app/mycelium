@@ -97,16 +97,17 @@ pub async fn start_workspace(State(state): State<AppState>, user: AuthUser, Path
 
     let api = forge_of(&state, user.id, forge_id).await?;
     let pull_request = found(&api, &state, repository, number).await?;
-    let existing = sqlx::query_scalar::<_, String>("select path from worktrees where project_id = $1 and branch = $2").bind(project.id).bind(&pull_request.source_branch).fetch_optional(&state.pool).await?;
+    let checkout = project.oldest_checkout()?;
+    let existing = sqlx::query_scalar::<_, String>("select path from worktrees where checkout_id = $1 and branch = $2").bind(checkout.id).bind(&pull_request.source_branch).fetch_optional(&state.pool).await?;
     let cwd = match existing {
         Some(path) => path,
-        None => worktrees::create_from_remote_branch(&state, &project, &pull_request.source_branch).await?.path,
+        None => worktrees::create_from_remote_branch(&state, checkout, &pull_request.source_branch).await?.path,
     };
 
     let body = pull_request.body.trim();
     let details = if body.is_empty() { String::new() } else { format!("\n\n{body}") };
     let prompt = format!("Work on {}: {}\n{}{details}", pull_request.label, pull_request.title, pull_request.url);
-    let start = CreateConversationRequest { mode: None, config: None, account: None, node_id: project.node_id, agent: request.agent, cwd, project_id: None, branch: None, worktree_path: None, title: Some(format!("{} {}", pull_request.label, pull_request.title)), prompt: Some(prompt), parent_id: None, side_kind: None, model: None, routing: None, client_id: None };
+    let start = CreateConversationRequest { mode: None, config: None, account: None, node_id: checkout.node_id, agent: request.agent, cwd, project_id: None, branch: None, worktree_path: None, title: Some(format!("{} {}", pull_request.label, pull_request.title)), prompt: Some(prompt), parent_id: None, side_kind: None, model: None, routing: None, client_id: None };
     let conversation = conversations::start(&state, user.id, start).await?;
 
     Ok((StatusCode::CREATED, Json(conversation)))

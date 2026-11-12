@@ -133,7 +133,7 @@ async fn run_link(state: AppState, node_id: Uuid, connection_id: Uuid, mut outgo
                                 let background = state.clone();
 
                                 tokio::spawn(async move {
-                                    let projects = sqlx::query_as::<_, (Uuid, Uuid)>("select owner, id from projects where node_id = $1 and icon is null and avatar_sha256 is null order by created_at")
+                                    let projects = sqlx::query_as::<_, (Uuid, Uuid)>("select p.owner, p.id from projects p join project_checkouts c on c.project_id = p.id where c.node_id = $1 and p.icon is null and p.avatar_sha256 is null order by p.created_at")
                                         .bind(node_id)
                                         .fetch_all(&background.pool)
                                         .await;

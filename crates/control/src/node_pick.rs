@@ -81,7 +81,7 @@ pub async fn preview(State(state): State<AppState>, user: AuthUser, Query(query)
         Some(id) => {
             let project = crate::projects::find_owned(&state, id, user.id).await?;
 
-            Some(crate::projects::nodes_holding(&state, user.id, &project).await?)
+            Some(project.checkout_nodes())
         }
         None => None,
     };

@@ -826,3 +826,79 @@ async fn the_project_tool_names_the_node_by_its_name() {
     assert!(text.contains("at /work/harbour on atlas"), "{text}");
     assert!(!text.contains(&node.to_string()), "{text}");
 }
+
+async fn backups_on_two_nodes(server: &Server, atlas: &mut NodeLink, orion: &NodeLink) -> Value {
+    let (_, (_, _)) = create_project(server, atlas, json!({"path": "work/backups"}), Ok(json!({"path": "/home/sam/backups"}))).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+    let id: Uuid = listed[0]["id"].as_str().unwrap().parse().unwrap();
+
+    sqlx::query("insert into project_checkouts (project_id, node_id, path) values ($1, $2, '/srv/backups')").bind(id).bind(orion.id).execute(&server.pool).await.unwrap();
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+
+    listed[0].clone()
+}
+
+#[tokio::test]
+async fn conversations_on_either_node_list_under_one_project_and_run_in_that_nodes_folder() {
+    let server = Server::start().await;
+    let mut atlas = server.online_node("atlas").await;
+    let orion = server.online_node("orion").await;
+    let project = backups_on_two_nodes(&server, &mut atlas, &orion).await;
+
+    let (on_atlas_status, on_atlas) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": atlas.id, "agent": "claude", "project_id": project["id"]}))).await;
+    let (on_orion_status, on_orion) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": orion.id, "agent": "claude", "project_id": project["id"]}))).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+
+    assert_eq!((on_atlas_status, on_orion_status), (201, 201), "{on_atlas} {on_orion}");
+    assert_eq!((on_atlas["project_id"].clone(), on_orion["project_id"].clone()), (project["id"].clone(), project["id"].clone()));
+    assert_eq!((on_atlas["cwd"].clone(), on_orion["cwd"].clone()), (json!("/home/sam/backups"), json!("/srv/backups")));
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_worktree_folder_on_the_second_node_belongs_to_the_one_project() {
+    let server = Server::start().await;
+    let mut atlas = server.online_node("atlas").await;
+    let orion = server.online_node("orion").await;
+    let project = backups_on_two_nodes(&server, &mut atlas, &orion).await;
+
+    let conversation = conversation_in(&server, orion.id, "/srv/backups-worktrees/restore-drill").await;
+
+    assert_eq!(project_of(&server, conversation).await, project["id"]);
+}
+
+#[tokio::test]
+async fn a_project_lists_a_checkout_per_node_and_keeps_the_oldest_as_node_id_and_path() {
+    let server = Server::start().await;
+    let mut atlas = server.online_node("atlas").await;
+    let orion = server.online_node("orion").await;
+    let project = backups_on_two_nodes(&server, &mut atlas, &orion).await;
+
+    let checkouts: Vec<(Value, Value)> = project["checkouts"].as_array().unwrap().iter().map(|checkout| (checkout["node_id"].clone(), checkout["path"].clone())).collect();
+
+    assert_eq!(checkouts, vec![(json!(atlas.id), json!("/home/sam/backups")), (json!(orion.id), json!("/srv/backups"))]);
+    assert_eq!((project["node_id"].clone(), project["path"].clone()), (json!(atlas.id), json!("/home/sam/backups")));
+}
+
+#[tokio::test]
+async fn a_client_from_before_checkouts_reads_a_project_and_a_project_without_checkouts_reads_as_empty() {
+    #[derive(serde::Deserialize)]
+    struct ProjectBeforeCheckouts {
+        id: Uuid,
+        node_id: Uuid,
+        path: String,
+    }
+
+    let server = Server::start().await;
+    let mut atlas = server.online_node("atlas").await;
+    let orion = server.online_node("orion").await;
+    let project = backups_on_two_nodes(&server, &mut atlas, &orion).await;
+
+    let older: ProjectBeforeCheckouts = serde_json::from_value(project.clone()).unwrap();
+    let mut before_checkouts = project.clone();
+    before_checkouts.as_object_mut().unwrap().remove("checkouts");
+    let newer: mycelium_proto::api::Project = serde_json::from_value(before_checkouts).unwrap();
+
+    assert_eq!((older.id, older.node_id, older.path.as_str()), (newer.id, atlas.id, "/home/sam/backups"));
+    assert!(newer.checkouts.is_empty());
+}

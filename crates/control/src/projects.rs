@@ -11,13 +11,14 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::body::Bytes;
 use axum::http::{HeaderMap, StatusCode};
-use mycelium_proto::api::{CheckoutProjectRequest, CreateProjectRequest, PatchProjectRequest, Project};
+use mycelium_proto::api::{CheckoutProjectRequest, CreateProjectRequest, PatchProjectRequest, Project, ProjectCheckout};
 use mycelium_proto::link::GitCommand;
 use mycelium_proto::stream::StreamMessage;
 use serde_json::Value;
 use uuid::Uuid;
 
-pub const PROJECT_COLUMNS: &str = "id, node_id, name, path, forge_id, repository, group_id, icon, avatar_sha256, created_at";
+pub const PROJECT_COLUMNS: &str = "id, (select node_id from project_checkouts where project_id = projects.id order by created_at, id limit 1) as node_id, name, (select path from project_checkouts where project_id = projects.id order by created_at, id limit 1) as path, forge_id, repository, group_id, icon, avatar_sha256, test_command, created_at";
+pub const CHECKOUT_COLUMNS: &str = "id, project_id, node_id, path, created_at";
 pub const MAX_AVATAR_BYTES: usize = 256 * 1024;
 const MAX_ICON_CHARACTERS: usize = 40;
 const AVATAR_MEDIA_TYPES: [&str; 3] = ["image/png", "image/jpeg", "image/webp"];
@@ -35,31 +36,82 @@ pub struct ProjectRow {
     pub group_id: Option<Uuid>,
     pub icon: Option<String>,
     pub avatar_sha256: Option<String>,
+    pub test_command: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[sqlx(skip)]
+    pub checkouts: Vec<CheckoutRow>,
+}
+
+#[derive(Clone, sqlx::FromRow)]
+pub struct CheckoutRow {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub node_id: Uuid,
+    pub path: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl CheckoutRow {
+    pub fn to_proto(self) -> ProjectCheckout {
+        ProjectCheckout { id: self.id, node_id: self.node_id, path: self.path, created_at: self.created_at }
+    }
 }
 
 impl ProjectRow {
     pub fn to_proto(self) -> Project {
-        Project { id: self.id, node_id: self.node_id, name: self.name, path: self.path, forge_id: self.forge_id, repository: self.repository, group_id: self.group_id, icon: self.icon, avatar_sha256: self.avatar_sha256, created_at: self.created_at }
+        let checkouts = self.checkouts.into_iter().map(CheckoutRow::to_proto).collect();
+
+        Project { id: self.id, node_id: self.node_id, name: self.name, path: self.path, forge_id: self.forge_id, repository: self.repository, group_id: self.group_id, icon: self.icon, avatar_sha256: self.avatar_sha256, test_command: self.test_command, checkouts, created_at: self.created_at }
     }
+
+    pub fn checkout_on(&self, node_id: Uuid) -> Option<&CheckoutRow> {
+        self.checkouts.iter().find(|checkout| checkout.node_id == node_id)
+    }
+
+    pub fn oldest_checkout(&self) -> ApiResult<&CheckoutRow> {
+        self.checkout_on(self.node_id).ok_or_else(|| ApiError::internal("This project has no checkout. Add one or remove the project."))
+    }
+
+    pub fn checkout_nodes(&self) -> Vec<Uuid> {
+        self.checkouts.iter().map(|checkout| checkout.node_id).collect()
+    }
+}
+
+pub fn not_on_node() -> ApiError {
+    ApiError::bad_request("project_not_on_node", "This project is not set up on that node. Choose a node it is set up on.")
+}
+
+pub async fn with_checkouts(state: &AppState, mut rows: Vec<ProjectRow>) -> ApiResult<Vec<ProjectRow>> {
+    let ids: Vec<Uuid> = rows.iter().map(|row| row.id).collect();
+    let checkouts = sqlx::query_as::<_, CheckoutRow>(sqlx::AssertSqlSafe(format!("select {CHECKOUT_COLUMNS} from project_checkouts where project_id = any($1) order by created_at, id"))).bind(&ids).fetch_all(&state.pool).await?;
+
+    for row in &mut rows {
+        row.checkouts = checkouts.iter().filter(|checkout| checkout.project_id == row.id).cloned().collect();
+    }
+
+    Ok(rows)
 }
 
 pub async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<ProjectRow> {
     let row = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("select {PROJECT_COLUMNS} from projects where id = $1 and owner = $2"))).bind(id).bind(owner).fetch_optional(&state.pool).await?;
+    let row = row.ok_or_else(|| ApiError::not_found("That project"))?;
 
-    row.ok_or_else(|| ApiError::not_found("That project"))
+    Ok(with_checkouts(state, vec![row]).await?.remove(0))
 }
 
-pub async fn nodes_holding(state: &AppState, owner: Uuid, project: &ProjectRow) -> ApiResult<Vec<Uuid>> {
-    let siblings = sqlx::query_scalar::<_, Uuid>("select node_id from projects where owner = $1 and forge_id = $2 and repository = $3").bind(owner).bind(project.forge_id).bind(&project.repository).fetch_all(&state.pool).await?;
+pub async fn add_checkout(state: &AppState, project_id: Uuid, node_id: Uuid, path: &str) -> ApiResult<CheckoutRow> {
+    let inserted = sqlx::query_as::<_, CheckoutRow>(sqlx::AssertSqlSafe(format!("insert into project_checkouts (project_id, node_id, path) values ($1, $2, $3) returning {CHECKOUT_COLUMNS}")))
+        .bind(project_id)
+        .bind(node_id)
+        .bind(path)
+        .fetch_one(&state.pool)
+        .await;
 
-    Ok(std::iter::once(project.node_id).chain(siblings).collect())
-}
-
-pub async fn sibling_on(state: &AppState, owner: Uuid, project: &ProjectRow, node_id: Uuid) -> ApiResult<ProjectRow> {
-    let row = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("select {PROJECT_COLUMNS} from projects where owner = $1 and node_id = $2 and forge_id = $3 and repository = $4"))).bind(owner).bind(node_id).bind(project.forge_id).bind(&project.repository).fetch_optional(&state.pool).await?;
-
-    row.ok_or_else(|| ApiError::bad_request("project_not_on_node", "This project is not set up on that node. Choose a node it is set up on."))
+    match inserted {
+        Ok(checkout) => Ok(checkout),
+        Err(sqlx::Error::Database(cause)) if cause.is_unique_violation() => Err(ApiError::conflict("project_exists", "This folder is already a project on this node.")),
+        Err(cause) => Err(cause.into()),
+    }
 }
 
 pub async fn clone_repository(state: &AppState, forge: &forges::ForgeRow, repository: &str, node_id: Uuid, folder: Option<&str>) -> ApiResult<String> {
@@ -127,13 +179,13 @@ fn check_checkout(answer: &Value, registered: &str, base_url: &str, clone_urls: 
     }
 }
 
-async fn link_conversations(state: &AppState, owner: Uuid, project: &ProjectRow) -> ApiResult<()> {
+async fn link_conversations(state: &AppState, owner: Uuid, project_id: Uuid, node_id: Uuid) -> ApiResult<()> {
     let linked = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
         "update conversations set project_id = $3 where owner = $1 and node_id = $2 and project_id is null and project_for_folder(owner, node_id, cwd) = $3 returning {CONVERSATION_COLUMNS}",
     )))
     .bind(owner)
-    .bind(project.node_id)
-    .bind(project.id)
+    .bind(node_id)
+    .bind(project_id)
     .fetch_all(&state.pool)
     .await?;
 
@@ -156,6 +208,7 @@ pub fn valid_repository(repository: &str) -> bool {
 
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<Project>>> {
     let rows = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("select {PROJECT_COLUMNS} from projects where owner = $1 order by created_at, id"))).bind(user.id).fetch_all(&state.pool).await?;
+    let rows = with_checkouts(&state, rows).await?;
 
     Ok(Json(rows.into_iter().map(ProjectRow::to_proto).collect()))
 }
@@ -235,9 +288,7 @@ async fn create_project(state: AppState, user: AuthUser, request: CreateProjectR
         _ => return Err(ApiError::bad_request("project_source_required", "Choose a forge repository or enter the folder on the node.")),
     };
 
-    let inserted = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!(
-        "insert into projects (owner, node_id, name, path, forge_id, repository, group_id) values ($1, $2, $3, $4, $5, $6, $7) returning {PROJECT_COLUMNS}",
-    )))
+    let inserted = sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path, forge_id, repository, group_id) values ($1, $2, $3, $4, $5, $6, $7) returning id")
     .bind(user.id)
     .bind(request.node_id)
     .bind(&name)
@@ -249,10 +300,10 @@ async fn create_project(state: AppState, user: AuthUser, request: CreateProjectR
     .await;
 
     match inserted {
-        Ok(row) => {
-            link_conversations(&state, user.id, &row).await?;
-            let (owner, project_id) = (user.id, row.id);
-            let project = row.to_proto();
+        Ok(project_id) => {
+            link_conversations(&state, user.id, project_id, request.node_id).await?;
+            let owner = user.id;
+            let project = find_owned(&state, project_id, owner).await?.to_proto();
             state.publish(Some(owner), StreamMessage::Project(project.clone()));
             let background = state.clone();
             tokio::spawn(async move { find_automatic_icon(&background, owner, project_id).await });
@@ -267,7 +318,7 @@ async fn create_project(state: AppState, user: AuthUser, request: CreateProjectR
 pub async fn checkout(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<CheckoutProjectRequest>) -> ApiResult<(StatusCode, Json<Project>)> {
     let project = find_owned(&state, id, user.id).await?;
 
-    if project.node_id == request.node_id {
+    if project.checkout_on(request.node_id).is_some() {
         return Ok((StatusCode::OK, Json(project.to_proto())));
     }
 
@@ -275,8 +326,16 @@ pub async fn checkout(State(state): State<AppState>, user: AuthUser, Path(id): P
         return Err(ApiError::bad_request("project_not_cloneable", "This project has no forge repository to clone. Register its folder on that node instead."));
     };
 
-    if let Ok(existing) = sibling_on(&state, user.id, &project, request.node_id).await {
-        return Ok((StatusCode::OK, Json(existing.to_proto())));
+    let sibling = sqlx::query_scalar::<_, Uuid>("select p.id from projects p join project_checkouts c on c.project_id = p.id where p.owner = $1 and c.node_id = $2 and p.forge_id = $3 and lower(p.repository) = lower($4) order by p.created_at, p.id limit 1")
+        .bind(user.id)
+        .bind(request.node_id)
+        .bind(forge_id)
+        .bind(&repository)
+        .fetch_optional(&state.pool)
+        .await?;
+
+    if let Some(sibling) = sibling {
+        return Ok((StatusCode::OK, Json(find_owned(&state, sibling, user.id).await?.to_proto())));
     }
 
     create_project(state, user, CreateProjectRequest { node_id: request.node_id, forge_id: Some(forge_id), repository: Some(repository), path: None, new_repository: false, new_folder: None, group_id: None }).await
@@ -323,6 +382,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     };
 
     publish_project(&state, user.id, id).await?;
+    let row = with_checkouts(&state, vec![row]).await?.remove(0);
 
     Ok(Json(row.to_proto()))
 }
@@ -334,6 +394,7 @@ pub async fn set_avatar(state: &AppState, owner: Uuid, id: Uuid, media_type: &st
     let row = store_avatar(state, owner, id, media_type, body, false).await?.ok_or_else(|| ApiError::not_found("That project"))?;
 
     publish_project(state, owner, id).await?;
+    let row = with_checkouts(state, vec![row]).await?.remove(0);
 
     Ok(row.to_proto())
 }
@@ -385,16 +446,18 @@ pub async fn find_icon(State(state): State<AppState>, user: AuthUser, Path(id): 
 pub async fn find_automatic_icon(state: &AppState, owner: Uuid, id: Uuid) {
     use base64::Engine;
 
-    let wanting = sqlx::query_as::<_, (Uuid, String, String)>("select p.node_id, p.path, n.version from projects p join nodes n on n.id = p.node_id where p.id = $1 and p.owner = $2 and (p.avatar_automatic or (p.icon is null and p.avatar_sha256 is null))").bind(id).bind(owner).fetch_optional(&state.pool).await;
-    let Ok(Some((node_id, path, version))) = wanting else {
+    let wanting = sqlx::query_as::<_, (Uuid, String, String)>("select c.node_id, c.path, n.version from projects p join project_checkouts c on c.project_id = p.id join nodes n on n.id = c.node_id where p.id = $1 and p.owner = $2 and (p.avatar_automatic or (p.icon is null and p.avatar_sha256 is null)) order by c.created_at, c.id").bind(id).bind(owner).fetch_all(&state.pool).await;
+    let Ok(wanting) = wanting else {
         return;
     };
+    let reachable = wanting.into_iter().find(|(node_id, _, version)| {
+        let supported = semver::Version::parse(version.trim_start_matches('v')).is_ok_and(|version| version >= semver::Version::new(0, 9, 0));
 
-    let supported = semver::Version::parse(version.trim_start_matches('v')).is_ok_and(|version| version >= semver::Version::new(0, 9, 0));
-
-    if !supported || !state.hub.is_online(node_id) {
+        supported && state.hub.is_online(*node_id)
+    });
+    let Some((node_id, path, _)) = reachable else {
         return;
-    }
+    };
 
     let Ok(answer) = relay(state, node_id, path, GitCommand::FindLogo).await else {
         return;

@@ -88,7 +88,7 @@ pub async fn start(state: &AppState, owner: Uuid, request: CreateConversationReq
 
 pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConversationRequest, assistant_id: Option<Uuid>, scratch: bool) -> ApiResult<Conversation> {
     let mut any_node_name = None;
-    let mut project = match request.project_id {
+    let project = match request.project_id {
         Some(project_id) => Some(projects::find_owned(state, project_id, owner).await?),
         None => None,
     };
@@ -103,23 +103,15 @@ pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConvers
     }
 
     if any_node {
-        let holding = match &project {
-            Some(project) => Some(projects::nodes_holding(state, owner, project).await?),
-            None => None,
-        };
+        let holding = project.as_ref().map(projects::ProjectRow::checkout_nodes);
         let picked = crate::node_pick::pick(state, owner, holding.as_deref()).await?;
 
         request.node_id = picked.node_id;
-
-        if let Some(held) = &project && held.node_id != picked.node_id {
-            project = Some(projects::sibling_on(state, owner, held, picked.node_id).await?);
-        }
-
         any_node_name = Some(picked.name);
     }
 
-    if project.as_ref().is_some_and(|project| project.node_id != request.node_id) {
-        return Err(ApiError::bad_request("project_not_on_node", "This project is not set up on that node. Choose a node it is set up on."));
+    if project.as_ref().is_some_and(|project| project.checkout_on(request.node_id).is_none()) {
+        return Err(projects::not_on_node());
     }
 
     if project.is_none() && (request.branch.is_some() || request.worktree_path.is_some()) {
@@ -129,7 +121,7 @@ pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConvers
     let scratch_id = (scratch && request.parent_id.is_none()).then(Uuid::new_v4);
     let mut cwd = match (&project, scratch_id) {
         (_, Some(id)) => assistants::folder_of(id),
-        (Some(project), None) => project.path.clone(),
+        (Some(project), None) => project.checkout_on(request.node_id).map(|checkout| checkout.path.clone()).unwrap_or_default(),
         (None, None) => request.cwd.trim().to_string(),
     };
 
@@ -172,14 +164,15 @@ pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConvers
     let mut worktree_branch = None;
 
     if let (Some(project), Some(branch)) = (&project, &request.branch) {
-        let worktree = worktrees::create(state, project, branch, None).await?;
+        let checkout = project.checkout_on(request.node_id).ok_or_else(projects::not_on_node)?;
+        let worktree = worktrees::create(state, checkout, branch, None).await?;
 
         cwd = worktree.path;
         worktree_branch = Some(worktree.branch);
     }
 
     if let (Some(project), Some(path)) = (&project, &request.worktree_path) {
-        let existing = worktrees::find_existing(state, project, path).await?;
+        let existing = worktrees::find_existing(state, project, request.node_id, path).await?;
 
         cwd = existing.path;
         worktree_branch = existing.branch;
@@ -450,8 +443,8 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     if let Some(project_id) = request.project_id {
         let project = projects::find_owned(&state, project_id, user.id).await?;
 
-        if project.node_id != before.node_id {
-            return Err(ApiError::bad_request("project_not_on_node", "This project is not set up on that node. Choose a node it is set up on."));
+        if project.checkout_on(before.node_id).is_none() {
+            return Err(projects::not_on_node());
         }
     }
 

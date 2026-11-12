@@ -259,8 +259,8 @@ pub async fn insert(state: &AppState, owner: Uuid, request: CreateScheduleReques
         if let Some(project_id) = request.project_id {
             let project = projects::find_owned(state, project_id, owner).await?;
 
-            if project.node_id != node_id {
-                return Err(ApiError::bad_request("project_not_on_node", "This project is not set up on that node. Choose a node it is set up on."));
+            if project.checkout_on(node_id).is_none() {
+                return Err(projects::not_on_node());
             }
         } else if request.cwd.trim().is_empty() {
             return Err(ApiError::bad_request("cwd_required", "Enter the folder the agent should work in."));

@@ -6,7 +6,7 @@ use crate::forges;
 use crate::git::relay;
 use crate::instructions;
 use crate::nodes::{node_has, node_offline};
-use crate::projects::{self, PROJECT_COLUMNS, ProjectRow};
+use crate::projects::{self, CHECKOUT_COLUMNS, CheckoutRow, PROJECT_COLUMNS, ProjectRow};
 use crate::prompts::pump;
 use crate::state::AppState;
 use crate::store::{CONVERSATION_COLUMNS, ConversationRow, TURN_HAS_ENDED, enum_text, find_owned, highest_node_seq, parse_enum};
@@ -40,7 +40,8 @@ struct Route {
     source: ConversationRow,
     source_node_name: String,
     source_project: Option<ProjectRow>,
-    target_project: Option<ProjectRow>,
+    source_checkout: Option<CheckoutRow>,
+    target_checkout: Option<CheckoutRow>,
     assistant_id: Option<Uuid>,
 }
 
@@ -86,24 +87,37 @@ async fn route(state: &AppState, owner: Uuid, id: Uuid, target_node_id: Uuid) ->
 
     let source_node_name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(source.node_id).fetch_one(&state.pool).await?;
     let recorded = sqlx::query_scalar::<_, Option<Uuid>>("select project_id from conversations where id = $1").bind(id).fetch_one(&state.pool).await?;
-    let on_source = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("select {PROJECT_COLUMNS} from projects where owner = $1 and node_id = $2"))).bind(owner).bind(source.node_id).fetch_all(&state.pool).await?;
-    let contains = |project: &ProjectRow| source.cwd == project.path || source.cwd.starts_with(&format!("{}/", project.path)) || source.cwd.starts_with(&format!("{}-worktrees/", project.path));
-    let source_project = on_source.iter().find(|project| Some(project.id) == recorded).or_else(|| on_source.iter().filter(|project| contains(project)).max_by_key(|project| project.path.len())).cloned();
+    let on_source = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("select {PROJECT_COLUMNS} from projects where owner = $1 and exists (select 1 from project_checkouts where project_id = projects.id and node_id = $2)")))
+        .bind(owner)
+        .bind(source.node_id)
+        .fetch_all(&state.pool)
+        .await?;
+    let on_source = projects::with_checkouts(state, on_source).await?;
+    let path_on_source = |project: &ProjectRow| project.checkout_on(source.node_id).map(|checkout| checkout.path.clone()).unwrap_or_default();
+    let contains = |project: &ProjectRow| {
+        let path = path_on_source(project);
 
-    let target_project = match source_project.as_ref().and_then(|project| project.forge_id.zip(project.repository.clone())) {
+        source.cwd == path || source.cwd.starts_with(&format!("{path}/")) || source.cwd.starts_with(&format!("{path}-worktrees/"))
+    };
+    let source_project = on_source.iter().find(|project| Some(project.id) == recorded).or_else(|| on_source.iter().filter(|project| contains(project)).max_by_key(|project| path_on_source(project).len())).cloned();
+    let source_checkout = source_project.as_ref().and_then(|project| project.checkout_on(source.node_id)).cloned();
+
+    let target_checkout = match source_project.as_ref().and_then(|project| project.forge_id.zip(project.repository.clone())) {
         Some((forge_id, repository)) => {
-            sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("select {PROJECT_COLUMNS} from projects where owner = $1 and node_id = $2 and forge_id = $3 and repository = $4")))
-                .bind(owner)
-                .bind(target_node_id)
-                .bind(forge_id)
-                .bind(repository)
-                .fetch_optional(&state.pool)
-                .await?
+            sqlx::query_as::<_, CheckoutRow>(sqlx::AssertSqlSafe(format!(
+                "select {CHECKOUT_COLUMNS} from project_checkouts where node_id = $2 and project_id in (select id from projects where owner = $1 and forge_id = $3 and lower(repository) = lower($4)) order by created_at, id limit 1",
+            )))
+            .bind(owner)
+            .bind(target_node_id)
+            .bind(forge_id)
+            .bind(repository)
+            .fetch_optional(&state.pool)
+            .await?
         }
         None => None,
     };
 
-    Ok(Route { source, source_node_name, source_project, target_project, assistant_id })
+    Ok(Route { source, source_node_name, source_project, source_checkout, target_checkout, assistant_id })
 }
 
 fn stays_behind(sample: &ResourceSample, conversation_id: Uuid, cwd: &str) -> (Vec<u16>, Vec<String>) {
@@ -162,8 +176,8 @@ pub async fn plan(State(state): State<AppState>, user: AuthUser, Path(id): Path<
         reason,
         branch,
         changed_files,
-        project_on_target: route.target_project.is_some(),
-        clones_project: route.target_project.is_none() && repository.is_some(),
+        project_on_target: route.target_checkout.is_some(),
+        clones_project: route.target_checkout.is_none() && repository.is_some(),
         agent_session: source.acp_session_id.is_some(),
         stays_ports,
         stays_processes,
@@ -292,41 +306,30 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
             (located, source.cwd.clone(), path.to_string(), None, None)
         }
         None => {
-            let Some((source_project, forge_id, repository)) = route.source_project.clone().and_then(|project| project.forge_id.zip(project.repository.clone()).map(|(forge_id, repository)| (project, forge_id, repository))) else {
+            let held = route.source_project.clone().zip(route.source_checkout.clone()).and_then(|(project, checkout)| {
+                let (forge_id, repository) = project.forge_id.zip(project.repository.clone())?;
+
+                Some((project, checkout, forge_id, repository))
+            });
+            let Some((source_project, source_checkout, forge_id, repository)) = held else {
                 return Err(reason("This folder is not a forge repository, so Mycelium cannot find the same project on the other node."));
             };
 
             let snapshot = relay(state, source.node_id, source.cwd.clone(), GitCommand::Snapshot { session_id: source.acp_session_id.clone() }).await.map_err(|error| reason(error.message()))?;
 
             let forge = forges::find_owned(state, forge_id, owner).await.map_err(|error| reason(error.message()))?;
-            let target_project = match route.target_project.clone() {
-                Some(project) => project,
+            let target_checkout = match route.target_checkout.clone() {
+                Some(checkout) => checkout,
                 None => {
                     let path = projects::clone_repository(state, &forge, &repository, target_node_id, None).await.map_err(|error| reason(error.message()))?;
-                    let name = repository.rsplit('/').next().unwrap_or(&repository).to_string();
 
-                    sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!(
-                        "insert into projects (owner, node_id, name, path, forge_id, repository, group_id) values ($1, $2, $3, $4, $5, $6, $7)
-                         on conflict (node_id, path) do update set forge_id = excluded.forge_id, repository = excluded.repository where projects.owner = excluded.owner
-                         returning {PROJECT_COLUMNS}",
-                    )))
-                    .bind(owner)
-                    .bind(target_node_id)
-                    .bind(&name)
-                    .bind(&path)
-                    .bind(forge_id)
-                    .bind(&repository)
-                    .bind(source_project.group_id)
-                    .fetch_optional(&state.pool)
-                    .await
-                    .map_err(|error| reason(ApiError::from(error).message()))?
-                    .ok_or_else(|| reason("The folder on the other node already belongs to another account. Choose a different node."))?
+                    projects::add_checkout(state, source_project.id, target_node_id, &path).await.map_err(|error| reason(error.message()))?
                 }
             };
 
-            let target_cwd = match source.cwd.strip_prefix(&source_project.path) {
-                Some(inside) if inside.is_empty() || inside.starts_with('/') => format!("{}{inside}", target_project.path),
-                _ => target_project.path.clone(),
+            let target_cwd = match source.cwd.strip_prefix(&source_checkout.path) {
+                Some(inside) if inside.is_empty() || inside.starts_with('/') => format!("{}{inside}", target_checkout.path),
+                _ => target_checkout.path.clone(),
             };
 
             let apply = GitCommand::Apply {
@@ -337,9 +340,9 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
                 credentials: Some(forge.git_credentials().map_err(|error| reason(error.message()))?),
                 approved_urls: forge.approved_clone_urls(&state.http, &repository).await.map_err(|error| reason(error.message()))?,
             };
-            let applied = relay(state, target_node_id, target_project.path.clone(), apply).await.map_err(|error| reason(error.message()))?;
+            let applied = relay(state, target_node_id, target_checkout.path.clone(), apply).await.map_err(|error| reason(error.message()))?;
 
-            (snapshot, target_cwd.clone(), target_cwd, Some(target_project.id), Some((target_project.path.clone(), applied)))
+            (snapshot, target_cwd.clone(), target_cwd, Some(target_checkout.project_id), Some((target_checkout.path.clone(), applied)))
         }
     };
 

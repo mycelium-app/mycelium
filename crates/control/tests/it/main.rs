@@ -63,6 +63,7 @@ mod nodes;
 mod paperless;
 mod project_icons;
 mod projects;
+mod projects_merge;
 mod pulls;
 mod provider_usage;
 mod puzzles;

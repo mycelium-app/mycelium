@@ -448,8 +448,10 @@ async fn the_project_is_cloned_on_the_other_node_when_it_is_missing_there() {
     assert!(matches!(command, GitCommand::Apply { .. }));
 
     let (_, projects) = moving.server.user.json(moving.server.user.get("/api/v1/projects")).await;
-    let on_target = projects.as_array().unwrap().iter().find(|project| project["node_id"] == json!(moving.target.id)).unwrap();
-    assert_eq!((on_target["path"].clone(), on_target["repository"].clone(), on_target["forge_id"].clone()), (json!(TARGET_PATH), json!("acme-org/app"), json!(moving.forge_id)));
+    let project = projects.as_array().unwrap().iter().find(|project| project["checkouts"].as_array().unwrap().iter().any(|checkout| checkout["node_id"] == json!(moving.target.id))).unwrap();
+    let on_target = project["checkouts"].as_array().unwrap().iter().find(|checkout| checkout["node_id"] == json!(moving.target.id)).unwrap();
+    assert_eq!((on_target["path"].clone(), project["repository"].clone(), project["forge_id"].clone()), (json!(TARGET_PATH), json!("acme-org/app"), json!(moving.forge_id)));
+    assert_eq!(projects.as_array().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -465,7 +467,7 @@ async fn cloning_onto_a_folder_another_account_registered_leaves_their_project_a
     answer_next(&mut moving.target, Ok(json!({"path": TARGET_PATH}))).await;
     let failed = progress(&moving, "failed").await;
 
-    assert!(failed["message"].as_str().unwrap().contains("another account"), "{failed}");
+    assert!(failed["message"].as_str().unwrap().contains("already a project"), "{failed}");
     let (owner, forge_id) = sqlx::query_as::<_, (Uuid, Option<Uuid>)>("select owner, forge_id from projects where node_id = $1 and path = $2").bind(moving.target.id).bind(TARGET_PATH).fetch_one(&moving.server.pool).await.unwrap();
     assert_eq!((owner, forge_id), (alex, None));
 }

@@ -89,16 +89,17 @@ pub async fn start_workspace(State(state): State<AppState>, user: AuthUser, Path
     };
 
     let branch = format!("issue/{number}-{}", slug(&issue.title));
-    let existing = sqlx::query_scalar::<_, String>("select path from worktrees where project_id = $1 and issue_number = $2").bind(project.id).bind(number).fetch_optional(&state.pool).await?;
+    let checkout = project.oldest_checkout()?;
+    let existing = sqlx::query_scalar::<_, String>("select path from worktrees where checkout_id = $1 and issue_number = $2").bind(checkout.id).bind(number).fetch_optional(&state.pool).await?;
     let cwd = match existing {
         Some(path) => path,
-        None => worktrees::create(&state, &project, &branch, Some(number)).await?.path,
+        None => worktrees::create(&state, checkout, &branch, Some(number)).await?.path,
     };
 
     let body = issue.body.trim();
     let details = if body.is_empty() { String::new() } else { format!("\n\n{body}") };
     let prompt = format!("Work on issue #{number}: {}\n{}{details}", issue.title, issue.url);
-    let start = CreateConversationRequest { mode: None, config: None, account: None, node_id: project.node_id, agent: request.agent, cwd, project_id: None, branch: None, worktree_path: None, title: Some(format!("#{number} {}", issue.title)), prompt: Some(prompt), parent_id: None, side_kind: None, model: None, routing: None, client_id: None };
+    let start = CreateConversationRequest { mode: None, config: None, account: None, node_id: checkout.node_id, agent: request.agent, cwd, project_id: None, branch: None, worktree_path: None, title: Some(format!("#{number} {}", issue.title)), prompt: Some(prompt), parent_id: None, side_kind: None, model: None, routing: None, client_id: None };
     let conversation = conversations::start(&state, user.id, start).await?;
 
     Ok((StatusCode::CREATED, Json(conversation)))

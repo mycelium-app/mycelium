@@ -181,7 +181,7 @@ fn matches_current(entry: &ModelChoice, row: &ConversationRow) -> bool {
 }
 
 async fn folder_exists(state: &AppState, owner: Uuid, node_id: Uuid, cwd: &str) -> ApiResult<bool> {
-    Ok(sqlx::query_scalar::<_, bool>("select exists (select 1 from projects where owner = $1 and node_id = $2 and path = $3)").bind(owner).bind(node_id).bind(cwd).fetch_one(&state.pool).await?)
+    Ok(sqlx::query_scalar::<_, bool>("select exists (select 1 from project_checkouts c join projects p on p.id = c.project_id where p.owner = $1 and c.node_id = $2 and c.path = $3)").bind(owner).bind(node_id).bind(cwd).fetch_one(&state.pool).await?)
 }
 
 async fn target_for(state: &AppState, owner: Uuid, entry: &ModelChoice, row: &ConversationRow, leaving_current: bool) -> ApiResult<Option<Target>> {
