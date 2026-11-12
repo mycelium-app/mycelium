@@ -1,6 +1,6 @@
 use crate::common;
 use crate::common::{NodeLink, Server};
-use mycelium_proto::link::ControlToNode;
+use mycelium_proto::link::{ControlToNode, NodeToControl};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -1115,4 +1115,49 @@ async fn creating_and_connecting_a_cross_group_start_connects_only_the_two_conve
     let (_, conversations) = fleet.server.user.json(fleet.server.user.get("/api/v1/conversation-connections")).await;
     assert_eq!(groups.as_array().unwrap().len(), 0);
     assert_eq!(conversations.as_array().unwrap().len(), 1, "{conversations}");
+}
+
+#[tokio::test]
+async fn a_conversation_started_here_that_the_node_refuses_fails_with_the_reason_and_tells_the_starter() {
+    let mut fleet = fleet().await;
+    connect(&fleet.server, fleet.yucca, fleet.immich).await;
+    project_in(&fleet, "billing", Some(fleet.immich)).await;
+    crate::watches::end_turn(&mut fleet.link, fleet.yucca_chat, 1).await;
+    let reason = "The folder /tmp/platform-health-oidc is outside /work. Choose a folder inside it.";
+
+    let started = call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_conversation", start_arguments("immich", "billing")).await;
+    let new_chat: Uuid = text(&started).split('(').nth(1).unwrap().split(')').next().unwrap().parse().unwrap();
+    fleet.link.expect_start_session().await;
+    fleet.link.send(NodeToControl::SessionFailed { conversation_id: new_chat, seq: 1, message: reason.into() }).await;
+    let told = crate::watches::told(&fleet.server, fleet.yucca_chat, 1).await;
+
+    assert!(told.contains("failed") && told.contains(reason), "{told}");
+    assert_eq!(fleet.server.conversation(new_chat).await["status"], "failed");
+}
+
+#[tokio::test]
+async fn a_node_refusal_that_arrives_while_the_conversation_is_being_started_still_tells_the_starter() {
+    let mut fleet = fleet().await;
+    connect(&fleet.server, fleet.yucca, fleet.immich).await;
+    project_in(&fleet, "billing", Some(fleet.immich)).await;
+    crate::watches::end_turn(&mut fleet.link, fleet.yucca_chat, 1).await;
+    let reason = "claude is not installed on this node.";
+
+    let anonymous = fleet.server.anonymous();
+    let request = anonymous
+        .post("/api/v1/mcp")
+        .header("authorization", format!("Bearer {}", fleet.link.token))
+        .header("x-mycelium-conversation", fleet.yucca_chat.to_string())
+        .json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "start_conversation", "arguments": start_arguments("immich", "billing")}}));
+    let start = anonymous.json(request);
+    let refuse_at_once = async {
+        let new_chat = fleet.link.expect_start_session().await;
+        fleet.link.send(NodeToControl::SessionFailed { conversation_id: new_chat, seq: 1, message: reason.into() }).await;
+    };
+    let ((_, body), ()) = tokio::join!(start, refuse_at_once);
+    let started = body["result"].clone();
+    let told = crate::watches::told(&fleet.server, fleet.yucca_chat, 1).await;
+
+    assert_eq!(started["isError"], false, "{started}");
+    assert!(told.contains("failed") && told.contains(reason), "{told}");
 }

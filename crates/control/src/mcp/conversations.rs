@@ -5,8 +5,8 @@ use crate::forge_watches::{self, Target};
 use crate::group_connections;
 use crate::message_proposals;
 use crate::start_proposals;
-use crate::store::{CONVERSATION_COLUMNS, CONVERSATION_GROUP_SQL, ConversationRow, append_event, find_owned, resolve_action_item};
-use mycelium_proto::conversation::EventKind;
+use crate::store::{CONVERSATION_COLUMNS, CONVERSATION_GROUP_SQL, ConversationRow, append_event, enum_text, find_owned, resolve_action_item};
+use mycelium_proto::conversation::{ConversationStatus, EventKind};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -461,6 +461,11 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
 
             let managed = crate::conversations::manage(state, owner, conversation_id, started.id).await?;
             state.publish(Some(owner), StreamMessage::Conversation(managed.to_proto()?));
+
+            if managed.status == enum_text(&ConversationStatus::Failed) {
+                crate::watches::conversation_ended(state, started.id, crate::watches::Ending::Failed).await?;
+            }
+
             let node_name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(started.node_id).fetch_one(&state.pool).await?;
 
             ToolReply::text(&format!("Started {} ({}) in {target_name} on {node_name}. The reason was: {reason}", message_proposals::label(started.id, &started.title), started.id), false)

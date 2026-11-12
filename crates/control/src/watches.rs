@@ -147,9 +147,14 @@ pub async fn conversation_ended(state: &AppState, conversation: Uuid, ending: En
     let at = sqlx::query_scalar::<_, Option<i64>>("select max(seq) from events where conversation_id = $1").bind(conversation).fetch_one(&state.pool).await?.unwrap_or_default();
     let label = crate::message_proposals::label(conversation, &title);
     let result = latest_result(state, conversation).await?.map(|(_, text)| text.chars().take(MOST_RESULT_CHARACTERS).collect::<String>());
-    let text = match result {
-        Some(result) => format!("From {label}:\n\n{label} ({conversation}) {}.\n\nLatest result:\n{result}", ending.words()),
-        None => format!("From {label}:\n\n{label} ({conversation}) {}.", ending.words()),
+    let reason = match ending {
+        Ending::Failed => sqlx::query_scalar::<_, Option<String>>("select payload->>'message' from events where conversation_id = $1 and kind = 'error' order by seq desc limit 1").bind(conversation).fetch_optional(&state.pool).await?.flatten(),
+        Ending::Done | Ending::Waiting => None,
+    };
+    let text = match (reason, result) {
+        (Some(reason), _) => format!("From {label}:\n\n{label} ({conversation}) {}.\n\nReason:\n{reason}", ending.words()),
+        (None, Some(result)) => format!("From {label}:\n\n{label} ({conversation}) {}.\n\nLatest result:\n{result}", ending.words()),
+        (None, None) => format!("From {label}:\n\n{label} ({conversation}) {}.", ending.words()),
     };
 
     for (watch, owner, watcher, skip_finished) in watches {
