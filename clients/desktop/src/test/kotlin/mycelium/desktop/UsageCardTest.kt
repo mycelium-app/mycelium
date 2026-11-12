@@ -6,7 +6,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.graphics.asSkiaBitmap
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.seconds
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
@@ -182,6 +188,32 @@ class UsageCardTest {
         rule.onNodeWithText("7d").assertIsDisplayed()
         rule.onNodeWithText("71%").assertIsDisplayed()
         rule.onNode(hasContentDescription("Weekly window, 71% used, at this rate runs out in", substring = true)).assertExists()
+    }
+
+    @Test
+    fun aNarrowCardKeepsFullPercentAndResetTextAndAlignsThePercentColumn() {
+        val now = kotlin.time.Clock.System.now()
+        val full = AgentAccount("claude", "sam@example.com", "oauth_token", emptyList(), windows = listOf(
+            UsageWindow("five_hour", 100.0, resetsAt = (now + 3.hours + 4.minutes + 30.seconds).toString()),
+            UsageWindow("seven_day", 71.0, resetsAt = (now + 23.hours + 59.minutes + 30.seconds).toString(), ratePerHour = 1.0, runsOutAt = (now + 10.hours).toString()),
+        ))
+        val low = AgentAccount("codex", "alex@example.org", "oauth_token", emptyList(), windows = listOf(UsageWindow("five_hour", 7.0, resetsAt = (now + 2.hours + 5.minutes + 30.seconds).toString())))
+
+        rule.setContent { MyceliumTheme(true) { Box(Modifier.width(268.dp)) { UsageCard(listOf(full to false, low to false)) } } }
+
+        val laidOut = { text: String ->
+            val results = mutableListOf<TextLayoutResult>()
+
+            rule.onNodeWithText(text).fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!.invoke(results)
+
+            results.single()
+        }
+
+        assertEquals("100%".length, laidOut("100%").getLineEnd(0, visibleEnd = true), "100% is truncated")
+        assertEquals("23h 59m".length, laidOut("23h 59m").getLineEnd(0, visibleEnd = true), "23h 59m is truncated")
+        assertEquals("3h 04m".length, laidOut("3h 04m").getLineEnd(0, visibleEnd = true), "3h 04m is truncated")
+        assertEquals(rule.onNodeWithText("100%").getUnclippedBoundsInRoot().right, rule.onNodeWithText("7%").getUnclippedBoundsInRoot().right)
+        rule.onRoot().save("usage-card-narrow-full-percent")
     }
 
     @Test
@@ -394,4 +426,12 @@ private fun Float.toDp(rule: ComposeContentTestRule): Dp = with(rule.density) { 
 
 private fun assertEquals(expected: Dp, actual: Dp, tolerance: Dp) {
     assertTrue((expected - actual).value.let { kotlin.math.abs(it) } <= tolerance.value, "expected $expected, was $actual")
+}
+
+private fun androidx.compose.ui.test.SemanticsNodeInteraction.save(name: String) {
+    val png = org.jetbrains.skia.Image.makeFromBitmap(captureToImage().asSkiaBitmap()).encodeToData(org.jetbrains.skia.EncodedImageFormat.PNG)!!.bytes
+    val out = java.io.File("build/screens/$name.png")
+
+    out.parentFile.mkdirs()
+    out.writeBytes(png)
 }

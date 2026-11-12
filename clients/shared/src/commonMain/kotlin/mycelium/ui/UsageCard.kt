@@ -35,6 +35,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -144,6 +146,11 @@ internal fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (s
     val platform = LocalPlatform.current
     val colors = MyTheme.colors
     val localDateTime: (Long) -> String? = { millis -> platform?.localDateTime(millis) }
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val figureStyle = Tokens.Type.Meta.copy(fontFeatureSettings = "tnum").themed()
+    val percentWidth = with(density) { measurer.measure(WidestPercent, figureStyle, softWrap = false, maxLines = 1).size.width.toDp() }
+    val resetWidth = with(density) { measurer.measure(WidestReset, figureStyle, softWrap = false, maxLines = 1).size.width.toDp() } + UsageAlertSize + Tokens.Space.S0_5
     var now by remember { mutableStateOf(Clock.System.now()) }
 
     LaunchedEffect(account.windows, now) {
@@ -179,14 +186,14 @@ internal fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (s
                 Hinted(description, Modifier.weight(1f).widthIn(min = UsageMeterMinWidth)) {
                     Meter(usage.percent, description, attention = attention, markerPercent = pace, height = UsageMeterHeight)
                 }
-                Label("${usage.percent}%", Modifier.width(UsagePercentWidth), Tokens.Type.Meta.copy(textAlign = TextAlign.End), maxLines = 1)
-                Hinted(description, Modifier.width(UsageResetWidth)) {
+                Label("${usage.percent}%", Modifier.width(percentWidth), figureStyle.copy(textAlign = TextAlign.End), maxLines = 1, overflow = TextOverflow.Clip)
+                Hinted(description, Modifier.width(resetWidth)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
                         if (attention) {
                             Icon(MyIcon.Alert, colors.statusAttention, UsageAlertSize)
                         }
 
-                        Label(usage.reset, style = Tokens.Type.Meta, color = if (attention) colors.statusAttention else colors.textMuted, maxLines = 1)
+                        Label(usage.reset, style = figureStyle, color = if (attention) colors.statusAttention else colors.textMuted, maxLines = 1)
                     }
                 }
             }
@@ -328,9 +335,9 @@ private fun SpendFigureLabel(figure: SpendFigure) {
 private val UsageRowHeight = 18.dp
 private val UsageNameWidth = 92.dp
 private val UsageWindowWidth = 14.dp
-private val UsageMeterMinWidth = 36.dp
-private val UsagePercentWidth = 28.dp
-private val UsageResetWidth = 52.dp
+private val UsageMeterMinWidth = 24.dp
+private const val WidestPercent = "100%"
+private const val WidestReset = "23h 59m"
 private val UsageMeterHeight = 4.dp
 private val UsageAlertSize = 12.dp
 private val UpdatedTick = 1.minutes
