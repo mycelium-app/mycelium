@@ -88,7 +88,7 @@ async fn stoat_tools_list_servers_read_search_and_send_messages() {
 
     assert_eq!((messages[0]["content"].clone(), messages[0]["author"].clone(), messages[0]["attachments"].clone()), (json!("Noon?"), json!("Grace"), json!([{"name": "menu.pdf", "size": 12}])));
     assert!(messages[0]["sent_at"].as_str().unwrap().starts_with("20"));
-    assert_eq!(found[0]["content"], "Noon?");
+    assert_eq!((found["messages"][0]["content"].clone(), found["coverage"]["returned"].clone(), found["coverage"]["next"].clone()), (json!("Noon?"), json!(1), json!(null)));
     assert_eq!(sent["isError"], false);
     assert_eq!((bad_channel["isError"].clone(), long_query["isError"].clone()), (json!(true), json!(true)));
 
@@ -172,5 +172,5 @@ async fn search_passes_before_and_after_through() {
     let sent: Value = serde_json::from_str(&stoat.requests(Method::POST, &format!("/channels/{HISTORY_CHANNEL}/search"))[0].1).unwrap();
 
     assert_eq!((sent["before"].clone(), sent["after"].clone(), sent["sort"].clone()), (json!(before), json!(after), json!("Latest")));
-    assert_eq!(found.as_array().unwrap().len(), 19);
+    assert_eq!((ids(&found).len(), found["coverage"]["found_oldest"].clone(), found["coverage"]["found_newest"].clone()), (19, json!(true), json!(false)));
 }

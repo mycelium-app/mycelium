@@ -287,10 +287,13 @@ async fn run(http: &reqwest::Client, credentials: &Credentials, tool: &str, argu
                 return Err(format!("Shorten query to {MAX_SEARCH_QUERY} characters or fewer."));
             }
 
-            let mut payload = json!({"query": query, "limit": limit(arguments).min(message_paging::PAGE_SIZE), "sort": "Latest", "include_users": true});
+            let asked = limit(arguments).min(message_paging::PAGE_SIZE);
+            let mut payload = json!({"query": query, "limit": asked, "sort": "Latest", "include_users": true});
+            let mut found_newest = true;
 
             if let Some(before) = optional_identifier(arguments, "before")? {
                 payload["before"] = json!(before);
+                found_newest = false;
             }
 
             if let Some(after) = optional_identifier(arguments, "after")? {
@@ -299,7 +302,15 @@ async fn run(http: &reqwest::Client, credentials: &Credentials, tool: &str, argu
 
             let body = send(request(http, credentials, reqwest::Method::POST, &format!("channels/{channel}/search")).json(&payload)).await?;
 
-            Ok(messages(&body))
+            let listed = messages(&body);
+            let found = listed.as_array().cloned().unwrap_or_default();
+            let oldest = found.first().and_then(|message| message["id"].as_str());
+            let newest = found.last().and_then(|message| message["id"].as_str());
+            let full_page = found.len() as u64 >= asked;
+            let next = if full_page { oldest.map(str::to_string) } else { None };
+            let coverage = message_paging::coverage(found.len(), oldest, newest, !full_page, found_newest, next);
+
+            Ok(json!({"messages": found, "coverage": coverage}))
         }
         SEND_MESSAGE => {
             let channel = identifier(arguments, "channel")?;
