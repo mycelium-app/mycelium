@@ -205,7 +205,7 @@ pub async fn bearer(state: &AppState, row: &ServerRow) -> ApiResult<Option<Strin
 }
 
 pub fn refreshable_after_rejection(row: &ServerRow) -> bool {
-    row.oauth.is_some() && row.oauth_refresh_token.is_some() && row.oauth_expires_at.is_none()
+    row.oauth.is_some() && row.oauth_refresh_token.is_some()
 }
 
 pub async fn renew(state: &AppState, row: &ServerRow) -> ApiResult<Option<String>> {

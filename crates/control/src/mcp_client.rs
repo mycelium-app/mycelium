@@ -12,6 +12,7 @@ const HEADER_MISMATCH: i64 = -32020;
 pub enum McpError {
     Unreachable,
     Rejected,
+    InsufficientScope(Option<String>),
     Failed(String),
 }
 
@@ -54,6 +55,8 @@ impl McpError {
         match self {
             McpError::Unreachable => format!("Mycelium could not reach {name}. Check the address and that the server is running, then try again."),
             McpError::Rejected => format!("{name} did not accept this token. Check that it has not expired and is for this server, then try again."),
+            McpError::InsufficientScope(Some(scope)) => format!("{name} needs more access than the sign-in gave it. Sign in to {name} again in Settings, Integrations and allow: {scope}."),
+            McpError::InsufficientScope(None) => format!("{name} needs more access than the sign-in gave it. Sign in to {name} again in Settings, Integrations and allow what it asks for."),
             McpError::Failed(reason) => format!("{name} answered with an error: {reason}"),
         }
     }
@@ -234,6 +237,7 @@ impl McpConnection {
             return Err(McpError::Unreachable);
         };
         let status = response.status().as_u16();
+        let challenge = crate::mcp_oauth::challenge_of(response.headers());
         let session = response.headers().get("mcp-session-id").and_then(|value| value.to_str().ok()).map(str::to_string);
         let event_stream = response.headers().get("content-type").and_then(|value| value.to_str().ok()).is_some_and(|value| value.starts_with("text/event-stream"));
         let text = match read_text_limited(response, BODY_LIMIT).await {
@@ -241,6 +245,12 @@ impl McpConnection {
             Err(Oversize::Larger) => return Err(McpError::Failed("the server's reply was larger than 16 MiB.".to_string())),
             Err(Oversize::Stopped) => return Err(McpError::Failed("the server stopped replying part way through.".to_string())),
         };
+
+        if status == 403
+            && let Some(challenge) = challenge.filter(|challenge| challenge.error.as_deref() == Some("insufficient_scope"))
+        {
+            return Err(McpError::InsufficientScope(challenge.scope));
+        }
 
         if status == 401 || status == 403 {
             return Err(McpError::Rejected);

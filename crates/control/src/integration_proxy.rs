@@ -1,5 +1,5 @@
 use crate::auth::AuthUser;
-use crate::chat_tool_servers::{ApiSurface, ServerRow, bearer, known_app, list_owned};
+use crate::chat_tool_servers::{ApiSurface, ServerRow, bearer, known_app, list_owned, refreshable_after_rejection, renew};
 use crate::error::{ApiError, ApiResult};
 use crate::outbound::{BODY_LIMIT, Oversize, read_limited};
 use crate::state::AppState;
@@ -131,27 +131,39 @@ pub async fn proxy(State(state): State<AppState>, user: AuthUser, Path((server_i
         return Err(ApiError::new(StatusCode::FORBIDDEN, "scope_not_granted", "This token allows reads only. Ask the person for write access."));
     }
 
-    let credential = bearer(&state, server).await?.unwrap_or_default();
+    let mut credential = bearer(&state, server).await?.unwrap_or_default();
     let target = match &query {
         Some(query) => format!("{base}{path}?{query}"),
         None => format!("{base}{path}"),
     };
-    let mut request = state.http.request(method.clone(), target).timeout(PROXY_TIMEOUT).bearer_auth(credential).body(body.to_vec());
-
-    for name in [header::CONTENT_TYPE, header::ACCEPT] {
-        if let Some(value) = headers.get(&name) {
-            request = request.header(name, value);
-        }
-    }
-
     let tool = format!("api:{} {}", method, path);
-    let response = match request.send().await {
-        Ok(response) => response,
-        Err(_) => {
-            record(&state, &user, server, &tool, reading, true).await;
+    let mut renewed = false;
+    let response = loop {
+        let mut request = state.http.request(method.clone(), &target).timeout(PROXY_TIMEOUT).bearer_auth(&credential).body(body.to_vec());
 
-            return Err(ApiError::new(StatusCode::BAD_GATEWAY, "integration_unreachable", format!("Mycelium could not reach {}.", server.name)));
+        for name in [header::CONTENT_TYPE, header::ACCEPT] {
+            if let Some(value) = headers.get(&name) {
+                request = request.header(name, value);
+            }
         }
+
+        let response = match request.send().await {
+            Ok(response) => response,
+            Err(_) => {
+                record(&state, &user, server, &tool, reading, true).await;
+
+                return Err(ApiError::new(StatusCode::BAD_GATEWAY, "integration_unreachable", format!("Mycelium could not reach {}.", server.name)));
+            }
+        };
+
+        if response.status() == StatusCode::UNAUTHORIZED && !renewed && refreshable_after_rejection(server) {
+            renewed = true;
+            credential = renew(&state, server).await?.unwrap_or_default();
+
+            continue;
+        }
+
+        break response;
     };
     let status = response.status();
 

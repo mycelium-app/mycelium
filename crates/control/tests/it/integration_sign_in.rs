@@ -9,6 +9,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use crate::common::{Server, serve};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 struct Options {
@@ -47,6 +48,9 @@ struct App {
     token_requests: Mutex<Vec<Vec<(String, String)>>>,
     mcp_authorisations: Mutex<Vec<String>>,
     token_authorisations: Mutex<Vec<String>>,
+    api_authorisations: Mutex<Vec<String>>,
+    rejecting: AtomicBool,
+    scope_missing: AtomicBool,
     options: Options,
 }
 
@@ -67,7 +71,13 @@ async fn mcp(State(app): Shared, headers: HeaderMap, Json(body): Json<Value>) ->
     let authorisation = headers.get("authorization").and_then(|value| value.to_str().ok()).unwrap_or_default().to_string();
     app.mcp_authorisations.lock().unwrap().push(authorisation.clone());
 
-    if !authorisation.starts_with("Bearer access-") {
+    if app.scope_missing.load(Ordering::SeqCst) {
+        let challenge = "Bearer error=\"insufficient_scope\", scope=\"files:write\"";
+
+        return (StatusCode::FORBIDDEN, [(header::WWW_AUTHENTICATE, challenge)]).into_response();
+    }
+
+    if !authorisation.starts_with("Bearer access-") || app.rejecting.load(Ordering::SeqCst) {
         return match app.options.challenge {
             Some(challenge) => (StatusCode::UNAUTHORIZED, [(header::WWW_AUTHENTICATE, challenge.replace("{base}", &app.base.lock().unwrap()))]).into_response(),
             None => StatusCode::UNAUTHORIZED.into_response(),
@@ -86,6 +96,17 @@ async fn mcp(State(app): Shared, headers: HeaderMap, Json(body): Json<Value>) ->
     };
 
     Json(json!({"jsonrpc": "2.0", "id": body["id"], "result": result})).into_response()
+}
+
+async fn api(State(app): Shared, headers: HeaderMap) -> Response {
+    let authorisation = headers.get("authorization").and_then(|value| value.to_str().ok()).unwrap_or_default().to_string();
+    app.api_authorisations.lock().unwrap().push(authorisation.clone());
+
+    if authorisation != "Bearer access-2" || app.rejecting.load(Ordering::SeqCst) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    Json(json!({"data": []})).into_response()
 }
 
 async fn protected_resource(State(app): Shared) -> Json<Value> {
@@ -141,8 +162,8 @@ async fn token(State(app): Shared, headers: HeaderMap, body: String) -> Response
 async fn start_with(options: Options) -> (String, Arc<App>) {
     let protected_path = options.protected_path;
     let authorisation_paths = options.authorisation_paths.clone();
-    let app = Arc::new(App { base: Mutex::default(), registrations: Mutex::default(), token_requests: Mutex::default(), mcp_authorisations: Mutex::default(), token_authorisations: Mutex::default(), options });
-    let mut router = Router::new().route("/mcp", post(mcp)).route(protected_path, get(protected_resource)).route("/register", post(register)).route("/token", post(token));
+    let app = Arc::new(App { base: Mutex::default(), registrations: Mutex::default(), token_requests: Mutex::default(), mcp_authorisations: Mutex::default(), token_authorisations: Mutex::default(), api_authorisations: Mutex::default(), rejecting: AtomicBool::new(false), scope_missing: AtomicBool::new(false), options });
+    let mut router = Router::new().route("/mcp", post(mcp)).route(protected_path, get(protected_resource)).route("/api/{action}", post(api)).route("/register", post(register)).route("/token", post(token));
 
     for path in authorisation_paths {
         router = router.route(path, get(authorisation_server));
@@ -812,4 +833,87 @@ async fn signing_in_again_reports_connected_with_the_existing_integration() {
     callback(&server, id).await;
 
     assert_eq!(sign_in_status(&server, id).await, (200, json!({"state": "connected", "server": existing})));
+}
+
+async fn connected_integration(server: &Server, base: &str) -> String {
+    let query = sign_in(server, base).await;
+    finish_sign_in(server, base, &query).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
+
+    listed[0]["id"].as_str().unwrap().to_string()
+}
+
+fn refresh_requests(app: &App) -> usize {
+    app.token_requests.lock().unwrap().iter().filter(|form| form.iter().any(|(name, value)| name == "grant_type" && value == "refresh_token")).count()
+}
+
+#[tokio::test]
+async fn a_rejected_oauth_token_is_refreshed_and_the_tools_listed_even_when_an_expiry_is_known() {
+    let server = Server::start().await;
+    let (_, node_token) = server.join("node", "laptop").await;
+    let (base, app) = start_app(false, 3600).await;
+    connected_integration(&server, &base).await;
+    sqlx::query("update chat_tool_servers set bearer_token = 'stale'").execute(&server.pool).await.unwrap();
+
+    let tools = listed_tools(&server, &node_token).await;
+
+    assert!(tools.iter().any(|tool| tool["name"] == "docs__search"), "{tools:?}");
+    assert_eq!(refresh_requests(&app), 1);
+    assert_eq!(app.mcp_authorisations.lock().unwrap().last().map(String::as_str), Some("Bearer access-2"));
+}
+
+#[tokio::test]
+async fn a_token_still_rejected_after_a_refresh_is_refreshed_once_not_again() {
+    let server = Server::start().await;
+    let (_, node_token) = server.join("node", "laptop").await;
+    let (base, app) = start_app(false, 3600).await;
+    connected_integration(&server, &base).await;
+    app.rejecting.store(true, Ordering::SeqCst);
+
+    listed_tools(&server, &node_token).await;
+
+    assert_eq!(refresh_requests(&app), 1);
+}
+
+#[tokio::test]
+async fn the_integration_proxy_retries_once_with_a_refreshed_token_after_a_401() {
+    let server = Server::start().await;
+    let (base, app) = start_app(false, 3600).await;
+    let id = connected_integration(&server, &base).await;
+
+    let (status, answer) = server.user.json(server.user.post(&format!("/api/v1/integrations/{id}/proxy/collections.list")).json(&json!({}))).await;
+
+    assert_eq!((status, answer), (200, json!({"data": []})));
+    assert_eq!(*app.api_authorisations.lock().unwrap(), vec!["Bearer access-1".to_string(), "Bearer access-2".to_string()]);
+    assert_eq!(refresh_requests(&app), 1);
+}
+
+#[tokio::test]
+async fn the_integration_proxy_does_not_retry_a_second_401_after_refreshing() {
+    let server = Server::start().await;
+    let (base, app) = start_app(false, 3600).await;
+    let id = connected_integration(&server, &base).await;
+    app.rejecting.store(true, Ordering::SeqCst);
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/integrations/{id}/proxy/collections.list")).json(&json!({}))).await;
+
+    assert_eq!(status, 401);
+    assert_eq!(app.api_authorisations.lock().unwrap().len(), 2);
+    assert_eq!(refresh_requests(&app), 1);
+}
+
+#[tokio::test]
+async fn a_403_insufficient_scope_tells_the_person_to_sign_in_again_and_names_the_scope_without_refreshing() {
+    let server = Server::start().await;
+    let (_, node_token) = server.join("node", "laptop").await;
+    let (base, app) = start_app(false, 3600).await;
+    connected_integration(&server, &base).await;
+    app.scope_missing.store(true, Ordering::SeqCst);
+    let anonymous = server.anonymous();
+    let call = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "docs__search", "arguments": {}}});
+
+    let (_, called) = anonymous.json(anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {node_token}")).json(&call)).await;
+
+    assert_eq!(called["result"]["content"][0]["text"], "Docs needs more access than the sign-in gave it. Sign in to Docs again in Settings, Integrations and allow: files:write.");
+    assert_eq!(refresh_requests(&app), 0);
 }
