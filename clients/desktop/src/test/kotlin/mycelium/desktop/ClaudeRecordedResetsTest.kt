@@ -11,7 +11,6 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
-import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
 import io.ktor.http.HttpHeaders
@@ -57,13 +56,13 @@ class ClaudeRecordedResetsTest {
 
     private fun store(): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
-        val engine = MockEngine { request ->
+        val engine = SynchronousMockEngine { request ->
             val path = request.url.encodedPath
 
             if (request.method != HttpMethod.Get) {
                 sent += "${request.method.value} $path" to String(request.body.toByteArray())
 
-                return@MockEngine respond(if (request.method == HttpMethod.Delete) "" else """{"id":"r3","title":"Full reset","manual":true}""", if (request.method == HttpMethod.Delete) HttpStatusCode.NoContent else HttpStatusCode.Created, json)
+                return@SynchronousMockEngine respond(if (request.method == HttpMethod.Delete) "" else """{"id":"r3","title":"Full reset","manual":true}""", if (request.method == HttpMethod.Delete) HttpStatusCode.NoContent else HttpStatusCode.Created, json)
             }
 
             val body = when {
