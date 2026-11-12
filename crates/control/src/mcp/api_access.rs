@@ -7,11 +7,11 @@ pub fn definitions() -> Value {
     json!([
         {
             "name": "request_api_access",
-            "description": "Ask the person for temporary access to the Mycelium API, for work such as debugging that needs more than these tools. It never grants anything itself: it waits for the person to approve it in a card in this conversation, where they can untick scopes and see the duration. On approval you are told in a message the path of a file holding a token and the API address; read the token from that file when you need it and never copy it into a message, a file or a commit. It expires and the person can revoke it.",
+            "description": "Ask the person for temporary access to the Mycelium API, for work such as debugging or administration that needs more than these tools. It never grants anything itself: it waits for the person to approve it in a card in this conversation, where they can untick scopes and see the duration. On approval you are told in a message the path of a file holding a token and the API address; read the token from that file when you need it and never copy it into a message, a file or a commit. It expires and the person can revoke it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "scopes": {"type": "array", "items": {"type": "string", "enum": ["conversations:read", "conversations:write", "nodes:read", "settings:read", "assistants"]}, "description": "The access you need. Ask for the least that works."},
+                    "scopes": {"type": "array", "items": {"type": "string", "enum": ["conversations:read", "conversations:write", "nodes:read", "settings:read", "assistants", "full"]}, "description": "The access you need. full covers every route the narrower scopes do not, writes included such as deciding message proposals and creating conversations, within this conversation's reach and the expiry. Ask for full when the job needs it rather than the narrowest scope that almost works: the person decides on the approval card and can untick scopes."},
                     "hours": {"type": "number", "description": "How long the access lasts, 1 to 24. Defaults to 4."},
                     "integration": {"type": "string", "description": "Ask for API access to one integration account instead of Mycelium's own API: its name or id. Scopes are then read and write. On approval you are told a file holding a token and an address under /api/v1/integrations/{id}/proxy/ that forwards to the integration's API with its credentials added, so you never handle its key."},
                     "reason": {"type": "string", "description": "A short reason the person should approve it."},

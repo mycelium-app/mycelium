@@ -432,3 +432,79 @@ async fn when_the_node_cannot_save_the_token_it_is_revoked_and_the_agent_is_told
     eventually("the agent being told", || async { queued_texts(&server, conversation).await.into_iter().find(|text| text.contains("could not save")) }).await;
     assert_eq!(status_with(&server, &token, "GET", "/api/v1/nodes").await, 401);
 }
+
+const FULL: &[&str] = &["full"];
+
+async fn proposed_message(server: &Server, link: &NodeLink, from: Uuid, to: Uuid) -> String {
+    tool(server, link, from, "send_to_conversation", json!({"conversation": to.to_string(), "message": "The schema is ready", "reason": "You asked"})).await;
+    let (_, proposals) = server.user.json(server.user.get("/api/v1/message-proposals")).await;
+
+    proposals[0]["id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn a_full_token_lists_and_declines_message_proposals_that_a_narrow_token_cannot_reach() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let from = working_conversation(&server, &mut link).await;
+    let to = working_conversation(&server, &mut link).await;
+    let id = proposed_message(&server, &link, from, to).await;
+    let (_, full) = insert_token(&server, Some(FULL), None).await;
+    let (_, narrow) = insert_token(&server, Some(&["conversations:read", "conversations:write", "nodes:read", "settings:read", "assistants"]), None).await;
+
+    assert_eq!(status_with(&server, &narrow, "GET", "/api/v1/message-proposals").await, 403);
+    assert_eq!(status_with(&server, &narrow, "POST", &format!("/api/v1/message-proposals/{id}/decline")).await, 403);
+    assert_eq!(status_with(&server, &full, "GET", "/api/v1/message-proposals").await, 200);
+    assert_eq!(status_with(&server, &full, "POST", &format!("/api/v1/message-proposals/{id}/decline")).await, 200);
+    let (_, proposals) = server.user.json(server.user.get("/api/v1/message-proposals")).await;
+    assert_eq!(proposals[0]["state"], "declined");
+}
+
+#[tokio::test]
+async fn an_expired_full_token_is_refused() {
+    let server = Server::start().await;
+    let (_, expired) = insert_token(&server, Some(FULL), Some("-1 minute")).await;
+    let (_, running) = insert_token(&server, Some(FULL), Some("1 hour")).await;
+
+    assert_eq!(status_with(&server, &expired, "GET", "/api/v1/message-proposals").await, 401);
+    assert_eq!(status_with(&server, &running, "GET", "/api/v1/message-proposals").await, 200);
+}
+
+#[tokio::test]
+async fn a_full_token_cannot_reach_another_persons_data_or_a_conversation_outside_its_reach() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let own = working_conversation(&server, &mut link).await;
+    let to = working_conversation(&server, &mut link).await;
+    let id = proposed_message(&server, &link, own, to).await;
+    server.second_user("other@example.com").await;
+    sqlx::query("update message_proposals set owner = (select id from users where email = 'other@example.com') where id = $1::uuid").bind(&id).execute(&server.pool).await.unwrap();
+    let (token_id, token) = insert_token(&server, Some(FULL), None).await;
+    sqlx::query("update client_tokens set conversation_id = $2 where id = $1").bind(token_id).bind(own).execute(&server.pool).await.unwrap();
+
+    let anonymous = server.anonymous();
+    let listed = anonymous.http.get(format!("{}/api/v1/message-proposals", server.base)).header("authorization", format!("Bearer {token}")).send().await.unwrap();
+    let listed: Value = listed.json().await.unwrap();
+
+    assert_eq!(listed.as_array().unwrap().len(), 0);
+    assert_eq!(status_with(&server, &token, "POST", &format!("/api/v1/message-proposals/{id}/decline")).await, 404);
+    assert_eq!(status_with(&server, &token, "GET", &format!("/api/v1/conversations/{}/events", Uuid::new_v4())).await, 403);
+}
+
+#[tokio::test]
+async fn full_access_is_requested_approved_and_shown_as_one_more_scope() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = working_conversation(&server, &mut link).await;
+
+    let result = tool(&server, &link, conversation, "request_api_access", json!({"scopes": ["full"], "reason": "Deciding message proposals"})).await;
+
+    assert_eq!(result["isError"], false, "{result}");
+    let listed = requests(&server).await;
+    assert_eq!(listed[0]["scopes"], json!(["full"]));
+
+    let (status, body) = approve(&server, listed[0]["id"].as_str().unwrap(), json!({})).await;
+    assert_eq!((status, body["scopes"].clone()), (200, json!(["full"])), "{body}");
+    let ControlToNode::ApiToken { token, .. } = link.next().await else { panic!("expected api_token") };
+    assert_eq!(status_with(&server, &token, "GET", "/api/v1/message-proposals").await, 200);
+}

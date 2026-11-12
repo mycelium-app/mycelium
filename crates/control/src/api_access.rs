@@ -17,7 +17,9 @@ use mycelium_proto::stream::StreamMessage;
 use std::sync::atomic::{AtomicI64, Ordering};
 use uuid::Uuid;
 
-pub const SCOPES: [&str; 5] = ["conversations:read", "conversations:write", "nodes:read", "settings:read", "assistants"];
+pub const SCOPES: [&str; 6] = ["conversations:read", "conversations:write", "nodes:read", "settings:read", "assistants", FULL_SCOPE];
+
+const FULL_SCOPE: &str = "full";
 
 const DEFAULT_HOURS: i64 = 4;
 const MIN_HOURS: i64 = 1;
@@ -129,7 +131,7 @@ pub async fn gate_scoped_tokens(State(state): State<AppState>, request: Request,
         None => match need(&method, &route) {
             Need::Anyone => true,
             Need::Scope(scope) => scopes.iter().any(|granted| granted == scope),
-            Need::Full => false,
+            Need::Full => scopes.iter().any(|granted| granted == FULL_SCOPE),
         },
     };
 
