@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.21
+
+- Switching to another tab and back keeps the Outline panel as it was: the open document, collection and account, the expanded folders, the tree's scroll position and whether the panel is open. On the desktop the document itself keeps its page, scroll and history without reloading.
+
 ## v0.34.20
 
 - You can record a Claude limit reset by hand, with its kind and expiry, from the Claude account's menu on Settings, Providers. Recorded resets show in the Usage card like Codex banked resets, soonest expiry first, and Use reset marks one used in Mycelium without contacting Anthropic. Expired and used ones drop off.
