@@ -5,6 +5,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,6 +28,8 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import com.jetbrains.cef.JCefAppConfig
 import mycelium.PageReading
+import mycelium.ui.LocalRetainedViewKey
+import mycelium.ui.RetainedViews
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -98,6 +101,43 @@ val jcefAvailable: Boolean by lazy {
         .isSuccess
 }
 
+private const val AttachedFrameRate = 60
+
+private const val DetachedFrameRate = 1
+
+private const val RetainedSessionLimit = 4
+
+private val retainedSessions = RetainedViews<JcefSession>(RetainedSessionLimit) { it.close() }
+
+private class JcefSession {
+    val host = OffscreenBrowser()
+    var reading: PageReading? = null
+    var onDisconnected: (() -> Unit)? = null
+    val reader = PageReader { reading }
+    val statuses = LiveViewStatus { onDisconnected }
+    var browserCreated by mutableStateOf(false)
+    var browser by mutableStateOf<CefBrowser?>(null)
+    var loadedUrl: String? = null
+    val client: CefClient = Jcef.createClient().also {
+        it.addLoadHandler(host.loaded)
+        it.addContextMenuHandler(host.contextMenu)
+        it.addMessageRouter(reader.router)
+        it.addMessageRouter(statuses.router)
+        it.addLifeSpanHandler(object : CefLifeSpanHandlerAdapter() {
+            override fun onAfterCreated(browser: CefBrowser) {
+                SwingUtilities.invokeLater { browserCreated = true }
+            }
+        })
+    }
+
+    fun close() {
+        reader.router.dispose()
+        statuses.router.dispose()
+        browser?.close(true)
+        client.dispose()
+    }
+}
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: PageReading? = null, viewOnly: Boolean? = null, onPointer: (() -> Unit)? = null, onDisconnected: (() -> Unit)? = null) {
@@ -115,48 +155,44 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: Pag
         return
     }
 
-    val host = remember { OffscreenBrowser() }
-    val currentReading by rememberUpdatedState(reading)
+    val retainKey = LocalRetainedViewKey.current
+    val session = remember(retainKey) { if (retainKey != null) retainedSessions.obtain(retainKey) { JcefSession() } else JcefSession() }
+    val host = session.host
     val currentOnPointer by rememberUpdatedState(onPointer)
-    val currentOnDisconnected by rememberUpdatedState(onDisconnected)
-    val reader = remember { PageReader { currentReading } }
-    val statuses = remember { LiveViewStatus { currentOnDisconnected } }
-    var browserCreated by remember { mutableStateOf(false) }
-    val client = remember {
-        Jcef.createClient().also {
-            it.addLoadHandler(host.loaded)
-            it.addContextMenuHandler(host.contextMenu)
-            it.addMessageRouter(reader.router)
-            it.addMessageRouter(statuses.router)
-            it.addLifeSpanHandler(object : CefLifeSpanHandlerAdapter() {
-                override fun onAfterCreated(browser: CefBrowser) {
-                    SwingUtilities.invokeLater { browserCreated = true }
-                }
-            })
-        }
-    }
-    var browser by remember { mutableStateOf<CefBrowser?>(null) }
+    val browser = session.browser
+    val browserCreated = session.browserCreated
     var laidOut by remember { mutableStateOf(false) }
     val density = LocalDensity.current.density.toDouble()
     val focus = remember { FocusRequester() }
     val bounds = rememberBrowserBounds(host, density) { laidOut = it }
 
-    DisposableEffect(Unit) {
+    SideEffect {
+        session.reading = reading
+        session.onDisconnected = onDisconnected
+    }
+
+    DisposableEffect(session) {
+        session.browser?.setWindowlessFrameRate(AttachedFrameRate)
+
         onDispose {
             host.contextMenu.close()
-            reader.router.dispose()
-            statuses.router.dispose()
-            browser?.close(true)
-            client.dispose()
+            session.reading = null
+            session.onDisconnected = null
+
+            if (retainKey == null) {
+                session.close()
+            } else {
+                session.browser?.setWindowlessFrameRate(DetachedFrameRate)
+            }
         }
     }
 
     LaunchedEffect(laidOut) {
-        if (laidOut && browser == null) {
-            browser = client.createBrowser("about:blank", CefRendering.CefRenderingWithHandler(host, host.source), false).also { created ->
+        if (laidOut && session.browser == null) {
+            session.browser = session.client.createBrowser("about:blank", CefRendering.CefRenderingWithHandler(host, host.source), false).also { created ->
                 host.browser = created
                 created.createImmediately()
-                created.setWindowlessFrameRate(60)
+                created.setWindowlessFrameRate(AttachedFrameRate)
                 host.applyZoom()
             }
         }
@@ -165,7 +201,7 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: Pag
     LaunchedEffect(url, token, browser, browserCreated) {
         val created = browser ?: return@LaunchedEffect
 
-        if (!browserCreated) {
+        if (!browserCreated || session.loadedUrl == url) {
             return@LaunchedEffect
         }
 
@@ -173,6 +209,7 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: Pag
             Jcef.setSessionCookie(url, token)
         }
 
+        session.loadedUrl = url
         created.loadURL(url)
     }
 
@@ -181,7 +218,7 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: Pag
 
         while (reading != null && browserCreated) {
             delay(ReadIntervalMillis)
-            reader.read(created)
+            session.reader.read(created)
         }
     }
 

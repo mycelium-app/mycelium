@@ -115,6 +115,7 @@ class Store(
     val voice = VoiceStore(api, scope, platform)
     val learning = LearningStore(api, scope)
     val composerDrafts = ComposerDrafts()
+    val heldState = HeldState()
     val pinDismissals = PinDismissals()
 
     var viewing: String? = null

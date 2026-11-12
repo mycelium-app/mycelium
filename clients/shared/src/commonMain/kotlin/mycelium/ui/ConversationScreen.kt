@@ -164,10 +164,11 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val assistantActions = threadAssistant?.let { held ->
         rememberAssistantActionControls(held, state.assistantActions[held.id].orEmpty(), onManageActions) { action, inputs -> store.act { store.api.runAssistantAction(action.assistantId, action.id, inputs) } }
     }
+    val outlineBrowser = store.heldState.of(id) { OutlineBrowser("outline:$id") }
     var panel by remember(id) {
         val saved = if (compact) null else platform?.loadPreference("$SidePanelPreference:$id")
 
-        mutableStateOf(SidePanel.entries.firstOrNull { it.name == saved && it != SidePanel.Outline && it != SidePanel.Apps && (it != SidePanel.PullRequest || conversation?.pullRequestNumber != null) && (conversation?.runsOnModel != true || it == SidePanel.Environment) })
+        mutableStateOf(if (!compact && outlineBrowser.panelOpen) SidePanel.Outline else SidePanel.entries.firstOrNull { it.name == saved && it != SidePanel.Outline && it != SidePanel.Apps && (it != SidePanel.PullRequest || conversation?.pullRequestNumber != null) && (conversation?.runsOnModel != true || it == SidePanel.Environment) })
     }
     var panelWidth by remember(workspace) {
         val saved = workspace?.let { platform?.loadPreference("$SidePanelWidthPreference:$it") } ?: platform?.loadPreference(SidePanelWidthPreference)
@@ -188,6 +189,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     fun openPanel(chosen: SidePanel?) {
         panel = chosen
         chatForced = false
+        outlineBrowser.panelOpen = chosen == SidePanel.Outline
 
         if (!compact) {
             platform?.savePreference("$SidePanelPreference:$id", chosen?.name.orEmpty())
@@ -282,16 +284,14 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     }
 
     val groupName = groupId?.let { state.groups[it]?.name }
-    var outlinePage by remember(id) { mutableStateOf<OutlinePage?>(null) }
-    var outlinePhoneStage by remember(id) { mutableStateOf<OutlinePhoneStage?>(null) }
     val embedsOutline = platform?.embedsOtherSites != false
     val revealOutline: (OutlinePage) -> Boolean = { page ->
-        outlinePage = page
+        outlineBrowser.page = page
 
         when {
             conversation.runsOnModel || !panels -> false
             compact -> {
-                outlinePhoneStage = if (embedsOutline) OutlinePhoneStage.Document else OutlinePhoneStage.Tree
+                outlineBrowser.phoneStage = if (embedsOutline) OutlinePhoneStage.Document else OutlinePhoneStage.Tree
 
                 true
             }
@@ -308,7 +308,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
     val selectOutline: (OutlinePage) -> Unit = { page ->
-        outlinePage = page
+        outlineBrowser.page = page
 
         if (!embedsOutline) {
             platform?.openUrl(page.url)
@@ -324,8 +324,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     }
 
     val outlineAccounts = outlineIntegrations(state.chatToolServers, groupId)
-    val shownOutlinePage = outlinePage ?: liveOutline
-    val outlineBrowser = rememberOutlineBrowser(id, store.api, outlineAccounts, shownOutlinePage, panel == SidePanel.Outline || outlinePhoneStage != null)
+    val shownOutlinePage = outlineBrowser.page ?: liveOutline
+    rememberOutlineBrowser(id, store.api, outlineAccounts, shownOutlinePage, panel == SidePanel.Outline || outlineBrowser.phoneStage != null, outlineBrowser)
 
     var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
 
@@ -928,9 +928,9 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
-    outlinePhoneStage?.takeIf { compact && conversation.hasSession && panels }?.let { stage ->
-        FullScreenSheet({ outlinePhoneStage = if (stage == OutlinePhoneStage.Document) OutlinePhoneStage.Tree else null }) {
-            platform?.let { OutlinePhone(outlineBrowser, it, outlineAccounts, shownOutlinePage, stage, { next -> outlinePhoneStage = next }, selectOutline, onClose = { outlinePhoneStage = null }) }
+    outlineBrowser.phoneStage?.takeIf { compact && conversation.hasSession && panels }?.let { stage ->
+        FullScreenSheet({ outlineBrowser.phoneStage = if (stage == OutlinePhoneStage.Document) OutlinePhoneStage.Tree else null }) {
+            platform?.let { OutlinePhone(outlineBrowser, it, outlineAccounts, shownOutlinePage, stage, { next -> outlineBrowser.phoneStage = next }, selectOutline, onClose = { outlineBrowser.phoneStage = null }) }
         }
     }
 

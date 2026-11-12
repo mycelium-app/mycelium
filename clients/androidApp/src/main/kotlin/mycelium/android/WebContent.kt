@@ -2,6 +2,7 @@ package mycelium.android
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -14,6 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.delay
 import mycelium.PageReading
+import mycelium.ui.LocalRetainedViewKey
+import mycelium.ui.RetainedViews
 import org.json.JSONTokener
 import java.net.URI
 
@@ -38,13 +41,21 @@ private fun createWebView(context: Context): WebView = WebView(context).apply {
     webViewClient = WebViewClient()
 }
 
+private const val RetainedWebViewLimit = 4
+
+private val retainedWebViews = RetainedViews<WebView>(RetainedWebViewLimit) { it.destroy() }
+
 @Composable
 fun AndroidWebContent(url: String, token: String?, modifier: Modifier, reading: PageReading? = null) {
-    val loaded = remember { arrayOfNulls<String>(1) }
+    val retainKey = LocalRetainedViewKey.current
     val view = remember { arrayOfNulls<WebView>(1) }
 
     DisposableEffect(Unit) {
-        onDispose { view[0]?.destroy() }
+        onDispose {
+            if (retainKey == null) {
+                view[0]?.destroy()
+            }
+        }
     }
 
     LaunchedEffect(reading) {
@@ -62,12 +73,15 @@ fun AndroidWebContent(url: String, token: String?, modifier: Modifier, reading: 
 
     AndroidView(
         factory = { context ->
-            createWebView(context).also { view[0] = it }
+            val created = if (retainKey != null) retainedWebViews.obtain(retainKey) { createWebView(context) } else createWebView(context)
+
+            (created.parent as? ViewGroup)?.removeView(created)
+            created.also { view[0] = it }
         },
         modifier = modifier,
         update = { webView ->
-            if (loaded[0] != url) {
-                loaded[0] = url
+            if (webView.tag != url) {
+                webView.tag = url
 
                 if (token != null) {
                     setSessionCookie(url, token)

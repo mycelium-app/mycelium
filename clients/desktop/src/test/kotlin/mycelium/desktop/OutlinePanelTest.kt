@@ -13,6 +13,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -36,7 +37,10 @@ import androidx.compose.ui.test.onChildren
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
@@ -66,7 +70,10 @@ import mycelium.ui.Label
 import mycelium.ui.MyTheme
 import mycelium.ui.OutlineBrowser
 import mycelium.ui.OutlineTreeState
+import mycelium.ui.ConversationScreen
 import mycelium.ui.LocalOpenList
+import mycelium.ui.LocalPlatform
+import mycelium.ui.LocalRetainedViewKey
 import mycelium.ui.LocalPanelBack
 import mycelium.ui.LocalTouch
 import mycelium.ui.MyceliumTheme
@@ -109,11 +116,13 @@ private fun outlineAccount(id: String, name: String, url: String) = ChatToolServ
 private class OutlinePlatform(private val inner: AppsPlatform = AppsPlatform(), override val embedsOtherSites: Boolean = true) : Platform by inner {
     val shown = java.util.concurrent.CopyOnWriteArrayList<String>()
     val opened: List<String> get() = inner.opened
+    val retainKeys = java.util.concurrent.CopyOnWriteArrayList<String?>()
     var reading: PageReading? = null
 
     @Composable
     override fun WebContent(url: String, token: String?, modifier: Modifier, reading: PageReading?) {
         this.reading = reading
+        retainKeys += LocalRetainedViewKey.current
         LaunchedEffect(url) { shown += url }
         Box(modifier.background(Color.White).padding(24.dp)) {
             Label("Outline page (test stub)", color = Color.Black)
@@ -476,6 +485,99 @@ class OutlinePanelTest {
         rule.waitUntil(WaitMillis) { web.opened.isNotEmpty() }
         assertEquals(listOf("https://docs.example.org/doc/team-norms-t1"), web.opened)
         assertTrue(web.shown.isEmpty())
+    }
+
+    private fun longHandbook(): String {
+        val fillers = (1..40).joinToString(",") { """{"id":"d-f$it","title":"Filler $it","url":"/doc/filler-$it","children":[]}""" }
+
+        return HandbookTree.removeSuffix("]}") + "," + fillers + "]}"
+    }
+
+    private fun showSwitchableConversations(): (String) -> Unit {
+        val json = headersOf(HttpHeaders.ContentType, "application/json")
+        val conversation = { id: String -> """{"id":"$id","owner":"u1","node_id":"n1","agent":"claude","cwd":"/work","title":"$id","status":"done","acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}""" }
+        val outline = outlineEngine { HttpStatusCode.OK to longHandbook() }
+        val engine = MockEngine { request ->
+            val path = request.url.encodedPath
+
+            when {
+                "/proxy/" in path -> outline.config.requestHandlers.first()(this, request)
+                path.endsWith("/chat-tool-servers") -> respond(docsServerJson, HttpStatusCode.OK, json)
+                path.endsWith("/conversations") -> respond("[${conversation("c1")},${conversation("c2")}]", HttpStatusCode.OK, json)
+                path.endsWith("/conversations/c1") -> respond(conversation("c1"), HttpStatusCode.OK, json)
+                path.endsWith("/conversations/c2") -> respond(conversation("c2"), HttpStatusCode.OK, json)
+                path.endsWith("/nodes") || path.endsWith("/groups") || path.endsWith("/events") -> respond("[]", HttpStatusCode.OK, json)
+                else -> respond("{}", HttpStatusCode.OK, json)
+            }
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
+        var switchTo: (String) -> Unit = {}
+
+        runBlocking {
+            store.refresh()
+            store.refreshChatToolServers()
+        }
+
+        rule.setContent {
+            MyceliumTheme(true) {
+                var id by remember { mutableStateOf("c1") }
+                val state by store.state.collectAsState()
+
+                switchTo = { id = it }
+
+                CompositionLocalProvider(LocalPlatform provides platform) {
+                    Box(Modifier.width(1100.dp).height(860.dp)) {
+                        ConversationScreen(store, state, id, onArchived = {}, onOpenConversation = { id = it })
+                    }
+                }
+            }
+        }
+
+        answerRequests()
+
+        return { switchTo(it) }
+    }
+
+    @Test
+    fun switchingToAnotherConversationAndBackKeepsTheOutlinePanelAsItWas() {
+        val switchTo = showSwitchableConversations()
+
+        rule.waitUntil(WaitMillis) { runCatching { rule.onNodeWithContentDescription("Open Outline").fetchSemanticsNode() }.isSuccess }
+        rule.onNodeWithContentDescription("Open Outline").performClick()
+        waitForText("Engineering")
+
+        val tree = rule.onNodeWithContentDescription("Documents")
+
+        tree.requestFocus()
+        tree.performKeyInput {
+            pressKey(Key.DirectionRight)
+            pressKey(Key.DirectionRight)
+            pressKey(Key.DirectionDown)
+            pressKey(Key.DirectionRight)
+            pressKey(Key.DirectionDown)
+            pressKey(Key.Enter)
+        }
+
+        rule.waitUntil(WaitMillis) { platform.shown.isNotEmpty() }
+        rule.onAllNodesWithText("Rota").filterToOne(isSelected()).assertExists()
+        rule.onNodeWithText("Filler 40").performScrollTo()
+        rule.onNodeWithText("Engineering").assertIsNotDisplayed()
+
+        switchTo("c2")
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithContentDescription("Close Outline").fetchSemanticsNodes().isEmpty())
+
+        switchTo("c1")
+        waitForText("Rota")
+
+        rule.onAllNodesWithContentDescription("Close Outline").assertCountEquals(2)
+        rule.onNodeWithContentDescription("Outline collection Handbook. Change").assertExists()
+        rule.onAllNodesWithText("Rota").filterToOne(isSelected()).assertExists()
+        rule.onNodeWithText("On-call").assertExists()
+        rule.onNodeWithText("Filler 40").assertIsDisplayed()
+        rule.onNodeWithText("Engineering").assertIsNotDisplayed()
+        assertEquals(setOf("outline:c1"), platform.retainKeys.toSet())
+        assertEquals(listOf("https://docs.example.org/doc/rota-r1"), platform.shown.distinct())
     }
 }
 

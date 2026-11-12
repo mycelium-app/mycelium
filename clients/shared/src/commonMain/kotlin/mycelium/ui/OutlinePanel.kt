@@ -1,5 +1,6 @@
 package mycelium.ui
 
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.Arrangement
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -78,7 +80,11 @@ sealed interface OutlineTreeState {
 
 enum class OutlinePhoneStage { Tree, Document }
 
-class OutlineBrowser {
+class OutlineBrowser(val viewKey: String = "") {
+    var page by mutableStateOf<OutlinePage?>(null)
+    var panelOpen by mutableStateOf(false)
+    var phoneStage by mutableStateOf<OutlinePhoneStage?>(null)
+    val treeScroll = ScrollState(0)
     var collections by mutableStateOf<Map<String, List<OutlineCollection>>>(emptyMap())
     var failedAccounts by mutableStateOf<Map<String, OutlineTreeState.Failed>>(emptyMap())
     var serverId by mutableStateOf<String?>(null)
@@ -137,8 +143,7 @@ private suspend fun <T> outlineCall(block: suspend () -> T): Result<T> = try {
 private fun failureOf(failure: Throwable?) = OutlineTreeState.Failed((failure as? ApiException)?.status in AuthRefused)
 
 @Composable
-fun rememberOutlineBrowser(key: String, api: MyceliumApi, servers: List<ChatToolServer>, page: OutlinePage?, active: Boolean): OutlineBrowser {
-    val browser = remember(key) { OutlineBrowser() }
+fun rememberOutlineBrowser(key: String, api: MyceliumApi, servers: List<ChatToolServer>, page: OutlinePage?, active: Boolean, browser: OutlineBrowser = remember(key) { OutlineBrowser("outline:$key") }): OutlineBrowser {
     val serverIds = servers.map { it.id }
 
     LaunchedEffect(page?.integrationId, page?.collectionId) {
@@ -318,7 +323,7 @@ private fun OutlineTreeBody(browser: OutlineBrowser, servers: List<ChatToolServe
         } else {
             val collection = browser.collectionId.orEmpty()
 
-            OutlineTree(tree.nodes, browser.expanded, page?.documentId, browser::expand, { node -> account?.let { onSelect(outlinePageOf(node, it, collection)) } }, modifier.verticalScrollWithBar())
+            OutlineTree(tree.nodes, browser.expanded, page?.documentId, browser::expand, { node -> account?.let { onSelect(outlinePageOf(node, it, collection)) } }, modifier.verticalScrollWithBar(browser.treeScroll))
         }
     }
 }
@@ -357,7 +362,9 @@ private fun ColumnScope.OutlineDocument(browser: OutlineBrowser, platform: Platf
         Hairline()
     }
 
-    platform.WebContent(page.url, null, Modifier.weight(1f).fillMaxWidth(), reading)
+    CompositionLocalProvider(LocalRetainedViewKey provides browser.viewKey.takeIf { it.isNotEmpty() }) {
+        platform.WebContent(page.url, null, Modifier.weight(1f).fillMaxWidth(), reading)
+    }
 }
 
 @Composable
