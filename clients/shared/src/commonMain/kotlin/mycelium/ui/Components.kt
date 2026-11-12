@@ -734,7 +734,7 @@ fun Segmented(options: List<String>, selected: String, onSelect: (String) -> Uni
 
             Box(
                 (if (stretch) Modifier.weight(1f) else Modifier)
-                    .height(maxOf(touchMin(Tokens.Size.ControlSm), Tokens.Space.S6))
+                    .height(touchMin(Tokens.Size.ControlSm))
                     .pressable(
                         onClick = { onSelect(option) },
                         role = Role.RadioButton,
