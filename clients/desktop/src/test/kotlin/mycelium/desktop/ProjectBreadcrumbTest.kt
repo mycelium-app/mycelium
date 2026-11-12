@@ -90,7 +90,7 @@ class ProjectBreadcrumbTest {
         rule.onNodeWithContentDescription("Send").performClick()
 
         rule.waitUntil(5_000) { created != null }
-        assertEquals("""{"node_id":"$NodeId","agent":"claude","project_id":"p1"}""", requests.single().third)
+        assertEquals("""{"node_id":"$NodeId","agent":"claude","project_id":"p1"}""", withoutClientId(requests.single().third))
     }
 
     @Test

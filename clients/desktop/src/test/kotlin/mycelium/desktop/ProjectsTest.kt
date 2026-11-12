@@ -449,7 +449,7 @@ class ProjectsTest {
 
         rule.waitUntil(5_000) { created != null }
         assertEquals("""{"node_id":"$AtlasId","new_folder":"$name"}""", posts.first().second)
-        assertEquals("""{"node_id":"$AtlasId","agent":"claude","project_id":"p1"}""", posts.last().second)
+        assertEquals("""{"node_id":"$AtlasId","agent":"claude","project_id":"p1"}""", withoutClientId(posts.last().second))
     }
 
     @Test
@@ -523,7 +523,7 @@ class ProjectsTest {
         rule.onNodeWithContentDescription("Send").performClick()
 
         rule.waitUntil(5_000) { created != null }
-        assertEquals("""{"node_id":"$LaptopId","agent":"claude","project_id":"p1"}""", posts.single().second)
+        assertEquals("""{"node_id":"$LaptopId","agent":"claude","project_id":"p1"}""", withoutClientId(posts.single().second))
     }
 
     @Test
@@ -537,7 +537,7 @@ class ProjectsTest {
         rule.onNodeWithContentDescription("Folder").performKeyInput { pressKey(Key.Enter) }
 
         rule.waitUntil(5_000) { created != null }
-        assertEquals("""{"node_id":"$AtlasId","agent":"claude","cwd":"/work/midden"}""", posts.single().second)
+        assertEquals("""{"node_id":"$AtlasId","agent":"claude","cwd":"/work/midden"}""", withoutClientId(posts.single().second))
     }
 
     @Test
@@ -552,7 +552,7 @@ class ProjectsTest {
         rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }
 
         rule.waitUntil(5_000) { created != null }
-        assertEquals("""{"node_id":"$AtlasId","agent":"claude","cwd":"/work/midden","prompt":"Fix the build"}""", posts.single().second)
+        assertEquals("""{"node_id":"$AtlasId","agent":"claude","cwd":"/work/midden","prompt":"Fix the build"}""", withoutClientId(posts.single().second))
     }
 }
 

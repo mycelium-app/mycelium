@@ -116,7 +116,7 @@ class NewConversationPlaceTest {
         rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }
 
         rule.waitUntil(5_000) { created != null }
-        assertEquals("""{"node_id":"$OrionId","agent":"claude","project_id":"p1","prompt":"Restore the copy"}""", bodies.single())
+        assertEquals("""{"node_id":"$OrionId","agent":"claude","project_id":"p1","prompt":"Restore the copy"}""", withoutClientId(bodies.single()))
     }
 
     @Test
@@ -211,7 +211,7 @@ class NewConversationPlaceTest {
         rule.onNodeWithContentDescription("Folder").performKeyInput { pressKey(Key.Enter) }
 
         rule.waitUntil(5_000) { created != null }
-        assertEquals("""{"node_id":"$OrionId","agent":"claude","cwd":"/srv/sites/willow-site"}""", bodies.single())
+        assertEquals("""{"node_id":"$OrionId","agent":"claude","cwd":"/srv/sites/willow-site"}""", withoutClientId(bodies.single()))
     }
 
     @Test
@@ -238,7 +238,7 @@ class NewConversationPlaceTest {
         rule.onNodeWithContentDescription("New branch").performKeyInput { pressKey(Key.Enter) }
 
         rule.waitUntil(5_000) { created != null }
-        assertEquals("""{"node_id":"$OrionId","agent":"claude","project_id":"p1","branch":"restore-copy"}""", bodies.single())
+        assertEquals("""{"node_id":"$OrionId","agent":"claude","project_id":"p1","branch":"restore-copy"}""", withoutClientId(bodies.single()))
     }
 
     @Test

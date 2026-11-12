@@ -138,6 +138,6 @@ class AttachmentsTest {
 
         assertEquals("/api/v1/conversations/c1/attachments?name=shot.png", seen[0].second)
         assertEquals("/api/v1/conversations/c1/prompt?", seen[1].second)
-        assertEquals("""{"text":"what is this","attachments":[{"sha256":"abc","name":"shot.png","media_type":"image/png","size":11}]}""", seen[1].third)
+        assertEquals("""{"text":"what is this","attachments":[{"sha256":"abc","name":"shot.png","media_type":"image/png","size":11}]}""", withoutClientId(seen[1].third))
     }
 }

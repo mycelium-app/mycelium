@@ -101,7 +101,7 @@ class AssistantThreadTest {
         rule.onNodeWithContentDescription("Send").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/assistants/a1/prompt" } }
-        assertEquals("""{"text":"Good morning"}""", requests.last { it.first == "POST /api/v1/assistants/a1/prompt" }.second)
+        assertEquals("""{"text":"Good morning"}""", withoutClientId(requests.last { it.first == "POST /api/v1/assistants/a1/prompt" }.second))
         rule.waitUntil(5_000) { present("Good morning") > 0 }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for Today").fetchSemanticsNodes().isNotEmpty() }

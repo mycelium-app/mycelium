@@ -223,7 +223,7 @@ class ChatsTest {
         rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/chats") } }
-        assertEquals("""{"provider_id":"p1","model":"llama3.2","prompt":"Plan a trip to Lisbon"}""", bodies.last { it.contains("provider_id") })
+        assertEquals("""{"provider_id":"p1","model":"llama3.2","prompt":"Plan a trip to Lisbon"}""", withoutClientId(bodies.last { it.contains("provider_id") }))
     }
 
     @Test
@@ -261,7 +261,7 @@ class ChatsTest {
         rule.onNodeWithContentDescription("Send").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/chats") } }
-        assertEquals("""{"provider_id":"p2","model":"claude-sonnet-5-5","prompt":"Hello"}""", bodies.last { it.contains("provider_id") })
+        assertEquals("""{"provider_id":"p2","model":"claude-sonnet-5-5","prompt":"Hello"}""", withoutClientId(bodies.last { it.contains("provider_id") }))
     }
 
     @Test
@@ -326,8 +326,8 @@ class ChatsTest {
 
         rule.waitUntil(5_000) { requests.any { it.url.encodedPath.endsWith("/prompt") } }
         ChatPlatform.picked = emptyList()
-        assertEquals("""{"provider_id":"p1","model":"llama3.2"}""", bodies.last { it.contains("provider_id") })
-        assertEquals("""{"text":"Summarise this","attachments":[{"sha256":"abc","name":"notes.txt","media_type":"text/plain","size":5}]}""", bodies.last { it.contains("Summarise") })
+        assertEquals("""{"provider_id":"p1","model":"llama3.2"}""", withoutClientId(bodies.last { it.contains("provider_id") }))
+        assertEquals("""{"text":"Summarise this","attachments":[{"sha256":"abc","name":"notes.txt","media_type":"text/plain","size":5}]}""", withoutClientId(bodies.last { it.contains("Summarise") }))
     }
 
     @Test

@@ -177,7 +177,7 @@ class FolderBrowserTest {
         rule.onNodeWithContentDescription("Send").performClick()
 
         rule.waitUntil(5_000) { created != null }
-        assertEquals("""{"node_id":"$NodeId","agent":"claude","cwd":"/work"}""", posts.single().second)
+        assertEquals("""{"node_id":"$NodeId","agent":"claude","cwd":"/work"}""", withoutClientId(posts.single().second))
     }
 
     @Test
@@ -191,7 +191,7 @@ class FolderBrowserTest {
         rule.onNodeWithContentDescription("Folder").performKeyInput { pressKey(Key.Enter) }
 
         rule.waitUntil(5_000) { created != null }
-        assertEquals("""{"node_id":"$NodeId","agent":"claude","cwd":"/work/midden"}""", posts.single().second)
+        assertEquals("""{"node_id":"$NodeId","agent":"claude","cwd":"/work/midden"}""", withoutClientId(posts.single().second))
     }
 
     @Test

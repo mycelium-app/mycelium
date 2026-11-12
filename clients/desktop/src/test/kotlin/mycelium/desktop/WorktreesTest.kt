@@ -116,7 +116,7 @@ class WorktreesTest {
         rule.onNodeWithContentDescription("New branch").performKeyInput { pressKey(Key.Enter) }
 
         rule.waitUntil(5_000) { created }
-        assertEquals("""{"node_id":"$LaptopId","agent":"claude","project_id":"p1","branch":"feature/restore"}""", bodies.single())
+        assertEquals("""{"node_id":"$LaptopId","agent":"claude","project_id":"p1","branch":"feature/restore"}""", withoutClientId(bodies.single()))
     }
 
     @Test
@@ -135,7 +135,7 @@ class WorktreesTest {
         rule.onNodeWithContentDescription("Send").performClick()
 
         rule.waitUntil(5_000) { created }
-        assertEquals("""{"node_id":"$LaptopId","agent":"claude","project_id":"p1","worktree_path":"/elsewhere/app-spike"}""", bodies.single())
+        assertEquals("""{"node_id":"$LaptopId","agent":"claude","project_id":"p1","worktree_path":"/elsewhere/app-spike"}""", withoutClientId(bodies.single()))
     }
 
     @Test
@@ -210,6 +210,6 @@ class WorktreesTest {
         rule.onNodeWithContentDescription("Send").performClick()
 
         rule.waitUntil(5_000) { created }
-        assertEquals("""{"node_id":"$LaptopId","agent":"claude","project_id":"p1","model":"sonnet"}""", bodies.single())
+        assertEquals("""{"node_id":"$LaptopId","agent":"claude","project_id":"p1","model":"sonnet"}""", withoutClientId(bodies.single()))
     }
 }
