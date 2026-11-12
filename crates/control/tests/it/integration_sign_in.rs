@@ -491,3 +491,42 @@ async fn the_scope_asked_for_is_the_challenges_else_the_resources_supported_scop
     assert_eq!(param(&from_resource, "scope"), "read write");
     assert!(!neither.iter().any(|(name, _)| name == "scope"), "{neither:?}");
 }
+
+#[tokio::test]
+async fn an_authorisation_server_that_reads_client_metadata_documents_is_given_mycelium_hosted_one_instead_of_a_registration() {
+    let server = Server::start().await;
+    let (base, app) = start_with(Options { authorisation_extra: json!({"client_id_metadata_document_supported": true}), ..Options::default() }).await;
+    let document_url = format!("{}/integrations/oauth/client.json", server.base);
+
+    let query = sign_in(&server, &base).await;
+
+    assert_eq!(param(&query, "client_id"), document_url);
+    assert!(app.registrations.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn an_authorisation_server_that_reads_client_metadata_documents_needs_no_registration_endpoint() {
+    let server = Server::start().await;
+    let (base, _) = start_with(Options { without_registration: true, authorisation_extra: json!({"client_id_metadata_document_supported": true}), ..Options::default() }).await;
+
+    let query = sign_in(&server, &base).await;
+
+    assert_eq!(param(&query, "client_id"), format!("{}/integrations/oauth/client.json", server.base));
+}
+
+#[tokio::test]
+async fn the_client_metadata_document_is_public_and_names_its_own_address_and_the_callback() {
+    let server = Server::start().await;
+    let anonymous = server.anonymous();
+
+    let response = anonymous.http.get(format!("{}/integrations/oauth/client.json", server.base)).send().await.unwrap();
+    let status = response.status().as_u16();
+    let document: Value = serde_json::from_str(&response.text().await.unwrap()).expect("a JSON document");
+
+    assert_eq!(status, 200);
+    assert_eq!(document["client_id"], format!("{}/integrations/oauth/client.json", server.base));
+    assert_eq!(document["client_name"], "Mycelium");
+    assert_eq!(document["redirect_uris"], json!([format!("{}/integrations/oauth/callback", server.base)]));
+    assert_eq!(document["token_endpoint_auth_method"], "none");
+    assert_eq!(document["grant_types"], json!(["authorization_code", "refresh_token"]));
+}

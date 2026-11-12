@@ -259,6 +259,14 @@ fn redirect_uri(state: &AppState) -> String {
     format!("{}/integrations/oauth/callback", state.config.public_url)
 }
 
+fn client_metadata_url(state: &AppState) -> String {
+    format!("{}/integrations/oauth/client.json", state.config.public_url)
+}
+
+pub async fn client_metadata(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({"client_id": client_metadata_url(&state), "client_name": "Mycelium", "redirect_uris": [redirect_uri(&state)], "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"], "token_endpoint_auth_method": "none"}))
+}
+
 pub async fn start(State(state): State<AppState>, user: AuthUser, Json(request): Json<StartChatToolServerOAuthRequest>) -> ApiResult<Json<OAuthStart>> {
     let name = request.name.trim();
     let kind = request.kind.as_deref().map(str::trim).filter(|kind| !kind.is_empty()).unwrap_or("mcp");
@@ -291,18 +299,24 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Json(request):
     let mcp_url = url::Url::parse(&resource).map_err(ApiError::internal)?;
     let unsupported = || ApiError::bad_request("oauth_unsupported", UNSUPPORTED);
     let Discovered { authorisation, scopes } = discover(&state, &mcp_url).await.map_err(|_| unsupported())?;
-    let registration_endpoint = authorisation.registration_endpoint.as_deref().ok_or_else(unsupported)?;
 
     let redirect = redirect_uri(&state);
-    let registration = json!({"client_name": "Mycelium", "redirect_uris": [redirect], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"]});
-    let registered = state.http.post(registration_endpoint).timeout(DISCOVERY_TIMEOUT).json(&registration).send().await.map_err(|_| unsupported())?;
+    let client_id = match (authorisation.metadata_document_supported, authorisation.registration_endpoint.as_deref()) {
+        (true, _) => client_metadata_url(&state),
+        (false, None) => return Err(unsupported()),
+        (false, Some(registration_endpoint)) => {
+            let registration = json!({"client_name": "Mycelium", "redirect_uris": [redirect], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"]});
+            let registered = state.http.post(registration_endpoint).timeout(DISCOVERY_TIMEOUT).json(&registration).send().await.map_err(|_| unsupported())?;
 
-    if !registered.status().is_success() {
-        return Err(unsupported());
-    }
+            if !registered.status().is_success() {
+                return Err(unsupported());
+            }
 
-    let registered: Value = registered.json().await.map_err(|_| unsupported())?;
-    let client_id = registered["client_id"].as_str().ok_or_else(unsupported)?.to_string();
+            let registered: Value = registered.json().await.map_err(|_| unsupported())?;
+
+            registered["client_id"].as_str().ok_or_else(unsupported)?.to_string()
+        }
+    };
     let verifier = new_token();
     let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
     let sign_in = new_token();
