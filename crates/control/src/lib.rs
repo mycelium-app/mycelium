@@ -123,6 +123,7 @@ mod paging;
 mod stoat;
 mod tandoor;
 mod zulip;
+mod web_search;
 
 pub use forge_cache::FORGE_CACHE_TTL;
 pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, FORGE_WATCH_INTERVAL, OidcConfig, PublicFetchRouting, SCHEDULER_TICK, STEER_TIMEOUT, STREAM_RECHECK_INTERVAL, VERSION_CHECK_INTERVAL};

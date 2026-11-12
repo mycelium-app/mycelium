@@ -46,7 +46,7 @@ pub fn always_asks(tool: &str) -> bool {
 }
 
 fn failure(text: impl Into<String>) -> CallOutput {
-    CallOutput { text: text.into(), is_error: true, binary: None }
+    CallOutput { text: text.into(), is_error: true, binary: None, images: Vec::new() }
 }
 
 fn encoded(pairs: &[(&str, String)]) -> String {
@@ -281,7 +281,7 @@ async fn messages(http: &reqwest::Client, credentials: &Credentials, narrow: Vec
         .collect();
     let coverage = json!({"returned": listed.len(), "found_oldest": found_oldest, "found_newest": found_newest, "oldest_id": oldest_id, "newest_id": newest_id, "next": next});
 
-    CallOutput { text: json!({"messages": listed, "coverage": coverage}).to_string(), is_error: false, binary: None }
+    CallOutput { text: json!({"messages": listed, "coverage": coverage}).to_string(), is_error: false, binary: None, images: Vec::new() }
 }
 
 pub async fn call(http: &reqwest::Client, credentials: &Credentials, tool: &str, arguments: &Value) -> CallOutput {
@@ -290,7 +290,7 @@ pub async fn call(http: &reqwest::Client, credentials: &Credentials, tool: &str,
             Ok(body) => {
                 let channels: Vec<Value> = body["subscriptions"].as_array().into_iter().flatten().map(|channel| json!({"id": channel["stream_id"], "name": channel["name"], "description": channel["description"]})).collect();
 
-                CallOutput { text: Value::Array(channels).to_string(), is_error: false, binary: None }
+                CallOutput { text: Value::Array(channels).to_string(), is_error: false, binary: None, images: Vec::new() }
             }
             Err(reason) => failure(reason),
         },
@@ -453,7 +453,7 @@ pub async fn call(http: &reqwest::Client, credentials: &Credentials, tool: &str,
             };
 
             match send(request(http, credentials, reqwest::Method::POST, "messages").header("content-type", "application/x-www-form-urlencoded").body(encoded(&form))).await {
-                Ok(body) => CallOutput { text: json!({"sent": true, "id": body["id"]}).to_string(), is_error: false, binary: None },
+                Ok(body) => CallOutput { text: json!({"sent": true, "id": body["id"]}).to_string(), is_error: false, binary: None, images: Vec::new() },
                 Err(reason) => failure(reason),
             }
         }

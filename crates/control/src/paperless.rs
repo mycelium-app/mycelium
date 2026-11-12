@@ -80,7 +80,7 @@ pub fn always_asks(tool: &str) -> bool {
 }
 
 fn failure(text: impl Into<String>) -> CallOutput {
-    CallOutput { text: text.into(), is_error: true, binary: None }
+    CallOutput { text: text.into(), is_error: true, binary: None, images: Vec::new() }
 }
 
 enum Answer {
@@ -339,8 +339,8 @@ pub async fn call(http: &reqwest::Client, credentials: &Credentials, tool: &str,
     };
 
     match outcome {
-        Ok(Answer::Json(value)) => CallOutput { text: value.to_string(), is_error: false, binary: None },
-        Ok(Answer::File(bytes)) => CallOutput { text: format!("A file of {} bytes.", bytes.len()), is_error: false, binary: Some(bytes) },
+        Ok(Answer::Json(value)) => CallOutput { text: value.to_string(), is_error: false, binary: None, images: Vec::new() },
+        Ok(Answer::File(bytes)) => CallOutput { text: format!("A file of {} bytes.", bytes.len()), is_error: false, binary: Some(bytes), images: Vec::new() },
         Err(reason) => failure(reason),
     }
 }

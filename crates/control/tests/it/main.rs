@@ -78,6 +78,7 @@ mod subscription_prices;
 mod workflows;
 mod stoat;
 mod tandoor;
+mod web_search;
 mod todos;
 mod terminal_tools;
 mod transcriptions;

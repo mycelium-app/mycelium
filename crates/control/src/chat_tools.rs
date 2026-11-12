@@ -1,6 +1,7 @@
 use crate::chat_tool_servers::{OWN_SERVER, ServerRow, bearer, list_owned, refreshable_after_rejection, renew};
 use crate::chats::{chat_node, record};
 use crate::error::ApiResult;
+use crate::integrations::FoundImage;
 use crate::mcp;
 use crate::mcp_client::{McpConnection, McpError};
 use crate::response_editor;
@@ -264,13 +265,14 @@ impl Toolbox {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn record(&self, state: &AppState, owner: Uuid, conversation_id: Uuid, tool: &Tool, decision: &str, is_error: bool, review: Option<&str>) {
+    async fn record(&self, state: &AppState, owner: Uuid, conversation_id: Uuid, tool: &Tool, decision: &str, is_error: bool, review: Option<&str>, found: &Found<'_>) {
         if let Some(server) = tool.server_row() {
-            record_call(state, owner, server, &tool.original, Some(conversation_id), "chat", self.provider.as_deref(), decision, is_error, review).await;
+            record_call(state, owner, server, &tool.original, Some(conversation_id), "chat", self.provider.as_deref(), decision, is_error, review, found).await;
         }
     }
 
-    async fn call(&mut self, state: &AppState, owner: Uuid, conversation_id: Uuid, tool_call: &str, tool: &Tool, input: &Value) -> ApiResult<(String, bool)> {
+    #[allow(clippy::too_many_arguments)]
+    async fn call(&mut self, state: &AppState, owner: Uuid, conversation_id: Uuid, tool_call: &str, tool: &Tool, input: &Value, images: &mut Vec<FoundImage>) -> ApiResult<(String, bool)> {
         if let Some(server) = tool.server_row().filter(|server| server.status() == IntegrationStatus::Expired) {
             return Ok((expired_text(&server.name), true));
         }
@@ -286,7 +288,8 @@ impl Toolbox {
                 let Some(integration) = server.integration() else {
                     return Ok((format!("{} is not a built-in integration Mycelium knows. Remove it and add it again.", tool.server), true));
                 };
-                let output = integration.call(state, owner, server, Some(conversation_id), &tool.original, input, false).await;
+                let mut output = integration.call(state, owner, server, Some(conversation_id), &tool.original, input, false).await;
+                *images = std::mem::take(&mut output.images);
 
                 Ok(output.text_only())
             }
@@ -382,7 +385,7 @@ async fn outcome_of(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolb
         }
 
         if !is_approved(&answered) {
-            toolbox.record(state, owner, id, &tool, "declined", false, None).await;
+            toolbox.record(state, owner, id, &tool, "declined", false, None, &Found::NONE).await;
 
             return Ok((DECLINED_TEXT.to_string(), true, None));
         }
@@ -391,7 +394,8 @@ async fn outcome_of(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolb
         answer = Some(answered);
     }
 
-    let (mut text, is_error) = match toolbox.call(state, owner, id, &call.id, &tool, &arguments).await {
+    let mut images = Vec::new();
+    let (mut text, is_error) = match toolbox.call(state, owner, id, &call.id, &tool, &arguments, &mut images).await {
         Ok(result) => result,
         Err(error) => (format!("The {} tool failed: {} The person did not decline this call. Do not report the action as completed or declined; check whether it was recorded before retrying.", tool.original, error.message()), true),
     };
@@ -406,7 +410,9 @@ async fn outcome_of(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolb
         review = Some(sent.outcome);
     }
 
-    toolbox.record(state, owner, id, &tool, decision, is_error, review).await;
+    let received: String = text.chars().take(MAX_RESULT_CHARS).collect();
+
+    toolbox.record(state, owner, id, &tool, decision, is_error, review, &Found { images: &images, received: &received }).await;
 
     Ok((text, is_error, None))
 }
@@ -433,12 +439,12 @@ pub async fn stop_asking(state: &AppState, owner: Uuid, server: &ServerRow, tool
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn record_call(state: &AppState, owner: Uuid, server: &ServerRow, tool: &str, conversation_id: Option<Uuid>, surface: &str, provider: Option<&str>, decision: &str, is_error: bool, review: Option<&str>) {
+pub async fn record_call(state: &AppState, owner: Uuid, server: &ServerRow, tool: &str, conversation_id: Option<Uuid>, surface: &str, provider: Option<&str>, decision: &str, is_error: bool, review: Option<&str>, found: &Found<'_>) {
     let kind = match server.tool_kind(tool) {
         ToolKind::Read => "read",
         ToolKind::Write => "write",
     };
-    let recorded = sqlx::query("insert into integration_calls (owner, server_id, server_name, tool, kind, conversation_id, surface, provider, decision, is_error, review) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)")
+    let recorded = sqlx::query_scalar::<_, Uuid>("insert into integration_calls (owner, server_id, server_name, tool, kind, conversation_id, surface, provider, decision, is_error, review) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning id")
         .bind(owner)
         .bind(server.id)
         .bind(&server.name)
@@ -450,8 +456,22 @@ pub async fn record_call(state: &AppState, owner: Uuid, server: &ServerRow, tool
         .bind(decision)
         .bind(is_error)
         .bind(review)
-        .execute(&state.pool)
+        .fetch_one(&state.pool)
         .await;
+
+    if let (Ok(call_id), Some(_), false, false) = (&recorded, conversation_id, is_error, decision == "declined") {
+        let shown: Vec<&FoundImage> = found.images.iter().filter(|image| found.received.contains(&image.url)).collect();
+
+        if !shown.is_empty() {
+            let urls: Vec<&str> = shown.iter().map(|image| image.url.as_str()).collect();
+            let pages: Vec<Option<&str>> = shown.iter().map(|image| image.page_url.as_deref()).collect();
+            let kept = sqlx::query("insert into integration_call_images (call_id, url, page_url) select $1, url, page_url from unnest($2::text[], $3::text[]) as found(url, page_url) on conflict do nothing").bind(call_id).bind(urls).bind(pages).execute(&state.pool).await;
+
+            if let Err(cause) = kept {
+                tracing::warn!("could not record the images {} returned: {cause}", server.name);
+            }
+        }
+    }
 
     if decision != "declined" {
         let error = is_error.then_some("The last call failed.");
@@ -465,6 +485,15 @@ pub async fn record_call(state: &AppState, owner: Uuid, server: &ServerRow, tool
     if let Err(cause) = recorded {
         tracing::warn!("could not record a call to {}: {cause}", server.name);
     }
+}
+
+pub struct Found<'a> {
+    pub images: &'a [FoundImage],
+    pub received: &'a str,
+}
+
+impl Found<'_> {
+    pub const NONE: Found<'static> = Found { images: &[], received: "" };
 }
 
 const GRANTED_SQL: &str = "select r.payload->'toolCall'->>'title', r.payload->>'request_id', coalesce(r.payload->'toolCall'->'rawInput', 'null'::jsonb) from events r join events s on s.conversation_id = r.conversation_id and s.kind = 'permission_resolved' and s.payload->>'request_id' = r.payload->>'request_id'

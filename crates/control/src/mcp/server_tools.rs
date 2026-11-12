@@ -60,7 +60,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             }
 
             if !chat_tools::is_approved(&answered) {
-                chat_tools::record_call(state, owner, server, tool, conversation, "workspace", None, "declined", false, None).await;
+                chat_tools::record_call(state, owner, server, tool, conversation, "workspace", None, "declined", false, None, &chat_tools::Found::NONE).await;
 
                 return Ok(ToolReply::text(chat_tools::DECLINED_TEXT, true));
             }
@@ -76,8 +76,11 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
     };
     let edits = conversation.is_some() && chat_tools::edits_response(answer.as_deref(), effective.edit);
     let mut binary = None;
+    let mut images = Vec::new();
     let (mut text, is_error) = if let Some(integration) = server.integration() {
-        let output = integration.call(state, owner, server, conversation, tool, &arguments, save_to.is_some()).await;
+        let mut output = integration.call(state, owner, server, conversation, tool, &arguments, save_to.is_some()).await;
+
+        images = std::mem::take(&mut output.images);
 
         match save_to {
             Some(_) => {
@@ -120,7 +123,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
         review = Some(sent.outcome);
     }
 
-    chat_tools::record_call(state, owner, server, tool, conversation, "workspace", None, decision, is_error, review).await;
+    chat_tools::record_call(state, owner, server, tool, conversation, "workspace", None, decision, is_error, review, &chat_tools::Found { images: &images, received: &text }).await;
 
     if let (Some(path), Some(conversation_id), false) = (save_to, conversation, is_error) {
         return Ok(match crate::file_arguments::save(state, owner, conversation_id, &path, binary.as_deref().unwrap_or(text.as_bytes())).await {

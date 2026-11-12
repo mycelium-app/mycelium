@@ -58,7 +58,7 @@ pub fn always_asks(tool: &str) -> bool {
 }
 
 fn failure(text: impl Into<String>) -> CallOutput {
-    CallOutput { text: text.into(), is_error: true, binary: None }
+    CallOutput { text: text.into(), is_error: true, binary: None, images: Vec::new() }
 }
 
 fn request(http: &reqwest::Client, credentials: &Credentials, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
@@ -197,7 +197,7 @@ pub async fn call(http: &reqwest::Client, credentials: &Credentials, tool: &str,
     };
 
     match outcome {
-        Ok(value) => CallOutput { text: value.to_string(), is_error: false, binary: None },
+        Ok(value) => CallOutput { text: value.to_string(), is_error: false, binary: None, images: Vec::new() },
         Err(reason) => failure(reason),
     }
 }

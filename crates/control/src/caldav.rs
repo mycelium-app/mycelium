@@ -762,8 +762,8 @@ async fn run(http: &reqwest::Client, credentials: &Credentials, tool: &str, argu
 
 pub async fn call(http: &reqwest::Client, credentials: &Credentials, tool: &str, arguments: &Value) -> CallOutput {
     match run(http, credentials, tool, arguments).await {
-        Ok(value) => CallOutput { text: value.to_string(), is_error: false, binary: None },
-        Err(reason) => CallOutput { text: reason, is_error: true, binary: None },
+        Ok(value) => CallOutput { text: value.to_string(), is_error: false, binary: None, images: Vec::new() },
+        Err(reason) => CallOutput { text: reason, is_error: true, binary: None, images: Vec::new() },
     }
 }
 

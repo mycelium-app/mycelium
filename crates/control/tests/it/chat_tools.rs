@@ -20,6 +20,7 @@ use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use uuid::Uuid;
 
 const MCP_TOKEN: &str = "mcp-secret-0123456789abcdef";
 const ANTHROPIC_KEY: &str = "sk-ant-0123456789abcdefghij";
@@ -1255,4 +1256,17 @@ async fn an_integration_added_mid_conversation_is_found_next_turn() {
 
     assert!(!rig.model.request(0)["messages"][0]["content"].as_str().unwrap().contains("- Zulip:"));
     assert!(rig.model.request(1)["messages"][0]["content"].as_str().unwrap().contains("- Zulip:"));
+}
+
+#[tokio::test]
+async fn images_a_chat_found_with_search_images_are_recorded_for_that_chat_only() {
+    let rig = rig(vec![Reply::Call("mcp__search__search_images", json!({"query": "ceiling track"})), Reply::Say("Here they are.")]).await;
+    let base = serve(Router::new().route("/search", get(|| async { Json(json!({"results": [{"title": "Track", "img_src": "https://images.example.org/track.png", "url": "https://shop.example.com/track"}]})) }))).await;
+    rig.server.user.json(rig.server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Search", "kind": "web_search", "url": base}))).await;
+    let id = rig.chat("Show me ceiling tracks.").await;
+    rig.turns_ended(&id, 1).await;
+
+    let recorded = sqlx::query_as::<_, (String, Option<String>, String)>("select i.url, i.page_url, c.surface from integration_call_images i join integration_calls c on c.id = i.call_id where c.conversation_id = $1").bind(id.parse::<Uuid>().unwrap()).fetch_all(&rig.server.pool).await.unwrap();
+
+    assert_eq!(recorded, [("https://images.example.org/track.png".to_string(), Some("https://shop.example.com/track".to_string()), "chat".to_string())]);
 }

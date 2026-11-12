@@ -350,7 +350,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
     };
     let address = match integration {
         Some(integration) if !integration.needs_address() => String::new(),
-        Some(integration) if entered.is_empty() && integration.default_address().is_some() => integration.default_address().unwrap_or_default().to_string(),
+        Some(integration) if entered.is_empty() && integration.default_address(request.settings.as_ref().unwrap_or(&Value::Null)).is_some() => integration.default_address(request.settings.as_ref().unwrap_or(&Value::Null)).unwrap_or_default().to_string(),
         _ => {
             let parsed = url::Url::parse(entered).ok().filter(|parsed| matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some());
             let Some(parsed) = parsed else {
@@ -375,8 +375,10 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
                 (Some(prompt), None) => return Err(ApiError::bad_request("account_required", prompt)),
                 (_, account) => account,
             };
-            let Some(secret) = token else {
-                return Err(ApiError::bad_request("api_key_required", integration.secret_prompt()));
+            let secret = match token {
+                Some(secret) => secret,
+                None if integration.secret_required(request.settings.as_ref().unwrap_or(&Value::Null)) => return Err(ApiError::bad_request("api_key_required", integration.secret_prompt())),
+                None => "",
             };
             settings = integration.normalise_settings(request.settings.as_ref().unwrap_or(&Value::Null)).map_err(|reason| ApiError::bad_request("settings_invalid", reason))?;
 

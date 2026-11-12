@@ -51,7 +51,7 @@ pub fn always_asks(tool: &str) -> bool {
 }
 
 fn failure(text: impl Into<String>) -> CallOutput {
-    CallOutput { text: text.into(), is_error: true, binary: None }
+    CallOutput { text: text.into(), is_error: true, binary: None, images: Vec::new() }
 }
 
 fn base(credentials: &Credentials) -> &str {
@@ -268,7 +268,7 @@ async fn run(http: &reqwest::Client, credentials: &Credentials, tool: &str, argu
 
 pub async fn call(http: &reqwest::Client, credentials: &Credentials, tool: &str, arguments: &Value) -> CallOutput {
     match run(http, credentials, tool, arguments).await {
-        Ok(value) => CallOutput { text: value.to_string(), is_error: false, binary: None },
+        Ok(value) => CallOutput { text: value.to_string(), is_error: false, binary: None, images: Vec::new() },
         Err(reason) => failure(reason),
     }
 }

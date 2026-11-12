@@ -1,7 +1,7 @@
 use crate::chat_tool_servers::{ServerRow, StoredTool};
 use crate::integration_policy::{self, Effective, Source};
 use mycelium_proto::api::{ApprovalPreset, IntegrationStatus, ToolKind};
-use crate::{actual, caldav, coolify, discord, email, freeagent, lastfm, paperless, stoat, tandoor, zulip};
+use crate::{actual, caldav, coolify, discord, email, freeagent, lastfm, paperless, stoat, tandoor, web_search, zulip};
 use crate::state::AppState;
 use uuid::Uuid;
 use serde_json::{Value, json};
@@ -19,6 +19,7 @@ pub enum Integration {
     Paperless,
     Coolify,
     Tandoor,
+    WebSearch,
 }
 
 pub struct Credentials {
@@ -29,10 +30,16 @@ pub struct Credentials {
     pub session: Option<String>,
 }
 
+pub struct FoundImage {
+    pub url: String,
+    pub page_url: Option<String>,
+}
+
 pub struct CallOutput {
     pub text: String,
     pub is_error: bool,
     pub binary: Option<Vec<u8>>,
+    pub images: Vec<FoundImage>,
 }
 
 impl CallOutput {
@@ -78,7 +85,15 @@ impl Integration {
             "paperless" => Some(Integration::Paperless),
             "coolify" => Some(Integration::Coolify),
             "tandoor" => Some(Integration::Tandoor),
+            "web_search" => Some(Integration::WebSearch),
             _ => None,
+        }
+    }
+
+    pub fn secret_required(self, settings: &Value) -> bool {
+        match self {
+            Integration::WebSearch => web_search::secret_required(settings),
+            _ => true,
         }
     }
 
@@ -86,11 +101,12 @@ impl Integration {
         self != Integration::Email
     }
 
-    pub fn default_address(self) -> Option<&'static str> {
+    pub fn default_address(self, settings: &Value) -> Option<&'static str> {
         match self {
             Integration::LastFm => Some(lastfm::DEFAULT_ADDRESS),
             Integration::Discord => Some(discord::DEFAULT_ADDRESS),
             Integration::FreeAgent => Some(freeagent::PRODUCTION_ADDRESS),
+            Integration::WebSearch => web_search::default_address(settings),
             _ => None,
         }
     }
@@ -104,7 +120,7 @@ impl Integration {
             Integration::CalDav => Some("Enter your calendar username."),
             Integration::Discord => Some("Enter the name people know you by on Discord."),
             Integration::FreeAgent => Some("Enter your FreeAgent OAuth identifier."),
-            Integration::Actual | Integration::Paperless | Integration::Coolify | Integration::Tandoor => None,
+            Integration::Actual | Integration::Paperless | Integration::Coolify | Integration::Tandoor | Integration::WebSearch => None,
         }
     }
 
@@ -121,6 +137,7 @@ impl Integration {
             Integration::Paperless => "Enter your Paperless-ngx API token.",
             Integration::Coolify => "Enter your Coolify API token.",
             Integration::Tandoor => "Enter your Tandoor API token.",
+            Integration::WebSearch => "Enter your Brave Search API key.",
         }
     }
 
@@ -133,6 +150,7 @@ impl Integration {
             Integration::CalDav => caldav::normalise_settings(settings),
             Integration::Actual => actual::normalise_settings(settings),
             Integration::Coolify => coolify::normalise_settings(settings),
+            Integration::WebSearch => web_search::normalise_settings(settings),
             Integration::Discord | Integration::FreeAgent | Integration::Paperless | Integration::Tandoor => Ok(Value::Null),
         }
     }
@@ -150,6 +168,7 @@ impl Integration {
             Integration::Paperless => paperless::tools(),
             Integration::Coolify => coolify::tools(),
             Integration::Tandoor => tandoor::tools(),
+            Integration::WebSearch => web_search::tools(),
         }
     }
 
@@ -166,6 +185,7 @@ impl Integration {
             Integration::Paperless => paperless::always_asks(tool),
             Integration::Coolify => coolify::always_asks(tool),
             Integration::Tandoor => tandoor::always_asks(tool),
+            Integration::WebSearch => web_search::always_asks(tool),
         }
     }
 
@@ -182,6 +202,7 @@ impl Integration {
             Integration::Paperless => paperless::verify(http, credentials).await.map(|_| Value::Null),
             Integration::Coolify => coolify::verify(http, credentials).await,
             Integration::Tandoor => tandoor::verify(http, credentials).await.map(|_| Value::Null),
+            Integration::WebSearch => web_search::verify(http, credentials).await.map(|_| Value::Null),
         }
     }
 
@@ -200,6 +221,7 @@ impl Integration {
             Integration::Paperless => paperless::call(&state.http, &credentials, tool, arguments, saving).await,
             Integration::Coolify => coolify::call(state, owner, server, &credentials, conversation, tool, arguments).await,
             Integration::Tandoor => tandoor::call(&state.http, &credentials, tool, arguments).await,
+            Integration::WebSearch => web_search::call(&state.http, &credentials, tool, arguments).await,
         }
     }
 }

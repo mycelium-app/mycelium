@@ -187,7 +187,7 @@ async fn run(http: &reqwest::Client, credentials: &Credentials, tool: &str, argu
 
 pub async fn call(state: &AppState, owner: Uuid, server: &ServerRow, credentials: &Credentials, tool: &str, arguments: &Value) -> CallOutput {
     match run(&state.http, credentials, tool, arguments).await {
-        Ok(value) => CallOutput { text: value.to_string(), is_error: false, binary: None },
+        Ok(value) => CallOutput { text: value.to_string(), is_error: false, binary: None, images: Vec::new() },
         Err((_, REVOKED)) => {
             if credentials.session.is_some() {
                 let _ = sqlx::query("update chat_tool_servers set session_key = null where id = $1").bind(server.id).execute(&state.pool).await;
@@ -195,9 +195,9 @@ pub async fn call(state: &AppState, owner: Uuid, server: &ServerRow, credentials
                 state.publish(Some(owner), StreamMessage::IntegrationsChanged);
             }
 
-            CallOutput { text: SIGN_IN_FIRST.to_string(), is_error: true, binary: None }
+            CallOutput { text: SIGN_IN_FIRST.to_string(), is_error: true, binary: None, images: Vec::new() }
         }
-        Err((reason, _)) => CallOutput { text: reason, is_error: true, binary: None },
+        Err((reason, _)) => CallOutput { text: reason, is_error: true, binary: None, images: Vec::new() },
     }
 }
 
