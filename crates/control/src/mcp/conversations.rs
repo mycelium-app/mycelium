@@ -379,12 +379,22 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
 
             let place = match (field("project"), field("folder"), field("node")) {
                 (Some(project), _, node) => {
-                    let found = sqlx::query_as::<_, (Uuid, Uuid, Option<Uuid>)>("select id, node_id, group_id from projects where owner = $1 and (id::text = lower($2) or name = $2) and ($3::text is null or node_id = (select id from nodes where created_by = $1 and name = $3 and revoked_at is null))").bind(owner).bind(project).bind(node).fetch_optional(&state.pool).await?;
+                    let found = sqlx::query_as::<_, (Uuid, String, Option<Uuid>)>("select id, name, group_id from projects where owner = $1 and (id::text = lower($2) or name = $2) order by created_at, id limit 1").bind(owner).bind(project).fetch_optional(&state.pool).await?;
 
                     match found {
                         None => return Ok(nothing(format!("None of the person's projects is {project}."))),
                         Some((_, _, project_group)) if project_group != Some(target_group) => return Ok(nothing(format!("The project {project} is not in the {target_name} group."))),
-                        Some((project_id, node_id, _)) => (node_id, String::new(), Some(project_id)),
+                        Some((project_id, project_name, _)) => {
+                            let node_id = match node {
+                                Some(node_name) => sqlx::query_scalar::<_, Uuid>("select c.node_id from project_checkouts c join nodes n on n.id = c.node_id where c.project_id = $1 and n.created_by = $2 and n.name = $3 and n.revoked_at is null").bind(project_id).bind(owner).bind(node_name).fetch_optional(&state.pool).await?.ok_or(node_name),
+                                None => Ok(sqlx::query_scalar::<_, Uuid>("select c.node_id from project_checkouts c left join conversations v on v.project_id = c.project_id and v.node_id = c.node_id where c.project_id = $1 group by c.id order by max(v.created_at) desc nulls last, c.created_at, c.id limit 1").bind(project_id).fetch_one(&state.pool).await?),
+                            };
+
+                            match node_id {
+                                Ok(node_id) => (node_id, String::new(), Some(project_id)),
+                                Err(node_name) => return Ok(nothing(format!("{project_name} has no checkout on {node_name}. Call create_project to clone it there."))),
+                            }
+                        }
                     }
                 }
                 (None, Some(folder), Some(node_name)) => {

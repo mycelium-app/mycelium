@@ -1014,3 +1014,106 @@ async fn a_checkout_that_is_not_there_is_not_found() {
 
     assert_eq!(status, 404);
 }
+
+fn create_project_call(arguments: Value) -> Value {
+    json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "create_project", "arguments": arguments}})
+}
+
+fn reply_text(reply: &Value) -> String {
+    reply["result"]["content"][0]["text"].as_str().unwrap().to_string()
+}
+
+struct AgentCreating {
+    reply: Value,
+    asked: Value,
+}
+
+async fn agent_creates_project(server: &Server, token: &str, arguments: Value, node: Option<(&mut NodeLink, Value)>) -> AgentCreating {
+    let conversation = server.node_conversation(token).await;
+    let (reply, asked) = tokio::join!(server.agent_mcp(token, conversation, create_project_call(arguments)), async {
+        let asked = server.open_request(conversation).await;
+
+        server.answer(conversation, &asked, "approve").await;
+
+        if let Some((link, answer)) = node {
+            answer_next(link, Ok(answer)).await;
+        }
+
+        asked
+    });
+
+    AgentCreating { reply, asked }
+}
+
+#[tokio::test]
+async fn the_create_project_approval_names_the_node_by_name_whatever_the_agent_passed() {
+    let server = Server::start().await;
+    let github = fake_forge("github").await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let (mut atlas, token) = server.online_node_with_token("atlas", env!("CARGO_PKG_VERSION")).await;
+    let mut orion = server.online_node("orion").await;
+    create_project(&server, &mut atlas, json!({"forge_id": forge_id, "repository": "acme-org/backups"}), Ok(json!({"path": "/home/sam/projects/acme-org/backups"}))).await;
+
+    let creating = agent_creates_project(&server, &token, json!({"node": orion.id.to_string(), "forge": forge_id.to_string(), "repository": "acme-org/backups"}), Some((&mut orion, json!({"path": "/srv/projects/acme-org/backups"})))).await;
+
+    assert_eq!(creating.asked["toolCall"]["rawInput"]["node"], "orion");
+}
+
+#[tokio::test]
+async fn create_project_on_a_node_for_a_repository_already_a_project_adds_a_checkout_and_says_so() {
+    let server = Server::start().await;
+    let github = fake_forge("github").await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let (mut atlas, token) = server.online_node_with_token("atlas", env!("CARGO_PKG_VERSION")).await;
+    let mut orion = server.online_node("orion").await;
+    create_project(&server, &mut atlas, json!({"forge_id": forge_id, "repository": "acme-org/backups"}), Ok(json!({"path": "/home/sam/projects/acme-org/backups"}))).await;
+
+    let creating = agent_creates_project(&server, &token, json!({"node": "orion", "forge": forge_id.to_string(), "repository": "acme-org/backups"}), Some((&mut orion, json!({"path": "/srv/projects/acme-org/backups"})))).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+
+    assert_eq!(reply_text(&creating.reply), "Added a checkout of backups on orion at /srv/projects/acme-org/backups");
+    assert_eq!(creating.reply["result"]["isError"], false);
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn create_project_for_a_repository_already_checked_out_on_that_node_says_where() {
+    let server = Server::start().await;
+    let github = fake_forge("github").await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let (mut atlas, token) = server.online_node_with_token("atlas", env!("CARGO_PKG_VERSION")).await;
+    create_project(&server, &mut atlas, json!({"forge_id": forge_id, "repository": "acme-org/backups"}), Ok(json!({"path": "/home/sam/projects/acme-org/backups"}))).await;
+
+    let creating = agent_creates_project(&server, &token, json!({"node": "atlas", "forge": forge_id.to_string(), "repository": "acme-org/backups"}), None).await;
+
+    assert_eq!(reply_text(&creating.reply), "backups is already checked out on atlas at /home/sam/projects/acme-org/backups");
+}
+
+#[tokio::test]
+async fn create_project_for_a_new_repository_says_it_added_the_project_without_ids() {
+    let server = Server::start().await;
+    let github = fake_forge("github").await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let (mut atlas, token) = server.online_node_with_token("atlas", env!("CARGO_PKG_VERSION")).await;
+
+    let creating = agent_creates_project(&server, &token, json!({"node": "atlas", "forge": forge_id.to_string(), "repository": "acme-org/backups"}), Some((&mut atlas, json!({"path": "/home/sam/projects/acme-org/backups"})))).await;
+
+    assert_eq!(reply_text(&creating.reply), "Added the project backups on atlas at /home/sam/projects/acme-org/backups");
+}
+
+#[tokio::test]
+async fn list_places_lists_each_project_once_with_a_checkout_per_node() {
+    let server = Server::start().await;
+    let (mut atlas, token) = server.online_node_with_token("atlas", env!("CARGO_PKG_VERSION")).await;
+    let orion = server.online_node("orion").await;
+    backups_on_two_nodes(&server, &mut atlas, &orion).await;
+    let conversation = server.node_conversation(&token).await;
+
+    let reply = server.agent_mcp(&token, conversation, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "list_places", "arguments": {}}})).await;
+    let places: Value = serde_json::from_str(&reply_text(&reply)).unwrap();
+    let checkouts: Vec<(Value, Value)> = places["projects"][0]["checkouts"].as_array().unwrap().iter().map(|checkout| (checkout["node"].clone(), checkout["path"].clone())).collect();
+
+    assert_eq!(places["projects"].as_array().unwrap().len(), 1);
+    assert_eq!(checkouts, vec![(json!("atlas"), json!("/home/sam/backups")), (json!("orion"), json!("/srv/backups"))]);
+    assert!(places["nodes"].as_array().unwrap().iter().all(|node| node.get("projects").is_none()));
+}

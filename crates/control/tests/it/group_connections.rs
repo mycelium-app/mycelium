@@ -1,5 +1,6 @@
 use crate::common;
 use crate::common::{NodeLink, Server};
+use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -877,4 +878,52 @@ async fn start_conversation_needs_the_project_a_worktree_belongs_to() {
 
     assert_eq!(refused["isError"], json!(true), "{refused}");
     assert!(text(&refused).contains("Name the project the worktree belongs to"), "{refused}");
+}
+
+#[tokio::test]
+async fn start_conversation_for_a_project_on_a_named_node_runs_in_that_nodes_checkout() {
+    let fleet = fleet().await;
+    let mut orion = fleet.server.online_node("orion").await;
+    let project = project_in(&fleet, "billing", Some(fleet.yucca)).await;
+    sqlx::query("insert into project_checkouts (project_id, node_id, path) values ($1, $2, '/srv/billing')").bind(project).bind(orion.id).execute(&fleet.server.pool).await.unwrap();
+    let mut arguments = start_arguments("yucca", "billing");
+    arguments["node"] = json!("orion");
+
+    let started = call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_conversation", arguments).await;
+
+    assert_eq!(started["isError"], false, "{started}");
+    assert!(text(&started).contains(" on orion."), "{started}");
+    let cwd = match orion.next().await {
+        ControlToNode::StartSession { cwd, .. } => cwd,
+        other => panic!("expected start_session, got {other:?}"),
+    };
+    assert_eq!(cwd, "/srv/billing");
+}
+
+#[tokio::test]
+async fn start_conversation_for_a_project_on_a_node_without_a_checkout_says_to_create_one() {
+    let fleet = fleet().await;
+    fleet.server.online_node("orion").await;
+    project_in(&fleet, "billing", Some(fleet.yucca)).await;
+    let mut arguments = start_arguments("yucca", "billing");
+    arguments["node"] = json!("orion");
+
+    let refused = call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_conversation", arguments).await;
+
+    assert_eq!(refused["isError"], true, "{refused}");
+    assert!(text(&refused).contains("billing has no checkout on orion. Call create_project to clone it there."), "{refused}");
+}
+
+#[tokio::test]
+async fn start_conversation_for_a_project_without_a_node_uses_the_checkout_of_its_latest_conversation() {
+    let fleet = fleet().await;
+    let mut orion = fleet.server.online_node("orion").await;
+    let project = project_in(&fleet, "billing", Some(fleet.yucca)).await;
+    sqlx::query("insert into project_checkouts (project_id, node_id, path) values ($1, $2, '/srv/billing')").bind(project).bind(orion.id).execute(&fleet.server.pool).await.unwrap();
+    sqlx::query("insert into conversations (owner, node_id, agent, cwd, title, status, project_id) values ((select owner from conversations where id = $1), $2, 'claude', '/srv/billing', 'Earlier', 'done', $3)").bind(fleet.yucca_chat).bind(orion.id).bind(project).execute(&fleet.server.pool).await.unwrap();
+
+    let started = call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_conversation", start_arguments("yucca", "billing")).await;
+
+    assert!(text(&started).contains(" on orion."), "{started}");
+    assert!(matches!(orion.next().await, ControlToNode::StartSession { .. }));
 }

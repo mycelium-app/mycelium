@@ -5,6 +5,7 @@ use crate::error::ApiResult;
 use crate::projects;
 use axum::Json;
 use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use mycelium_proto::api::{CreateProjectRequest, PatchProjectRequest, Project};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -13,7 +14,7 @@ pub fn definitions() -> Value {
     json!([
         {
             "name": "create_project",
-            "description": "Add a project: register a folder that is already on a node, make a new folder, or clone a repository from a connected forge. The person approves it in a card in this conversation first. List nodes and existing projects with list_places.",
+            "description": "Add a project: register a folder that is already on a node, make a new folder, or clone a repository from a connected forge. When the repository is already a project, this adds a checkout of it on that node instead of a second project. The person approves it in a card in this conversation first. List nodes and existing projects with list_places.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -79,14 +80,28 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             None => None,
         };
 
-        if let Err(refusal) = approval::approved(&caller, tool, &arguments).await? {
+        let node_name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(node_id).fetch_one(&state.pool).await?;
+        let mut shown = arguments.clone();
+        shown["node"] = json!(node_name);
+
+        if let Err(refusal) = approval::approved(&caller, tool, &shown).await? {
             return Ok(ToolReply::text(&refusal, true));
         }
 
         let request = CreateProjectRequest { node_id, forge_id, repository: field("repository"), path: field("path"), new_repository: arguments["new_repository"].as_bool().unwrap_or(false), new_folder: field("new_folder"), group_id: None };
 
         return Ok(match projects::create(State(state.clone()), AuthUser::of(state, owner).await?, Json(request)).await {
-            Ok((_, Json(created))) => ToolReply::text(&format!("Added the project {}.", described(state, &created.project).await?), false),
+            Ok((status, Json(created))) => {
+                let path = created.project.checkouts.iter().find(|checkout| checkout.node_id == node_id).map(|checkout| checkout.path.as_str()).unwrap_or_default();
+                let name = &created.project.name;
+                let text = match (status, created.checkout_added) {
+                    (_, true) => format!("Added a checkout of {name} on {node_name} at {path}"),
+                    (StatusCode::CREATED, false) => format!("Added the project {name} on {node_name} at {path}"),
+                    (_, false) => format!("{name} is already checked out on {node_name} at {path}"),
+                };
+
+                ToolReply::text(&text, false)
+            }
             Err(error) => ToolReply::text(&format!("Nothing was added. {}", error.message()), true),
         });
     }
