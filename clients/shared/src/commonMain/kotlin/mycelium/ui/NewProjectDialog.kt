@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
@@ -64,7 +65,7 @@ fun StepHeading(number: Int, title: String, filled: Boolean = true) {
 }
 
 @Composable
-fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCreated: (Project) -> Unit) {
+fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCreated: (Project) -> Unit, onExisting: (Project) -> Unit = onCreated) {
     val nodes = state.nodes.values.filter { it.online }.sortedBy { it.name }
     var source by remember { mutableStateOf(ProjectSources.first()) }
     var query by remember { mutableStateOf("") }
@@ -80,11 +81,15 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
     var groupId by remember { mutableStateOf<String?>(groupFilter.takeUnless { it == AllGroups || it == NoGroup || it.startsWith("all-except:") }) }
     val action = rememberAction()
 
-    val node = nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
     val cloning = source == ForgeRepository
+    val existing = repository?.takeIf { cloning }?.let { picked -> state.projects.values.firstOrNull { it.forgeId == picked.forgeId && it.repository.equals(picked.fullName, ignoreCase = true) } }
+    val node = nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull { existing?.checkoutOn(it.id) == null } ?: nodes.firstOrNull()
+    val alreadyThere = existing != null && node != null && existing.checkoutOn(node.id) != null
     val creating = source == NewRepository
     val forge = forges.firstOrNull { it.id == forgeId } ?: forges.firstOrNull()
     val submitLabel = when {
+        existing != null && alreadyThere -> "Open ${existing.name}"
+        existing != null -> "Add a checkout on ${node?.name.orEmpty()}"
         cloning -> "Clone and open"
         creating -> "Create and open"
         else -> "Register and open"
@@ -122,6 +127,11 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
             return
         }
 
+        if (existing != null && alreadyThere) {
+            onExisting(existing)
+            return
+        }
+
         if (creating && forge == null) {
             action.failure = "Connect a forge in Settings, then create the repository."
             return
@@ -139,7 +149,7 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
 
         val picked = repository
         val request = if (cloning && picked != null) {
-            CreateProjectRequest(node.id, picked.forgeId, picked.fullName, groupId = groupId)
+            CreateProjectRequest(node.id, picked.forgeId, picked.fullName, groupId = groupId.takeIf { existing == null })
         } else if (creating && forge != null) {
             CreateProjectRequest(node.id, forge.id, created.trim(), newRepository = true, groupId = groupId)
         } else {
@@ -147,7 +157,13 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
         }
 
         action {
-            onCreated(store.createProject(request))
+            val project = store.createProject(request)
+
+            if (existing != null) {
+                onExisting(project)
+            } else {
+                onCreated(project)
+            }
         }
     }
 
@@ -218,21 +234,37 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
                         text = option.name,
                         icon = nodeIcon(option),
                         iconColour = nodeColour(option),
-                        description = "Set up on ${option.name}",
+                        description = if (existing?.checkoutOn(option.id) != null) "Set up on ${option.name}, already has a checkout" else "Set up on ${option.name}",
                         variant = ButtonVariant.Outline,
                         size = ButtonSize.Sm,
                         muted = option.id != node?.id,
                         selected = option.id == node?.id,
+                        trailingIcon = MyIcon.Check.takeIf { existing?.checkoutOn(option.id) != null },
                     )
                 }
             }
 
-            if (destination != null) {
+            if (existing != null) {
+                Row(
+                    Modifier.fillMaxWidth().background(MyTheme.colors.bgPanel, BlockShape).border(Tokens.Size.Hairline, MyTheme.colors.border, BlockShape).padding(Tokens.Space.S2),
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Icon(MyIcon.Info, MyTheme.colors.textMuted, Tokens.Size.IconSm)
+                    Label(
+                        "${existing.repository} is already a project, checked out on ${existing.places.mapNotNull { state.nodes[it.nodeId]?.name }.joinToString(", ")}. Its group, icon and test command carry over.",
+                        Modifier.weight(1f),
+                        Tokens.Type.Meta,
+                    )
+                }
+            }
+
+            if (destination != null && existing == null) {
                 Label("~/projects/$destination", style = Tokens.Type.Code, color = MyTheme.colors.textMuted)
             }
         }
 
-        if (groups.isNotEmpty()) {
+        if (groups.isNotEmpty() && existing == null) {
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 StepHeading(3, "Group", filled = false)
 

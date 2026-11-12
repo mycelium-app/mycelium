@@ -435,7 +435,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
     }
 
     if (creating) {
-        NewProjectDialog(store, state, onDismiss = { creating = false }, onCreated = { creating = false; onNewConversation(it.id) })
+        NewProjectDialog(store, state, onDismiss = { creating = false }, onCreated = { creating = false; onNewConversation(it.id) }, onExisting = { creating = false; onOpenProject(it.id) })
     }
 }
 
