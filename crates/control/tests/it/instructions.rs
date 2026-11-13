@@ -20,7 +20,19 @@ const GITLAB_TOKEN: &str = "glpat-0123456789abcdefghij";
 struct Repository {
     files: HashMap<String, (String, String)>,
     commits: u32,
-    refuse_next_write: bool,
+    refuse_writes: bool,
+    edit_before_next_write: Option<(String, String)>,
+    writes: u32,
+}
+
+impl Repository {
+    fn commit(&mut self, path: String, text: String) -> String {
+        self.commits += 1;
+        let commit = commit_id(self.commits);
+        self.files.insert(path, (text, commit.clone()));
+
+        commit
+    }
 }
 
 type Shared = Arc<Mutex<Repository>>;
@@ -45,9 +57,7 @@ fn fake_github(shared: Shared) -> Router {
         let mut repository = shared.lock().unwrap();
         let existing = repository.files.get(&path).map(|(_, commit)| format!("blob-{commit}"));
 
-        if repository.refuse_next_write || (existing.is_some() && body["sha"].as_str() != existing.as_deref()) {
-            repository.refuse_next_write = false;
-
+        if repository.refuse_writes || (existing.is_some() && body["sha"].as_str() != existing.as_deref()) {
             return Err(StatusCode::CONFLICT);
         }
 
@@ -87,15 +97,19 @@ fn fake_gitlab(shared: Shared) -> Router {
 
     async fn write(State(shared): State<Shared>, Path((_, path)): Path<(String, String)>, Json(body): Json<Value>) -> StatusCode {
         let mut repository = shared.lock().unwrap();
+
+        if let Some((edited_path, text)) = repository.edit_before_next_write.take() {
+            repository.commit(edited_path, text);
+        }
+
         let existing = repository.files.get(&path).map(|(_, commit)| commit.clone());
 
-        if existing.is_some() && body["last_commit_id"].as_str() != existing.as_deref() {
+        if repository.refuse_writes || (existing.is_some() && body["last_commit_id"].as_str() != existing.as_deref()) {
             return StatusCode::BAD_REQUEST;
         }
 
-        repository.commits += 1;
-        let commit = commit_id(repository.commits);
-        repository.files.insert(path, (body["content"].as_str().unwrap().to_string(), commit));
+        repository.writes += 1;
+        repository.commit(path, body["content"].as_str().unwrap().to_string());
 
         StatusCode::OK
     }
@@ -122,6 +136,13 @@ async fn github_source(server: &Server, shared: Shared) -> Uuid {
     assert_eq!(status, 200, "{body}");
 
     forge_id
+}
+
+async fn gitlab_source(server: &Server, shared: Shared) {
+    let base = serve(fake_gitlab(shared)).await;
+    let forge_id = connect_forge(server, "gitlab", &base, GITLAB_TOKEN).await;
+    let (status, body) = server.user.json(server.user.put("/api/v1/instruction-source").json(&json!({"forge_id": forge_id, "repository": "slop/agents-md"}))).await;
+    assert_eq!(status, 200, "{body}");
 }
 
 async fn create_group(server: &Server, name: &str) -> Uuid {
@@ -482,16 +503,17 @@ async fn a_layer_is_committed_to_a_sibling_file_named_after_the_group() {
 }
 
 #[tokio::test]
-async fn a_refused_commit_leaves_the_text_unsaved_and_asks_for_a_pull() {
+async fn a_commit_the_forge_refuses_while_the_file_is_unchanged_says_so_and_leaves_the_text_unsaved() {
     let server = Server::start().await;
     let shared = Shared::default();
     github_source(&server, shared.clone()).await;
     save(&server, "global", "# One").await;
-    shared.lock().unwrap().refuse_next_write = true;
+    shared.lock().unwrap().refuse_writes = true;
 
     let (status, body) = save(&server, "global", "# Two").await;
 
-    assert_eq!((status, body["error"].clone()), (409, json!("forge_file_changed")));
+    assert_eq!((status, body["error"].clone()), (400, json!("forge_write_refused")));
+    assert!(!body["message"].as_str().unwrap_or_default().contains("Pull"), "{body}");
     assert_eq!(layer(&instructions(&server).await, "Global")["text"], "# One");
 }
 
@@ -980,7 +1002,7 @@ async fn approving_with_a_source_commits_to_the_forge() {
 }
 
 #[tokio::test]
-async fn a_proposal_goes_out_of_date_when_the_layer_is_saved_and_cannot_be_approved() {
+async fn a_proposal_that_overlaps_a_newer_save_is_out_of_date_and_stays_waiting() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let token = link.token.clone();
@@ -988,7 +1010,7 @@ async fn a_proposal_goes_out_of_date_when_the_layer_is_saved_and_cannot_be_appro
     expect_instructions(&mut link).await;
     let conversation = conversation_with_session(&server, &mut link, "/anywhere").await;
     let (read, _) = tool(&server, &token, conversation, "get_instructions", json!({})).await;
-    propose(&server, &token, conversation, json!({"text": "# One\nRule", "base_revision": revision_in(&read), "reason": "because"})).await;
+    propose(&server, &token, conversation, json!({"text": "# One, briefly", "base_revision": revision_in(&read), "reason": "because"})).await;
     let id = proposals(&server).await[0]["id"].as_str().unwrap().to_string();
     let mut stream = server.user.stream().await;
 
@@ -1002,8 +1024,127 @@ async fn a_proposal_goes_out_of_date_when_the_layer_is_saved_and_cannot_be_appro
     assert!(streamed.out_of_date);
     assert_eq!(proposals(&server).await[0]["out_of_date"], json!(true));
     let (status, body) = server.user.json(server.user.post(&format!("/api/v1/instruction-proposals/{id}/approve"))).await;
-    assert_eq!((status, body["error"].clone()), (409, json!("proposal_out_of_date")));
+    assert_eq!((status, body["error"].clone()), (409, json!("instructions_overlap")));
     assert_eq!(layer(&instructions(&server).await, "Global")["text"], "# Edited by hand");
+    assert_eq!(proposals(&server).await[0]["state"], json!("proposed"));
+}
+
+async fn propose_on_current(server: &Server, token: &str, conversation: Uuid, text: &str) -> String {
+    let (read, _) = tool(server, token, conversation, "get_instructions", json!({})).await;
+    let (answer, is_error) = propose(server, token, conversation, json!({"text": text, "base_revision": revision_in(&read), "reason": "because"})).await;
+    assert_eq!(is_error, json!(false), "{answer}");
+
+    proposals(server).await.as_array().unwrap().iter().find(|proposal| proposal["text"] == text).unwrap()["id"].as_str().unwrap().to_string()
+}
+
+async fn approve(server: &Server, id: &str) -> (u16, Value) {
+    server.user.json(server.user.post(&format!("/api/v1/instruction-proposals/{id}/approve"))).await
+}
+
+const RULES: &str = "# Rules\nOne\nTwo\nThree\n";
+
+#[tokio::test]
+async fn approving_after_the_file_changed_on_gitlab_keeps_that_change_and_adds_the_proposal() {
+    let server = Server::start().await;
+    let shared = Shared::default();
+    gitlab_source(&server, shared.clone()).await;
+    save(&server, "global", RULES).await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    let conversation = conversation_with_session(&server, &mut link, "/anywhere").await;
+    let id = propose_on_current(&server, &token, conversation, "# Rules\nOne\nTwo\nThree\nFour\n").await;
+    shared.lock().unwrap().commit("AGENTS.md".into(), "# Rules\nOne, changed on GitLab\nTwo\nThree\n".into());
+
+    let (status, approved) = approve(&server, &id).await;
+
+    assert_eq!(status, 200, "{approved}");
+    let merged = "# Rules\nOne, changed on GitLab\nTwo\nThree\nFour\n";
+    assert_eq!(shared.lock().unwrap().files["AGENTS.md"].0, merged);
+    assert_eq!(layer(&instructions(&server).await, "Global")["text"], merged);
+}
+
+#[tokio::test]
+async fn two_proposals_made_on_the_same_text_are_approved_one_after_the_other() {
+    let server = Server::start().await;
+    let shared = Shared::default();
+    gitlab_source(&server, shared.clone()).await;
+    save(&server, "global", RULES).await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    let first_conversation = conversation_with_session(&server, &mut link, "/first").await;
+    let second_conversation = conversation_with_session(&server, &mut link, "/second").await;
+    let first = propose_on_current(&server, &token, first_conversation, "# Rules\nOne\nTwo\nThree\nFour\n").await;
+    let second = propose_on_current(&server, &token, second_conversation, "# Rules\nOne, sooner\nTwo\nThree\n").await;
+
+    let (first_status, _) = approve(&server, &first).await;
+    let waiting = proposals(&server).await.as_array().unwrap().iter().find(|proposal| proposal["id"] == json!(second)).unwrap()["out_of_date"].clone();
+    let (second_status, body) = approve(&server, &second).await;
+
+    assert_eq!((first_status, waiting, second_status), (200, json!(false), 200), "{body}");
+    assert_eq!(shared.lock().unwrap().files["AGENTS.md"].0, "# Rules\nOne, sooner\nTwo\nThree\nFour\n");
+}
+
+#[tokio::test]
+async fn a_write_that_races_another_change_is_retried_on_the_newer_file() {
+    let server = Server::start().await;
+    let shared = Shared::default();
+    gitlab_source(&server, shared.clone()).await;
+    save(&server, "global", RULES).await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    let conversation = conversation_with_session(&server, &mut link, "/anywhere").await;
+    let id = propose_on_current(&server, &token, conversation, "# Rules\nOne\nTwo\nThree\nFour\n").await;
+    shared.lock().unwrap().edit_before_next_write = Some(("AGENTS.md".into(), "# Rules\nOne\nTwo, raced\nThree\n".into()));
+
+    let (status, approved) = approve(&server, &id).await;
+
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(shared.lock().unwrap().files["AGENTS.md"].0, "# Rules\nOne\nTwo, raced\nThree\nFour\n");
+}
+
+#[tokio::test]
+async fn an_edit_overlapping_a_change_on_gitlab_waits_and_leaves_gitlab_as_it_is() {
+    let server = Server::start().await;
+    let shared = Shared::default();
+    gitlab_source(&server, shared.clone()).await;
+    save(&server, "global", RULES).await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    let conversation = conversation_with_session(&server, &mut link, "/anywhere").await;
+    let id = propose_on_current(&server, &token, conversation, "# Rules\nOne, from the proposal\nTwo\nThree\n").await;
+    let upstream = "# Rules\nOne, from GitLab\nTwo\nThree\n";
+    shared.lock().unwrap().commit("AGENTS.md".into(), upstream.into());
+    let writes_before = shared.lock().unwrap().writes;
+
+    let (status, body) = approve(&server, &id).await;
+
+    assert_eq!((status, body["error"].clone()), (409, json!("instructions_overlap")));
+    let repository = shared.lock().unwrap();
+    assert_eq!((repository.files["AGENTS.md"].0.as_str(), repository.writes), (upstream, writes_before));
+    drop(repository);
+    let listed = proposals(&server).await;
+    assert_eq!((listed[0]["state"].clone(), listed[0]["out_of_date"].clone()), (json!("proposed"), json!(true)));
+    assert_eq!(layer(&instructions(&server).await, "Global")["text"], upstream);
+}
+
+#[tokio::test]
+async fn approving_the_same_proposal_twice_at_once_commits_it_once() {
+    let server = Server::start().await;
+    let shared = Shared::default();
+    gitlab_source(&server, shared.clone()).await;
+    save(&server, "global", RULES).await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    let conversation = conversation_with_session(&server, &mut link, "/anywhere").await;
+    let id = propose_on_current(&server, &token, conversation, "# Rules\nOne\nTwo\nThree\nFour\n").await;
+    let writes_before = shared.lock().unwrap().writes;
+
+    let ((first, _), (second, _)) = tokio::join!(approve(&server, &id), approve(&server, &id));
+
+    let mut statuses = [first, second];
+    statuses.sort();
+    assert_eq!(statuses, [200, 409]);
+    assert_eq!(shared.lock().unwrap().writes, writes_before + 1);
 }
 
 #[tokio::test]

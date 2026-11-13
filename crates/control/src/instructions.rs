@@ -20,6 +20,7 @@ use uuid::Uuid;
 const GLOBAL: &str = "global";
 const DEFAULT_PATH: &str = "AGENTS.md";
 const ASSISTANT_PREFIX: &str = "assistant:";
+const WRITE_ATTEMPTS: usize = 3;
 
 pub fn assistant_layer(id: Uuid) -> String {
     format!("{ASSISTANT_PREFIX}{id}")
@@ -308,9 +309,24 @@ pub async fn record_assistant_version(state: &AppState, assistant_id: Uuid, text
     record(state, owner, &Layer::of_assistant(assistant_id, String::new()), text, None).await
 }
 
-pub async fn apply(state: &AppState, user: &AuthUser, layer: &Layer, text: &str) -> ApiResult<()> {
+pub fn rebase(base: &str, current: &str, edited: &str) -> Option<String> {
+    if current == base {
+        return Some(edited.to_string());
+    }
+
+    diffy::merge(base, current, edited).ok()
+}
+
+fn overlapping_edit(layer: &Layer) -> ApiError {
+    ApiError::conflict("instructions_overlap", format!("A newer change to the {} instructions edits the same lines as this one. Ask the agent to propose it again on the current text.", layer.name))
+}
+
+pub async fn apply(state: &AppState, user: &AuthUser, layer: &Layer, base: &str, text: &str) -> ApiResult<()> {
+    let current = latest(state, &layer.key).await?.map(|version| version.text).unwrap_or_default();
+
     if let Some(assistant_id) = layer.assistant_id {
-        assistants::store_file(state, assistant_id, INSTRUCTIONS_PATH, text.as_bytes()).await?;
+        let merged = rebase(base, &current, text).ok_or_else(|| overlapping_edit(layer))?;
+        assistants::store_file(state, assistant_id, INSTRUCTIONS_PATH, merged.as_bytes()).await?;
         assistants::publish(state, user.id, assistant_id).await?;
         crate::assistant_backup::trigger(state, user.id, assistant_id);
 
@@ -321,33 +337,66 @@ pub async fn apply(state: &AppState, user: &AuthUser, layer: &Layer, text: &str)
         user.require_operator(state)?;
     }
 
-    let unchanged = latest(state, &layer.key).await?.is_some_and(|version| version.text == text);
+    let Some(source) = source(state).await? else {
+        let merged = rebase(base, &current, text).ok_or_else(|| overlapping_edit(layer))?;
 
-    if !unchanged {
-        let source = source(state).await?;
-        let commit = match &source {
-            Some(source) => {
-                let api = forge_for(state, user.id, source).await?;
-                let path = layer.path(&source.path);
-                let existing = api.file(&state.http, &source.repository, &path).await.map_err(|error| error.into_api(api.kind, &api.base_url))?;
-                let message = format!("docs: update {path}");
+        if merged != current {
+            record(state, user.id, layer, &merged, None).await?;
+            push_to_every_node(state).await?;
+        }
 
-                Some(api.write_file(&state.http, &source.repository, &path, text, &message, existing.as_ref()).await.map_err(|error| error.into_api(api.kind, &api.base_url))?)
+        return Ok(());
+    };
+
+    let api = forge_for(state, user.id, &source).await?;
+    let path = layer.path(&source.path);
+    let message = format!("docs: update {path}");
+    let mut refused_at = None;
+
+    for _ in 0..WRITE_ATTEMPTS {
+        let existing = api.file(&state.http, &source.repository, &path).await.map_err(|error| error.into_api(api.kind, &api.base_url))?;
+        let upstream = existing.as_ref().map_or(current.as_str(), |file| file.text.as_str());
+
+        if let Some(file) = &existing
+            && file.text != current
+        {
+            record(state, user.id, layer, &file.text, Some(file.commit.clone())).await?;
+        }
+
+        let merged = rebase(base, upstream, text).ok_or_else(|| overlapping_edit(layer))?;
+
+        if existing.is_some() && merged == upstream {
+            push_to_every_node(state).await?;
+
+            return Ok(());
+        }
+
+        let commit_read = existing.as_ref().map(|file| file.commit.clone());
+
+        if refused_at.is_some() && refused_at == commit_read {
+            return Err(ApiError::bad_request("forge_write_refused", format!("{} refused to save {path} in {}. Check that the connected account can push to its default branch, then try again.", forges::display_name(api.kind), source.repository)));
+        }
+
+        match api.write_file(&state.http, &source.repository, &path, &merged, &message, existing.as_ref()).await {
+            Ok(commit) => {
+                record(state, user.id, layer, &merged, Some(commit)).await?;
+                push_to_every_node(state).await?;
+
+                return Ok(());
             }
-            None => None,
-        };
-
-        record(state, user.id, layer, text, commit).await?;
-        push_to_every_node(state).await?;
+            Err(forges::ForgeError::Conflict) => refused_at = commit_read,
+            Err(error) => return Err(error.into_api(api.kind, &api.base_url)),
+        }
     }
 
-    Ok(())
+    Err(forges::ForgeError::Conflict.into_api(api.kind, &api.base_url))
 }
 
 pub async fn save(State(state): State<AppState>, user: AuthUser, Path(key): Path<String>, Json(request): Json<SaveInstructionsRequest>) -> ApiResult<Json<InstructionLayer>> {
     let layer = find_layer(&state, &user, &key).await?;
+    let base = latest(&state, &layer.key).await?.map(|version| version.text).unwrap_or_default();
 
-    apply(&state, &user, &layer, &request.text).await?;
+    apply(&state, &user, &layer, &base, &request.text).await?;
 
     layer_of(&state, &user, layer).await
 }

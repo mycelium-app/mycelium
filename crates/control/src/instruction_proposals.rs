@@ -15,7 +15,7 @@ const LISTED: i64 = 100;
 pub const NO_REVISION: &str = "none";
 
 const PROPOSAL_COLUMNS: &str = "p.id, p.conversation_id, c.title as conversation_title, p.layer, p.layer_name, p.base_revision, p.base_text, p.text, p.reason, p.state, p.note, p.created_at, p.decided_at,
-    coalesce((select v.id from instruction_versions v where v.layer = p.layer order by v.seq desc limit 1), '') as current_revision";
+    coalesce((select v.text from instruction_versions v where v.layer = p.layer order by v.seq desc limit 1), '') as current_text";
 
 #[derive(sqlx::FromRow)]
 struct ProposalRow {
@@ -32,7 +32,7 @@ struct ProposalRow {
     note: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
     decided_at: Option<chrono::DateTime<chrono::Utc>>,
-    current_revision: String,
+    current_text: String,
 }
 
 impl ProposalRow {
@@ -50,7 +50,7 @@ impl ProposalRow {
             conversation_title: self.conversation_title,
             layer: self.layer,
             layer_name: self.layer_name,
-            out_of_date: state == InstructionProposalState::Proposed && self.current_revision != self.base_revision,
+            out_of_date: state == InstructionProposalState::Proposed && instructions::rebase(&self.base_text, &self.current_text, &self.text).is_none(),
             base_revision: self.base_revision,
             base_text: self.base_text,
             text: self.text,
@@ -217,18 +217,21 @@ pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
 pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<InstructionProposal>> {
     let found = find_owned(&state, id, user.id).await?;
 
-    if found.state != "proposed" {
+    let layer = find_layer(&state, &user, &found.layer).await?;
+    let claimed = sqlx::query("update instruction_proposals set state = 'approved', decided_at = now() where id = $1 and state = 'proposed'").bind(id).execute(&state.pool).await?.rows_affected();
+
+    if claimed == 0 {
         return Err(ApiError::conflict("proposal_not_proposed", "This proposal has already been decided."));
     }
 
-    if found.current_revision != found.base_revision {
-        return Err(ApiError::conflict("proposal_out_of_date", "The instructions changed after this edit was proposed. Decline it, or ask the agent to propose it again on the current text."));
+    let applied = instructions::apply(&state, &user, &layer, &found.base_text, &found.text).await;
+
+    if let Err(error) = applied {
+        sqlx::query("update instruction_proposals set state = 'proposed', decided_at = null where id = $1").bind(id).execute(&state.pool).await?;
+        publish(&state, user.id, find_owned(&state, id, user.id).await?);
+
+        return Err(error);
     }
-
-    let layer = find_layer(&state, &user, &found.layer).await?;
-
-    instructions::apply(&state, &user, &layer, &found.text).await?;
-    sqlx::query("update instruction_proposals set state = 'approved', decided_at = now() where id = $1").bind(id).execute(&state.pool).await?;
 
     Ok(Json(publish(&state, user.id, find_owned(&state, id, user.id).await?)))
 }
