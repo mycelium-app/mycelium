@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.34.29
+
+- An agent can ask to start one conversation in a group its group is not connected to. Instead of refusing, start_conversation shows a card naming both groups, the project, node and first message; Create starts exactly that conversation and never connects the groups, and Create and connect links only the two conversations.
+- A refused API call says why: the action needs full access, the conversation is in a group the token cannot reach, or the token lacks a named scope.
+- A conversation that fails before its first message tells the conversation that started it why, and read_conversation shows a conversation's errors among its messages.
+
 ## v0.34.27
 
 - Publishes the changes listed under v0.34.26, whose desktop and web build did not complete, so v0.34.26 was never released.
