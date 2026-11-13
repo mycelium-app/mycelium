@@ -168,3 +168,34 @@ fn node_run_joins_first_when_given_a_control_plane_and_no_credential() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("Could not reach http://127.0.0.1:9"), "node run did not try to join: {stderr}");
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn an_agent_stops_when_its_keeper_is_killed() {
+    let dir = tempfile::tempdir().unwrap();
+    let pid_file = dir.path().join("agent.pid");
+    let mut keeper = std::process::Command::new(assert_cmd::cargo::cargo_bin("mycelium"))
+        .args(["keeper", "--dir"])
+        .arg(dir.path())
+        .args(["--", "sh", "-c", &format!("echo $$ > {}; exec sleep 600", pid_file.display())])
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let agent = loop {
+        if let Some(pid) = std::fs::read_to_string(&pid_file).ok().and_then(|text| text.trim().parse::<u32>().ok()) {
+            break pid;
+        }
+
+        assert!(std::time::Instant::now() < deadline, "the agent never started");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+
+    keeper.kill().unwrap();
+    keeper.wait().unwrap();
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::path::Path::new(&format!("/proc/{agent}")).exists() && std::fs::read_to_string(format!("/proc/{agent}/stat")).is_ok_and(|stat| !stat.contains(") Z ")) {
+        assert!(std::time::Instant::now() < deadline, "the agent kept running after its keeper was killed");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}

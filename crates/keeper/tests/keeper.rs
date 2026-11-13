@@ -176,3 +176,17 @@ async fn attaching_beyond_the_journal_replays_nothing_and_goes_live() {
     client.send(json!({"n": 1})).await;
     assert_eq!(client.next().await.unwrap()["seq"], 1);
 }
+
+#[tokio::test]
+async fn a_second_keeper_for_the_same_session_is_refused_and_the_first_keeps_serving() {
+    let dir = tempfile::tempdir().unwrap();
+    let _first = start(dir.path(), "cat");
+    let mut client = Client::attach(dir.path(), 0).await;
+    assert_eq!(client.next().await.unwrap(), json!({"live": true}));
+
+    let second = start(dir.path(), "cat").await.unwrap();
+
+    assert!(second.unwrap_err().to_string().contains("Another keeper already runs the agent"));
+    client.send(json!({"id": 1})).await;
+    assert_eq!(client.next().await.unwrap(), json!({"seq": 1, "dir": "out", "frame": {"id": 1}}));
+}

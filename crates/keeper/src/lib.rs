@@ -48,6 +48,7 @@ pub async fn run(dir: PathBuf, command: Vec<String>) -> Result<()> {
     };
 
     std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    let _session = hold_session(&dir)?;
     let socket_path = dir.join("keeper.sock");
     let _ = std::fs::remove_file(&socket_path);
     let _ = std::fs::remove_file(dir.join("exit.json"));
@@ -67,7 +68,9 @@ pub async fn run(dir: PathBuf, command: Vec<String>) -> Result<()> {
         close,
     });
 
-    let mut child = Command::new(program)
+    let mut agent = Command::new(program);
+    stop_with_keeper(&mut agent);
+    let mut child = agent
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -217,6 +220,41 @@ async fn serve_client(stream: UnixStream, shared: &Shared, frames_to_agent: mpsc
         }
     }
 }
+
+fn hold_session(dir: &Path) -> Result<std::fs::File> {
+    use std::os::fd::AsRawFd;
+
+    let lock = OpenOptions::new().create(true).truncate(false).write(true).open(dir.join("keeper.lock"))?;
+    let taken = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+
+    if taken != 0 {
+        bail!("Another keeper already runs the agent for {}.", dir.display());
+    }
+
+    Ok(lock)
+}
+
+#[cfg(target_os = "linux")]
+fn stop_with_keeper(agent: &mut Command) {
+    let keeper = std::process::id() as libc::pid_t;
+
+    unsafe {
+        agent.pre_exec(move || {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+
+            if libc::getppid() != keeper {
+                libc::_exit(1);
+            }
+
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn stop_with_keeper(_agent: &mut Command) {}
 
 pub fn socket_path(dir: &Path) -> PathBuf {
     dir.join("keeper.sock")
