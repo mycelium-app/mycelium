@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.34.32
+
+- read_usage reports the tokens a readable conversation used between two times: input, output, cache read and cache write, and cost, in total and per model.
+- An agent stops when its keeper goes away, and a second keeper for the same conversation is refused, so an orphaned agent can no longer keep editing beside its replacement.
+- Projects can be archived, restored and removed from the project page's menu. Archived projects leave the pickers and show under Archived in the Projects list's node filter; removing one keeps its conversations and leaves its files on the nodes.
+- read_conversation shows each message once.
+- A bot mention on Discord, or on Stoat with a bot token, wakes the assistant a mention trigger routes it to, with the message and the ten before it. Triggers are set up through /api/v1/mention-triggers for now.
+- The desktop app no longer keeps Outline browsers running after their panel closes, and never closes one that is still on screen.
+
 ## v0.34.31
 
 - A subagent or workflow with a step in a group the asking conversation's group is not connected to names that group on the approval card, on that step only, and approving re-checks every step after your choices. Steps reaching two unconnected groups are refused before any card, and approving never connects the groups.
