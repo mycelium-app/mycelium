@@ -109,6 +109,8 @@ private const val RetainedSessionLimit = 4
 
 private val retainedSessions = RetainedViews<JcefSession>(RetainedSessionLimit) { it.close() }
 
+fun forgetRetainedSession(key: String) = retainedSessions.forget(key)
+
 private class JcefSession {
     val host = OffscreenBrowser()
     var reading: PageReading? = null
@@ -183,6 +185,7 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: Pag
                 session.close()
             } else {
                 session.browser?.setWindowlessFrameRate(DetachedFrameRate)
+                retainedSessions.release(retainKey)
             }
         }
     }

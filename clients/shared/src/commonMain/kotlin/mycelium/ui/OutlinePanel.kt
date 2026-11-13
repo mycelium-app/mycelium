@@ -371,7 +371,7 @@ private fun ColumnScope.OutlineDocument(browser: OutlineBrowser, platform: Platf
 fun OutlinePanel(browser: OutlineBrowser, platform: Platform, servers: List<ChatToolServer>, page: OutlinePage?, onSelect: (OutlinePage) -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier) {
     val colors = MyTheme.colors
     val back = LocalPanelBack.current
-    val close = onClose.takeIf { back == null }
+    val close: (() -> Unit)? = if (back == null) ({ platform.forgetRetainedView(browser.viewKey); onClose() }) else null
     val openSettings = LocalOpenIntegrationSettings.current
     val collection = browser.collections[browser.serverId]?.firstOrNull { it.id == browser.collectionId }
 

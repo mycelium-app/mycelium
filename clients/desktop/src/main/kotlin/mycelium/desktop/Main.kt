@@ -266,6 +266,8 @@ private object DesktopPlatform : Platform {
 
     override val readsPages: Boolean get() = jcefAvailable
 
+    override fun forgetRetainedView(key: String) = forgetRetainedSession(key)
+
     @Composable
     override fun WebContent(url: String, token: String?, modifier: Modifier, reading: PageReading?) {
         if (jcefAvailable) {

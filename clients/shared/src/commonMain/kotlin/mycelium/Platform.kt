@@ -65,6 +65,8 @@ interface Platform {
 
     fun openSignIn(url: String, onCancelled: () -> Unit) = openUrl(url)
 
+    fun forgetRetainedView(key: String) = Unit
+
     fun copyToClipboard(text: String)
 
     suspend fun readClipboard(): String? = null
