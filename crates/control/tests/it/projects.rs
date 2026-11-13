@@ -1157,10 +1157,17 @@ async fn removing_an_archived_project_keeps_its_conversations_without_a_project(
     let project = project_on(&server, &mut link).await;
     let (_, conversation) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "project_id": project["id"]}))).await;
     archive(&server, &project, true).await;
+    let mut stream = server.user.stream().await;
 
     let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/projects/{}", project["id"].as_str().unwrap()))).await;
 
     assert_eq!(status, 204);
+    let removed = stream.until(|message| match message {
+        mycelium_proto::stream::StreamMessage::ProjectRemoved { project_id } => Some(project_id),
+        _ => None,
+    })
+    .await;
+    assert_eq!(json!(removed), project["id"]);
     let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
     assert_eq!(listed, json!([]));
     let kept = server.conversation(conversation["id"].as_str().unwrap().parse().unwrap()).await;

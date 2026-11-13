@@ -15,6 +15,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/projects",
     "POST /api/v1/projects/{id}/checkout",
     "DELETE /api/v1/projects/{id}/checkouts/{node_id}",
+    "DELETE /api/v1/projects/{id}",
     "POST /api/v1/workflows",
     "POST /api/v1/workflows/{id}/control",
     "POST /api/v1/workflows/{id}/rerun",
@@ -129,6 +130,8 @@ const PUBLISHING_ROUTES: &[&str] = &[
 ];
 
 const SILENT_ROUTES: &[&str] = &[
+    "POST /api/v1/mention-triggers",
+    "DELETE /api/v1/mention-triggers/{id}",
     "POST /api/v1/mcp-session-tokens/revoke",
     "POST /api/v1/nodes/join-tokens",
     "PUT /api/v1/agent-settings",
