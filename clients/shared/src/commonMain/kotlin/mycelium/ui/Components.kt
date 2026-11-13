@@ -470,7 +470,7 @@ fun StatusGlyph(status: ConversationStatus, size: Dp = Tokens.Size.IconSm) {
     Icon(icon, tint, size)
 }
 
-enum class Tone { Working, Attention, Failed, Muted }
+enum class Tone { Working, Attention, Failed, Muted, Done }
 
 @Composable
 fun StatusMark(text: String, tone: Tone, icon: MyIcon, modifier: Modifier = Modifier) {
@@ -480,6 +480,7 @@ fun StatusMark(text: String, tone: Tone, icon: MyIcon, modifier: Modifier = Modi
         Tone.Attention -> colors.statusAttention
         Tone.Failed -> colors.statusFailed
         Tone.Muted -> colors.textMuted
+        Tone.Done -> colors.statusDone
     }
     val wordColor = if (tone == Tone.Failed) colors.statusFailed else colors.textMuted
 

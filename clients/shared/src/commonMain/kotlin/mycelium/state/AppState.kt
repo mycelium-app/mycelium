@@ -101,6 +101,8 @@ data class AppState(
     val finishedLogins: Map<String, Boolean> = emptyMap(),
     val terminalOutput: Map<String, TerminalFeed> = emptyMap(),
     val exitedTerminals: Set<String> = emptySet(),
+    val terminalExitCodes: Map<String, Int> = emptyMap(),
+    val actionItemFailures: Map<String, String> = emptyMap(),
     val environments: Map<String, mycelium.api.Environment> = emptyMap(),
     val environmentActions: Map<String, List<mycelium.api.EnvironmentAction>> = emptyMap(),
     val lastEnvironmentNodeId: String? = null,
@@ -259,7 +261,10 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
         state.copy(terminalOutput = state.terminalOutput + (message.terminalId to (state.terminalOutput[message.terminalId] ?: TerminalFeed()).with(message.data, message.offset)))
 
     is StreamMessage.TerminalExited ->
-        state.copy(exitedTerminals = state.exitedTerminals + message.terminalId)
+        state.copy(
+            exitedTerminals = state.exitedTerminals + message.terminalId,
+            terminalExitCodes = if (message.exitCode == null) state.terminalExitCodes else state.terminalExitCodes + (message.terminalId to message.exitCode),
+        )
 
     is StreamMessage.ProjectChanged ->
         state.copy(projects = state.projects + (message.project.id to message.project))

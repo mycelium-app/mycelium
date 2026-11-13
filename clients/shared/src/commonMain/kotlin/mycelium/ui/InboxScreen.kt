@@ -351,7 +351,7 @@ fun RequestCard(store: Store, state: AppState, conversationId: String, request: 
             onOpen = { store.clearFlag(conversationId); onOpenConversation(conversationId) },
             onDismiss = { store.clearFlag(conversationId) },
         )
-        is InboxRequest.ActionItem -> ActionItemCard(request, onDone = { store.completeActionItem(state.conversations.getValue(conversationId), request.item.id) })
+        is InboxRequest.ActionItem -> ActionItemCard(store, state, conversationId, request, onOpenConversation)
     }
 }
 
@@ -384,35 +384,6 @@ private fun FlagCard(text: String, onReply: (String) -> Unit, onOpen: () -> Unit
                 MyButton(::send, text = "Send reply", variant = ButtonVariant.Primary)
                 MyButton(onOpen, text = "Open conversation", variant = ButtonVariant.Outline)
                 MyButton(onDismiss, text = "Dismiss", variant = ButtonVariant.Outline)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ActionItemCard(request: InboxRequest.ActionItem, onDone: () -> Unit) {
-    val colors = MyTheme.colors
-
-    Card {
-        CardHead {
-            StatusMark(if (request.done) "Done" else "For you to do", if (request.done) Tone.Muted else Tone.Attention, if (request.done) MyIcon.Check else MyIcon.Clipboard)
-
-            if (!request.done) {
-                Spacer(Modifier.weight(1f))
-                Icon(MyIcon.Clock, colors.textMuted, Tokens.Size.IconSm)
-                Label("Stays until you mark it done", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-            }
-        }
-
-        Column(Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-            MarkdownBlocks(parsedMarkdown(request.item.text), textStyle = Tokens.Type.Ui, blockSpacing = Tokens.Space.S2)
-
-            if (request.done) {
-                Label("Marked as done. It leaves Needs you.", Modifier.semantics { liveRegion = LiveRegionMode.Polite }, Tokens.Type.Meta, colors.textMuted)
-            } else {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    MyButton(onDone, text = "Mark as done", variant = ButtonVariant.Primary, description = "Mark as done: ${request.item.text}")
-                }
             }
         }
     }

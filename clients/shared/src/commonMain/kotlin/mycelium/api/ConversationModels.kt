@@ -177,7 +177,26 @@ data class ConfigRequest(
 )
 
 @Serializable
-data class ActionItem(val id: String, val text: String, @SerialName("created_at") val createdAt: String)
+data class ActionItemRun(
+    @SerialName("terminal_id") val terminalId: String,
+    val status: String,
+    @SerialName("started_at") val startedAt: String,
+    @SerialName("exit_code") val exitCode: Int? = null,
+    val output: String = "",
+    val reason: String? = null,
+)
+
+@Serializable
+data class ActionItem(
+    val id: String,
+    val text: String,
+    @SerialName("created_at") val createdAt: String,
+    val command: String? = null,
+    @SerialName("node_id") val nodeId: String? = null,
+    @SerialName("node_name") val nodeName: String? = null,
+    val folder: String? = null,
+    val run: ActionItemRun? = null,
+)
 
 @Serializable
 data class Conversation(

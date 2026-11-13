@@ -178,8 +178,9 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     }
 
     var chatForced by remember(id) { mutableStateOf(false) }
-    var terminalShown by remember(id) { mutableStateOf(false) }
-    var terminalMounted by remember(id) { mutableStateOf(false) }
+    val terminalRequested = remember(id) { store.takeTerminalRequest(id) }
+    var terminalShown by remember(id) { mutableStateOf(terminalRequested) }
+    var terminalMounted by remember(id) { mutableStateOf(terminalRequested) }
     var terminalHeight by remember { mutableStateOf(Tokens.Size.TerminalDock) }
 
     fun toggleTerminal() {

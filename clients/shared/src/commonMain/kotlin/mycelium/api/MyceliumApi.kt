@@ -998,6 +998,9 @@ class MyceliumApi(
     suspend fun completeActionItem(conversationId: String, itemId: String): Conversation =
         call("/conversations/$conversationId/action-items/$itemId") { client.delete(it) { authorise() } }.body()
 
+    suspend fun runActionItem(conversationId: String, itemId: String, cols: Int, rows: Int): Conversation =
+        call("/conversations/$conversationId/action-items/$itemId/run") { client.post(it) { authorise(); json(StartTerminalRequest(cols, rows)) } }.body()
+
     suspend fun continueConversation(id: String, request: ContinueRequest): Conversation =
         call("/conversations/$id/continue") { client.post(it) { authorise(); json(request) } }.body()
 

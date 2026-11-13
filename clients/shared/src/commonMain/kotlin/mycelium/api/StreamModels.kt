@@ -4,6 +4,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 
 sealed interface StreamMessage {
@@ -91,7 +92,7 @@ sealed interface StreamMessage {
 
     data class TerminalOutput(val terminalId: String, val data: String, val offset: Long? = null) : StreamMessage
 
-    data class TerminalExited(val terminalId: String) : StreamMessage
+    data class TerminalExited(val terminalId: String, val exitCode: Int? = null) : StreamMessage
 
     data class ProjectChanged(val project: Project) : StreamMessage
 
@@ -169,7 +170,7 @@ fun parseStreamMessage(text: String): StreamMessage? {
             ok = (element["ok"] as? JsonPrimitive)?.contentOrNull == "true",
         )
         "terminal_output" -> StreamMessage.TerminalOutput(element.requireString("terminal_id"), element.requireString("data"), (element["offset"] as? JsonPrimitive)?.longOrNull)
-        "terminal_exited" -> StreamMessage.TerminalExited(element.requireString("terminal_id"))
+        "terminal_exited" -> StreamMessage.TerminalExited(element.requireString("terminal_id"), (element["exit_code"] as? JsonPrimitive)?.intOrNull)
         "project" -> StreamMessage.ProjectChanged(MyceliumJson.decodeFromJsonElement(Project.serializer(), element))
         "environment" -> StreamMessage.EnvironmentChanged(MyceliumJson.decodeFromJsonElement(Environment.serializer(), element))
         "environment_action" -> StreamMessage.EnvironmentActed(

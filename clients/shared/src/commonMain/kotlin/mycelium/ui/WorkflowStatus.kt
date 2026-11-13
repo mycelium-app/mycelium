@@ -53,4 +53,5 @@ fun Tone.color() = when (this) {
     Tone.Attention -> MyTheme.colors.statusAttention
     Tone.Failed -> MyTheme.colors.statusFailed
     Tone.Muted -> MyTheme.colors.textMuted
+    Tone.Done -> MyTheme.colors.statusDone
 }

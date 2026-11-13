@@ -82,6 +82,8 @@ import kotlin.io.encoding.Base64
 
 private const val FirstRetryMillis = 250L
 private const val TerminalLayoutSaveDelay = 500L
+private const val ActionItemTerminalCols = 80
+private const val ActionItemTerminalRows = 24
 private const val LongestRetryMillis = 15_000L
 private const val StableConnectionMillis = 10_000L
 private const val RecentConnectAttemptMillis = 5_000L
@@ -1433,6 +1435,39 @@ class Store(
             mutableState.update { it.copy(conversations = it.conversations + (updated.id to updated)) }
         }
     }
+
+    fun runActionItem(conversation: Conversation, itemId: String) {
+        scope.launch {
+            mutableState.update { it.copy(actionItemFailures = it.actionItemFailures - itemId) }
+
+            try {
+                val updated = api.runActionItem(conversation.id, itemId, ActionItemTerminalCols, ActionItemTerminalRows)
+                mutableState.update { it.copy(conversations = it.conversations + (updated.id to updated)) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: ApiException) {
+                mutableState.update { it.copy(actionItemFailures = it.actionItemFailures + (itemId to failure.message)) }
+            } catch (_: Exception) {
+                mutableState.update { it.copy(actionItemFailures = it.actionItemFailures + (itemId to ControlPlaneUnreachable)) }
+            }
+        }
+    }
+
+    fun stopActionItemRun(terminalId: String) {
+        act { api.stopTerminal(terminalId) }
+    }
+
+    val terminalRequests = mutableSetOf<String>()
+
+    fun openActionItemTerminal(conversationId: String, terminalId: String, onOpen: () -> Unit) {
+        act {
+            keepTerminalWorkspace(conversationId, loadTerminalWorkspace(conversationId).focusing(terminalId))
+            terminalRequests += conversationId
+            onOpen()
+        }
+    }
+
+    fun takeTerminalRequest(conversationId: String): Boolean = terminalRequests.remove(conversationId)
 
     fun snooze(conversation: Conversation, until: String?) {
         act {

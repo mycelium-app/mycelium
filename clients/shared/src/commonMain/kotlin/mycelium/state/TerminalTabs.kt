@@ -128,6 +128,13 @@ data class TerminalWorkspace(val tabs: TerminalTabs = TerminalTabs(), val panes:
 
         workspace.copy(tabs = opened, panes = workspace.panes + (opened.current!!.focused to terminalId))
     }
+
+    fun focusing(terminalId: String): TerminalWorkspace {
+        val pane = panes.entries.firstOrNull { it.value == terminalId }?.key ?: return adopting(listOf(terminalId))
+        val tab = tabs.tabs.firstOrNull { pane in it.layout.paneIds() } ?: return adopting(listOf(terminalId))
+
+        return copy(tabs = tabs.select(tab.id).focus(pane))
+    }
 }
 
 private fun TerminalLayout.saved(): SavedTerminalNode = when (this) {

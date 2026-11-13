@@ -38,7 +38,7 @@ sealed interface InboxRequest {
 
     data class Flag(val text: String) : InboxRequest
 
-    data class ActionItem(val item: mycelium.api.ActionItem, val done: Boolean = false) : InboxRequest
+    data class ActionItem(val item: mycelium.api.ActionItem, val done: Boolean = false, val succeeded: Boolean = false) : InboxRequest
 }
 
 data class InboxItem(
@@ -55,11 +55,13 @@ data class InboxItem(
     val name: String get() = assistant?.name ?: conversation.title
 }
 
+private val RunningOrSucceeded = setOf("running", "succeeded")
+
 fun InboxItem.resolved(): InboxItem? = when (request) {
     is InboxRequest.Approval -> copy(request = InboxRequest.Approval(request.permission.copy(resolved = true)))
     is InboxRequest.Mycelium, is InboxRequest.Gate -> this
     is InboxRequest.Instructions, is InboxRequest.Flag -> null
-    is InboxRequest.ActionItem -> copy(request = request.copy(done = true))
+    is InboxRequest.ActionItem -> copy(request = if (request.item.run?.status in RunningOrSucceeded) request.copy(succeeded = true) else request.copy(done = true))
 }
 
 private fun waitsOnPerson(conversation: Conversation) =
