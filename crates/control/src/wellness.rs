@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Mutex;
 use uuid::Uuid;
 
-pub const PUZZLES: [&str; 6] = ["wordle", "connections", "daily-orbs", "catfishing", "enclose-horse", "elect-horse"];
+pub const PUZZLES: [&str; 7] = ["wordle", "connections", "daily-orbs", "catfishing", "enclose-horse", "elect-horse", "elect-horse-expert"];
 const PUZZLE_STATS_DAYS: i64 = 30;
 const HEARTBEAT_CAP_SECONDS: i32 = 90;
 const HEARTBEAT_FUTURE_MINUTES: i64 = 5;
@@ -457,8 +457,8 @@ pub async fn today_of(state: &AppState, owner: Uuid) -> ApiResult<NaiveDate> {
 
 pub async fn save_puzzle_result(state: &AppState, owner: Uuid, puzzle: &str, day: NaiveDate, result: &PuzzleResult, source: &str) -> ApiResult<()> {
     sqlx::query(
-        "insert into puzzle_plays (owner, puzzle, day, solved, score, seconds, source) values ($1, $2, $3, $4, $5, $6, $7)
-         on conflict (owner, puzzle, day) do update set solved = excluded.solved, score = excluded.score, seconds = excluded.seconds, source = excluded.source, recorded_at = now()",
+        "insert into puzzle_plays (owner, puzzle, day, solved, score, seconds, source, drawn) values ($1, $2, $3, $4, $5, $6, $7, $8)
+         on conflict (owner, puzzle, day) do update set solved = excluded.solved, score = excluded.score, seconds = excluded.seconds, source = excluded.source, drawn = excluded.drawn, recorded_at = now()",
     )
     .bind(owner)
     .bind(puzzle)
@@ -467,6 +467,7 @@ pub async fn save_puzzle_result(state: &AppState, owner: Uuid, puzzle: &str, day
     .bind(result.score)
     .bind(result.seconds)
     .bind(source)
+    .bind(result.drawn && result.solved.is_none())
     .execute(&state.pool)
     .await?;
 
@@ -518,7 +519,7 @@ pub struct PuzzlesQuery {
     days: Option<i64>,
 }
 
-type PuzzleRow = (String, NaiveDate, Option<bool>, Option<i32>, Option<i32>, String, DateTime<Utc>);
+type PuzzleRow = (String, NaiveDate, Option<bool>, Option<i32>, Option<i32>, String, DateTime<Utc>, bool);
 
 fn streaks(days: &BTreeSet<NaiveDate>, today: NaiveDate) -> (i64, i64) {
     let mut cursor = if days.contains(&today) { today } else { today - Duration::days(1) };
@@ -551,14 +552,14 @@ pub async fn puzzles(State(state): State<AppState>, user: AuthUser, Query(query)
     let today = today_of(&state, user.id).await?;
     let first = today - Duration::days(count - 1);
     let stats_first = today - Duration::days(PUZZLE_STATS_DAYS - 1);
-    let rows = sqlx::query_as::<_, PuzzleRow>("select puzzle, day, solved, score, seconds, source, recorded_at from puzzle_plays where owner = $1 order by day desc").bind(user.id).fetch_all(&state.pool).await?;
+    let rows = sqlx::query_as::<_, PuzzleRow>("select puzzle, day, solved, score, seconds, source, recorded_at, drawn from puzzle_plays where owner = $1 order by day desc").bind(user.id).fetch_all(&state.pool).await?;
 
     let summaries = PUZZLES
         .iter()
         .map(|name| {
             let own: Vec<&PuzzleRow> = rows.iter().filter(|row| row.0 == *name).collect();
             let recent: Vec<&PuzzleRow> = own.iter().copied().filter(|row| row.1 >= stats_first).collect();
-            let result = |row: &PuzzleRow| PuzzleResult { solved: row.2, score: row.3, seconds: row.4, source: Some(row.5.clone()) };
+            let result = |row: &PuzzleRow| PuzzleResult { solved: row.2, score: row.3, seconds: row.4, source: Some(row.5.clone()), drawn: row.7 };
             let scores: Vec<i32> = recent.iter().filter_map(|row| row.3).collect();
             let times: Vec<i32> = recent.iter().filter_map(|row| row.4).collect();
             let streak_days: BTreeSet<NaiveDate> = own.iter().filter(|row| row.2 != Some(false)).map(|row| row.1).collect();
@@ -577,6 +578,7 @@ pub async fn puzzles(State(state): State<AppState>, user: AuthUser, Query(query)
                 stats: PuzzleStats {
                     played: recent.len() as i64,
                     solved: recent.iter().filter(|row| row.2 == Some(true)).count() as i64,
+                    drawn: recent.iter().filter(|row| row.7).count() as i64,
                     average: mean(&scores),
                     average_seconds: mean(&times),
                     streak,

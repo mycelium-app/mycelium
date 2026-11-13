@@ -308,3 +308,27 @@ async fn elect_horse_is_on_the_list_and_keeps_a_result_entered_by_hand() {
     let elect = summary(&server, "elect-horse").await;
     assert_eq!((elect["today"]["solved"].clone(), elect["today"]["score"].clone(), elect["today"]["seconds"].clone()), (json!(true), json!(5), json!(135)));
 }
+
+#[tokio::test]
+async fn a_drawn_elect_horse_day_is_kept_as_a_draw_and_counted_apart_from_solved() {
+    let server = Server::start().await;
+
+    let (status, _) = server.user.json(server.user.put("/api/v1/wellness/puzzles/elect-horse/today").json(&json!({"score": 3, "seconds": 90, "drawn": true}))).await;
+    assert_eq!(status, 204);
+
+    let elect = summary(&server, "elect-horse").await;
+    assert_eq!((elect["today"]["drawn"].clone(), elect["today"]["solved"].clone()), (json!(true), Value::Null));
+    assert_eq!((elect["stats"]["drawn"].clone(), elect["stats"]["solved"].clone(), elect["stats"]["streak"].clone()), (json!(1), json!(0), json!(1)));
+}
+
+#[tokio::test]
+async fn the_elect_horse_expert_daily_is_its_own_puzzle() {
+    let server = Server::start().await;
+
+    let (status, _) = server.user.json(server.user.put("/api/v1/wellness/puzzles/elect-horse-expert/today").json(&json!({"solved": false, "score": 2, "seconds": 90}))).await;
+    assert_eq!(status, 204);
+
+    let expert = summary(&server, "elect-horse-expert").await;
+    let normal = summary(&server, "elect-horse").await;
+    assert_eq!((expert["today"]["score"].clone(), normal["today"].clone()), (json!(2), Value::Null));
+}

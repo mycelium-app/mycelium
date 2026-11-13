@@ -268,7 +268,7 @@ pub async fn wordle_guess(State(state): State<AppState>, user: AuthUser, Json(re
 
     if done {
         let won = game.status == "won";
-        let result = PuzzleResult { solved: Some(won), score: won.then_some(game.guesses.len() as i32), seconds: game.seconds, source: None };
+        let result = PuzzleResult { solved: Some(won), score: won.then_some(game.guesses.len() as i32), seconds: game.seconds, source: None, drawn: false };
 
         save_puzzle_result(&state, user.id, WORDLE, day, &result, "native").await?;
     }
@@ -387,7 +387,7 @@ pub async fn connections_guess(State(state): State<AppState>, user: AuthUser, Js
     let game = connections_game_of(date, &day, Some(&stored));
 
     if done {
-        let result = PuzzleResult { solved: Some(game.status == "won"), score: Some(game.mistakes), seconds: game.seconds, source: None };
+        let result = PuzzleResult { solved: Some(game.status == "won"), score: Some(game.mistakes), seconds: game.seconds, source: None, drawn: false };
 
         save_puzzle_result(&state, user.id, CONNECTIONS, date, &result, "native").await?;
     }

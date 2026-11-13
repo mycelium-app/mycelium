@@ -21,6 +21,7 @@ val Puzzles = listOf(
     Puzzle("catfishing", "Catfishing", "https://catfishing.net", "catfishing.net", "/", "^game-\\d+$", "correct"),
     Puzzle("enclose-horse", "enclose.horse", "https://enclose.horse", "enclose.horse", "/", "^enclose_submissions$", "points"),
     Puzzle("elect-horse", "elect.horse", "https://elect.horse", "elect.horse", "/", "^elect_submissions$", "seats"),
+    Puzzle("elect-horse-expert", "elect.horse expert", "https://elect.horse", "elect.horse", "/", "^elect_submissions$", "seats"),
 )
 
 fun puzzleOf(id: String): Puzzle? = Puzzles.firstOrNull { it.id == id }
@@ -73,7 +74,7 @@ fun parseGameState(puzzle: Puzzle, storageJson: String, today: String): GameRead
         "wordle", "connections" -> values.filterValues { it?.get("states") is JsonArray }
         "daily-orbs" -> values.filterValues { it?.get("puzzles") is JsonArray }
         "catfishing" -> values.filterValues { it?.get("s")?.jsonPrimitive?.intOrNull != null }
-        "elect-horse" -> values.filterValues { it != null }
+        "elect-horse", "elect-horse-expert" -> values.filterValues { it != null }
         else -> emptyMap()
     }
 
@@ -86,6 +87,7 @@ fun parseGameState(puzzle: Puzzle, storageJson: String, today: String): GameRead
         "connections" -> recognisedValues.values.firstNotNullOfOrNull { nytResult(it, today, ::connectionsResult) }
         "daily-orbs" -> recognisedValues.entries.firstOrNull { it.key.endsWith("daily-orbs-$today") }?.value?.let(::orbsResult)
         "elect-horse" -> recognisedValues.values.firstNotNullOfOrNull { it?.get(today) as? JsonObject }?.let(::electResult)
+        "elect-horse-expert" -> recognisedValues.values.firstNotNullOfOrNull { it?.get("$today#expert") as? JsonObject }?.let(::electResult)
         else -> recognisedValues.entries.firstOrNull { it.key == "game-${catfishingDay(today)}" }?.value?.let(::catfishingResult)
     }
 
@@ -170,7 +172,9 @@ private fun electResult(day: JsonObject): PuzzleResult? {
     }
     val seconds = day["durationMs"]?.jsonPrimitive?.longOrNull?.let { (it / 1000).toInt() }
 
-    return PuzzleResult(solved = solved, score = day["seats"]?.jsonPrimitive?.intOrNull, seconds = seconds)
+    val horseSeats = (day["seats"] as? JsonArray)?.firstOrNull()?.jsonPrimitive?.intOrNull
+
+    return PuzzleResult(solved = solved, score = horseSeats, seconds = seconds, drawn = day["outcome"]?.jsonPrimitive?.contentOrNull == "draw")
 }
 
 private fun plural(count: Int, word: String, many: String = "${word}s"): String = "$count ${if (count == 1) word else many}"
@@ -198,6 +202,8 @@ fun puzzleStatus(puzzle: Puzzle, result: PuzzleResult?): String {
         result.solved == true -> "Solved"
         result.solved == false && puzzle.measure != "guesses" && label != null -> "Not solved, $label"
         result.solved == false -> "Not solved"
+        result.drawn && label != null -> "Draw, $label"
+        result.drawn -> "Draw"
         label != null -> "Played, $label"
         else -> "Played"
     }

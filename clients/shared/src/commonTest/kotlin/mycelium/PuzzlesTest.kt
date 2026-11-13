@@ -160,6 +160,7 @@ class PuzzlesTest {
         assertEquals("Solved, 5 seats", puzzleStatus(elect, PuzzleResult(solved = true, score = 5)))
         assertEquals("Not solved, 1 seat", puzzleStatus(elect, PuzzleResult(solved = false, score = 1)))
         assertEquals("Played, 3 seats", puzzleStatus(elect, PuzzleResult(score = 3)))
+        assertEquals("Draw, 3 seats", puzzleStatus(elect, PuzzleResult(score = 3, drawn = true)))
     }
 
     @Test
@@ -177,17 +178,27 @@ class PuzzlesTest {
 
     @Test
     fun electHorseIsReadFromTodaysNormalDailyInTheSubmissions() {
-        val won = JsonPrimitive("""{"2026-10-27":{"date":"2026-10-27","mode":"normal","seats":5,"outcome":"won","durationMs":134500},"2026-10-27#expert":{"date":"2026-10-27","mode":"expert","seats":2,"outcome":"lost","durationMs":90000},"2026-10-26":{"date":"2026-10-26","seats":4,"outcome":"won","durationMs":60000}}""")
-        val lost = JsonPrimitive("""{"2026-10-27":{"date":"2026-10-27","seats":1,"outcome":"lost","durationMs":61000}}""")
-        val draw = JsonPrimitive("""{"2026-10-27":{"date":"2026-10-27","seats":3,"outcome":"draw"}}""")
-        val yesterdayOnly = JsonPrimitive("""{"2026-10-26":{"date":"2026-10-26","seats":4,"outcome":"won","durationMs":60000}}""")
+        val won = JsonPrimitive("""{"2026-10-27":{"date":"2026-10-27","mode":"normal","seats":[5,2,1],"outcome":"won","durationMs":134500},"2026-10-27#expert":{"date":"2026-10-27","mode":"expert","seats":[2,6],"outcome":"lost","durationMs":90000},"2026-10-26":{"date":"2026-10-26","seats":[4,4],"outcome":"won","durationMs":60000}}""")
+        val lost = JsonPrimitive("""{"2026-10-27":{"date":"2026-10-27","seats":[1,7],"outcome":"lost","durationMs":61000}}""")
+        val draw = JsonPrimitive("""{"2026-10-27":{"date":"2026-10-27","seats":[3,3],"outcome":"draw"}}""")
+        val yesterdayOnly = JsonPrimitive("""{"2026-10-26":{"date":"2026-10-26","seats":[4,4],"outcome":"won","durationMs":60000}}""")
 
         assertEquals(read(PuzzleResult(solved = true, score = 5, seconds = 134)), parseGameState(elect, """{"elect_submissions": $won}""", today))
         assertEquals(read(PuzzleResult(solved = false, score = 1, seconds = 61)), parseGameState(elect, """{"elect_submissions": $lost}""", today))
-        assertEquals(read(PuzzleResult(score = 3)), parseGameState(elect, """{"elect_submissions": $draw}""", today))
+        assertEquals(read(PuzzleResult(score = 3, drawn = true)), parseGameState(elect, """{"elect_submissions": $draw}""", today))
         assertEquals(read(null), parseGameState(elect, """{"elect_submissions": $yesterdayOnly}""", today))
         assertEquals(GameReading.Unrecognised, parseGameState(elect, """{"elect_submissions": ${JsonPrimitive("[]")}}""", today))
         assertTrue(elect.isOnThisSite("https://elect.horse/"))
+    }
+
+    @Test
+    fun electHorseExpertIsReadFromTodaysExpertDailyOnly() {
+        val expert = puzzleOf("elect-horse-expert")!!
+        val both = JsonPrimitive("""{"2026-10-27":{"date":"2026-10-27","mode":"normal","seats":[5,2,1],"outcome":"won","durationMs":134500},"2026-10-27#expert":{"date":"2026-10-27","mode":"expert","seats":[2,6],"outcome":"lost","durationMs":90000}}""")
+        val normalOnly = JsonPrimitive("""{"2026-10-27":{"date":"2026-10-27","mode":"normal","seats":[5,2,1],"outcome":"won","durationMs":134500}}""")
+
+        assertEquals(read(PuzzleResult(solved = false, score = 2, seconds = 90)), parseGameState(expert, """{"elect_submissions": $both}""", today))
+        assertEquals(read(null), parseGameState(expert, """{"elect_submissions": $normalOnly}""", today))
     }
 
     @Test

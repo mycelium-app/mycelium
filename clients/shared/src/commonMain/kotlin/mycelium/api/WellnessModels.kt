@@ -148,6 +148,7 @@ data class PuzzleResult(
     val score: Int? = null,
     val seconds: Int? = null,
     val source: String? = null,
+    val drawn: Boolean = false,
 )
 
 @Serializable
@@ -164,6 +165,7 @@ data class PuzzleBucket(val value: Int, val count: Long)
 data class PuzzleStats(
     val played: Long = 0,
     val solved: Long = 0,
+    val drawn: Long = 0,
     val average: Double? = null,
     @SerialName("average_seconds") val averageSeconds: Double? = null,
     val streak: Long = 0,

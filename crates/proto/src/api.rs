@@ -3010,6 +3010,8 @@ pub struct PuzzleResult {
     pub seconds: Option<i32>,
     #[serde(default)]
     pub source: Option<String>,
+    #[serde(default)]
+    pub drawn: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -3029,6 +3031,8 @@ pub struct PuzzleBucket {
 pub struct PuzzleStats {
     pub played: i64,
     pub solved: i64,
+    #[serde(default)]
+    pub drawn: i64,
     pub average: Option<f64>,
     #[serde(default)]
     pub average_seconds: Option<f64>,
