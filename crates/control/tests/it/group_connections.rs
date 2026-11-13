@@ -1183,3 +1183,103 @@ async fn reading_a_conversation_the_node_refused_shows_the_refusal_reason_in_ord
     assert!(read.contains("role=\"error\""), "{read}");
     assert!(!read.contains("No messages match."), "{read}");
 }
+
+fn ledger_step(fleet_ledger: Uuid) -> Value {
+    json!({"key": "compare", "title": "Compare with the ledger", "prompt": "Compare the delivery log with the stock counts in ledger", "node": "atlas", "agent": "claude", "project_id": fleet_ledger})
+}
+
+fn delivery_step(folder: &str) -> Value {
+    json!({"key": "collect", "title": "Collect the delivery log", "prompt": "Export the October delivery log", "node": "atlas", "agent": "claude", "cwd": folder})
+}
+
+async fn ledger(fleet: &Fleet) -> Uuid {
+    sqlx::query_scalar("select id from projects where name = 'ledger'").fetch_one(&fleet.server.pool).await.unwrap()
+}
+
+#[tokio::test]
+async fn a_subagent_in_an_unconnected_groups_project_names_that_group_on_its_card() {
+    let fleet = ops_and_shop().await;
+    let step = ledger_step(ledger(&fleet).await);
+
+    let proposed = call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_subagent", json!({"step": step})).await;
+
+    assert_eq!(proposed["isError"], false, "{proposed}");
+    let proposal = start_proposals(&fleet.server).await[0].clone();
+    assert_eq!((proposal["source_group"].clone(), proposal["target_group"].clone(), proposal["steps"][0]["group"].clone()), (json!("Ops"), json!("Shop"), json!("Shop")), "{proposal}");
+}
+
+#[tokio::test]
+async fn only_the_workflow_step_outside_the_callers_group_names_its_group() {
+    let fleet = ops_and_shop().await;
+    let plan = json!({"title": "Reconcile October stock", "steps": [delivery_step("/work/ops/deliveries"), ledger_step(ledger(&fleet).await)]});
+
+    call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_workflow", json!({"plan": plan})).await;
+
+    let proposal = start_proposals(&fleet.server).await[0].clone();
+    assert_eq!(proposal["target_group"], "Shop", "{proposal}");
+    assert_eq!((proposal["steps"][0]["group"].clone(), proposal["steps"][1]["group"].clone()), (Value::Null, json!("Shop")), "{proposal}");
+}
+
+#[tokio::test]
+async fn a_subagent_in_a_connected_group_names_no_group() {
+    let fleet = ops_and_shop().await;
+    connect(&fleet.server, fleet.yucca, fleet.immich).await;
+
+    call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_subagent", json!({"step": ledger_step(ledger(&fleet).await)})).await;
+
+    let proposal = start_proposals(&fleet.server).await[0].clone();
+    assert_eq!((proposal["target_group"].clone(), proposal["steps"][0]["group"].clone()), (Value::Null, Value::Null), "{proposal}");
+}
+
+#[tokio::test]
+async fn a_workflow_reaching_two_unconnected_groups_is_refused_before_any_card() {
+    let fleet = ops_and_shop().await;
+    group(&fleet.server, "Payroll", "/work/payroll").await;
+    let plan = json!({"title": "Reconcile October stock", "steps": [delivery_step("/work/payroll/runs"), ledger_step(ledger(&fleet).await)]});
+
+    let refused = call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_workflow", json!({"plan": plan})).await;
+
+    assert_eq!(refused["isError"], true, "{refused}");
+    assert!(text(&refused).contains("Payroll and Shop") && text(&refused).contains("Propose a separate workflow for each group"), "{refused}");
+    assert!(start_proposals(&fleet.server).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_nested_workflow_step_in_an_unconnected_group_is_named_as_the_proposals_group() {
+    let fleet = ops_and_shop().await;
+    let mut inner = ledger_step(ledger(&fleet).await);
+    inner["node_id"] = json!(fleet.link.id);
+    inner.as_object_mut().unwrap().remove("node");
+    let nested = json!({"key": "inner", "title": "Check the ledger", "workflow": {"title": "Check the ledger", "steps": [inner]}});
+    let plan = json!({"title": "Reconcile October stock", "steps": [delivery_step("/work/ops/deliveries"), nested]});
+
+    call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_workflow", json!({"plan": plan})).await;
+
+    assert_eq!(start_proposals(&fleet.server).await[0]["target_group"], "Shop");
+}
+
+#[tokio::test]
+async fn approving_a_subagent_whose_project_moved_to_another_unconnected_group_is_refused() {
+    let fleet = ops_and_shop().await;
+    let payroll = group(&fleet.server, "Payroll", "/work/payroll").await;
+    call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_subagent", json!({"step": ledger_step(ledger(&fleet).await)})).await;
+    let id = start_proposals(&fleet.server).await[0]["id"].as_str().unwrap().to_string();
+    sqlx::query("update projects set group_id = $1 where name = 'ledger'").bind(payroll).execute(&fleet.server.pool).await.unwrap();
+
+    let (status, refused) = fleet.server.user.json(fleet.server.user.post(&format!("/api/v1/start-proposals/{id}/approve")).json(&json!({}))).await;
+
+    assert_eq!((status, refused["error"].clone()), (409, json!("target_group_changed")), "{refused}");
+    assert_eq!(start_proposals(&fleet.server).await[0]["state"], "proposed");
+}
+
+#[tokio::test]
+async fn approving_a_subagent_in_its_own_group_still_starts_it() {
+    let mut fleet = ops_and_shop().await;
+    call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_subagent", json!({"step": delivery_step("/work/ops/deliveries")})).await;
+    let id = start_proposals(&fleet.server).await[0]["id"].as_str().unwrap().to_string();
+
+    let (status, approved) = fleet.server.user.json(fleet.server.user.post(&format!("/api/v1/start-proposals/{id}/approve")).json(&json!({}))).await;
+
+    assert_eq!((status, approved["state"].clone()), (200, json!("started")), "{approved}");
+    fleet.link.expect_start_session().await;
+}

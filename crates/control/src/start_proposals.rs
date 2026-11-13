@@ -5,17 +5,18 @@ use crate::state::AppState;
 use crate::store::CONVERSATION_GROUP_SQL;
 use axum::Json;
 use axum::extract::{Path, State};
-use mycelium_proto::api::{ApproveStartProposalRequest, HarnessModel, StartProposal, StartProposalNode, StartProposalState, StartProposalStep, WorkflowPlan};
+use mycelium_proto::api::{ApproveStartProposalRequest, HarnessModel, StartProposal, StartProposalNode, StartProposalState, StartProposalStep, WorkflowPlan, WorkflowStep};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 const LISTED: i64 = 100;
-const COLUMNS: &str = "id, conversation_id, kind, plan, choices, connect, state, workflow_id, target_group_id, created_at, decided_at";
+const COLUMNS: &str = "id, owner, conversation_id, kind, plan, choices, connect, state, workflow_id, target_group_id, created_at, decided_at";
 
 #[derive(sqlx::FromRow)]
 struct ProposalRow {
     id: Uuid,
+    owner: Uuid,
     conversation_id: Option<Uuid>,
     kind: String,
     plan: Value,
@@ -34,6 +35,54 @@ fn node_of(state: &AppState, names: &[(Uuid, String)], id: Uuid) -> StartProposa
     StartProposalNode { id, name, online: state.hub.is_online(id) }
 }
 
+async fn place_group(state: &AppState, owner: Uuid, step: &WorkflowStep) -> ApiResult<Option<Uuid>> {
+    let Some(node_id) = step.node_id else {
+        return Ok(None);
+    };
+
+    Ok(match step.project_id {
+        Some(project) => sqlx::query_scalar::<_, Option<Uuid>>("select group_id from projects where id = $1 and owner = $2").bind(project).bind(owner).fetch_optional(&state.pool).await?.flatten(),
+        None => sqlx::query_scalar::<_, Option<Uuid>>("select conversation_group($1, $2, null, $3)").bind(&step.cwd).bind(node_id).bind(owner).fetch_one(&state.pool).await?,
+    })
+}
+
+fn agent_steps(plan: &WorkflowPlan) -> Vec<&WorkflowStep> {
+    plan.steps
+        .iter()
+        .flat_map(|step| match &step.workflow {
+            Some(child) => agent_steps(child),
+            None if step.gate || step.provider_id.is_some() => Vec::new(),
+            None => vec![step],
+        })
+        .collect()
+}
+
+async fn unconnected_groups(state: &AppState, owner: Uuid, conversation_id: Uuid, plan: &WorkflowPlan) -> ApiResult<Vec<Uuid>> {
+    let own = crate::group_connections::group_of(state, conversation_id).await?;
+    let mut reached = Vec::new();
+
+    for step in agent_steps(plan) {
+        let Some(group) = place_group(state, owner, step).await? else {
+            continue;
+        };
+
+        if Some(group) == own || reached.contains(&group) {
+            continue;
+        }
+
+        let connected = match own {
+            Some(own) => crate::group_connections::active(state, owner, own, group).await?,
+            None => false,
+        };
+
+        if !connected {
+            reached.push(group);
+        }
+    }
+
+    Ok(reached)
+}
+
 async fn to_proto(state: &AppState, row: ProposalRow) -> ApiResult<StartProposal> {
     let plan: WorkflowPlan = serde_json::from_value(row.plan.clone()).map_err(|_| ApiError::not_found("That proposal"))?;
     let mut node_ids: Vec<Uuid> = plan.steps.iter().filter_map(|step| step.node_id).collect();
@@ -43,10 +92,22 @@ async fn to_proto(state: &AppState, row: ProposalRow) -> ApiResult<StartProposal
     let names = sqlx::query_as::<_, (Uuid, String)>("select id, name from nodes where id = any($1)").bind(&node_ids).fetch_all(&state.pool).await?;
     let projects = sqlx::query_as::<_, (Uuid, String)>("select id, name from projects where id = any($1)").bind(&project_ids).fetch_all(&state.pool).await?;
 
+    let target_group = sqlx::query_scalar::<_, String>("select name from groups where id = $1").bind(row.target_group_id).fetch_optional(&state.pool).await?;
+    let mut in_target = Vec::new();
+
+    for step in &plan.steps {
+        let group = match row.target_group_id {
+            Some(_) => place_group(state, row.owner, step).await?,
+            None => None,
+        };
+        in_target.push(group.is_some() && group == row.target_group_id);
+    }
+
     let steps = plan
         .steps
         .iter()
-        .map(|step| {
+        .zip(in_target)
+        .map(|(step, in_target)| {
             let choice = &row.choices[&step.key];
             let node_choices = choice["node"].as_array().cloned().unwrap_or_default().iter().filter_map(|node| node["id"].as_str().and_then(|id| id.parse().ok())).map(|id| node_of(state, &names, id)).collect();
             let account_choices = choice["account"].as_array().cloned().unwrap_or_default().iter().filter_map(|account| account.as_str().map(String::from)).collect();
@@ -68,6 +129,7 @@ async fn to_proto(state: &AppState, row: ProposalRow) -> ApiResult<StartProposal
                 node_choices,
                 account_choices,
                 model_choices,
+                group: target_group.clone().filter(|_| in_target),
             }
         })
         .collect();
@@ -82,8 +144,6 @@ async fn to_proto(state: &AppState, row: ProposalRow) -> ApiResult<StartProposal
         Some(conversation) => sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!("select name from groups where id = (select {CONVERSATION_GROUP_SQL} from conversations where id = $1)"))).bind(conversation).fetch_optional(&state.pool).await?,
         None => None,
     };
-    let target_group = sqlx::query_scalar::<_, String>("select name from groups where id = $1").bind(row.target_group_id).fetch_optional(&state.pool).await?;
-
     Ok(StartProposal { id: row.id, conversation_id: row.conversation_id, kind: row.kind, title: plan.title, steps, state: proposal_state, connect: row.connect, workflow_id: row.workflow_id, source_group, target_group, created_at: row.created_at, decided_at: row.decided_at })
 }
 
@@ -202,6 +262,20 @@ pub async fn propose(state: &AppState, owner: Uuid, conversation_id: Uuid, kind:
         return Ok(Err(format!("Nothing was proposed. {}", error.message())));
     }
 
+    let mut target_group = target_group;
+
+    if kind != "conversation" {
+        let reached = unconnected_groups(state, owner, conversation_id, &parsed).await?;
+
+        if reached.len() > 1 {
+            let names = sqlx::query_scalar::<_, String>("select name from groups where id = any($1) order by lower(name)").bind(&reached).fetch_all(&state.pool).await?;
+
+            return Ok(Err(format!("Nothing was proposed. Its steps reach {}, groups this conversation's group is not connected to. Propose a separate {kind} for each group.", names.join(" and "))));
+        }
+
+        target_group = reached.first().copied();
+    }
+
     let id = sqlx::query_scalar::<_, Uuid>("insert into start_proposals (owner, conversation_id, kind, plan, choices, target_group_id) values ($1, $2, $3, $4, $5, $6) returning id")
         .bind(owner)
         .bind(conversation_id)
@@ -276,12 +350,7 @@ pub async fn approve_for(state: &AppState, owner: Uuid, id: Uuid, request: Appro
         let (Some(source), Some(target_group), Some(node_id), Some(agent)) = (found.conversation_id, found.target_group_id, step.node_id, step.agent) else {
             return Err(ApiError::conflict("source_removed", "The conversation that proposed this, or the group it targets, has been removed."));
         };
-        let place_group = match step.project_id {
-            Some(project) => sqlx::query_scalar::<_, Option<Uuid>>("select group_id from projects where id = $1 and owner = $2").bind(project).bind(owner).fetch_optional(&state.pool).await?.flatten(),
-            None => sqlx::query_scalar::<_, Option<Uuid>>("select conversation_group($1, $2, null, $3)").bind(&step.cwd).bind(node_id).bind(owner).fetch_one(&state.pool).await?,
-        };
-
-        if place_group != Some(target_group) {
+        if place_group(state, owner, step).await? != Some(target_group) {
             return Err(ApiError::conflict("target_group_changed", "That place is no longer in the group this was proposed for. Nothing was started."));
         }
 
@@ -328,6 +397,15 @@ pub async fn approve_for(state: &AppState, owner: Uuid, id: Uuid, request: Appro
                 return Err(cause);
             }
         }
+    }
+
+    let Some(source) = found.conversation_id else {
+        return Err(ApiError::conflict("source_removed", "The conversation that proposed this has been removed."));
+    };
+    let reached = unconnected_groups(state, owner, source, &plan).await?;
+
+    if reached.iter().any(|group| Some(*group) != found.target_group_id) {
+        return Err(ApiError::conflict("target_group_changed", "A step's place is no longer in a group this was proposed for. Nothing was started."));
     }
 
     let claimed = sqlx::query("update start_proposals set state = 'started', decided_at = now() where id = $1 and state = 'proposed'").bind(id).execute(&state.pool).await?;

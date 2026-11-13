@@ -1428,6 +1428,8 @@ pub struct StartProposalStep {
     pub account_choices: Vec<String>,
     #[serde(default)]
     pub model_choices: Vec<HarnessModel>,
+    #[serde(default)]
+    pub group: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
