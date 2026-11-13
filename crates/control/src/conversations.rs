@@ -569,6 +569,11 @@ async fn adopting_conversation(state: &AppState, owner: Uuid, assistant_id: Uuid
 
 pub async fn manage(state: &AppState, owner: Uuid, manager: Uuid, target: Uuid) -> ApiResult<ConversationRow> {
     conversation_connections::connect(state, owner, manager, target).await?;
+
+    set_manager(state, owner, manager, target).await
+}
+
+pub async fn set_manager(state: &AppState, owner: Uuid, manager: Uuid, target: Uuid) -> ApiResult<ConversationRow> {
     crate::watches::watch_conversation(state, owner, manager, target, false).await?;
     let managed = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set managed_by = $2 where id = $1 returning {CONVERSATION_COLUMNS}"))).bind(target).bind(manager).fetch_one(&state.pool).await?;
 

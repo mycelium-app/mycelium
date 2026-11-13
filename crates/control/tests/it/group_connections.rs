@@ -74,12 +74,16 @@ struct Fleet {
 }
 
 async fn fleet() -> Fleet {
+    fleet_of("laptop", "yucca", "Immich").await
+}
+
+async fn fleet_of(node: &str, first: &str, second: &str) -> Fleet {
     let server = Server::start().await;
-    let mut link = server.online_node("laptop").await;
-    let yucca = group(&server, "yucca", "/work/yucca").await;
-    let immich = group(&server, "Immich", "/work/immich").await;
-    let yucca_chat = working_conversation(&server, &mut link, "Plan the release", "/work/yucca/app").await;
-    let immich_chat = working_conversation(&server, &mut link, "Fix billing export", "/work/immich/app").await;
+    let mut link = server.online_node(node).await;
+    let yucca = group(&server, first, &format!("/work/{}", first.to_lowercase())).await;
+    let immich = group(&server, second, &format!("/work/{}", second.to_lowercase())).await;
+    let yucca_chat = working_conversation(&server, &mut link, "Plan the release", &format!("/work/{}/app", first.to_lowercase())).await;
+    let immich_chat = working_conversation(&server, &mut link, "Fix billing export", &format!("/work/{}/app", second.to_lowercase())).await;
 
     Fleet { server, link, yucca, immich, yucca_chat, immich_chat }
 }
@@ -271,7 +275,7 @@ async fn a_message_against_a_one_way_connection_waits_for_approval_and_says_whic
 }
 
 #[tokio::test]
-async fn reading_and_starting_against_a_one_way_connection_are_refused_with_the_direction_sentence() {
+async fn reading_against_a_one_way_connection_is_refused_and_starting_waits_for_approval() {
     let mut fleet = fleet().await;
     connect_one_way(&fleet.server, fleet.yucca, fleet.immich, false).await;
     project_in(&fleet, "billing", Some(fleet.yucca)).await;
@@ -280,8 +284,8 @@ async fn reading_and_starting_against_a_one_way_connection_are_refused_with_the_
     let refused = read(&fleet, fleet.immich_chat, fleet.yucca_chat, json!({})).await;
     assert_eq!((refused["isError"].clone(), text(&refused)), (json!(true), format!("Nothing was read. {IMMICH_CANNOT_REACH_YUCCA}")));
 
-    let not_started = call(&fleet.server, &fleet.link, fleet.immich_chat, "start_conversation", start_arguments("yucca", "billing")).await;
-    assert_eq!((not_started["isError"].clone(), text(&not_started)), (json!(true), format!("Nothing was started. {IMMICH_CANNOT_REACH_YUCCA}")));
+    let proposed = call(&fleet.server, &fleet.link, fleet.immich_chat, "start_conversation", start_arguments("yucca", "billing")).await;
+    assert!(text(&proposed).starts_with("Waiting for the person to approve starting"), "{proposed}");
     let (_, conversations) = fleet.server.user.json(fleet.server.user.get("/api/v1/conversations")).await;
     assert_eq!(conversations.as_array().unwrap().len(), 2);
 }
@@ -378,14 +382,15 @@ async fn starting_a_conversation_in_a_connected_groups_project_queues_the_prompt
 }
 
 #[tokio::test]
-async fn starting_in_an_unconnected_group_starts_nothing_and_says_how_to_connect() {
+async fn starting_in_an_unconnected_group_waits_for_approval_and_starts_nothing() {
     let fleet = fleet().await;
     project_in(&fleet, "billing", Some(fleet.immich)).await;
 
-    let refused = call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_conversation", start_arguments("Immich", "billing")).await;
+    let waiting = call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_conversation", start_arguments("Immich", "billing")).await;
 
-    assert_eq!(refused["isError"], true);
-    assert_eq!(text(&refused), "Nothing was started. The yucca and Immich groups are not connected. Ask the person to connect them in Settings, Agent connections.");
+    assert_eq!(waiting["isError"], false, "{waiting}");
+    assert!(text(&waiting).starts_with("Waiting for the person to approve starting Billing follow-up in Immich (proposal "), "{waiting}");
+    assert!(text(&waiting).ends_with("). Nothing has started."), "{waiting}");
     let (_, conversations) = fleet.server.user.json(fleet.server.user.get("/api/v1/conversations")).await;
     assert_eq!(conversations.as_array().unwrap().len(), 2);
 }
@@ -1003,4 +1008,111 @@ async fn start_conversation_for_a_project_without_a_node_uses_the_checkout_of_it
 
     assert!(text(&started).contains(" on orion."), "{started}");
     assert!(matches!(orion.next().await, ControlToNode::StartSession { .. }));
+}
+
+async fn ops_and_shop() -> Fleet {
+    let fleet = fleet_of("atlas", "Ops", "Shop").await;
+    project_in(&fleet, "ledger", Some(fleet.immich)).await;
+
+    fleet
+}
+
+fn ledger_start() -> Value {
+    json!({"group": "Shop", "project": "ledger", "title": "Reconcile the stock counts", "prompt": "Compare the stock counts in ledger with the Ops delivery log", "reason": "The October close needs it"})
+}
+
+async fn start_proposals(server: &Server) -> Vec<Value> {
+    let (_, proposals) = server.user.json(server.user.get("/api/v1/start-proposals")).await;
+
+    proposals.as_array().unwrap().clone()
+}
+
+async fn conversation_count(server: &Server) -> usize {
+    let (_, conversations) = server.user.json(server.user.get("/api/v1/conversations")).await;
+
+    conversations.as_array().unwrap().len()
+}
+
+async fn proposed_ledger_start(fleet: &Fleet) -> String {
+    call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_conversation", ledger_start()).await;
+
+    start_proposals(&fleet.server).await[0]["id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn approving_a_cross_group_start_creates_exactly_the_stored_conversation_and_no_group_connection() {
+    let mut fleet = ops_and_shop().await;
+    let id = proposed_ledger_start(&fleet).await;
+    let proposal = start_proposals(&fleet.server).await[0].clone();
+    assert_eq!((proposal["kind"].clone(), proposal["source_group"].clone(), proposal["target_group"].clone()), (json!("conversation"), json!("Ops"), json!("Shop")), "{proposal}");
+    assert_eq!(proposal["steps"][0]["project"], "ledger", "{proposal}");
+    assert_eq!(conversation_count(&fleet.server).await, 2);
+
+    let (status, approved) = fleet.server.user.json(fleet.server.user.post(&format!("/api/v1/start-proposals/{id}/approve")).json(&json!({}))).await;
+
+    assert_eq!((status, approved["state"].clone()), (200, json!("started")), "{approved}");
+    fleet.link.expect_start_session().await;
+    assert_eq!(conversation_count(&fleet.server).await, 3);
+    let started: Uuid = sqlx::query_scalar("select started_conversation_id from start_proposals where id = $1::uuid").bind(&id).fetch_one(&fleet.server.pool).await.unwrap();
+    fleet.link.start_session(started, "acp-started").await;
+    let (_, prompt) = fleet.link.expect_prompt().await;
+    assert_eq!(prompt, "From Plan the release:\n\nCompare the stock counts in ledger with the Ops delivery log");
+    let (_, groups) = fleet.server.user.json(fleet.server.user.get("/api/v1/group-connections")).await;
+    let (_, conversations) = fleet.server.user.json(fleet.server.user.get("/api/v1/conversation-connections")).await;
+    assert_eq!((groups.as_array().unwrap().len(), conversations.as_array().unwrap().len()), (0, 0));
+    assert_eq!(conversation(&fleet.server, started).await["managed_by"], json!(fleet.yucca_chat.to_string()));
+}
+
+#[tokio::test]
+async fn approving_a_cross_group_start_twice_is_refused_and_starts_one_conversation() {
+    let mut fleet = ops_and_shop().await;
+    let id = proposed_ledger_start(&fleet).await;
+    fleet.server.user.json(fleet.server.user.post(&format!("/api/v1/start-proposals/{id}/approve")).json(&json!({}))).await;
+    fleet.link.expect_start_session().await;
+
+    let (status, refused) = fleet.server.user.json(fleet.server.user.post(&format!("/api/v1/start-proposals/{id}/approve")).json(&json!({}))).await;
+
+    assert_eq!((status, refused["error"].clone()), (409, json!("proposal_not_proposed")), "{refused}");
+    assert_eq!(conversation_count(&fleet.server).await, 3);
+}
+
+#[tokio::test]
+async fn declining_a_cross_group_start_tells_the_agent_and_starts_nothing() {
+    let fleet = ops_and_shop().await;
+    let id = proposed_ledger_start(&fleet).await;
+
+    let (status, declined) = fleet.server.user.json(fleet.server.user.post(&format!("/api/v1/start-proposals/{id}/decline"))).await;
+
+    assert_eq!((status, declined["state"].clone()), (200, json!("declined")), "{declined}");
+    assert_eq!(conversation_count(&fleet.server).await, 2);
+    let told = queue(&fleet.server, fleet.yucca_chat).await;
+    assert!(told[0]["text"].as_str().unwrap().contains("I declined starting Reconcile the stock counts"), "{told:?}");
+}
+
+#[tokio::test]
+async fn approving_a_cross_group_start_after_the_project_left_the_group_is_refused() {
+    let fleet = ops_and_shop().await;
+    let id = proposed_ledger_start(&fleet).await;
+    sqlx::query("update projects set group_id = $1 where name = 'ledger'").bind(fleet.yucca).execute(&fleet.server.pool).await.unwrap();
+
+    let (status, refused) = fleet.server.user.json(fleet.server.user.post(&format!("/api/v1/start-proposals/{id}/approve")).json(&json!({}))).await;
+
+    assert_eq!((status, refused["error"].clone()), (409, json!("target_group_changed")), "{refused}");
+    assert_eq!(conversation_count(&fleet.server).await, 2);
+    assert_eq!(start_proposals(&fleet.server).await[0]["state"], "proposed");
+}
+
+#[tokio::test]
+async fn creating_and_connecting_a_cross_group_start_connects_only_the_two_conversations() {
+    let mut fleet = ops_and_shop().await;
+    let id = proposed_ledger_start(&fleet).await;
+
+    let (status, approved) = fleet.server.user.json(fleet.server.user.post(&format!("/api/v1/start-proposals/{id}/connect")).json(&json!({}))).await;
+
+    assert_eq!(status, 200, "{approved}");
+    fleet.link.expect_start_session().await;
+    let (_, groups) = fleet.server.user.json(fleet.server.user.get("/api/v1/group-connections")).await;
+    let (_, conversations) = fleet.server.user.json(fleet.server.user.get("/api/v1/conversation-connections")).await;
+    assert_eq!(groups.as_array().unwrap().len(), 0);
+    assert_eq!(conversations.as_array().unwrap().len(), 1, "{conversations}");
 }

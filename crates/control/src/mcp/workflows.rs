@@ -77,7 +77,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             };
             let kind = if tool == "start_subagent" { "subagent" } else { "workflow" };
 
-            match start_proposals::propose(state, owner, conversation, kind, plan).await? {
+            match start_proposals::propose(state, owner, conversation, kind, plan, None).await? {
                 Ok(proposal) => ToolReply::text(&format!("Waiting for the person to approve starting {} (proposal {}). Nothing has started.", proposal.title, proposal.id), false),
                 Err(message) => ToolReply::text(&message, true),
             }

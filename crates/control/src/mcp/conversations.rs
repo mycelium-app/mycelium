@@ -4,6 +4,7 @@ use crate::error::ApiResult;
 use crate::forge_watches::{self, Target};
 use crate::group_connections;
 use crate::message_proposals;
+use crate::start_proposals;
 use crate::store::{CONVERSATION_COLUMNS, CONVERSATION_GROUP_SQL, ConversationRow, append_event, find_owned, resolve_action_item};
 use mycelium_proto::conversation::EventKind;
 use mycelium_proto::stream::StreamMessage;
@@ -31,7 +32,7 @@ pub fn definitions() -> Value {
         },
         {
             "name": "start_conversation",
-            "description": "Start a new conversation in a project of another group and give it a first message. The person must have connected your group to that group in Settings, Agent connections; starting in your own group needs no connection. The new conversation is connected to this one, so it can reply with send_to_conversation, and this one is told each time its turn ends and it has finished, failed or is waiting on the person. This conversation manages it: it stays out of the person's way under Managed by assistant, with no notifications, until you bring it to them with flag_for_person or they take it over. Name the project, or a folder together with its node. To open a worktree the project already has, name the project and give worktree.",
+            "description": "Start a new conversation in a project of another group and give it a first message. Starting in your own group, or in a group the person has connected yours to in Settings, Agent connections, starts at once. Otherwise the start is proposed and nothing starts until the person approves it on the card; approving does not connect the groups. The new conversation is connected to this one, so it can reply with send_to_conversation, and this one is told each time its turn ends and it has finished, failed or is waiting on the person. This conversation manages it: it stays out of the person's way under Managed by assistant, with no notifications, until you bring it to them with flag_for_person or they take it over. Name the project, or a folder together with its node. To open a worktree the project already has, name the project and give worktree.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -366,22 +367,8 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 None => false,
             };
 
-            if !allowed {
-                let reverse = match caller_group {
-                    Some(own) => group_connections::reverse_only(state, owner, own, target_group).await?,
-                    None => None,
-                };
-                let message = match (caller_group, reverse) {
-                    (_, Some(sentence)) => sentence,
-                    (Some(own), None) => {
-                        let own_name = sqlx::query_scalar::<_, String>("select name from groups where id = $1").bind(own).fetch_one(&state.pool).await?;
-
-                        format!("The {own_name} and {target_name} groups are not connected. Ask the person to connect them in Settings, Agent connections.")
-                    }
-                    (None, None) => format!("This conversation is not in a group, so it cannot start one in {target_name}. Ask the person to put it in a group and connect that group to {target_name} in Settings, Agent connections."),
-                };
-
-                return Ok(nothing(message));
+            if caller_group.is_none() {
+                return Ok(nothing(format!("This conversation is not in a group, so it cannot start one in {target_name}. Ask the person to put it in a group and connect that group to {target_name} in Settings, Agent connections.")));
             }
 
             if field("worktree").is_some() && field("project").is_none() {
@@ -456,6 +443,17 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 routing,
                 client_id: None,
             };
+            if !allowed {
+                let title = request.title.clone().unwrap_or_else(|| format!("A conversation in {target_name}"));
+                let step = json!({"key": "conversation", "title": title, "prompt": request.prompt, "node": request.node_id, "agent": request.agent, "cwd": request.cwd, "project_id": request.project_id, "worktree_path": request.worktree_path, "routing": request.routing});
+                let plan = json!({"title": title, "steps": [step]});
+
+                return Ok(match start_proposals::propose(state, owner, conversation_id, "conversation", plan, Some(target_group)).await? {
+                    Ok(proposal) => ToolReply::text(&format!("Waiting for the person to approve starting {} in {target_name} (proposal {}). Nothing has started.", proposal.title, proposal.id), false),
+                    Err(message) => ToolReply::text(&message, true),
+                });
+            }
+
             let started = match crate::conversations::start(state, owner, request).await {
                 Ok(started) => started,
                 Err(error) => return Ok(nothing(error.message().to_string())),

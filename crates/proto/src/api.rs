@@ -1416,6 +1416,8 @@ pub struct StartProposalStep {
     pub gate: bool,
     pub node: Option<StartProposalNode>,
     pub folder: Option<String>,
+    #[serde(default)]
+    pub project: Option<String>,
     pub agent: Option<String>,
     pub account: Option<String>,
     pub model: Option<String>,
@@ -1438,6 +1440,10 @@ pub struct StartProposal {
     pub state: StartProposalState,
     pub connect: bool,
     pub workflow_id: Option<Uuid>,
+    #[serde(default)]
+    pub source_group: Option<String>,
+    #[serde(default)]
+    pub target_group: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
 }
