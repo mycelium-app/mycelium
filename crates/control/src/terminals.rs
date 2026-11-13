@@ -1,3 +1,4 @@
+use crate::action_items::{self, RunEnd};
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::nodes::node_offline;
@@ -62,7 +63,10 @@ pub async fn read_buffer(state: &AppState, terminal_id: Uuid) -> Option<Terminal
     let buffer = state.ask_node::<TerminalBufferAnswer>(owner.node_id, BUFFER_TIMEOUT, |request_id| ControlToNode::ReadTerminal { request_id, terminal_id, from: 0 }).await?;
 
     if !buffer.found {
+        let captured = state.hub.captured_terminal_output(terminal_id);
+
         state.hub.finish_terminal(terminal_id);
+        action_items::run_ended_in_background(state, terminal_id, RunEnd::Lost, captured);
         state.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id, exit_code: None });
 
         return None;
@@ -98,9 +102,12 @@ pub async fn resize(State(state): State<AppState>, user: AuthUser, Path(terminal
 pub async fn stop(State(state): State<AppState>, user: AuthUser, Path(terminal_id): Path<Uuid>) -> ApiResult<StatusCode> {
     let owner = state.hub.terminal_owner(terminal_id).filter(|owner| owner.user_id == user.id).ok_or_else(|| ApiError::not_found("That terminal"))?;
 
+    let captured = state.hub.captured_terminal_output(terminal_id);
+
     state.hub.send(owner.node_id, ControlToNode::StopTerminal { terminal_id });
     state.hub.finish_terminal(terminal_id);
     state.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id, exit_code: None });
+    action_items::run_ended_in_background(&state, terminal_id, RunEnd::Stopped, captured);
 
     Ok(StatusCode::NO_CONTENT)
 }

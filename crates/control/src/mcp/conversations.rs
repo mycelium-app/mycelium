@@ -80,6 +80,9 @@ pub fn definitions() -> Value {
                 "type": "object",
                 "properties": {
                     "text": {"type": "string", "description": "One short sentence of what the person must do, written so it makes sense on its own."},
+                    "command": {"type": "string", "description": "A shell command the person can run from the item with one press of Run. Use it when the step is a command only they should run, for example one that needs their key. The item resolves itself when the command exits with code 0; if it fails it stays open and you are told the exit code and output. Leave it out when the step is not a command."},
+                    "node": {"type": "string", "description": "With command: the name or id of the node to run it on. Defaults to this conversation's node."},
+                    "folder": {"type": "string", "description": "With command: the folder to run it in on that node. Defaults to this conversation's folder."},
                 },
                 "required": ["text"],
             },
@@ -527,12 +530,32 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 return Ok(ToolReply::text("Nothing was added. An action item comes from a conversation, and this call did not come from one.", true));
             };
             let owner = caller.owner().await?;
-            let item_id = sqlx::query_scalar::<_, Uuid>("insert into conversation_action_items (conversation_id, text) select id, $2 from conversations where id = $1 and owner = $3 returning id")
-                .bind(conversation_id)
-                .bind(text)
-                .bind(owner)
-                .fetch_one(&state.pool)
-                .await?;
+            let command = arguments.get("command").and_then(Value::as_str).map(str::trim).filter(|command| !command.is_empty());
+            let named_node = arguments.get("node").and_then(Value::as_str).map(str::trim).filter(|node| !node.is_empty());
+            let named_folder = arguments.get("folder").and_then(Value::as_str).map(str::trim).filter(|folder| !folder.is_empty());
+
+            if command.is_none() && (named_node.is_some() || named_folder.is_some()) {
+                return Ok(ToolReply::text("Nothing was added. node and folder say where a command runs, so give a command with them.", true));
+            }
+
+            let node_id = match named_node {
+                Some(node) => match super::projects::node_id(state, owner, node).await? {
+                    Some(node_id) => Some(node_id),
+                    None => return Ok(ToolReply::text(&format!("Nothing was added. None of the person's nodes is {node}. List them with list_places."), true)),
+                },
+                None => None,
+            };
+            let item_id = sqlx::query_scalar::<_, Uuid>(
+                "insert into conversation_action_items (conversation_id, text, command, node_id, folder) select id, $2, $4, case when $4::text is null then null else coalesce($5, node_id) end, case when $4::text is null then null else coalesce($6, cwd) end from conversations where id = $1 and owner = $3 returning id",
+            )
+            .bind(conversation_id)
+            .bind(text)
+            .bind(owner)
+            .bind(command)
+            .bind(node_id)
+            .bind(named_folder)
+            .fetch_one(&state.pool)
+            .await?;
             let row = find_owned(&state.pool, conversation_id, owner).await?;
             state.publish(Some(owner), StreamMessage::Conversation(row.to_proto()?));
 

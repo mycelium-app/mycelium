@@ -50,7 +50,7 @@ async fn described(state: &crate::state::AppState, project: &Project) -> ApiResu
     Ok(format!("{} ({}) at {} on {node}", project.name, project.id, project.path))
 }
 
-async fn node_id(state: &crate::state::AppState, owner: Uuid, node: &str) -> ApiResult<Option<Uuid>> {
+pub async fn node_id(state: &crate::state::AppState, owner: Uuid, node: &str) -> ApiResult<Option<Uuid>> {
     Ok(sqlx::query_scalar::<_, Uuid>("select id from nodes where created_by = $1 and revoked_at is null and (id::text = lower($2) or name = $2)").bind(owner).bind(node).fetch_optional(&state.pool).await?)
 }
 

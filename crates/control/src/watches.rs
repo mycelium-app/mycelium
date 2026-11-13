@@ -53,11 +53,7 @@ pub async fn deliver(state: &AppState, owner: Uuid, watch: Uuid, watcher: Uuid, 
         return Ok(false);
     }
 
-    let sent = if chat {
-        crate::chats::send_or_queue(state, owner, watcher, &text).await
-    } else {
-        crate::prompts::send_from(state, owner, watcher, mycelium_proto::api::PromptRequest { text, ..Default::default() }, Some(EVENT_ORIGIN)).await.map(|_| ())
-    };
+    let sent = send_event(state, owner, watcher, chat, text).await;
 
     if let Err(error) = sent {
         sqlx::query("delete from watch_notifications where watch_id = $1 and key = $2").bind(watch).bind(key).execute(&state.pool).await?;
@@ -66,6 +62,14 @@ pub async fn deliver(state: &AppState, owner: Uuid, watch: Uuid, watcher: Uuid, 
     }
 
     Ok(true)
+}
+
+pub async fn send_event(state: &AppState, owner: Uuid, watcher: Uuid, chat: bool, text: String) -> ApiResult<()> {
+    if chat {
+        crate::chats::send_or_queue(state, owner, watcher, &text).await
+    } else {
+        crate::prompts::send_from(state, owner, watcher, mycelium_proto::api::PromptRequest { text, ..Default::default() }, Some(EVENT_ORIGIN)).await.map(|_| ())
+    }
 }
 
 pub async fn end(state: &AppState, owner: Uuid, watch: Uuid) -> ApiResult<()> {

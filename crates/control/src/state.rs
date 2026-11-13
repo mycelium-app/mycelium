@@ -46,6 +46,7 @@ struct TerminalSession {
     owner: LoginOwner,
     conversation_id: Uuid,
     total: u64,
+    capture: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +58,7 @@ pub struct UnacknowledgedPrompt {
     pub attachments: Vec<mycelium_proto::conversation::Attachment>,
 }
 
+const TERMINAL_CAPTURE_BYTES: usize = 64 * 1024;
 const RESOURCE_HISTORY: usize = 200;
 
 #[derive(Default)]
@@ -712,7 +714,7 @@ impl Hub {
 
     pub fn track_terminal(&self, terminal_id: Uuid, node_id: Uuid, user_id: Uuid, conversation_id: Uuid, total: u64) {
         if let Ok(mut terminals) = self.terminals.lock() {
-            terminals.insert(terminal_id, TerminalSession { owner: LoginOwner { node_id, user_id }, conversation_id, total });
+            terminals.insert(terminal_id, TerminalSession { owner: LoginOwner { node_id, user_id }, conversation_id, total, capture: None });
         }
     }
 
@@ -741,7 +743,26 @@ impl Hub {
 
         session.total += bytes.len() as u64;
 
+        if let Some(capture) = &mut session.capture {
+            capture.extend_from_slice(bytes);
+
+            let excess = capture.len().saturating_sub(TERMINAL_CAPTURE_BYTES);
+            capture.drain(..excess);
+        }
+
         Some(start)
+    }
+
+    pub fn capture_terminal_output(&self, terminal_id: Uuid) {
+        if let Ok(mut terminals) = self.terminals.lock() {
+            if let Some(session) = terminals.get_mut(&terminal_id) {
+                session.capture = Some(Vec::new());
+            }
+        }
+    }
+
+    pub fn captured_terminal_output(&self, terminal_id: Uuid) -> Option<Vec<u8>> {
+        self.terminals.lock().ok()?.get(&terminal_id)?.capture.clone()
     }
 
     pub fn finish_terminal(&self, terminal_id: Uuid) {
@@ -750,11 +771,11 @@ impl Hub {
         }
     }
 
-    pub fn finish_terminals_of(&self, node_id: Uuid, live: &HashSet<Uuid>) -> Vec<(Uuid, LoginOwner)> {
+    pub fn finish_terminals_of(&self, node_id: Uuid, live: &HashSet<Uuid>) -> Vec<(Uuid, LoginOwner, Option<Vec<u8>>)> {
         let Ok(mut terminals) = self.terminals.lock() else {
             return Vec::new();
         };
-        let finished: Vec<(Uuid, LoginOwner)> = terminals.iter().filter(|(terminal_id, session)| session.owner.node_id == node_id && !live.contains(terminal_id)).map(|(terminal_id, session)| (*terminal_id, session.owner)).collect();
+        let finished: Vec<(Uuid, LoginOwner, Option<Vec<u8>>)> = terminals.iter().filter(|(terminal_id, session)| session.owner.node_id == node_id && !live.contains(terminal_id)).map(|(terminal_id, session)| (*terminal_id, session.owner, session.capture.clone())).collect();
 
         terminals.retain(|terminal_id, session| session.owner.node_id != node_id || live.contains(terminal_id));
 
@@ -874,8 +895,9 @@ impl AppState {
     }
 
     pub fn finish_terminals_of_node(&self, node_id: Uuid, live: &HashSet<Uuid>) {
-        for (terminal_id, owner) in self.hub.finish_terminals_of(node_id, live) {
+        for (terminal_id, owner, captured) in self.hub.finish_terminals_of(node_id, live) {
             self.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id, exit_code: None });
+            crate::action_items::run_ended_in_background(self, terminal_id, crate::action_items::RunEnd::Lost, captured);
         }
     }
 
@@ -885,9 +907,12 @@ impl AppState {
                 continue;
             };
 
+            let captured = self.hub.captured_terminal_output(terminal_id);
+
             self.hub.send(owner.node_id, ControlToNode::StopTerminal { terminal_id });
             self.hub.finish_terminal(terminal_id);
             self.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id, exit_code: None });
+            crate::action_items::run_ended_in_background(self, terminal_id, crate::action_items::RunEnd::Stopped, captured);
         }
     }
 }

@@ -248,6 +248,8 @@ pub const HEAD_AND_DIRECTORIES_SINCE: (u64, u64, u64) = (0, 10, 0);
 
 pub const STEERING_SINCE: (u64, u64, u64) = (0, 10, 1);
 
+pub const COMMAND_TERMINAL_SINCE: (u64, u64, u64) = (0, 34, 30);
+
 pub fn node_offline() -> ApiError {
     ApiError::conflict("node_offline", "This node is offline. Start it, then try again.")
 }

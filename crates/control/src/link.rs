@@ -1,3 +1,4 @@
+use crate::action_items::{self, RunEnd};
 use crate::activity::record_turn;
 use crate::api_access;
 use crate::auth::AuthNode;
@@ -342,7 +343,7 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
             let mut live = HashSet::new();
 
             for terminal in terminals {
-                let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1 and node_id = $2").bind(terminal.conversation_id).bind(node_id).fetch_optional(&state.pool).await?;
+                let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations c where c.id = $1 and (c.node_id = $2 or exists (select 1 from conversation_action_items i where i.conversation_id = c.id and i.node_id = $2))").bind(terminal.conversation_id).bind(node_id).fetch_optional(&state.pool).await?;
 
                 match owner {
                     Some(user_id) => {
@@ -366,8 +367,11 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
         }
         NodeToControl::TerminalExited { terminal_id, exit_code } => {
             if let Some(owner) = state.hub.terminal_owner(terminal_id).filter(|owner| owner.node_id == node_id) {
+                let captured = state.hub.captured_terminal_output(terminal_id);
+
                 state.hub.finish_terminal(terminal_id);
                 state.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id, exit_code });
+                action_items::run_ended_in_background(state, terminal_id, RunEnd::Exited(exit_code), captured);
             }
 
             Ok(())
