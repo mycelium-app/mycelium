@@ -10,10 +10,10 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
 import kotlin.test.Test
@@ -37,7 +37,7 @@ class IdempotentSendTest {
 
         store.send("c1", "ship it")
         store.send("c1", "ship it")
-        withTimeout(5_000) { while (bodies.value.isEmpty()) delay(10) }
+        bodies.first { it.isNotEmpty() }
         withContext(Dispatchers.Default) { delay(100) }
         answer.complete(Unit)
 
@@ -59,7 +59,7 @@ class IdempotentSendTest {
         val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
 
         store.send("c1", "ship it")
-        withTimeout(5_000) { while (bodies.value.size < 2) delay(10) }
+        bodies.first { it.size >= 2 }
 
         val ids = bodies.value.map { clientId.find(it)!!.groupValues[1] }
         assertEquals(ids[0], ids[1])
@@ -76,10 +76,10 @@ class IdempotentSendTest {
         val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
 
         store.send("c1", "yes")
-        withTimeout(5_000) { while (bodies.value.size < 1) delay(10) }
+        bodies.first { it.size >= 1 }
         withContext(Dispatchers.Default) { delay(100) }
         store.send("c1", "yes")
-        withTimeout(5_000) { while (bodies.value.size < 2) delay(10) }
+        bodies.first { it.size >= 2 }
 
         val ids = bodies.value.map { clientId.find(it)!!.groupValues[1] }
         assertNotEquals(ids[0], ids[1])
@@ -104,7 +104,7 @@ class IdempotentSendTest {
         val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
 
         store.voice.say("turn the lights off")
-        withTimeout(5_000) { while (bodies.value.size < 2) delay(10) }
+        bodies.first { it.size >= 2 }
 
         val ids = bodies.value.map { clientId.find(it)!!.groupValues[1] }
         assertEquals(ids[0], ids[1])
