@@ -124,6 +124,19 @@ pub fn definitions() -> Value {
             },
         },
         {
+            "name": "read_usage",
+            "description": "Read the tokens another of the person's conversations used between two times, from its reported turns: input, output, cache read and cache write tokens, cost, and the same per model. It reads the conversations read_conversation can read.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "conversation": {"type": "string", "description": "The id of the conversation or assistant, or the conversation's exact title or the assistant's name."},
+                    "from": {"type": "string", "description": "Start of the window, an RFC 3339 time such as 2026-11-13T19:00:00Z. Defaults to the conversation's start."},
+                    "to": {"type": "string", "description": "End of the window, an RFC 3339 time. Defaults to now."},
+                },
+                "required": ["conversation"],
+            },
+        },
+        {
             "name": "show_conversation",
             "description": "Show the person another of their conversations in this thread: its state, its latest result and everything it is waiting on, live, with a reply box. Use it when they need to see or answer what another conversation is waiting on. Only the person can act on approvals: you can show one and never answer it. It needs the same access as read_conversation.",
             "inputSchema": {
@@ -594,6 +607,54 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             crate::conversations::archive_for(state, owner, target_id).await?;
 
             ToolReply::text(&format!("Archived {label} ({target_id}). It stays readable and comes back when the person writes in it or this conversation sends it a message."), false)
+        }
+        "read_usage" => {
+            let target = match readable_target(&caller, &arguments, "read_usage", "read").await? {
+                Ok(target) => target,
+                Err(reply) => return Ok(reply),
+            };
+            let mut window = [None, None];
+
+            for (slot, name) in window.iter_mut().zip(["from", "to"]) {
+                if let Some(text) = arguments.get(name).and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty()) {
+                    match chrono::DateTime::parse_from_rfc3339(text) {
+                        Ok(time) => *slot = Some(time.with_timezone(&chrono::Utc)),
+                        Err(_) => return Ok(ToolReply::text(&format!("Nothing was read. {name} is a time like 2026-11-13T19:00:00Z."), true)),
+                    }
+                }
+            }
+
+            let [from, to] = window;
+            let rows = sqlx::query_as::<_, (Option<String>, i64, i64, i64, i64, i64, Option<f64>)>(
+                "select model, count(*), coalesce(sum(input_tokens), 0)::bigint, coalesce(sum(output_tokens), 0)::bigint, coalesce(sum(cache_read_tokens), 0)::bigint, coalesce(sum(cache_write_tokens), 0)::bigint, sum(cost_usd)
+                 from usage_turns where conversation_id = $1 and ($2::timestamptz is null or ended_at >= $2) and ($3::timestamptz is null or ended_at < $3)
+                 group by model order by model nulls last",
+            )
+            .bind(target.target_id)
+            .bind(from)
+            .bind(to)
+            .fetch_all(&state.pool)
+            .await?;
+            let line = |name: &str, turns: i64, input: i64, output: i64, read: i64, write: i64, cost: Option<f64>| {
+                let cost = cost.map_or("cost not reported".to_string(), |cost| format!("${cost:.2}"));
+
+                format!("{name}: {turns} turns, input {input}, output {output}, cache read {read}, cache write {write}, {cost}")
+            };
+            let window = format!("{} to {}", from.map_or("its start".to_string(), |time| time.to_rfc3339()), to.map_or("now".to_string(), |time| time.to_rfc3339()));
+            let mut parts = vec![format!("{} ({}) from {window}:", target.label, target.target_id)];
+
+            if rows.is_empty() {
+                parts.push("No turns reported usage in that window.".to_string());
+            } else {
+                let total = rows.iter().fold((0, 0, 0, 0, 0, None::<f64>), |sum, row| (sum.0 + row.1, sum.1 + row.2, sum.2 + row.3, sum.3 + row.4, sum.4 + row.5, row.6.map(|cost| sum.5.unwrap_or(0.0) + cost).or(sum.5)));
+                parts.push(line("Total", total.0, total.1, total.2, total.3, total.4, total.5));
+
+                for (model, turns, input, output, read, write, cost) in &rows {
+                    parts.push(line(model.as_deref().unwrap_or("Model not reported"), *turns, *input, *output, *read, *write, *cost));
+                }
+            }
+
+            ToolReply::text(&parts.join("\n"), false)
         }
         "read_conversation" => {
             let target = match readable_target(&caller, &arguments, "read_conversation", "read").await? {

@@ -97,7 +97,7 @@ fn area_of(tool: &str) -> Option<Area> {
         "create_project" | "update_project" => Some(Area::Projects),
         "open_outline" => Some(Area::Outline),
         "open_screen" => Some(Area::Screens),
-        "find_conversations" | "start_conversation" | "manage_conversation" | "flag_for_person" | "add_action_item" | "resolve_action_item" | "archive_conversation" | "read_conversation" | "show_conversation" | "send_to_conversation" | "withdraw_message" | "watch_conversation" | "watch_pipeline" | "watch_release" | "wake_at" | "list_watches" | "unwatch" => Some(Area::Conversations),
+        "find_conversations" | "start_conversation" | "manage_conversation" | "flag_for_person" | "add_action_item" | "resolve_action_item" | "archive_conversation" | "read_conversation" | "read_usage" | "show_conversation" | "send_to_conversation" | "withdraw_message" | "watch_conversation" | "watch_pipeline" | "watch_release" | "wake_at" | "list_watches" | "unwatch" => Some(Area::Conversations),
         "request_api_access" => Some(Area::ApiAccess),
         "decide" => Some(Area::Decide),
         "request_ssh_access" => Some(Area::SshAccess),
@@ -325,7 +325,7 @@ pub async fn respond(state: &AppState, node_id: Uuid, conversation_id: Option<Uu
                         ToolReply::Invalid(message) => failure(&id, INVALID_PARAMS, &message),
                     }
                 }
-                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use list_places, assistant_list, assistant_create, assistant_update, assistant_propose_action, recall, remember, propose_schedule, walkthrough, save_reflection, propose_exercise, note_learned, save_exercise_review, list_needs_you, resolve_needs_you, focus_needs_you, read_earlier_turns, get_instructions, propose_instructions_edit, find_conversations, read_conversation, show_conversation, send_to_conversation, request_api_access, decide, request_ssh_access, create_artifact, update_artifact, design_set_artboard, design_remove_item, read_artifact or read_artifact_feedback."),
+                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use list_places, assistant_list, assistant_create, assistant_update, assistant_propose_action, recall, remember, propose_schedule, walkthrough, save_reflection, propose_exercise, note_learned, save_exercise_review, list_needs_you, resolve_needs_you, focus_needs_you, read_earlier_turns, get_instructions, propose_instructions_edit, find_conversations, read_conversation, read_usage, show_conversation, send_to_conversation, request_api_access, decide, request_ssh_access, create_artifact, update_artifact, design_set_artboard, design_remove_item, read_artifact or read_artifact_feedback."),
             }
         }
         _ => failure(&id, METHOD_NOT_FOUND, "Method not found."),

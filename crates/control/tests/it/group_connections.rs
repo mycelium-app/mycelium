@@ -1283,3 +1283,55 @@ async fn approving_a_subagent_in_its_own_group_still_starts_it() {
     assert_eq!((status, approved["state"].clone()), (200, json!("started")), "{approved}");
     fleet.link.expect_start_session().await;
 }
+
+async fn reported_turn(fleet: &Fleet, conversation: Uuid, model: &str, ended_at: &str, tokens: [i64; 4], cost: f64) {
+    sqlx::query("insert into usage_turns (conversation_id, owner, node_id, agent, model, ended_at, day, reported, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd) select id, owner, node_id, agent, $2, $3::timestamptz, ($3::timestamptz at time zone 'utc')::date, true, $4, $5, $6, $7, $8 from conversations where id = $1")
+        .bind(conversation)
+        .bind(model)
+        .bind(ended_at)
+        .bind(tokens[0])
+        .bind(tokens[1])
+        .bind(tokens[2])
+        .bind(tokens[3])
+        .bind(cost)
+        .execute(&fleet.server.pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn read_usage_sums_the_tokens_a_readable_conversation_reported_in_the_window() {
+    let fleet = fleet().await;
+    connect(&fleet.server, fleet.yucca, fleet.immich).await;
+    reported_turn(&fleet, fleet.immich_chat, "opus", "2026-11-13T19:30:00Z", [100, 20, 1000, 50], 0.5).await;
+    reported_turn(&fleet, fleet.immich_chat, "sonnet", "2026-11-13T20:10:00Z", [10, 2, 100, 5], 0.25).await;
+    reported_turn(&fleet, fleet.immich_chat, "opus", "2026-11-13T18:00:00Z", [9999, 9999, 9999, 9999], 9.0).await;
+
+    let read = call(&fleet.server, &fleet.link, fleet.yucca_chat, "read_usage", json!({"conversation": fleet.immich_chat.to_string(), "from": "2026-11-13T19:00:00Z", "to": "2026-11-13T21:00:00Z"})).await;
+
+    let read = text(&read);
+    assert!(read.contains("Total: 2 turns, input 110, output 22, cache read 1100, cache write 55, $0.75"), "{read}");
+    assert!(read.contains("opus: 1 turns, input 100, output 20, cache read 1000, cache write 50, $0.50"), "{read}");
+    assert!(read.contains("sonnet: 1 turns, input 10, output 2, cache read 100, cache write 5, $0.25"), "{read}");
+}
+
+#[tokio::test]
+async fn read_usage_refuses_a_conversation_read_conversation_cannot_read() {
+    let fleet = fleet().await;
+    reported_turn(&fleet, fleet.immich_chat, "opus", "2026-11-13T19:30:00Z", [100, 20, 1000, 50], 0.5).await;
+
+    let refused = call(&fleet.server, &fleet.link, fleet.yucca_chat, "read_usage", json!({"conversation": fleet.immich_chat.to_string()})).await;
+
+    assert_eq!(refused["isError"], true, "{refused}");
+    assert!(!text(&refused).contains("input 100"), "{refused}");
+}
+
+#[tokio::test]
+async fn read_usage_says_how_to_write_a_time_it_cannot_read() {
+    let fleet = fleet().await;
+    connect(&fleet.server, fleet.yucca, fleet.immich).await;
+
+    let refused = call(&fleet.server, &fleet.link, fleet.yucca_chat, "read_usage", json!({"conversation": fleet.immich_chat.to_string(), "from": "yesterday"})).await;
+
+    assert!(text(&refused).contains("from is a time like 2026-11-13T19:00:00Z."), "{refused}");
+}
