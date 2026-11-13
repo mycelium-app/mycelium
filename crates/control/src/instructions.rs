@@ -317,6 +317,10 @@ pub fn rebase(base: &str, current: &str, edited: &str) -> Option<String> {
     diffy::merge(base, current, edited).ok()
 }
 
+pub fn overlap(base: &str, current: &str, edited: &str) -> Option<String> {
+    diffy::MergeOptions::new().set_conflict_style(diffy::ConflictStyle::Merge).merge(base, current, edited).err()
+}
+
 fn overlapping_edit(layer: &Layer) -> ApiError {
     ApiError::conflict("instructions_overlap", format!("A newer change to the {} instructions edits the same lines as this one. Ask the agent to propose it again on the current text.", layer.name))
 }
@@ -351,7 +355,7 @@ pub async fn apply(state: &AppState, user: &AuthUser, layer: &Layer, base: &str,
     let api = forge_for(state, user.id, &source).await?;
     let path = layer.path(&source.path);
     let message = format!("docs: update {path}");
-    let mut refused_at = None;
+    let mut last_refusal = None;
 
     for _ in 0..WRITE_ATTEMPTS {
         let existing = api.file(&state.http, &source.repository, &path).await.map_err(|error| error.into_api(api.kind, &api.base_url))?;
@@ -373,8 +377,10 @@ pub async fn apply(state: &AppState, user: &AuthUser, layer: &Layer, base: &str,
 
         let commit_read = existing.as_ref().map(|file| file.commit.clone());
 
-        if refused_at.is_some() && refused_at == commit_read {
-            return Err(ApiError::bad_request("forge_write_refused", format!("{} refused to save {path} in {}. Check that the connected account can push to its default branch, then try again.", forges::display_name(api.kind), source.repository)));
+        if let Some((refused_at, refusal)) = last_refusal.take()
+            && refused_at == commit_read
+        {
+            return Err(forges::ForgeError::into_api(refusal, api.kind, &api.base_url));
         }
 
         match api.write_file(&state.http, &source.repository, &path, &merged, &message, existing.as_ref()).await {
@@ -384,12 +390,12 @@ pub async fn apply(state: &AppState, user: &AuthUser, layer: &Layer, base: &str,
 
                 return Ok(());
             }
-            Err(forges::ForgeError::Conflict) => refused_at = commit_read,
+            Err(refusal @ forges::ForgeError::WriteRefused(..)) => last_refusal = Some((commit_read, refusal)),
             Err(error) => return Err(error.into_api(api.kind, &api.base_url)),
         }
     }
 
-    Err(forges::ForgeError::Conflict.into_api(api.kind, &api.base_url))
+    Err(ApiError::conflict("instructions_busy", format!("The {} instructions kept changing while Mycelium saved this edit. Nothing was lost: approve it again in a moment.", layer.name)))
 }
 
 pub async fn save(State(state): State<AppState>, user: AuthUser, Path(key): Path<String>, Json(request): Json<SaveInstructionsRequest>) -> ApiResult<Json<InstructionLayer>> {

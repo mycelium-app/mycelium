@@ -48,6 +48,7 @@ pub enum ForgeError {
     MissingScope,
     Unreachable,
     Conflict,
+    WriteRefused(u16, String),
     CreateRefused,
     Failed(u16),
 }
@@ -80,6 +81,7 @@ impl ForgeError {
             ForgeError::MissingScope => ApiError::bad_request("forge_token_scope", missing_scope_message(kind)),
             ForgeError::Unreachable => ApiError::bad_request("forge_unreachable", format!("Mycelium could not reach {base_url}. Check the address and try again.")),
             ForgeError::Conflict => ApiError::conflict("forge_file_changed", format!("The file changed on {name} since Mycelium last read it. Pull the latest version, then make your edit again.")),
+            ForgeError::WriteRefused(status, reason) => ApiError::bad_request("forge_write_refused", format!("{name} did not accept the change (status {status}: {reason}). The file there has not changed, so trying again will not help until that is resolved.")),
             ForgeError::CreateRefused => ApiError::bad_request("forge_repository_refused", format!("{name} did not create that repository. It may already exist, or the name may not be allowed. Choose a different name and try again.")),
             ForgeError::Failed(status) => ApiError::bad_request("forge_failed", format!("{name} answered with status {status}. Try again in a moment.")),
         }
@@ -474,7 +476,14 @@ impl ForgeApi {
         let status = response.status();
 
         if matches!(status.as_u16(), 400 | 409 | 422) {
-            return Err(ForgeError::Conflict);
+            let body: Value = response.json().await.unwrap_or(Value::Null);
+            let reason = match &body["message"] {
+                Value::String(message) => message.clone(),
+                Value::Null => "no reason given".to_string(),
+                other => other.to_string(),
+            };
+
+            return Err(ForgeError::WriteRefused(status.as_u16(), reason.chars().take(300).collect()));
         }
 
         if !status.is_success() {

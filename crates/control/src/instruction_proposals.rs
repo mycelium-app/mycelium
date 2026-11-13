@@ -218,20 +218,16 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Pa
     let found = find_owned(&state, id, user.id).await?;
 
     let layer = find_layer(&state, &user, &found.layer).await?;
-    let claimed = sqlx::query("update instruction_proposals set state = 'approved', decided_at = now() where id = $1 and state = 'proposed'").bind(id).execute(&state.pool).await?.rows_affected();
+    let mut claim = state.pool.begin().await?;
+    let held = sqlx::query_scalar::<_, String>("select state from instruction_proposals where id = $1 for update").bind(id).fetch_one(&mut *claim).await?;
 
-    if claimed == 0 {
+    if held != "proposed" {
         return Err(ApiError::conflict("proposal_not_proposed", "This proposal has already been decided."));
     }
 
-    let applied = instructions::apply(&state, &user, &layer, &found.base_text, &found.text).await;
-
-    if let Err(error) = applied {
-        sqlx::query("update instruction_proposals set state = 'proposed', decided_at = null where id = $1").bind(id).execute(&state.pool).await?;
-        publish(&state, user.id, find_owned(&state, id, user.id).await?);
-
-        return Err(error);
-    }
+    instructions::apply(&state, &user, &layer, &found.base_text, &found.text).await?;
+    sqlx::query("update instruction_proposals set state = 'approved', decided_at = now() where id = $1").bind(id).execute(&mut *claim).await?;
+    claim.commit().await?;
 
     Ok(Json(publish(&state, user.id, find_owned(&state, id, user.id).await?)))
 }
@@ -250,7 +246,13 @@ pub async fn decline(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 
     if let Some(conversation_id) = found.conversation_id.filter(|_| request.notify) {
         let mut text = if request.redo {
-            format!("The {} instructions changed after you proposed your edit to them. Read them again with get_instructions and, if your edit still applies, propose it again on the current text.", found.layer_name)
+            let mut text = format!("The {} instructions changed after you proposed your edit to them. Read them again with get_instructions and, if your edit still applies, propose it again on the current text.", found.layer_name);
+
+            if let Some(overlap) = instructions::overlap(&found.base_text, &found.current_text, &found.text) {
+                text.push_str(&format!(" Your edit and the newer change touch the same lines; between the markers, the first part is the current text and the second is your edit:\n\n```text\n{overlap}\n```\n\nPropose one wording that settles both, and say in the reason what you changed."));
+            }
+
+            text
         } else {
             format!("I declined the edit you proposed to the {} instructions. Do not edit the instruction files another way.", found.layer_name)
         };

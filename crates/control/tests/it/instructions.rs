@@ -95,7 +95,7 @@ fn fake_gitlab(shared: Shared) -> Router {
         Ok(Json(json!({"content": encode(text), "last_commit_id": commit})))
     }
 
-    async fn write(State(shared): State<Shared>, Path((_, path)): Path<(String, String)>, Json(body): Json<Value>) -> StatusCode {
+    async fn write(State(shared): State<Shared>, Path((_, path)): Path<(String, String)>, Json(body): Json<Value>) -> (StatusCode, Json<Value>) {
         let mut repository = shared.lock().unwrap();
 
         if let Some((edited_path, text)) = repository.edit_before_next_write.take() {
@@ -104,14 +104,18 @@ fn fake_gitlab(shared: Shared) -> Router {
 
         let existing = repository.files.get(&path).map(|(_, commit)| commit.clone());
 
-        if repository.refuse_writes || (existing.is_some() && body["last_commit_id"].as_str() != existing.as_deref()) {
-            return StatusCode::BAD_REQUEST;
+        if repository.refuse_writes {
+            return (StatusCode::BAD_REQUEST, Json(json!({"message": "You are not allowed to push into this branch"})));
+        }
+
+        if existing.is_some() && body["last_commit_id"].as_str() != existing.as_deref() {
+            return (StatusCode::BAD_REQUEST, Json(json!({"message": "You are attempting to update a file that has changed since you started editing it."})));
         }
 
         repository.writes += 1;
         repository.commit(path, body["content"].as_str().unwrap().to_string());
 
-        StatusCode::OK
+        (StatusCode::OK, Json(json!({})))
     }
 
     Router::new()
@@ -1125,6 +1129,55 @@ async fn an_edit_overlapping_a_change_on_gitlab_waits_and_leaves_gitlab_as_it_is
     let listed = proposals(&server).await;
     assert_eq!((listed[0]["state"].clone(), listed[0]["out_of_date"].clone()), (json!("proposed"), json!(true)));
     assert_eq!(layer(&instructions(&server).await, "Global")["text"], upstream);
+
+    server.user.json(server.user.post(&format!("/api/v1/instruction-proposals/{id}/decline")).json(&json!({"redo": true}))).await;
+    match link.next().await {
+        ControlToNode::StartSession { reload, .. } => assert!(reload, "the session reloads onto the instructions GitLab changed"),
+        other => panic!("expected a reload before the prompt, got {other:?}"),
+    }
+
+    let (_, told) = link.expect_prompt().await;
+    assert!(told.contains("One, from GitLab") && told.contains("One, from the proposal") && told.contains("Propose one wording"), "{told}");
+}
+
+#[tokio::test]
+async fn approving_an_edit_gitlab_already_has_marks_it_approved_without_a_commit() {
+    let server = Server::start().await;
+    let shared = Shared::default();
+    gitlab_source(&server, shared.clone()).await;
+    save(&server, "global", RULES).await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    let conversation = conversation_with_session(&server, &mut link, "/anywhere").await;
+    let wanted = "# Rules\nOne\nTwo\nThree\nFour\n";
+    let id = propose_on_current(&server, &token, conversation, wanted).await;
+    shared.lock().unwrap().commit("AGENTS.md".into(), wanted.into());
+    let writes_before = shared.lock().unwrap().writes;
+
+    let (status, approved) = approve(&server, &id).await;
+
+    assert_eq!((status, approved["state"].clone()), (200, json!("approved")), "{approved}");
+    assert_eq!(shared.lock().unwrap().writes, writes_before);
+    assert_eq!(layer(&instructions(&server).await, "Global")["text"], wanted);
+}
+
+#[tokio::test]
+async fn a_write_gitlab_refuses_gives_its_reason_and_the_proposal_keeps_waiting() {
+    let server = Server::start().await;
+    let shared = Shared::default();
+    gitlab_source(&server, shared.clone()).await;
+    save(&server, "global", RULES).await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    let conversation = conversation_with_session(&server, &mut link, "/anywhere").await;
+    let id = propose_on_current(&server, &token, conversation, "# Rules\nOne\nTwo\nThree\nFour\n").await;
+    shared.lock().unwrap().refuse_writes = true;
+
+    let (status, body) = approve(&server, &id).await;
+
+    assert_eq!((status, body["error"].clone()), (400, json!("forge_write_refused")), "{body}");
+    assert!(body["message"].as_str().unwrap().contains("You are not allowed to push into this branch"), "{body}");
+    assert_eq!(proposals(&server).await[0]["state"], json!("proposed"));
 }
 
 #[tokio::test]
