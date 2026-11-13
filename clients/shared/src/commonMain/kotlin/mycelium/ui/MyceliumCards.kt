@@ -458,6 +458,7 @@ private fun StartProposedBody(parsed: MyceliumCall.StartProposed) {
         val waiting = proposal != null && proposal.waiting
         val choice = chosen[step.key]
         val node = step.nodeChoices.firstOrNull { it.id == choice?.nodeId } ?: step.node
+        val stepGroup = step.group ?: proposal?.targetGroup?.takeIf { crossGroup && proposal.kind == "conversation" }
 
         Label(step.title, style = Tokens.Type.UiStrong, maxLines = 1)
 
@@ -465,9 +466,9 @@ private fun StartProposedBody(parsed: MyceliumCall.StartProposed) {
             Label("Waits for your decision", style = Tokens.Type.Meta, color = colors.textMuted)
         }
 
-        if (crossGroup) {
+        if (crossGroup && stepGroup != null) {
             Label("From ${proposal?.sourceGroup}", style = Tokens.Type.Meta, color = colors.textMuted)
-            Label("In ${proposal?.targetGroup}, ${step.project?.let { "project $it" } ?: "folder ${step.folder.orEmpty()}"}", style = Tokens.Type.Meta, color = colors.textMuted)
+            Label("In $stepGroup, ${step.project?.let { "project $it" } ?: "folder ${step.folder.orEmpty()}"}", style = Tokens.Type.Meta, color = colors.textMuted)
         }
 
         if (step.nodeChoices.isEmpty() && node != null) {
@@ -480,7 +481,7 @@ private fun StartProposedBody(parsed: MyceliumCall.StartProposed) {
             Segmented(labels.keys.toList(), labels.entries.firstOrNull { it.value.id == choice?.nodeId }?.key.orEmpty(), { label -> labels[label]?.let { picked -> choose(step.key) { it.copy(nodeId = picked.id) } } }, "Node for ${step.title}")
         }
 
-        if (!crossGroup) {
+        if (!crossGroup || stepGroup == null) {
             step.folder?.let { Label("Folder $it", style = Tokens.Type.Meta, color = colors.textMuted) }
         }
 
@@ -521,8 +522,11 @@ private fun StartProposedBody(parsed: MyceliumCall.StartProposed) {
     }
 
     if (crossGroup && proposal != null && proposal.waiting) {
-        Label("Creating starts only this conversation and does not connect ${proposal.sourceGroup} and ${proposal.targetGroup}.", style = Tokens.Type.Meta, color = colors.textMuted)
-        Label("Connecting allows messages in both directions between these two conversations until you revoke it in Settings.", style = Tokens.Type.Meta, color = colors.textMuted)
+        Label("Creating starts only this ${proposal.kind} and does not connect ${proposal.sourceGroup} and ${proposal.targetGroup}.", style = Tokens.Type.Meta, color = colors.textMuted)
+
+        if (proposal.kind == "conversation") {
+            Label("Connecting allows messages in both directions between these two conversations until you revoke it in Settings.", style = Tokens.Type.Meta, color = colors.textMuted)
+        }
     }
 
     action.failure?.let { ErrorBanner(it, onDismiss = { action.failure = null }) }

@@ -64,6 +64,12 @@ private const val Ambiguous = ""","first_message":"Read the schema","node_choice
 private fun proposal(state: String, step: String = SingleChoice, crossGroup: Boolean = false) =
     """{"id":"$ProposalId","conversation_id":"c1","kind":"${if (crossGroup) "conversation" else "subagent"}"${if (crossGroup) ",\"source_group\":\"Ops\",\"target_group\":\"Shop\"" else ""},"title":"Review the schema","steps":[{"key":"subagent","title":"Review the schema","depends_on":[],"gate":false,"node":{"id":"n1","name":"laptop","online":true},"folder":"/tmp","agent":"claude"${if (crossGroup) ",\"project\":\"ledger\"" else ""}$step}],"state":"$state","connect":false,"workflow_id":null,"created_at":"2026-10-23T10:00:00Z"}"""
 
+private fun workflowReachingShop(state: String) =
+    """{"id":"$ProposalId","conversation_id":"c1","kind":"workflow","source_group":"Ops","target_group":"Shop","title":"Reconcile October stock","steps":[""" +
+        """{"key":"collect","title":"Collect the delivery log","depends_on":[],"gate":false,"node":{"id":"n1","name":"atlas","online":true},"folder":"ops/deliveries","agent":"claude","account":"a@example.com","first_message":"Export the October delivery log","node_choices":[],"account_choices":[]},""" +
+        """{"key":"compare","title":"Compare with the ledger","depends_on":["collect"],"gate":false,"node":{"id":"n1","name":"atlas","online":true},"folder":"ledger","project":"ledger","agent":"claude","account":"a@example.com","first_message":"Compare the delivery log with the ledger","node_choices":[],"account_choices":[],"group":"Shop"}""" +
+        """],"state":"$state","connect":false,"workflow_id":null,"created_at":"2026-10-23T10:00:00Z"}"""
+
 class StartProposalCardTest {
     @get:Rule
     val rule = createComposeRule()
@@ -75,16 +81,16 @@ class StartProposalCardTest {
 
     private val bodies = java.util.concurrent.ConcurrentHashMap<String, String>()
 
-    private fun show(step: String = SingleChoice, crossGroup: Boolean = false) {
+    private fun show(step: String = SingleChoice, crossGroup: Boolean = false, proposalIn: (String) -> String = { state -> proposal(state, step, crossGroup) }) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             requests += request.method to path
             bodies[path] = request.body.toByteArray().decodeToString()
             val body = when {
-                path.endsWith("/connect") || path.endsWith("/approve") -> proposal("started", step, crossGroup)
-                path.endsWith("/decline") -> proposal("declined", step, crossGroup)
-                path.endsWith("/start-proposals") -> "[${proposal("proposed", step, crossGroup)}]"
+                path.endsWith("/connect") || path.endsWith("/approve") -> proposalIn("started")
+                path.endsWith("/decline") -> proposalIn("declined")
+                path.endsWith("/start-proposals") -> "[${proposalIn("proposed")}]"
                 path.endsWith("/conversation-connections") -> "[]"
                 else -> "{}"
             }
@@ -219,6 +225,23 @@ class StartProposalCardTest {
         rule.onNodeWithText("Create").performClick()
 
         waitForRequest(HttpMethod.Post, "/start-proposals/$ProposalId/approve")
+    }
+
+    @Test
+    fun aWorkflowCardNamesTheGroupOnlyOnTheStepOutsideTheCallersGroup() {
+        show(proposalIn = ::workflowReachingShop)
+
+        waitForText("Create")
+        rule.onNodeWithText("Folder ops/deliveries").assertExists()
+        rule.onNodeWithText("In Shop, project ledger").assertExists()
+        assertEquals(1, rule.onAllNodesWithText("From Ops").fetchSemanticsNodes().size)
+        rule.onNodeWithText("Creating starts only this workflow and does not connect Ops and Shop.").assertExists()
+        rule.onNodeWithText("Connecting allows messages in both directions between these two conversations until you revoke it in Settings.").assertDoesNotExist()
+
+        val png = Image.makeFromBitmap(rule.onRoot().captureToImage().asSkiaBitmap()).encodeToData(EncodedImageFormat.PNG)!!.bytes
+        val out = java.io.File("build/screens/workflow-reaching-another-group.png")
+        out.parentFile.mkdirs()
+        out.writeBytes(png)
     }
 
     @Test
