@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.33
+
+- elect.horse results are read again: the horse's seats come from the game's seat list, the expert daily counts as its own puzzle, and a draw is kept and shown as "Draw, N seats" with a drawn count in the stats.
+
 ## v0.34.32
 
 - read_usage reports the tokens a readable conversation used between two times: input, output, cache read and cache write, and cost, in total and per model.
