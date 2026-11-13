@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.31
+
+- A subagent or workflow with a step in a group the asking conversation's group is not connected to names that group on the approval card, on that step only, and approving re-checks every step after your choices. Steps reaching two unconnected groups are refused before any card, and approving never connects the groups.
+
 ## v0.34.30
 
 - An action item can carry a command. add_action_item takes a command, and optionally the node and folder to run it in; the Inbox card shows the command with Run, Copy and Mark as done. Run starts it in a terminal on that node, shows its output on the card, and resolves the item when it exits with code 0; a failure shows the exit code and output with Retry and Open in terminal, and the agent that added the item is told the result.
