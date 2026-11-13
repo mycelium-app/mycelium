@@ -902,6 +902,17 @@ async fn reading_another_conversation_pages_back_and_searches() {
     assert!(searched.contains("role=\"user\">\nSecond pass") && !searched.contains("role=\"user\">\nThird pass"), "{searched}");
 }
 
+#[tokio::test]
+async fn reading_the_latest_message_alone_shows_it_once() {
+    let mut fleet = fleet().await;
+    let sibling = working_conversation(&fleet.server, &mut fleet.link, "Draft the changelog", "/work/yucca/docs").await;
+    answered(&fleet.server, &mut fleet.link, sibling, "First draft done.").await;
+
+    let read = text(&read(&fleet, fleet.yucca_chat, sibling, json!({"limit": 1})).await);
+
+    assert_eq!(read.matches("First draft done.").count(), 1, "{read}");
+}
+
 const WORKTREE_READY_NODE: &str = "v0.35.0";
 
 async fn apps_group_with_a_working_chat() -> (Server, NodeLink, Uuid, Uuid) {

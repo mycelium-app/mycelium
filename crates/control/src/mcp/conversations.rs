@@ -694,7 +694,9 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 parts.push("No messages match.".to_string());
             }
 
-            parts.extend(shown.iter().map(|(seq, kind, text)| block(*seq, &if kind == "error" { "error".to_string() } else { super::earlier_turns::speaker(kind).to_lowercase() }, text)));
+            shown.dedup_by_key(|(seq, _, _)| *seq);
+            let latest_seq = latest.as_ref().map(|(seq, _)| *seq);
+            parts.extend(shown.iter().filter(|(seq, _, _)| Some(*seq) != latest_seq).map(|(seq, kind, text)| block(*seq, &if kind == "error" { "error".to_string() } else { super::earlier_turns::speaker(kind).to_lowercase() }, text)));
 
             if let (true, Some((oldest, _, _))) = (more, messages.first()) {
                 parts.push(format!("Call again with before={oldest} for older messages."));
