@@ -34,6 +34,15 @@ and publishes each `vX.Y.Z` tag. Never push to GitHub directly: the next mirror 
 Pushes to `main` that change a lockfile run the build jobs without publishing. They keep the GitHub
 Actions caches warm, since a tag run can only restore caches made on `main`.
 
+## Update a running control plane
+
+A deployment that follows `:latest` picks up a release by pulling the image and restarting the
+service; one that pins a version changes the tag to `ghcr.io/mycelium-app/mycelium:X.Y.Z` first.
+Nothing else changes: the same port (8080), environment, data volume and database. The control
+plane runs its migrations when it starts, so `/readyz` answers 503 until they finish while
+`/healthz` stays 200. It is updated once `GET /api/v1/version` returns `{"version":"vX.Y.Z"}`.
+Nodes update themselves to the control plane's version after it.
+
 ## Signing key
 
 The Android key is the `ANDROID_KEYSTORE_BASE64` and `ANDROID_KEYSTORE_PASSWORD` secrets of the
