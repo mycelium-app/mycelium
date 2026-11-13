@@ -176,19 +176,25 @@ fn events_host_belongs_to(events: &url::Url, address: &str) -> bool {
     events == account || events == family || events.ends_with(&format!(".{family}"))
 }
 
-async fn servers(http: &reqwest::Client, credentials: &Credentials) -> Result<Value, String> {
+pub async fn events_address(http: &reqwest::Client, credentials: &Credentials) -> Result<url::Url, String> {
     let root = send(http.get(format!("{}/", base(credentials))).timeout(TIMEOUT)).await?;
     let Some(events) = root["ws"].as_str() else {
         return Err("This server did not say where its events are. Check the server address, then try again.".to_string());
     };
-    let unreachable = || "Mycelium could not open Stoat's events connection to list servers. Check the server address, then try again.".to_string();
-    let mut address = url::Url::parse(events).map_err(|_| unreachable())?;
+    let mut address = url::Url::parse(events).map_err(|_| "Mycelium could not open Stoat's events connection to list servers. Check the server address, then try again.".to_string())?;
 
     if !events_host_belongs_to(&address, &credentials.address) {
         return Err("This server named an events address on a different domain, so Mycelium did not send the token there. Check the server address, then try again.".to_string());
     }
 
     address.query_pairs_mut().append_pair("version", "1").append_pair("format", "json");
+
+    Ok(address)
+}
+
+async fn servers(http: &reqwest::Client, credentials: &Credentials) -> Result<Value, String> {
+    let address = events_address(http, credentials).await?;
+    let unreachable = || "Mycelium could not open Stoat's events connection to list servers. Check the server address, then try again.".to_string();
     let (mut socket, _) = tokio::time::timeout(TIMEOUT, tokio_tungstenite::connect_async(address.as_str())).await.map_err(|_| unreachable())?.map_err(|_| unreachable())?;
 
     socket.send(Message::Text(json!({"type": "Authenticate", "token": credentials.secret}).to_string().into())).await.map_err(|_| unreachable())?;

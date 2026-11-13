@@ -123,6 +123,7 @@ mod discord;
 mod actual;
 mod local_speech;
 mod paperless;
+mod mention_triggers;
 mod message_paging;
 mod paging;
 mod stoat;
@@ -180,6 +181,7 @@ pub async fn run(config: Config, listener: TcpListener) -> Result<()> {
     tokio::spawn(conversations::wake_regularly(state.clone()));
     tokio::spawn(watches::deliver_regularly(state.clone()));
     tokio::spawn(forge_sync::sync_regularly(state.clone()));
+    tokio::spawn(mention_triggers::listen_regularly(state.clone()));
     tokio::spawn(wellness::announce_boundaries(state.clone()));
     axum::serve(listener, router(state).into_make_service_with_connect_info::<SocketAddr>()).await?;
 
@@ -360,6 +362,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/repositories", get(forges::repositories))
         .route("/api/v1/projects", get(projects::list).post(projects::create))
         .route("/api/v1/projects/{id}", patch(projects::patch).delete(projects::remove))
+        .route("/api/v1/mention-triggers", get(mention_triggers::list).post(mention_triggers::create))
+        .route("/api/v1/mention-triggers/{id}", delete(mention_triggers::delete))
         .route("/api/v1/projects/{id}/checkout", post(projects::checkout))
         .route("/api/v1/projects/{id}/checkouts/{node_id}", delete(projects::remove_checkout))
         .route("/api/v1/projects/{id}/worktrees", get(worktrees::existing))

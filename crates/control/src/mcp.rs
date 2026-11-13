@@ -3,7 +3,7 @@ mod approval;
 mod artifacts;
 mod assistants;
 mod browser_task;
-mod call;
+pub(crate) mod call;
 mod conversations;
 mod decide;
 mod earlier_turns;

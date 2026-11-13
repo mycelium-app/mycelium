@@ -55,6 +55,7 @@ mod mcp_coverage;
 mod mcp_inbox;
 mod mcp_live_tools;
 mod memory;
+mod mention_triggers;
 mod message_proposals;
 mod moves;
 mod node_link;

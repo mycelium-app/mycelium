@@ -1182,6 +1182,26 @@ pub struct PatchProjectRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MentionTrigger {
+    pub id: Uuid,
+    pub server_id: Uuid,
+    pub assistant_id: Uuid,
+    pub channels: Vec<String>,
+    pub senders: Vec<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateMentionTriggerRequest {
+    pub server_id: Uuid,
+    pub assistant_id: Uuid,
+    #[serde(default)]
+    pub channels: Vec<String>,
+    #[serde(default)]
+    pub senders: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Group {
     pub id: Uuid,
     pub name: String,
