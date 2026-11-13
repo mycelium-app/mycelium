@@ -8,7 +8,12 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asSkiaBitmap
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onRoot
+import org.jetbrains.skia.EncodedImageFormat
+import org.jetbrains.skia.Image
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -39,12 +44,13 @@ import kotlin.test.assertEquals
 
 private const val ProposalId = "99999999-9999-9999-9999-999999999999"
 
-private fun startSubagent(): List<Event> {
-    val output = Json.encodeToString(serializer<String>(), "Waiting for the person to approve starting Review the schema (proposal $ProposalId). Nothing has started.")
-    val input = """{"step":{"title":"Review the schema","prompt":"Read the schema","node":"laptop","agent":"claude","cwd":"/tmp"}}"""
+private fun startSubagent(crossGroup: Boolean): List<Event> {
+    val output = Json.encodeToString(serializer<String>(), "Waiting for the person to approve starting Review the schema${if (crossGroup) " in Shop" else ""} (proposal $ProposalId). Nothing has started.")
+    val input = if (crossGroup) """{"group":"Shop","project":"ledger","title":"Review the schema","prompt":"Read the schema","reason":"Needed"}""" else """{"step":{"title":"Review the schema","prompt":"Read the schema","node":"laptop","agent":"claude","cwd":"/tmp"}}"""
+    val tool = if (crossGroup) "start_conversation" else "start_subagent"
 
     return listOf(
-        Event("c1", 1, "acp_update", Json.parseToJsonElement("""{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"t1","title":"mcp__mycelium__start_subagent","kind":"other","status":"pending","rawInput":{}}}""")),
+        Event("c1", 1, "acp_update", Json.parseToJsonElement("""{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"t1","title":"mcp__mycelium__$tool","kind":"other","status":"pending","rawInput":{}}}""")),
         Event("c1", 2, "acp_update", Json.parseToJsonElement("""{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed","rawInput":$input,"content":[{"type":"content","content":{"type":"text","text":$output}}]}}""")),
     )
 }
@@ -55,8 +61,8 @@ private const val ModelChoices = ""","account":"a@example.com","model":"opus","f
 
 private const val Ambiguous = ""","first_message":"Read the schema","node_choices":[],"account_choices":["a@example.com","b@example.com"]"""
 
-private fun proposal(state: String, step: String = SingleChoice) =
-    """{"id":"$ProposalId","conversation_id":"c1","kind":"subagent","title":"Review the schema","steps":[{"key":"subagent","title":"Review the schema","depends_on":[],"gate":false,"node":{"id":"n1","name":"laptop","online":true},"folder":"/tmp","agent":"claude"$step}],"state":"$state","connect":false,"workflow_id":null,"created_at":"2026-10-23T10:00:00Z"}"""
+private fun proposal(state: String, step: String = SingleChoice, crossGroup: Boolean = false) =
+    """{"id":"$ProposalId","conversation_id":"c1","kind":"${if (crossGroup) "conversation" else "subagent"}"${if (crossGroup) ",\"source_group\":\"Ops\",\"target_group\":\"Shop\"" else ""},"title":"Review the schema","steps":[{"key":"subagent","title":"Review the schema","depends_on":[],"gate":false,"node":{"id":"n1","name":"laptop","online":true},"folder":"/tmp","agent":"claude"${if (crossGroup) ",\"project\":\"ledger\"" else ""}$step}],"state":"$state","connect":false,"workflow_id":null,"created_at":"2026-10-23T10:00:00Z"}"""
 
 class StartProposalCardTest {
     @get:Rule
@@ -69,16 +75,16 @@ class StartProposalCardTest {
 
     private val bodies = java.util.concurrent.ConcurrentHashMap<String, String>()
 
-    private fun show(step: String = SingleChoice) {
+    private fun show(step: String = SingleChoice, crossGroup: Boolean = false) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             requests += request.method to path
             bodies[path] = request.body.toByteArray().decodeToString()
             val body = when {
-                path.endsWith("/connect") || path.endsWith("/approve") -> proposal("started", step)
-                path.endsWith("/decline") -> proposal("declined", step)
-                path.endsWith("/start-proposals") -> "[${proposal("proposed", step)}]"
+                path.endsWith("/connect") || path.endsWith("/approve") -> proposal("started", step, crossGroup)
+                path.endsWith("/decline") -> proposal("declined", step, crossGroup)
+                path.endsWith("/start-proposals") -> "[${proposal("proposed", step, crossGroup)}]"
                 path.endsWith("/conversation-connections") -> "[]"
                 else -> "{}"
             }
@@ -86,7 +92,7 @@ class StartProposalCardTest {
             respond(body, HttpStatusCode.OK, json)
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
-        val items = buildThread(startSubagent())
+        val items = buildThread(startSubagent(crossGroup))
 
         rule.setContent {
             MyceliumTheme(true) {
@@ -191,5 +197,36 @@ class StartProposalCardTest {
 
         rule.onNodeWithText("claude · a@example.com · opus").assertExists()
         rule.onNodeWithContentDescription("Model: opus").assertDoesNotExist()
+    }
+
+    @Test
+    fun aCrossGroupCardNamesBothGroupsTheTargetAndTheTwoHintsAndCreateApproves() {
+        show(crossGroup = true)
+
+        waitForText("Create")
+        rule.onNodeWithText("Proposed a conversation: Review the schema").assertExists()
+        rule.onNodeWithText("From Ops").assertExists()
+        rule.onNodeWithText("In Shop, project ledger").assertExists()
+        rule.onNodeWithText("Folder /tmp").assertDoesNotExist()
+        rule.onNodeWithText("Creating starts only this conversation and does not connect Ops and Shop.").assertExists()
+        rule.onNodeWithText("Connecting allows messages in both directions between these two conversations until you revoke it in Settings.").assertExists()
+
+        val png = Image.makeFromBitmap(rule.onRoot().captureToImage().asSkiaBitmap()).encodeToData(EncodedImageFormat.PNG)!!.bytes
+        val out = java.io.File("build/screens/cross-group-start-proposal.png")
+        out.parentFile.mkdirs()
+        out.writeBytes(png)
+
+        rule.onNodeWithText("Create").performClick()
+
+        waitForRequest(HttpMethod.Post, "/start-proposals/$ProposalId/approve")
+    }
+
+    @Test
+    fun aSameGroupCardShowsNoGroupLines() {
+        show()
+
+        waitForText("Create")
+        rule.onNodeWithText("Folder /tmp").assertExists()
+        assertEquals(0, rule.onAllNodesWithText("From Ops", substring = true).fetchSemanticsNodes().size)
     }
 }

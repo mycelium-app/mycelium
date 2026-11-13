@@ -233,7 +233,11 @@ private fun doneHeading(parsed: MyceliumCall, artifacts: Map<String, Artifact>):
     is MyceliumCall.ProposeInstructionsEdit -> "Proposed an edit to the ${parsed.layer ?: "agent"} instructions"
     is MyceliumCall.FindConversations -> if (parsed.query != null) "Searched conversations for “${parsed.query}”" else "Listed recent conversations"
     is MyceliumCall.SendToConversation -> if (parsed.target.isNotEmpty()) "Proposed a message to ${parsed.target}" else "Proposed a message"
-    is MyceliumCall.StartProposed -> "Proposed ${if (parsed.tool == MyceliumTool.StartWorkflow) "a workflow" else "a subagent"}: ${parsed.title}"
+    is MyceliumCall.StartProposed -> "Proposed ${when (parsed.tool) {
+        MyceliumTool.StartWorkflow -> "a workflow"
+        MyceliumTool.StartConversation -> "a conversation"
+        else -> "a subagent"
+    }}: ${parsed.title}"
     is MyceliumCall.RequestArtifactAccess -> "Asked for artefact access"
     is MyceliumCall.RequestApiAccess -> if ("full" in parsed.scopes) "Asked for full API access" else "Asked for API access"
     is MyceliumCall.RequestSshAccess -> "Asked for SSH access to ${parsed.node}"
@@ -448,6 +452,8 @@ private fun StartProposedBody(parsed: MyceliumCall.StartProposed) {
         }
     }
 
+    val crossGroup = proposal?.let { it.sourceGroup != null && it.targetGroup != null && it.sourceGroup != it.targetGroup } == true
+
     for (step in proposal?.steps.orEmpty()) {
         val waiting = proposal != null && proposal.waiting
         val choice = chosen[step.key]
@@ -457,6 +463,11 @@ private fun StartProposedBody(parsed: MyceliumCall.StartProposed) {
 
         if (step.gate) {
             Label("Waits for your decision", style = Tokens.Type.Meta, color = colors.textMuted)
+        }
+
+        if (crossGroup) {
+            Label("From ${proposal?.sourceGroup}", style = Tokens.Type.Meta, color = colors.textMuted)
+            Label("In ${proposal?.targetGroup}, ${step.project?.let { "project $it" } ?: "folder ${step.folder.orEmpty()}"}", style = Tokens.Type.Meta, color = colors.textMuted)
         }
 
         if (step.nodeChoices.isEmpty() && node != null) {
@@ -469,7 +480,9 @@ private fun StartProposedBody(parsed: MyceliumCall.StartProposed) {
             Segmented(labels.keys.toList(), labels.entries.firstOrNull { it.value.id == choice?.nodeId }?.key.orEmpty(), { label -> labels[label]?.let { picked -> choose(step.key) { it.copy(nodeId = picked.id) } } }, "Node for ${step.title}")
         }
 
-        step.folder?.let { Label("Folder $it", style = Tokens.Type.Meta, color = colors.textMuted) }
+        if (!crossGroup) {
+            step.folder?.let { Label("Folder $it", style = Tokens.Type.Meta, color = colors.textMuted) }
+        }
 
         val using = listOfNotNull(step.agent, step.account?.takeIf { step.accountChoices.isEmpty() }, step.model?.takeIf { step.modelChoices.isEmpty() }).joinToString(" · ")
 
@@ -505,6 +518,11 @@ private fun StartProposedBody(parsed: MyceliumCall.StartProposed) {
         if (step.firstMessage.isNotEmpty()) {
             MarkdownText(step.firstMessage, style = Tokens.Type.Ui, maxLines = ExcerptLines)
         }
+    }
+
+    if (crossGroup && proposal != null && proposal.waiting) {
+        Label("Creating starts only this conversation and does not connect ${proposal.sourceGroup} and ${proposal.targetGroup}.", style = Tokens.Type.Meta, color = colors.textMuted)
+        Label("Connecting allows messages in both directions between these two conversations until you revoke it in Settings.", style = Tokens.Type.Meta, color = colors.textMuted)
     }
 
     action.failure?.let { ErrorBanner(it, onDismiss = { action.failure = null }) }

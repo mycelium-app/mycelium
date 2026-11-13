@@ -119,7 +119,11 @@ private fun approvalCall(id: String, parsed: MyceliumCall) =
 
 private fun waitingApprovals(state: AppState): List<WaitingApproval> =
     state.startProposals.values.filter { it.waiting }.map { proposal ->
-        val tool = if (proposal.kind == "workflow") MyceliumTool.StartWorkflow else MyceliumTool.StartSubagent
+        val tool = when (proposal.kind) {
+            "workflow" -> MyceliumTool.StartWorkflow
+            "conversation" -> MyceliumTool.StartConversation
+            else -> MyceliumTool.StartSubagent
+        }
 
         WaitingApproval("start", proposal.id, proposal.conversationId, proposal.createdAt, approvalCall(proposal.id, MyceliumCall.StartProposed(tool, proposal.title, proposal.id)))
     } + state.messageProposals.values.filter { it.waiting }.map { proposal ->

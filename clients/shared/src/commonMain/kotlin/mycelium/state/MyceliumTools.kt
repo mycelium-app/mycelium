@@ -15,6 +15,7 @@ enum class MyceliumTool(val key: String, val label: String, val running: String)
     SendToConversation("send_to_conversation", "Send to conversation", "Proposing a message"),
     StartSubagent("start_subagent", "Start subagent", "Proposing a subagent"),
     StartWorkflow("start_workflow", "Start workflow", "Proposing a workflow"),
+    StartConversation("start_conversation", "Start conversation", "Starting a conversation"),
     RequestArtifactAccess("request_artifact_access", "Request artefact access", "Requesting artefact access"),
     RequestApiAccess("request_api_access", "Request API access", "Requesting API access"),
     RequestSshAccess("request_ssh_access", "Request SSH access", "Requesting SSH access"),
@@ -208,6 +209,12 @@ fun myceliumCall(call: ThreadItem.ToolCall): MyceliumCall? {
             val title = (plan as? JsonObject)?.string("title")?.trim()?.ifEmpty { null } ?: return null
 
             MyceliumCall.StartProposed(tool, title, waitingToStart.find(output.trim())?.groupValues?.get(1))
+        }
+
+        MyceliumTool.StartConversation -> {
+            val proposalId = waitingToStart.find(output.trim())?.groupValues?.get(1) ?: return null
+
+            MyceliumCall.StartProposed(tool, fields.string("title")?.trim()?.ifEmpty { null } ?: "A conversation", proposalId)
         }
 
         MyceliumTool.RequestArtifactAccess -> {

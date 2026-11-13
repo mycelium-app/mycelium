@@ -14,6 +14,7 @@ data class StartProposalStep(
     val gate: Boolean = false,
     val node: StartProposalNode? = null,
     val folder: String? = null,
+    val project: String? = null,
     val agent: String? = null,
     val account: String? = null,
     val model: String? = null,
@@ -33,6 +34,8 @@ data class StartProposal(
     val state: String,
     val connect: Boolean = false,
     @SerialName("workflow_id") val workflowId: String? = null,
+    @SerialName("source_group") val sourceGroup: String? = null,
+    @SerialName("target_group") val targetGroup: String? = null,
     @SerialName("created_at") val createdAt: String,
     @SerialName("decided_at") val decidedAt: String? = null,
 ) {
