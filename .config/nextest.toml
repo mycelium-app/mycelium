@@ -2,5 +2,10 @@
 node-processes = { max-threads = 2 }
 
 [[profile.default.overrides]]
+filter = "package(mycelium-cli) & test(/^end_to_end::/)"
+threads-required = "num-test-threads"
+test-group = "node-processes"
+
+[[profile.default.overrides]]
 filter = "package(mycelium-cli)"
 test-group = "node-processes"
