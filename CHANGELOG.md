@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.34.30
+
+- An action item can carry a command. add_action_item takes a command, and optionally the node and folder to run it in; the Inbox card shows the command with Run, Copy and Mark as done. Run starts it in a terminal on that node, shows its output on the card, and resolves the item when it exits with code 0; a failure shows the exit code and output with Retry and Open in terminal, and the agent that added the item is told the result.
+- Approving an instruction edit merges it onto the current text, read fresh from GitLab, GitHub or Forgejo, instead of refusing because the instructions changed. Two proposals on the same layer can both be approved, a change made on the forge is kept, and a write that races another commit is retried. An edit the file already has is approved without a commit, and a write the forge refuses gives the forge's reason. A proposal is out of date only when its lines overlap a newer change; then nothing is written, it keeps waiting, and Ask the agent to redo hands the agent the overlapping lines. Approving the same proposal twice at once commits it once.
+
+Running an action item's command needs its node on Mycelium v0.34.30 or later; older nodes refuse Run and say which version they need. Opening a card while its command is already running shows output from that point on.
+
 ## v0.34.29
 
 - An agent can ask to start one conversation in a group its group is not connected to. Instead of refusing, start_conversation shows a card naming both groups, the project, node and first message; Create starts exactly that conversation and never connects the groups, and Create and connect links only the two conversations.
