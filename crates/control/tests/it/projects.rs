@@ -1118,3 +1118,65 @@ async fn list_places_lists_each_project_once_with_a_checkout_per_node() {
     assert_eq!(checkouts, vec![(json!("atlas"), json!("/home/sam/backups")), (json!("orion"), json!("/srv/backups"))]);
     assert!(places["nodes"].as_array().unwrap().iter().all(|node| node.get("projects").is_none()));
 }
+
+async fn archive(server: &Server, project: &Value, archived: bool) -> (u16, Value) {
+    server.user.json(server.user.patch(&format!("/api/v1/projects/{}", project["id"].as_str().unwrap())).json(&json!({"archived": archived}))).await
+}
+
+#[tokio::test]
+async fn archiving_a_project_marks_it_and_restoring_clears_it() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let project = project_on(&server, &mut link).await;
+
+    let (status, archived) = archive(&server, &project, true).await;
+    let (_, restored) = archive(&server, &project, false).await;
+
+    assert_eq!(status, 200, "{archived}");
+    assert!(archived["archived_at"].is_string(), "{archived}");
+    assert!(restored["archived_at"].is_null(), "{restored}");
+}
+
+#[tokio::test]
+async fn a_project_that_is_not_archived_cannot_be_removed() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let project = project_on(&server, &mut link).await;
+
+    let (status, refused) = server.user.json(server.user.delete(&format!("/api/v1/projects/{}", project["id"].as_str().unwrap()))).await;
+
+    assert_eq!((status, refused["error"].clone()), (409, json!("project_not_archived")), "{refused}");
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn removing_an_archived_project_keeps_its_conversations_without_a_project() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let project = project_on(&server, &mut link).await;
+    let (_, conversation) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "project_id": project["id"]}))).await;
+    archive(&server, &project, true).await;
+
+    let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/projects/{}", project["id"].as_str().unwrap()))).await;
+
+    assert_eq!(status, 204);
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+    assert_eq!(listed, json!([]));
+    let kept = server.conversation(conversation["id"].as_str().unwrap().parse().unwrap()).await;
+    assert_eq!((kept["cwd"].clone(), kept["project_id"].clone()), (json!("/w/app"), Value::Null), "{kept}");
+}
+
+#[tokio::test]
+async fn another_person_cannot_archive_or_remove_a_project() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let project = project_on(&server, &mut link).await;
+    let path = format!("/api/v1/projects/{}", project["id"].as_str().unwrap());
+    let other = server.second_user("other@example.com").await;
+
+    let (archived, _) = other.json(other.patch(&path).json(&json!({"archived": true}))).await;
+    let (removed, _) = other.json(other.delete(&path)).await;
+
+    assert_eq!((archived, removed), (404, 404));
+}

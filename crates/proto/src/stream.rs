@@ -60,6 +60,9 @@ pub enum StreamMessage {
     ArtifactAccessRequest(ArtifactAccessRequest),
     ArtifactComment(ArtifactComment),
     Project(Project),
+    ProjectRemoved {
+        project_id: Uuid,
+    },
     Node(NodeSummary),
     NodeRemoved {
         node_id: Uuid,

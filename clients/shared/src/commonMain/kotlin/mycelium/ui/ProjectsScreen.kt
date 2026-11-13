@@ -48,6 +48,8 @@ private fun newConversationProject(projects: List<Project>, state: AppState): Pr
 
 private const val NotSetUpAnywhere = "none"
 
+private const val ArchivedProjects = "archived"
+
 private sealed interface ProjectRow {
     val at: Instant?
 }
@@ -114,18 +116,20 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
 
     val forges = state.forges
     val groupFilter = LocalGroupFilter.current
-    val visibleProjects = state.projects.values.filter { inGroup(it.groupId, groupFilter) }
+    val groupProjects = state.projects.values.filter { inGroup(it.groupId, groupFilter) }
+    val showingArchived = nodeFilter == ArchivedProjects
+    val visibleProjects = groupProjects.filter { (it.archivedAt != null) == showingArchived }
     val listing = if (filtering) filtered ?: state.repositoryListing else state.repositoryListing
     val connected = forges.orEmpty()
-    val folders = if (forgeId == null && organisation == null) registeredFolders(visibleProjects).filter { it.name.contains(query.trim(), ignoreCase = true) && (nodeFilter == null || it.places.any { place -> place.nodeId == nodeFilter }) } else emptyList()
+    val folders = if (forgeId == null && organisation == null) registeredFolders(visibleProjects).filter { it.name.contains(query.trim(), ignoreCase = true) && (nodeFilter == null || showingArchived || it.places.any { place -> place.nodeId == nodeFilter }) } else emptyList()
     val organisations = listing?.organisations.orEmpty().filter { forgeId == null || it.forgeId == forgeId }.map { it.name }.distinct()
     val setUpListed = setUpRepositories(visibleProjects, listing?.repositories.orEmpty()).filter { repository ->
         val matchesSearch = (forgeId == null || repository.forgeId == forgeId) && (organisation == null || repository.owner == organisation) && repository.fullName.contains(query.trim(), ignoreCase = true)
 
-        matchesSearch && (nodeFilter == null || projectsOfRepository(visibleProjects, repository).any { held -> held.places.any { it.nodeId == nodeFilter } })
+        matchesSearch && (nodeFilter == null || showingArchived || projectsOfRepository(visibleProjects, repository).any { held -> held.places.any { it.nodeId == nodeFilter } })
     }
     val notSetUp = listing?.repositories.orEmpty().filter { repository ->
-        (nodeFilter == null || nodeFilter == NotSetUpAnywhere) && projectsOfRepository(visibleProjects, repository).isEmpty()
+        (nodeFilter == null || nodeFilter == NotSetUpAnywhere) && projectsOfRepository(groupProjects, repository).isEmpty()
     }
     val repositories = setUpListed + notSetUp
     val initialised = setUpListed.map { repository ->
@@ -220,7 +224,11 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
             }
 
             Box {
-                val nodeLabel = chosenNode?.name ?: if (nodeFilter == NotSetUpAnywhere) "Not set up anywhere" else "All nodes"
+                val nodeLabel = chosenNode?.name ?: when (nodeFilter) {
+                    NotSetUpAnywhere -> "Not set up anywhere"
+                    ArchivedProjects -> "Archived"
+                    else -> "All nodes"
+                }
 
                 MyButton(
                     { nodeMenu = true },
@@ -242,6 +250,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                         }
 
                         MenuItem("Not set up anywhere", onClick = { nodeFilter = NotSetUpAnywhere; nodeMenu = false }, checked = nodeFilter == NotSetUpAnywhere)
+                        MenuItem("Archived", onClick = { nodeFilter = ArchivedProjects; nodeMenu = false }, checked = showingArchived)
                     }
                 }
             }

@@ -24,7 +24,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             let ids: Vec<Uuid> = nodes.iter().map(|(id, _)| *id).collect();
             let agents = sqlx::query_as::<_, (Uuid, String)>("select node_id, agent from agents where node_id = any($1) and available order by agent").bind(&ids).fetch_all(&state.pool).await?;
             let logins = sqlx::query_as::<_, (Uuid, String, String)>("select node_id, agent, account from logins where node_id = any($1) and state = 'signed_in' and account is not null order by account").bind(&ids).fetch_all(&state.pool).await?;
-            let projects = sqlx::query_as::<_, (Uuid, String, Option<String>, Option<String>)>("select p.id, p.name, p.repository, f.kind from projects p left join forges f on f.id = p.forge_id where p.owner = $1 order by p.name, p.id").bind(owner).fetch_all(&state.pool).await?;
+            let projects = sqlx::query_as::<_, (Uuid, String, Option<String>, Option<String>)>("select p.id, p.name, p.repository, f.kind from projects p left join forges f on f.id = p.forge_id where p.owner = $1 and p.archived_at is null order by p.name, p.id").bind(owner).fetch_all(&state.pool).await?;
             let checkouts = sqlx::query_as::<_, (Uuid, Uuid, String)>("select c.project_id, c.node_id, c.path from project_checkouts c join projects p on p.id = c.project_id where p.owner = $1 order by c.created_at, c.id").bind(owner).fetch_all(&state.pool).await?;
             let providers = sqlx::query_as::<_, (Uuid, String, Vec<String>)>("select id, name, models from model_providers where owner = $1 order by name").bind(owner).fetch_all(&state.pool).await?;
             let mut agent_models = std::collections::HashMap::new();

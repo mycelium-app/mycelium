@@ -269,6 +269,8 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.ProjectChanged ->
         state.copy(projects = state.projects + (message.project.id to message.project))
 
+    is StreamMessage.ProjectRemoved -> state.copy(projects = state.projects - message.projectId)
+
     is StreamMessage.EnvironmentChanged ->
         state.copy(environments = state.environments + (message.environment.conversationId to message.environment))
 

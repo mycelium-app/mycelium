@@ -38,6 +38,7 @@ data class Project(
     @SerialName("avatar_sha256") val avatarSha256: String? = null,
     @SerialName("test_command") val testCommand: String? = null,
     val checkouts: List<ProjectCheckout> = emptyList(),
+    @SerialName("archived_at") val archivedAt: String? = null,
 ) {
     val places: List<ProjectCheckout> get() = checkouts.ifEmpty { listOf(ProjectCheckout(id, nodeId, path, createdAt)) }
 }
@@ -48,6 +49,7 @@ data class PatchProjectRequest(
     val icon: String? = null,
     @SerialName("clear_icon") val clearIcon: Boolean = false,
     @SerialName("test_command") val testCommand: String? = null,
+    val archived: Boolean? = null,
 )
 
 @Serializable

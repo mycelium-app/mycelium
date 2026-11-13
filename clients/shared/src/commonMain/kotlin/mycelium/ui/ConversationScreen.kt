@@ -636,7 +636,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     onGit = { openPanel(SidePanel.Git) },
                     onEnvironment = { phoneEnvironment = true },
                     project = state.projects[conversation.projectId],
-                    projects = state.projects.values.filter { it.nodeId == conversation.nodeId }.sortedBy { it.name },
+                    projects = state.projects.values.filter { it.nodeId == conversation.nodeId && it.archivedAt == null }.sortedBy { it.name },
                     nodes = state.nodes,
                     onProject = { projectId -> store.setConversationProject(conversation, projectId) },
                     onSetUp = { store.act { store.createProject(CreateProjectRequest(conversation.nodeId, path = conversation.cwd)) } },

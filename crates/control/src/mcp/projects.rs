@@ -138,11 +138,11 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
     let mut updated = None;
 
     if let Some(test_command) = test_command {
-        updated = Some(projects::patch(State(state.clone()), AuthUser::of(state, owner).await?, Path(project_id), Json(PatchProjectRequest { group_id: None, icon: None, clear_icon: false, test_command: Some(test_command) })).await);
+        updated = Some(projects::patch(State(state.clone()), AuthUser::of(state, owner).await?, Path(project_id), Json(PatchProjectRequest { group_id: None, icon: None, clear_icon: false, test_command: Some(test_command), archived: None })).await);
     }
 
     if group.is_some() && !matches!(updated, Some(Err(_))) {
-        updated = Some(projects::patch(State(state.clone()), AuthUser::of(state, owner).await?, Path(project_id), Json(PatchProjectRequest { group_id, icon: None, clear_icon: false, test_command: None })).await);
+        updated = Some(projects::patch(State(state.clone()), AuthUser::of(state, owner).await?, Path(project_id), Json(PatchProjectRequest { group_id, icon: None, clear_icon: false, test_command: None, archived: None })).await);
     }
 
     Ok(match updated {

@@ -90,7 +90,7 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
         store.load { store.refreshProjects() }
     }
 
-    val projects = state.projects.values.sortedBy { it.name }
+    val projects = state.projects.values.filter { it.archivedAt == null }.sortedBy { it.name }
     val project = resolveProject(state, place.projectId, place.checkedOut)
     val projectNode = project?.let { held -> runOnNode(held, nodes, state.conversations.values.sortedByDescending { it.updatedAt }, place.nodeId) }
     val choosingNode = project != null && nodes.isNotEmpty() && projectNode == null

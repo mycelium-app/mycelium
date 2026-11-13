@@ -154,6 +154,7 @@ const COVERED: &[(&str, &str, &str)] = &[
 const EXCEPTIONS: &[(&str, &str, &str)] = &[
     ("POST", "/api/v1/conversations/{id}/action-items/{item_id}/run", "pressing Run is the person's approval of the command, so an agent cannot run its own item"),
     ("POST", "/api/v1/mcp-session-tokens/revoke", "revoking the credentials agents use is the person's decision, not an agent's"),
+    ("DELETE", "/api/v1/projects/{id}", "removing a project takes its schedules and tasks with it, so it is the person's decision, not an agent's"),
     ("POST", "/api/v1/artifact-access-requests/{id}/approve", "approving an approval card from an agent would let it approve its own request"),
     ("POST", "/api/v1/assistant-changes/{id}/approve", "approving an approval card from an agent would let it approve its own request"),
     ("POST", "/api/v1/assistants/{id}/action-proposals/{proposal_id}/approve", "approving an approval card from an agent would let it approve its own request"),

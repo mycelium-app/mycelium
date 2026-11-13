@@ -154,6 +154,35 @@ class ProjectCheckoutsTest {
     }
 
     @Test
+    fun anActiveProjectCanBeArchivedFromItsMenuButNotRemoved() {
+        showPage(store(TwoCheckouts))
+
+        rule.onNodeWithContentDescription("More for backups").performClick()
+        rule.onNodeWithText("Remove").assertDoesNotExist()
+        rule.onNodeWithText("Archive").performClick()
+        rule.waitUntil(5_000) { requests.isNotEmpty() }
+
+        assertEquals("PATCH /api/v1/projects/p1", requests.single().first)
+        assertTrue(requests.single().second.contains("\"archived\":true"), requests.single().second)
+    }
+
+    @Test
+    fun anArchivedProjectIsRestoredOrRemovedAfterConfirming() {
+        showPage(store(TwoCheckouts.replace("\"created_at\":\"2026-10-22T10:00:00Z\"}", "\"archived_at\":\"2026-11-13T19:00:00Z\",\"created_at\":\"2026-10-22T10:00:00Z\"}")))
+
+        rule.onNodeWithContentDescription("More for backups").performClick()
+        rule.onNodeWithText("Restore").assertExists()
+        rule.onNodeWithText("Remove").performClick()
+        rule.onNodeWithText("Remove backups?").assertExists()
+        assertTrue(requests.isEmpty())
+
+        rule.onNodeWithText("Remove project").performClick()
+        rule.waitUntil(5_000) { requests.isNotEmpty() }
+
+        assertEquals("DELETE /api/v1/projects/p1", requests.single().first)
+    }
+
+    @Test
     fun addingACheckoutOffersCloneAndFolderOnlyForNodesWithoutOne() {
         showPage(store(TwoCheckouts))
 

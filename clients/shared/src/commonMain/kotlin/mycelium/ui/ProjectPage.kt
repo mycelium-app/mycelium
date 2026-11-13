@@ -44,6 +44,7 @@ fun ProjectPage(store: Store, state: AppState, projectId: String, onBack: () -> 
     var changingIcon by remember { mutableStateOf(false) }
     var changingGroup by remember { mutableStateOf(false) }
     var editingTestCommand by remember { mutableStateOf(false) }
+    var confirmingRemove by remember { mutableStateOf(false) }
     val failures = rememberAction()
 
     LaunchedEffect(Unit) {
@@ -69,6 +70,31 @@ fun ProjectPage(store: Store, state: AppState, projectId: String, onBack: () -> 
                 Box(Modifier.weight(1f))
 
                 MyButton({ onNewConversation(project.id) }, text = "New conversation", variant = ButtonVariant.Outline, description = "New conversation in ${project.name}")
+
+                RowMenu(project.name) { close ->
+                    val archived = project.archivedAt != null
+
+                    MenuItem(if (archived) "Restore" else "Archive", onClick = { close(); failures { store.archiveProject(project.id, !archived) } }, leading = MyIcon.Archive)
+
+                    if (archived) {
+                        MenuItem("Remove", onClick = { close(); confirmingRemove = true })
+                    }
+                }
+            }
+        }
+
+        if (confirmingRemove && project != null) {
+            ConfirmDialog(
+                "Remove ${project.name}?",
+                "Its schedules and tasks go with it. Its conversations stay, without a project, and its folders and files stay on their nodes.",
+                "Remove project",
+                onDismiss = { confirmingRemove = false },
+            ) {
+                confirmingRemove = false
+                failures {
+                    store.removeProject(project.id)
+                    onBack()
+                }
             }
         }
 

@@ -138,7 +138,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     }
 
     val groupFilter = LocalGroupFilter.current
-    val projects = state.projects.values.filter { inGroup(it.groupId, groupFilter) }.sortedBy { it.name }
+    val projects = state.projects.values.filter { inGroup(it.groupId, groupFilter) && it.archivedAt == null }.sortedBy { it.name }
     val newestConversations = state.conversations.values.sortedByDescending { it.updatedAt }
     val chosenCheckout = if (withoutProject || newProjectChosen) null else resolveProject(state, chosenProject, checkedOut)
     val keptNodeId = if (anyNode) null else nodeId

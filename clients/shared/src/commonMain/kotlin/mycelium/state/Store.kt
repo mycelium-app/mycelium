@@ -700,6 +700,13 @@ class Store(
 
     suspend fun setProjectTestCommand(projectId: String, testCommand: String): Project = keepProject(api.setProjectTestCommand(projectId, testCommand))
 
+    suspend fun archiveProject(projectId: String, archived: Boolean): Project = keepProject(api.archiveProject(projectId, archived))
+
+    suspend fun removeProject(projectId: String) {
+        api.removeProject(projectId)
+        mutableState.update { it.copy(projects = it.projects - projectId) }
+    }
+
     suspend fun uploadProjectAvatar(projectId: String, mediaType: String, bytes: ByteArray): Project = keepProject(api.uploadProjectAvatar(projectId, mediaType, bytes))
 
     suspend fun addCheckout(projectId: String, nodeId: String, path: String? = null, newFolder: String? = null): Project = keepProject(api.checkoutProject(projectId, nodeId, path, newFolder))

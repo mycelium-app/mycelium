@@ -663,6 +663,13 @@ class MyceliumApi(
     suspend fun setProjectTestCommand(projectId: String, testCommand: String): Project =
         call("/projects/$projectId") { client.patch(it) { authorise(); json(PatchProjectRequest(testCommand = testCommand)) } }.body()
 
+    suspend fun archiveProject(projectId: String, archived: Boolean): Project =
+        call("/projects/$projectId") { client.patch(it) { authorise(); json(PatchProjectRequest(archived = archived)) } }.body()
+
+    suspend fun removeProject(projectId: String) {
+        call("/projects/$projectId") { client.delete(it) { authorise() } }
+    }
+
     suspend fun uploadProjectAvatar(projectId: String, mediaType: String, bytes: ByteArray): Project =
         call("/projects/$projectId/avatar") {
             client.post(it) {

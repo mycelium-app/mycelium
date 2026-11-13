@@ -1154,6 +1154,8 @@ pub struct Project {
     pub test_command: Option<String>,
     #[serde(default)]
     pub checkouts: Vec<ProjectCheckout>,
+    #[serde(default)]
+    pub archived_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -1175,6 +1177,8 @@ pub struct PatchProjectRequest {
     pub clear_icon: bool,
     #[serde(default)]
     pub test_command: Option<String>,
+    #[serde(default)]
+    pub archived: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

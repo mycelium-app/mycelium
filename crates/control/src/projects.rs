@@ -17,7 +17,7 @@ use mycelium_proto::stream::StreamMessage;
 use serde_json::Value;
 use uuid::Uuid;
 
-pub const PROJECT_COLUMNS: &str = "id, (select node_id from project_checkouts where project_id = projects.id order by created_at, id limit 1) as node_id, name, (select path from project_checkouts where project_id = projects.id order by created_at, id limit 1) as path, forge_id, repository, group_id, icon, avatar_sha256, test_command, created_at";
+pub const PROJECT_COLUMNS: &str = "id, (select node_id from project_checkouts where project_id = projects.id order by created_at, id limit 1) as node_id, name, (select path from project_checkouts where project_id = projects.id order by created_at, id limit 1) as path, forge_id, repository, group_id, icon, avatar_sha256, test_command, archived_at, created_at";
 pub const CHECKOUT_COLUMNS: &str = "id, project_id, node_id, path, created_at";
 pub const MAX_AVATAR_BYTES: usize = 256 * 1024;
 const MAX_ICON_CHARACTERS: usize = 40;
@@ -37,6 +37,7 @@ pub struct ProjectRow {
     pub icon: Option<String>,
     pub avatar_sha256: Option<String>,
     pub test_command: Option<String>,
+    pub archived_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     #[sqlx(skip)]
     pub checkouts: Vec<CheckoutRow>,
@@ -61,7 +62,7 @@ impl ProjectRow {
     pub fn to_proto(self) -> Project {
         let checkouts = self.checkouts.into_iter().map(CheckoutRow::to_proto).collect();
 
-        Project { id: self.id, node_id: self.node_id, name: self.name, path: self.path, forge_id: self.forge_id, repository: self.repository, group_id: self.group_id, icon: self.icon, avatar_sha256: self.avatar_sha256, test_command: self.test_command, checkouts, created_at: self.created_at }
+        Project { id: self.id, node_id: self.node_id, name: self.name, path: self.path, forge_id: self.forge_id, repository: self.repository, group_id: self.group_id, icon: self.icon, avatar_sha256: self.avatar_sha256, test_command: self.test_command, checkouts, archived_at: self.archived_at, created_at: self.created_at }
     }
 
     pub fn checkout_on(&self, node_id: Uuid) -> Option<&CheckoutRow> {
@@ -383,6 +384,19 @@ pub async fn remove_checkout(State(state): State<AppState>, user: AuthUser, Path
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub async fn remove(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+    let project = find_owned(&state, id, user.id).await?;
+
+    if project.archived_at.is_none() {
+        return Err(ApiError::conflict("project_not_archived", format!("Archive {} before removing it.", project.name)));
+    }
+
+    sqlx::query("delete from projects where id = $1 and owner = $2").bind(id).bind(user.id).execute(&state.pool).await?;
+    state.publish(Some(user.id), StreamMessage::ProjectRemoved { project_id: id });
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchProjectRequest>) -> ApiResult<Json<Project>> {
     let changes_icon = request.icon.is_some() || request.clear_icon;
 
@@ -396,7 +410,14 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
         return Err(ApiError::bad_request("icon_invalid", "Choose an icon from the list."));
     }
 
-    let row = if let Some(test_command) = request.test_command.as_deref() {
+    let row = if let Some(archived) = request.archived {
+        sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("update projects set archived_at = case when $3 then coalesce(archived_at, now()) end where id = $1 and owner = $2 returning {PROJECT_COLUMNS}")))
+            .bind(id)
+            .bind(user.id)
+            .bind(archived)
+            .fetch_optional(&state.pool)
+            .await?
+    } else if let Some(test_command) = request.test_command.as_deref() {
         sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("update projects set test_command = nullif(btrim($3), '') where id = $1 and owner = $2 returning {PROJECT_COLUMNS}")))
             .bind(id)
             .bind(user.id)
