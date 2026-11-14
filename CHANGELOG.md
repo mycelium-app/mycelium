@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.38
+
+- People can sign in on extra addresses, such as plain HTTP inside a private network: list them in `MYCELIUM_EXTRA_ORIGINS` and add each one's `/auth/callback` to the identity provider. The public address keeps its callback and secure cookies.
+
 ## v0.34.37
 
 - The web app draws again in Safari 27.2 on iPad, iPhone and Mac, which had left it white after loading (WebKit bug 329421, Compose CMP-10986).
