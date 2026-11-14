@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.34.37
+
+- The web app draws again in Safari 27.2 on iPad, iPhone and Mac, which had left it white after loading (WebKit bug 329421, Compose CMP-10986).
+- If the web app still has not drawn shortly after it loads, loses its graphics, or hits an error, a notice says what happened while it keeps running, and a blank-canvas notice goes away by itself once it draws.
+- A new release of the web app is picked up on the next load instead of a cached older copy.
+
 ## v0.34.36
 
 - The web app shows what went wrong instead of a white page when it stops after loading, or when the browser refuses or loses its WebGL context.
