@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.36
+
+- The web app shows what went wrong instead of a white page when it stops after loading, or when the browser refuses or loses its WebGL context.
+
 ## v0.34.35
 
 - A release or pipeline watch on github.com reads GitHub's public API, even when a GitHub account is connected whose token cannot read Actions. Watch a private repository through the connected forge by its kind, id or project.
