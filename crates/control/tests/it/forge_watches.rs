@@ -1,7 +1,7 @@
 use crate::common::{NodeLink, Server, serve};
 use crate::watches::{begun, connect, end_turn, prompt_for, quiet_for, text, tool};
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use hmac::{Hmac, KeyInit, Mac};
@@ -20,6 +20,7 @@ const FAST: Duration = Duration::from_millis(50);
 struct FakeForge {
     hooks_refused: bool,
     runs_refused: AtomicBool,
+    runs_authorised: AtomicBool,
     hook_secret: Mutex<Option<String>>,
     runs: Mutex<Vec<Value>>,
     release: Mutex<Option<Value>>,
@@ -39,7 +40,11 @@ fn github_api(fake: &Fake) -> Router {
         StatusCode::CREATED
     }
 
-    async fn runs(State(fake): State<Fake>, Path(_): Path<(String, String)>) -> Result<Json<Value>, StatusCode> {
+    async fn runs(State(fake): State<Fake>, Path(_): Path<(String, String)>, headers: HeaderMap) -> Result<Json<Value>, StatusCode> {
+        if headers.contains_key("authorization") {
+            fake.runs_authorised.store(true, Ordering::SeqCst);
+        }
+
         if fake.runs_refused.load(Ordering::SeqCst) {
             return Err(StatusCode::FORBIDDEN);
         }
@@ -331,4 +336,21 @@ async fn a_release_watch_that_cannot_be_checked_tells_the_watcher_why_once_and_k
     assert!(failed.contains("Mycelium could not check acme/app v1.0.0") && failed.contains("This token cannot read your account"), "{failed}");
     assert!(repeated, "the same failure was told again");
     assert!(told.contains("From acme/app v1.0.0:") && told.contains("succeeded"), "{told}");
+}
+
+#[tokio::test]
+async fn a_release_watch_on_github_com_reads_the_public_api_even_with_a_github_com_forge_connected() {
+    let fake = Fake::default();
+    *fake.runs.lock().unwrap() = vec![run(7, "v1.0.0", "completed", Some("success"))];
+    let public = serve(github_api(&fake)).await;
+    let server = quick_server(&public).await;
+    let (mut link, watcher) = idle_watcher(&server).await;
+    sqlx::query("insert into forges (owner, kind, base_url, account, token) select owner, 'github', 'https://github.com', 'samexample', 'ghp_0123456789abcdefghijklmnopqrstuvwxyz' from conversations where id = $1").bind(watcher).execute(&server.pool).await.unwrap();
+
+    let watched = tool(&server, &link, watcher, "watch_release", json!({"forge": "github.com", "repository": "acme/app", "tag": "v1.0.0"})).await;
+    let told = prompt_for(&mut link, watcher).await;
+
+    assert_eq!(watched["isError"], false, "{watched}");
+    assert!(told.contains("From acme/app v1.0.0:") && told.contains("succeeded"), "{told}");
+    assert!(!fake.runs_authorised.load(Ordering::SeqCst), "the public repository was read with the connected token");
 }

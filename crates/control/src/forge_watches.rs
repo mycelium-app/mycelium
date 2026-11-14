@@ -98,12 +98,12 @@ pub async fn resolve_place(state: &AppState, owner: Uuid, project: Option<&str>,
                 Some(_) => return Ok(Err(format!("The project {project} is not linked to a repository on a forge. Give forge and repository instead."))),
             }
         }
+        (None, Some(forge), Some(repository)) if forge.eq_ignore_ascii_case("github.com") => (None, repository.to_string()),
         (None, Some(forge), Some(repository)) => {
             let found = sqlx::query_scalar::<_, Uuid>("select id from forges where owner = $1 and (id::text = lower($2) or kind = lower($2) or replace(replace(base_url, 'https://', ''), 'http://', '') = lower($2))").bind(owner).bind(forge).fetch_all(&state.pool).await?;
 
             match found.as_slice() {
                 [only] => (Some(forges::find_owned(state, *only, owner).await?), repository.to_string()),
-                [] if forge.eq_ignore_ascii_case("github.com") => (None, repository.to_string()),
                 [] => return Ok(Err(format!("None of the person's forges is {forge}. Use github.com for a public GitHub repository."))),
                 _ => return Ok(Err(format!("More than one forge is {forge}. Give its id."))),
             }
