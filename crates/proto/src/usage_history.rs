@@ -1,6 +1,5 @@
 use crate::conversation::AgentId;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UsageHistory {
