@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.34
+
+- A release or pipeline watch that Mycelium cannot check tells its conversation why, once, and keeps checking, instead of staying silent until it is stopped.
+
 ## v0.34.33
 
 - elect.horse results are read again: the horse's seats come from the game's seat list, the expert daily counts as its own puzzle, and a draw is kept and shown as "Draw, N seats" with a drawn count in the stats.
