@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 const POLL_BATCH: i64 = 20;
 const FINISHED_KEY: &str = "finished";
+const CHECK_FAILED_KEY: &str = "check_failed";
 const WATCH_COLUMNS: &str = "id, owner, watcher_id, kind, forge_id, repository, reference";
 const SHA_MARK: &str = " sha:";
 
@@ -270,6 +271,13 @@ pub async fn poll(state: &AppState) -> ApiResult<()> {
     for watch in due {
         if let Err(error) = check(state, &watch).await {
             tracing::warn!("could not check {} {} for watch {}: {}", watch.repository, watch.reference, watch.id, error.message());
+
+            let label = Target::parse(&watch.reference).map(|target| target.label()).unwrap_or_else(|| watch.reference.clone());
+            let text = format!("Mycelium could not check {} {label}: {}\n\nIt keeps checking, and tells this conversation when it finishes.", watch.repository, error.message());
+
+            if let Err(error) = watches::deliver(state, watch.owner, watch.id, watch.watcher_id, CHECK_FAILED_KEY, text).await {
+                tracing::warn!("could not tell {} that watch {} cannot be checked: {}", watch.watcher_id, watch.id, error.message());
+            }
         }
     }
 

@@ -7,7 +7,7 @@ use axum::{Json, Router};
 use hmac::{Hmac, KeyInit, Mac};
 use serde_json::{Value, json};
 use sha2::Sha256;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use uuid::Uuid;
@@ -19,6 +19,7 @@ const FAST: Duration = Duration::from_millis(50);
 #[derive(Default)]
 struct FakeForge {
     hooks_refused: bool,
+    runs_refused: AtomicBool,
     hook_secret: Mutex<Option<String>>,
     runs: Mutex<Vec<Value>>,
     release: Mutex<Option<Value>>,
@@ -38,8 +39,12 @@ fn github_api(fake: &Fake) -> Router {
         StatusCode::CREATED
     }
 
-    async fn runs(State(fake): State<Fake>, Path(_): Path<(String, String)>) -> Json<Value> {
-        Json(json!({"workflow_runs": fake.runs.lock().unwrap().clone()}))
+    async fn runs(State(fake): State<Fake>, Path(_): Path<(String, String)>) -> Result<Json<Value>, StatusCode> {
+        if fake.runs_refused.load(Ordering::SeqCst) {
+            return Err(StatusCode::FORBIDDEN);
+        }
+
+        Ok(Json(json!({"workflow_runs": fake.runs.lock().unwrap().clone()})))
     }
 
     async fn release(State(fake): State<Fake>, Path(_): Path<(String, String, String)>) -> Result<Json<Value>, StatusCode> {
@@ -305,4 +310,25 @@ async fn a_release_watch_does_not_look_for_the_release_while_a_run_is_still_goin
 
     assert!(early);
     assert_eq!(fake.release_lookups.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn a_release_watch_that_cannot_be_checked_tells_the_watcher_why_once_and_keeps_checking() {
+    let fake = Fake::default();
+    fake.runs_refused.store(true, Ordering::SeqCst);
+    *fake.runs.lock().unwrap() = vec![run(7, "v1.0.0", "completed", Some("success"))];
+    let public = serve(github_api(&fake)).await;
+    let server = quick_server(&public).await;
+    let (mut link, watcher) = idle_watcher(&server).await;
+
+    tool(&server, &link, watcher, "watch_release", json!({"forge": "github.com", "repository": "acme/app", "tag": "v1.0.0"})).await;
+    let failed = prompt_for(&mut link, watcher).await;
+    let repeated = quiet_for(&mut link, watcher).await;
+    end_turn(&mut link, watcher, 3).await;
+    fake.runs_refused.store(false, Ordering::SeqCst);
+    let told = prompt_for(&mut link, watcher).await;
+
+    assert!(failed.contains("Mycelium could not check acme/app v1.0.0") && failed.contains("This token cannot read your account"), "{failed}");
+    assert!(repeated, "the same failure was told again");
+    assert!(told.contains("From acme/app v1.0.0:") && told.contains("succeeded"), "{told}");
 }
