@@ -8,52 +8,160 @@
   <style>
     html, body { margin: 0; height: 100%; overflow: hidden; background: #161616; color: #a8a8a8; font: 13px/18px system-ui, sans-serif; }
     canvas { display: block; }
-    #status { position: fixed; inset: 0; z-index: 1; background: #161616; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; text-align: center; }
+    #status { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; text-align: center; }
     #status svg { width: 20px; height: 20px; animation: spin 900ms linear infinite; }
     #status .problem { color: #ec8576; max-width: 40ch; }
     #status code { display: block; margin-top: 8px; color: #a8a8a8; font: 12px/16px ui-monospace, monospace; word-break: break-word; }
+    #notice { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 2; box-sizing: border-box; width: min(560px, calc(100% - 32px)); padding: 12px 16px; border: 1px solid #ec8576; border-radius: 8px; background: #161616; color: #ec8576; }
+    #notice p { margin: 0; }
+    #notice code { display: block; margin-top: 8px; color: #a8a8a8; font: 12px/16px ui-monospace, monospace; word-break: break-word; }
+    #notice button { margin-top: 8px; min-height: 24px; padding: 4px 12px; border: 1px solid currentColor; border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
     @keyframes spin { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { #status svg { animation: none; } }
     @media (prefers-color-scheme: light) {
-      html, body, #status { background: #ffffff; color: #5a5a5a; }
+      html, body { background: #ffffff; color: #5a5a5a; }
       #status .problem { color: #b0372a; }
       #status code { color: #5a5a5a; }
+      #notice { background: #ffffff; border-color: #b0372a; color: #b0372a; }
+      #notice code { color: #5a5a5a; }
     }
   </style>
   <script>
+    function loading() { return document.getElementById("status"); }
+
     function showProblem(detail) {
-      var status = document.getElementById("status");
-      var started = !status;
-      if (started) {
-        if (!document.body) return;
-        status = document.createElement("div");
-        status.id = "status";
-        document.body.appendChild(status);
-      }
-      status.innerHTML = started
-        ? '<p class="problem" role="alert">Mycelium stopped with an error. Reload the page to start it again.<code></code></p>'
-        : '<p class="problem" role="alert">Mycelium could not start in this browser. Update the browser, or open Mycelium in a current Chrome, Edge or Firefox.<code></code></p>';
+      var status = loading();
+      if (!status) return showNotice("Mycelium hit an error. If it stops responding, reload the page.", detail, true);
+      status.innerHTML = '<p class="problem" role="alert">Mycelium could not start in this browser. Update the browser, or open Mycelium in a current Chrome, Edge or Firefox.<code></code></p>';
       status.querySelector("code").textContent = String(detail || "");
     }
+
+    function showNotice(message, detail, dismissable) {
+      if (!document.body) return;
+      var notice = document.getElementById("notice");
+      if (!notice) {
+        notice = document.createElement("div");
+        notice.id = "notice";
+        notice.setAttribute("role", "alert");
+        document.body.appendChild(notice);
+      }
+      notice.innerHTML = '<p></p><code></code>';
+      notice.querySelector("p").textContent = message;
+      notice.querySelector("code").textContent = String(detail || "");
+      if (dismissable) {
+        var dismiss = document.createElement("button");
+        dismiss.type = "button";
+        dismiss.textContent = "Dismiss";
+        dismiss.addEventListener("click", hideNotice);
+        notice.appendChild(dismiss);
+      }
+      notice.dataset.untilPainted = dismissable ? "" : "yes";
+    }
+
+    function hideNotice() {
+      var notice = document.getElementById("notice");
+      if (notice) notice.remove();
+    }
+
     window.addEventListener("error", function (event) { showProblem(event.message); });
     window.addEventListener("unhandledrejection", function (event) { showProblem(event.reason && (event.reason.message || event.reason)); });
+
     (function () {
       var getContext = HTMLCanvasElement.prototype.getContext;
       var graphicsStarted = false;
+      var refusal = "";
+      var painted = false;
+
+      function uniform(pixels) {
+        for (var index = 4; index < pixels.length; index += 4) {
+          if (pixels[index] !== pixels[0] || pixels[index + 1] !== pixels[1] || pixels[index + 2] !== pixels[2] || pixels[index + 3] !== pixels[3]) return false;
+        }
+        return true;
+      }
+
+      function readCross(gl) {
+        var webgl2 = typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext;
+        var width = gl.drawingBufferWidth;
+        var height = gl.drawingBufferHeight;
+        var framebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+        var alignment = gl.getParameter(gl.PACK_ALIGNMENT);
+        var packBuffer = webgl2 ? gl.getParameter(gl.PIXEL_PACK_BUFFER_BINDING) : null;
+        var rowLength = webgl2 ? gl.getParameter(gl.PACK_ROW_LENGTH) : 0;
+        var skipPixels = webgl2 ? gl.getParameter(gl.PACK_SKIP_PIXELS) : 0;
+        var skipRows = webgl2 ? gl.getParameter(gl.PACK_SKIP_ROWS) : 0;
+        var row = new Uint8Array(width * 4);
+        var column = new Uint8Array(height * 4);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.pixelStorei(gl.PACK_ALIGNMENT, 4);
+        if (webgl2) {
+          gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+          gl.pixelStorei(gl.PACK_ROW_LENGTH, 0);
+          gl.pixelStorei(gl.PACK_SKIP_PIXELS, 0);
+          gl.pixelStorei(gl.PACK_SKIP_ROWS, 0);
+        }
+        gl.readPixels(0, height >> 1, width, 1, gl.RGBA, gl.UNSIGNED_BYTE, row);
+        gl.readPixels(width >> 1, 0, 1, height, gl.RGBA, gl.UNSIGNED_BYTE, column);
+        if (webgl2) {
+          gl.pixelStorei(gl.PACK_SKIP_ROWS, skipRows);
+          gl.pixelStorei(gl.PACK_SKIP_PIXELS, skipPixels);
+          gl.pixelStorei(gl.PACK_ROW_LENGTH, rowLength);
+          gl.bindBuffer(gl.PIXEL_PACK_BUFFER, packBuffer);
+        }
+        gl.pixelStorei(gl.PACK_ALIGNMENT, alignment);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        return !(uniform(row) && uniform(column) && row[0] === column[0] && row[1] === column[1] && row[2] === column[2] && row[3] === column[3]);
+      }
+
+      function watchPainting(gl) {
+        var checking = false;
+        ["drawArrays", "drawElements", "drawArraysInstanced", "drawElementsInstanced", "clear"].forEach(function (name) {
+          var draw = gl[name];
+          if (typeof draw !== "function") return;
+          gl[name] = function () {
+            var result = draw.apply(gl, arguments);
+            if (!painted && !checking) {
+              checking = true;
+              queueMicrotask(function () {
+                checking = false;
+                if (painted || !readCross(gl)) return;
+                painted = true;
+                var notice = document.getElementById("notice");
+                if (notice && notice.dataset.untilPainted) hideNotice();
+              });
+            }
+            return result;
+          };
+        });
+      }
+
       HTMLCanvasElement.prototype.getContext = function (type, options) {
         var context = getContext.call(this, type, options);
         if (!/^(webgl|experimental-webgl)/.test(type)) return context;
         if (context) {
           graphicsStarted = true;
-          this.addEventListener("webglcontextlost", function (event) { showProblem("The browser stopped the WebGL context (webglcontextlost" + (event.statusMessage ? ": " + event.statusMessage : "") + ")."); });
+          watchPainting(context);
+          this.addEventListener("webglcontextlost", function (event) {
+            event.preventDefault();
+            painted = false;
+            showNotice("The browser stopped Mycelium's graphics. Mycelium is waiting for them to come back.", "webglcontextlost" + (event.statusMessage ? ": " + event.statusMessage : ""), false);
+          });
           return context;
         }
-        var canvas = this;
+        refusal = "The browser did not create a " + type + " context for a " + this.width + " by " + this.height + " canvas.";
         setTimeout(function () {
-          if (!graphicsStarted) showProblem("The browser did not create a " + type + " context for a " + canvas.width + " by " + canvas.height + " canvas.");
+          if (!graphicsStarted && loading()) showProblem(refusal);
         }, 1000);
         return context;
       };
+
+      var watch = setInterval(function () {
+        if (loading()) return;
+        clearInterval(watch);
+        setTimeout(function () {
+          if (!graphicsStarted) showNotice("Mycelium has loaded, but the browser did not give it WebGL graphics, so it cannot draw. Mycelium keeps trying.", refusal, false);
+          else if (!painted) showNotice("Mycelium has loaded, but the browser has not drawn it yet. This looks like a Safari bug that leaves Compose apps blank (CMP-10986). Mycelium keeps trying, and this goes away once it draws.", navigator.userAgent, false);
+        }, 3000);
+      }, 250);
     })();
   </script>
   <script src="mycelium-web.js"></script>
