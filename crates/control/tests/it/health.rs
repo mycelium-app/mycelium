@@ -289,6 +289,22 @@ async fn the_web_client_is_served_with_single_page_fallback_but_unknown_api_path
 }
 
 #[tokio::test]
+async fn the_web_client_is_revalidated_on_every_load_so_a_release_replaces_it_at_once() {
+    let server = Server::start().await;
+    std::fs::write(server.web_dir.join("index.html"), "<html>mycelium</html>").unwrap();
+    std::fs::write(server.web_dir.join("mycelium-web.js"), "console.log(1)").unwrap();
+    let anonymous = server.anonymous();
+
+    let page = anonymous.get("/").send().await.unwrap();
+    let script = anonymous.get("/mycelium-web.js").send().await.unwrap();
+    let route = anonymous.get("/approve?code=WDJB-MJHT").send().await.unwrap();
+
+    for response in [page, script, route] {
+        assert_eq!(response.headers().get("cache-control").and_then(|value| value.to_str().ok()), Some("no-cache"), "{}", response.url());
+    }
+}
+
+#[tokio::test]
 async fn creating_a_test_database_drops_the_ones_left_by_processes_that_have_exited() {
     let admin = std::env::var("MYCELIUM_TEST_DATABASE_URL").unwrap_or_default();
     if admin.is_empty() {

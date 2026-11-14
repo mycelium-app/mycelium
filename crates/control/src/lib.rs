@@ -141,6 +141,7 @@ use axum::routing::{any, delete, get, patch, post, put};
 use state::AppState;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
+use tower::Layer;
 use tracing_subscriber::EnvFilter;
 
 pub async fn serve() -> Result<()> {
@@ -537,6 +538,6 @@ fn router(state: AppState) -> Router {
         .route_layer(axum::middleware::from_fn_with_state(state.clone(), auth::refuse_cross_site_session_writes))
         .route_layer(axum::middleware::from_fn_with_state(state.clone(), experiments::gate))
         .route_layer(axum::middleware::from_fn_with_state(state.clone(), api_access::gate_scoped_tokens))
-        .fallback_service(web::single_page_app(&web_dir))
+        .fallback_service(tower_http::set_header::SetResponseHeaderLayer::overriding(axum::http::header::CACHE_CONTROL, axum::http::HeaderValue::from_static("no-cache")).layer(web::single_page_app(&web_dir)))
         .with_state(state)
 }
