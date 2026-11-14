@@ -17,7 +17,10 @@ pub fn check_origin(state: &AppState, headers: &HeaderMap) -> ApiResult<()> {
     if let Some(origin) = headers.get(ORIGIN) {
         let own = origin_of(&state.config.public_url);
 
-        if origin.to_str().ok().map(str::to_string) != own {
+        let origin = origin.to_str().ok().map(str::to_string);
+        let listed = origin.as_ref().is_some_and(|origin| state.config.extra_origins.contains(origin));
+
+        if origin != own && !listed {
             return Err(ApiError::new(StatusCode::FORBIDDEN, "origin_not_allowed", "This page is not allowed to make that request. Use the address of the control plane itself."));
         }
     }

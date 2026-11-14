@@ -56,6 +56,7 @@ release binaries are static musl.
 | `MYCELIUM_DATABASE_ACQUIRE_TIMEOUT_SECONDS` | `3` | Time to wait for a database connection |
 | `MYCELIUM_LISTEN` | `0.0.0.0:8080` | HTTP listen address |
 | `MYCELIUM_PUBLIC_URL` | required | e.g. `https://mycelium.example.com`, used in links and OIDC redirects |
+| `MYCELIUM_EXTRA_ORIGINS` | empty | Comma-separated origins besides the public URL that people may sign in on, such as `http://mycelium.example.test` for a plain HTTP address inside a private network. A request counts as one of them only when its `Host` header and scheme match an entry exactly; the scheme is `X-Forwarded-Proto` when a proxy sets it, and `http` otherwise. Sign-in on a listed origin returns to `<origin>/auth/callback`, so add that address to the identity provider's redirect URIs for each entry. On an `http://` entry the sign-in cookies are sent without `Secure`; everything else keeps the public URL and `Secure` cookies |
 | `MYCELIUM_DATA_DIR` | `/var/lib/mycelium` | Transcript copy and node journals |
 | `MYCELIUM_SECRET_KEY` | generated | Base64 of 32 bytes that encrypts stored secrets. Unset, the control plane generates one at `$MYCELIUM_DATA_DIR/secret.key` on first boot. See `docs/SECURITY.md` |
 | `MYCELIUM_SECRET_KEY_PREVIOUS` | empty | Comma-separated retired keys, kept so values sealed under them can still be read until they are re-encrypted |

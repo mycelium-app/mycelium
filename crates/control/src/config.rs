@@ -67,6 +67,7 @@ pub struct Config {
     pub database_url: String,
     pub listen: SocketAddr,
     pub public_url: String,
+    pub extra_origins: Vec<String>,
     pub data_dir: PathBuf,
     pub secret_key: Option<String>,
     pub previous_secret_keys: Vec<String>,
@@ -117,6 +118,22 @@ fn required(lookup: Lookup, name: &str) -> Result<String> {
     }
 }
 
+fn extra_origins(lookup: Lookup) -> Result<Vec<String>> {
+    let Some(listed) = optional(lookup, "MYCELIUM_EXTRA_ORIGINS") else {
+        return Ok(Vec::new());
+    };
+
+    listed
+        .split(',')
+        .map(str::trim)
+        .filter(|origin| !origin.is_empty())
+        .map(|origin| match url::Url::parse(origin) {
+            Ok(url) if matches!(url.scheme(), "http" | "https") && url.host().is_some() => Ok(url.origin().ascii_serialization()),
+            _ => bail!("MYCELIUM_EXTRA_ORIGINS has {origin}, which is not an origin. Give each as scheme and host, such as http://mycelium.example.test."),
+        })
+        .collect()
+}
+
 pub fn is_localhost(public_url: &str) -> bool {
     ["http://localhost", "http://127.0.0.1"].iter().any(|prefix| {
         public_url.strip_prefix(prefix).is_some_and(|rest| rest.is_empty() || rest.starts_with(':') || rest.starts_with('/'))
@@ -149,6 +166,7 @@ impl Config {
             database_url: required(lookup, "MYCELIUM_DATABASE_URL")?,
             listen: optional(lookup, "MYCELIUM_LISTEN").unwrap_or_else(|| "0.0.0.0:8080".into()).parse()?,
             public_url,
+            extra_origins: extra_origins(lookup)?,
             data_dir: optional(lookup, "MYCELIUM_DATA_DIR").unwrap_or_else(|| "/var/lib/mycelium".into()).into(),
             secret_key: optional(lookup, "MYCELIUM_SECRET_KEY"),
             previous_secret_keys: optional(lookup, "MYCELIUM_SECRET_KEY_PREVIOUS").map(|keys| keys.split(',').map(|key| key.trim().to_string()).filter(|key| !key.is_empty()).collect()).unwrap_or_default(),
@@ -236,6 +254,33 @@ mod tests {
 
         assert!(config.oidc.is_none());
         assert_eq!(config.dev_login.as_deref(), Some("me@example.com"));
+    }
+
+    #[test]
+    fn extra_origins_are_kept_as_scheme_and_host() {
+        let config = config_from(&[
+            ("MYCELIUM_DATABASE_URL", "postgres://x"),
+            ("MYCELIUM_PUBLIC_URL", "https://mycelium.example.com"),
+            ("MYCELIUM_OIDC_ISSUER", "https://id.example.com"),
+            ("MYCELIUM_OIDC_CLIENT_ID", "mycelium"),
+            ("MYCELIUM_EXTRA_ORIGINS", " http://mycelium.example.test/ , http://atlas.example.test:8080,"),
+        ])
+        .unwrap();
+
+        assert_eq!(config.extra_origins, ["http://mycelium.example.test", "http://atlas.example.test:8080"]);
+    }
+
+    #[test]
+    fn an_extra_origin_that_is_not_an_origin_is_refused() {
+        let result = config_from(&[
+            ("MYCELIUM_DATABASE_URL", "postgres://x"),
+            ("MYCELIUM_PUBLIC_URL", "https://mycelium.example.com"),
+            ("MYCELIUM_OIDC_ISSUER", "https://id.example.com"),
+            ("MYCELIUM_OIDC_CLIENT_ID", "mycelium"),
+            ("MYCELIUM_EXTRA_ORIGINS", "mycelium.example.test"),
+        ]);
+
+        assert!(result.unwrap_err().to_string().contains("MYCELIUM_EXTRA_ORIGINS has mycelium.example.test, which is not an origin"));
     }
 
     #[test]

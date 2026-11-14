@@ -98,6 +98,8 @@ HTTPS, remove `MYCELIUM_DEV_LOGIN` and set:
 | `MYCELIUM_OIDC_CLIENT_ID` | The client you registered with `<public-url>/auth/callback` as its redirect |
 | `MYCELIUM_ALLOWED_EMAILS` | The people allowed to sign in |
 
+To also sign in on another address, such as plain HTTP inside a private network, list it in `MYCELIUM_EXTRA_ORIGINS` and add its `/auth/callback` to the identity provider.
+
 [`docs/STAGE1.md`](docs/STAGE1.md#config-environment) lists the other variables.
 
 ### 2. Install the agent adapters on each node

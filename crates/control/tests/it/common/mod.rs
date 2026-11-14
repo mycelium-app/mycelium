@@ -373,6 +373,7 @@ impl Server {
             database_url: database_url.clone(),
             listen: address,
             public_url: base.clone(),
+            extra_origins: Vec::new(),
             data_dir: data_dir.clone(),
             secret_key: Some(TEST_SECRET_KEY.into()),
             previous_secret_keys: Vec::new(),

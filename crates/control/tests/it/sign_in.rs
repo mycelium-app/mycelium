@@ -17,6 +17,7 @@ struct Provider {
     challenge: Mutex<String>,
     nonce: Mutex<String>,
     leaves_email_unverified: std::sync::atomic::AtomicBool,
+    redirect_uri: Mutex<String>,
 }
 
 async fn start_provider() -> (String, Arc<Provider>) {
@@ -32,6 +33,7 @@ async fn start_provider() -> (String, Arc<Provider>) {
             post({
                 let issuer = issuer.clone();
                 move |State(provider): State<Arc<Provider>>, Form(form): Form<HashMap<String, String>>| async move {
+                    *provider.redirect_uri.lock().unwrap() = form.get("redirect_uri").cloned().unwrap_or_default();
                     let verifier = form.get("code_verifier").cloned().unwrap_or_default();
                     let expected = provider.challenge.lock().unwrap().clone();
 
@@ -183,6 +185,79 @@ async fn oidc_sign_in_uses_pkce_and_sets_a_secure_session_cookie() {
 
     assert_eq!(me["email"], "ada@example.com");
     assert_eq!(me["name"], "Ada");
+}
+
+struct ExtraOriginSignIn {
+    redirect_uri: String,
+    exchanged_redirect_uri: String,
+    oidc_cookie_header: String,
+    session_cookie_header: String,
+}
+
+async fn sign_in_arriving_as(host: &str, forwarded_proto: Option<&str>) -> (ExtraOriginSignIn, common::Client, Server) {
+    let (issuer, provider) = start_provider().await;
+    let server = Server::start_with(|config| {
+        config.dev_login = None;
+        config.public_url = "https://mycelium.example.com".into();
+        config.extra_origins = vec!["http://mycelium.example.test".into()];
+        config.oidc = Some(OidcConfig { issuer: issuer.clone(), client_id: "mycelium".into(), client_secret: None });
+    })
+    .await;
+    let anonymous = server.anonymous();
+    let arriving = |request: reqwest::RequestBuilder| {
+        let request = request.header("host", host);
+        match forwarded_proto {
+            Some(proto) => request.header("x-forwarded-proto", proto),
+            None => request,
+        }
+    };
+
+    let login = arriving(anonymous.get("/auth/login?next=/nodes")).send().await.unwrap();
+    let authorize = query_of(login.headers()["location"].to_str().unwrap());
+    *provider.challenge.lock().unwrap() = authorize["code_challenge"].clone();
+    *provider.nonce.lock().unwrap() = authorize["nonce"].clone();
+    let oidc_cookie_header = login.headers().get_all("set-cookie").iter().map(|value| value.to_str().unwrap().to_string()).find(|value| value.starts_with("myc_oidc=")).unwrap();
+
+    let callback = arriving(anonymous.get("/auth/callback").query(&[("code", "the-code"), ("state", authorize["state"].as_str())]).header("cookie", oidc_cookie(&login))).send().await.unwrap();
+    assert_eq!(callback.status(), 303);
+    let session_cookie_header = callback.headers().get_all("set-cookie").iter().map(|value| value.to_str().unwrap().to_string()).find(|value| value.starts_with("myc_session=")).unwrap();
+    let signed_in = common::Client { cookie: session_cookie(&callback), ..anonymous.clone() };
+    let exchanged_redirect_uri = provider.redirect_uri.lock().unwrap().clone();
+
+    (ExtraOriginSignIn { redirect_uri: authorize["redirect_uri"].clone(), exchanged_redirect_uri, oidc_cookie_header, session_cookie_header }, signed_in, server)
+}
+
+#[tokio::test]
+async fn a_listed_http_origin_signs_in_over_http_through_its_own_callback() {
+    let (sign_in, signed_in, _server) = sign_in_arriving_as("mycelium.example.test", None).await;
+
+    let (_, me) = signed_in.json(signed_in.get("/api/v1/me").header("host", "mycelium.example.test")).await;
+    let logout = signed_in.post("/auth/logout").header("host", "mycelium.example.test").header("origin", "http://mycelium.example.test").send().await.unwrap();
+
+    assert_eq!(sign_in.redirect_uri, "http://mycelium.example.test/auth/callback");
+    assert_eq!(sign_in.exchanged_redirect_uri, "http://mycelium.example.test/auth/callback");
+    assert!(!sign_in.oidc_cookie_header.contains("Secure"), "{}", sign_in.oidc_cookie_header);
+    assert!(!sign_in.session_cookie_header.contains("Secure"), "{}", sign_in.session_cookie_header);
+    assert_eq!(me["email"], "ada@example.com");
+    assert_ne!(logout.status(), 403, "a write from the listed origin was refused");
+}
+
+#[tokio::test]
+async fn an_unlisted_origin_keeps_the_public_callback_and_secure_cookies() {
+    let (sign_in, _, _server) = sign_in_arriving_as("elsewhere.example.test", None).await;
+
+    assert_eq!(sign_in.redirect_uri, "https://mycelium.example.com/auth/callback");
+    assert_eq!(sign_in.exchanged_redirect_uri, "https://mycelium.example.com/auth/callback");
+    assert!(sign_in.oidc_cookie_header.contains("Secure"), "{}", sign_in.oidc_cookie_header);
+    assert!(sign_in.session_cookie_header.contains("Secure"), "{}", sign_in.session_cookie_header);
+}
+
+#[tokio::test]
+async fn a_listed_host_arriving_through_the_https_proxy_keeps_the_public_callback_and_secure_cookies() {
+    let (sign_in, _, _server) = sign_in_arriving_as("mycelium.example.test", Some("https")).await;
+
+    assert_eq!(sign_in.redirect_uri, "https://mycelium.example.com/auth/callback");
+    assert!(sign_in.session_cookie_header.contains("Secure"), "{}", sign_in.session_cookie_header);
 }
 
 #[tokio::test]

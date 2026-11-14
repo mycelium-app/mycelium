@@ -5,7 +5,7 @@ use crate::stream::check_origin;
 use crate::state::{AppState, hash_token, new_token};
 use axum::Json;
 use axum::extract::{ConnectInfo, FromRequestParts, Query, Request, State};
-use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, COOKIE, SET_COOKIE, USER_AGENT};
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, COOKIE, HOST, SET_COOKIE, USER_AGENT};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::middleware::Next;
@@ -171,15 +171,31 @@ impl FromRequestParts<AppState> for AuthNode {
     }
 }
 
-fn session_cookie_attributes(state: &AppState) -> &'static str {
-    if is_localhost(&state.config.public_url) {
+fn listed_origin(state: &AppState, headers: &HeaderMap) -> Option<String> {
+    let host = headers.get(HOST)?.to_str().ok()?;
+    let scheme = headers.get("x-forwarded-proto").and_then(|value| value.to_str().ok()).and_then(|value| value.split(',').next()).map(str::trim).unwrap_or("http");
+    let origin = url::Url::parse(&format!("{scheme}://{host}")).ok()?.origin().ascii_serialization();
+
+    state.config.extra_origins.contains(&origin).then_some(origin)
+}
+
+fn callback_url(state: &AppState, headers: &HeaderMap) -> String {
+    let origin = listed_origin(state, headers).unwrap_or_else(|| state.config.public_url.clone());
+
+    format!("{origin}/auth/callback")
+}
+
+fn session_cookie_attributes(state: &AppState, headers: &HeaderMap) -> &'static str {
+    let plain_http = listed_origin(state, headers).is_some_and(|origin| origin.starts_with("http://"));
+
+    if is_localhost(&state.config.public_url) || plain_http {
         ""
     } else {
         "; Secure"
     }
 }
 
-async fn start_session(state: &AppState, subject: &str, email: &str, name: &str, next: &str) -> ApiResult<Response> {
+async fn start_session(state: &AppState, headers: &HeaderMap, subject: &str, email: &str, name: &str, next: &str) -> ApiResult<Response> {
     let user_id = sqlx::query_scalar::<_, Uuid>(
         "insert into users (subject, email, name) values ($1, $2, $3)
          on conflict (subject) do update set email = excluded.email, name = excluded.name returning id",
@@ -201,7 +217,7 @@ async fn start_session(state: &AppState, subject: &str, email: &str, name: &str,
     let cookie = format!(
         "{SESSION_COOKIE}={token}; HttpOnly; Path=/; SameSite=Lax; Max-Age={}{}",
         SESSION_DAYS * 86400,
-        session_cookie_attributes(state)
+        session_cookie_attributes(state, headers)
     );
     let mut response = Redirect::to(next).into_response();
     response.headers_mut().append(SET_COOKIE, header_value(&cookie)?);
@@ -225,13 +241,13 @@ pub struct LoginQuery {
     next: Option<String>,
 }
 
-pub async fn login(State(state): State<AppState>, Query(query): Query<LoginQuery>) -> ApiResult<Response> {
+pub async fn login(State(state): State<AppState>, headers: HeaderMap, Query(query): Query<LoginQuery>) -> ApiResult<Response> {
     let next = safe_next(query.next);
 
     if let Some(email) = &state.config.dev_login {
         let name = email.split('@').next().unwrap_or(email);
 
-        return start_session(&state, &format!("dev:{email}"), email, name, &next).await;
+        return start_session(&state, &headers, &format!("dev:{email}"), email, name, &next).await;
     }
 
     let oidc = state.config.oidc.as_ref().ok_or_else(|| ApiError::internal("no sign-in method configured"))?;
@@ -247,7 +263,7 @@ pub async fn login(State(state): State<AppState>, Query(query): Query<LoginQuery
     url.query_pairs_mut()
         .append_pair("response_type", "code")
         .append_pair("client_id", &oidc.client_id)
-        .append_pair("redirect_uri", &format!("{}/auth/callback", state.config.public_url))
+        .append_pair("redirect_uri", &callback_url(&state, &headers))
         .append_pair("scope", "openid email profile")
         .append_pair("state", &oidc_state)
         .append_pair("nonce", &nonce)
@@ -255,7 +271,7 @@ pub async fn login(State(state): State<AppState>, Query(query): Query<LoginQuery
         .append_pair("code_challenge_method", "S256");
 
     let pending = URL_SAFE_NO_PAD.encode(json!({"state": oidc_state, "verifier": verifier, "nonce": nonce, "next": next}).to_string());
-    let cookie = format!("{OIDC_COOKIE}={pending}; HttpOnly; Path=/auth; SameSite=Lax; Max-Age=600{}", session_cookie_attributes(&state));
+    let cookie = format!("{OIDC_COOKIE}={pending}; HttpOnly; Path=/auth; SameSite=Lax; Max-Age=600{}", session_cookie_attributes(&state, &headers));
     let mut response = Redirect::to(url.as_str()).into_response();
     response.headers_mut().append(SET_COOKIE, header_value(&cookie)?);
 
@@ -296,7 +312,7 @@ pub async fn callback(State(state): State<AppState>, headers: HeaderMap, Query(q
     let discovery = discover(&state, oidc).await?;
     let token_endpoint = discovery["token_endpoint"].as_str().ok_or_else(|| ApiError::internal("issuer has no token endpoint"))?;
 
-    let redirect_uri = format!("{}/auth/callback", state.config.public_url);
+    let redirect_uri = callback_url(&state, &headers);
     let mut form = vec![
         ("grant_type", "authorization_code"),
         ("code", code.as_str()),
@@ -340,7 +356,7 @@ pub async fn callback(State(state): State<AppState>, headers: HeaderMap, Query(q
     let name = claims["name"].as_str().or(claims["preferred_username"].as_str()).unwrap_or(email);
     let next = safe_next(pending["next"].as_str().map(str::to_string));
 
-    let mut response = start_session(&state, &format!("oidc:{subject}"), email, name, &next).await?;
+    let mut response = start_session(&state, &headers, &format!("oidc:{subject}"), email, name, &next).await?;
     response.headers_mut().append(SET_COOKIE, header_value(&format!("{OIDC_COOKIE}=; Path=/auth; Max-Age=0"))?);
 
     Ok(response)
@@ -356,7 +372,7 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> ApiRes
     }
 
     let mut response = StatusCode::NO_CONTENT.into_response();
-    response.headers_mut().append(SET_COOKIE, header_value(&format!("{SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0{}", session_cookie_attributes(&state)))?);
+    response.headers_mut().append(SET_COOKIE, header_value(&format!("{SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0{}", session_cookie_attributes(&state, &headers)))?);
 
     Ok(response)
 }
