@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.35
+
+- A release or pipeline watch on github.com reads GitHub's public API, even when a GitHub account is connected whose token cannot read Actions. Watch a private repository through the connected forge by its kind, id or project.
+
 ## v0.34.34
 
 - A release or pipeline watch that Mycelium cannot check tells its conversation why, once, and keeps checking, instead of staying silent until it is stopped.
