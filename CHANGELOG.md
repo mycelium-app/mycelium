@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.42
+
+- The control plane records how long each request and tool call takes, with the database queries, node round-trips and outside calls inside the slow ones, for 48 hours. Agents read them with read_traces to find where time goes, and every response carries an x-request-id.
+- The apps report how long the conversation list took to show after start and how long a conversation took to open, under the request id they waited on, so a slow start can be traced to the requests behind it.
+
 ## v0.34.41
 
 - The web, desktop and Android apps report their errors and connection events to the control plane: uncaught errors with their stack, the notices the web page shows, lost WebGL, and the live connection opening, closing with its code and reason, and the page being hidden or shown. Agents read them with read_client_events, and they are kept for 14 days with tokens and secrets removed.
