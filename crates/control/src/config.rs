@@ -15,6 +15,7 @@ pub const STREAM_RECHECK_INTERVAL: Duration = Duration::from_secs(30);
 pub const STREAM_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(25);
 pub const STREAM_CAPACITY: usize = 1024;
 pub const TRACE_KEPT_IN_FULL: Duration = Duration::from_millis(200);
+pub const GIT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone)]
 pub struct OidcConfig {
@@ -108,6 +109,7 @@ pub struct Config {
     pub stream_heartbeat_interval: Duration,
     pub stream_capacity: usize,
     pub trace_kept_in_full: Duration,
+    pub git_timeout: Duration,
     pub public_fetch: PublicFetchRouting,
 }
 
@@ -213,6 +215,7 @@ impl Config {
             stream_heartbeat_interval: STREAM_HEARTBEAT_INTERVAL,
             stream_capacity: STREAM_CAPACITY,
             trace_kept_in_full: TRACE_KEPT_IN_FULL,
+            git_timeout: GIT_TIMEOUT,
             public_fetch: PublicFetchRouting::default(),
         })
     }

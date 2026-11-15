@@ -439,6 +439,7 @@ impl Server {
             stream_heartbeat_interval: mycelium_control::STREAM_HEARTBEAT_INTERVAL,
             stream_capacity: mycelium_control::STREAM_CAPACITY,
             trace_kept_in_full: mycelium_control::TRACE_KEPT_IN_FULL,
+            git_timeout: mycelium_control::GIT_TIMEOUT,
             public_fetch: Default::default(),
         };
         configure(&mut config);

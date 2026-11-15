@@ -185,6 +185,10 @@ async fn find_icon_with_node_answer(server: &Server, link: &mut common::NodeLink
     body
 }
 
+async fn server_waiting_on_the_node() -> Server {
+    Server::start_with(|config| config.git_timeout = std::time::Duration::from_secs(300)).await
+}
+
 fn found(bytes: &[u8]) -> Value {
     use base64::Engine;
 
@@ -193,7 +197,7 @@ fn found(bytes: &[u8]) -> Value {
 
 #[tokio::test]
 async fn a_logo_found_on_the_node_is_stored_for_a_project_with_no_icon() {
-    let server = Server::start().await;
+    let server = server_waiting_on_the_node().await;
     let mut link = server.online_node("laptop").await;
     let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
     let id = sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path) values ($1, $2, 'app', '/work/app') returning id").bind(owner).bind(link.id).fetch_one(&server.pool).await.unwrap();
@@ -232,7 +236,7 @@ async fn a_logo_found_on_the_node_does_not_replace_an_uploaded_logo() {
 
 #[tokio::test]
 async fn an_automatic_logo_is_replaced_by_a_newer_find_but_a_person_can_still_choose_over_it() {
-    let server = Server::start().await;
+    let server = server_waiting_on_the_node().await;
     let mut link = server.online_node("laptop").await;
     let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
     let id = sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path) values ($1, $2, 'app', '/work/app') returning id").bind(owner).bind(link.id).fetch_one(&server.pool).await.unwrap();

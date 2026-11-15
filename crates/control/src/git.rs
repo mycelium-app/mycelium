@@ -14,7 +14,6 @@ use serde_json::{Value, json};
 use std::time::Duration;
 use uuid::Uuid;
 
-const GIT_TIMEOUT: Duration = Duration::from_secs(10);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
 const TOWN_TIMEOUT: Duration = Duration::from_secs(300);
 const CLONE_TIMEOUT: Duration = Duration::from_secs(600);
@@ -115,7 +114,7 @@ pub async fn relay(state: &AppState, node_id: Uuid, cwd: String, command: GitCom
         GitCommand::Remote { .. } | GitCommand::Fetch | GitCommand::Pull { .. } | GitCommand::Push { .. } | GitCommand::Snapshot { .. } | GitCommand::Apply { .. } | GitCommand::Undo { .. } => FETCH_TIMEOUT,
         GitCommand::TownSync | GitCommand::TownPropose => TOWN_TIMEOUT,
         GitCommand::Clone { .. } => CLONE_TIMEOUT,
-        _ => GIT_TIMEOUT,
+        _ => state.config.git_timeout,
     };
 
     if !state.hub.is_online(node_id) {
