@@ -110,6 +110,7 @@ data class AppState(
     val sending: Map<String, List<String>> = emptyMap(),
     val needsYouFocus: String? = null,
     val connected: Boolean = false,
+    val streamOpenings: Int = 0,
 )
 
 private fun followAssistant(state: AppState, conversation: Conversation): AppState {

@@ -198,7 +198,7 @@ fun rememberInbox(store: Store, state: AppState): List<InboxItem> {
 
     val builders = remember { mutableMapOf<String, ThreadBuilder>() }
 
-    LaunchedEffect(store, state.connected) {
+    LaunchedEffect(store, state.streamOpenings) {
         attempt { store.refreshStartProposals() }
         attempt { store.refreshMessageProposals() }
         attempt { store.refreshApiAccessRequests() }

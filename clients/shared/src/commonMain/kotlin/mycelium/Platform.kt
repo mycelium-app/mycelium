@@ -41,6 +41,10 @@ interface Platform {
 
     val resumes: Flow<Unit> get() = emptyFlow()
 
+    val clientSession: String? get() = null
+
+    fun onUncaughtError(report: (Throwable) -> Unit) = reportUncaughtErrors(report)
+
     fun loadConnection(): Connection?
 
     fun saveConnection(connection: Connection?)
@@ -138,3 +142,5 @@ interface Platform {
 
     fun listenForNotificationOpens(listener: ((String) -> Unit)?) = Unit
 }
+
+expect fun reportUncaughtErrors(report: (Throwable) -> Unit)

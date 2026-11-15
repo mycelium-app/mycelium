@@ -138,7 +138,7 @@ fun InboxScreen(store: Store, state: AppState, onOpenConversation: (String) -> U
         previous = items
     }
 
-    LaunchedEffect(store, state.connected) {
+    LaunchedEffect(store, state.streamOpenings) {
         store.refreshFeed()
     }
 

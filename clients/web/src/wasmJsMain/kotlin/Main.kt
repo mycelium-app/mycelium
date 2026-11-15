@@ -300,16 +300,26 @@ private object WebPlatform : Platform {
         notificationOpener = listener
     }
 
+    override val clientSession: String? = pageSession().ifBlank { null }
+
     override fun loadPreference(key: String): String? = readStorage(key)
 
     override fun savePreference(key: String, value: String) = writeStorage(key, value)
 }
+
+@JsFun("() => window.myceliumSession || ''")
+private external fun pageSession(): String
+
+@JsFun("(version) => { window.myceliumVersion = version; }")
+private external fun tellPageTheVersion(version: String)
 
 @JsFun("() => { const status = document.getElementById('status'); if (status) status.remove(); }")
 private external fun hideLoading()
 
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
+    tellPageTheVersion(mycelium.ClientVersion)
+
     if (WebPlatform.loadPreference(NotifyFinishedPreference) != false.toString()) {
         askNotificationPermissionOnFirstClick()
     }

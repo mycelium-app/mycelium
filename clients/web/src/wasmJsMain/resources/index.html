@@ -27,6 +27,41 @@
     }
   </style>
   <script>
+    var report = (function () {
+      var session;
+      try {
+        session = window.sessionStorage.getItem("mycelium.session");
+        if (!session) {
+          session = Math.random().toString(16).slice(2) + Date.now().toString(16);
+          window.sessionStorage.setItem("mycelium.session", session);
+        }
+      } catch (error) {
+        session = Math.random().toString(16).slice(2) + Date.now().toString(16);
+      }
+      window.myceliumSession = session;
+      var pending = [];
+
+      function flush(keepalive) {
+        if (!pending.length) return;
+        var events = pending.splice(0, 50);
+        var body = JSON.stringify({ session_id: session, client: "web", version: window.myceliumVersion || "unknown", events: events });
+        try {
+          fetch("/api/v1/client-events", { method: "POST", credentials: "same-origin", keepalive: !!keepalive, headers: { "content-type": "application/json" }, body: body }).catch(function () {});
+        } catch (error) {}
+      }
+
+      setInterval(flush, 10000);
+      window.addEventListener("pagehide", function () { flush(true); });
+      document.addEventListener("visibilitychange", function () { report("visibility", document.visibilityState, {}); });
+
+      function report(kind, message, detail) {
+        if (pending.length >= 200) pending.shift();
+        pending.push({ at: new Date().toISOString(), kind: kind, message: String(message || "").slice(0, 2000), detail: detail || {} });
+      }
+
+      return report;
+    })();
+
     function loading() { return document.getElementById("status"); }
 
     function showProblem(detail) {
@@ -71,6 +106,7 @@
       }
       notice.innerHTML = '<p></p><code></code>';
       notice.querySelector("p").textContent = message;
+      report("notice", message, { detail: String(detail || "") });
       notice.querySelector("code").textContent = String(detail || "");
       var dismiss = document.createElement("button");
       dismiss.type = "button";
@@ -87,9 +123,14 @@
 
     window.addEventListener("error", function (event) {
       if (event.message === "Script error." && !event.filename) return;
+      report("error", event.message, { source: event.filename, line: event.lineno, column: event.colno, stack: event.error && event.error.stack ? String(event.error.stack).slice(0, 4000) : "" });
       showProblem(event.message);
     });
-    window.addEventListener("unhandledrejection", function (event) { showProblem(event.reason && (event.reason.message || event.reason)); });
+    window.addEventListener("unhandledrejection", function (event) {
+      var reason = event.reason && (event.reason.message || event.reason);
+      report("rejection", reason, { stack: event.reason && event.reason.stack ? String(event.reason.stack).slice(0, 4000) : "" });
+      showProblem(reason);
+    });
 
     (function () {
       var getContext = HTMLCanvasElement.prototype.getContext;
@@ -166,12 +207,14 @@
           watchPainting(context);
           this.addEventListener("webglcontextlost", function (event) {
             event.preventDefault();
+            report("webgl", "lost", { status: event.statusMessage || "" });
             painted = false;
             checkPaintedSoon();
           });
           return context;
         }
         refusal = "The browser did not create a " + type + " context for a " + this.width + " by " + this.height + " canvas.";
+        report("webgl", "refused", { detail: refusal });
         setTimeout(function () {
           if (!graphicsStarted && loading()) showProblem(refusal);
         }, 1000);

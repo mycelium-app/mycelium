@@ -28,6 +28,7 @@ import io.ktor.serialization.kotlinx.json.json
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.JsonElement
@@ -66,6 +67,12 @@ sealed interface DevicePoll {
 }
 
 private const val StreamPingMillis = 20_000L
+
+private const val CloseReasonWaitMillis = 1_000L
+
+const val FellBehindCloseCode = 4000
+
+class StreamClosed(val code: Int?, val reason: String) : Exception("The server closed the stream" + (code?.let { " with $it" } ?: "") + reason.takeIf { it.isNotEmpty() }?.let { ": $it" }.orEmpty())
 
 private const val ConnectTimeoutMillis = 10_000L
 
@@ -1344,7 +1351,15 @@ class MyceliumApi(
                     }
                 }
             }
+
+            val reason = withTimeoutOrNull(CloseReasonWaitMillis) { closeReason.await() }
+
+            throw StreamClosed(reason?.code?.toInt(), reason?.message.orEmpty())
         }
+    }
+
+    suspend fun reportClientEvents(report: ClientEventReport) {
+        call("/client-events") { client.post(it) { authorise(); json(report) } }
     }
 
     fun close() {

@@ -28,9 +28,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import kotlinx.coroutines.launch
 import mycelium.api.ApiException
 import mycelium.api.Me
+import kotlinx.coroutines.CoroutineScope
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
 import mycelium.state.catching
+import mycelium.state.ClientReporter
+import mycelium.state.clientKind
 import mycelium.ui.ApproveScreen
 import mycelium.ui.Label
 import mycelium.ui.LocalReducedMotion
@@ -135,7 +138,7 @@ private fun AppContent(platform: Platform) {
 
         val api = MyceliumApi(baseUrl, saved?.token)
 
-        val warm = if (saved?.token != null && approveCode == null) Store(api, scope, platform).also { it.start() } else null
+        val warm = if (saved?.token != null && approveCode == null) Store(api, scope, platform, report = reporterFor(api, scope, platform)::report).also { it.start() } else null
 
         phase = try {
             Phase.SignedIn(api, api.me(), warm)
@@ -187,7 +190,7 @@ private fun AppContent(platform: Platform) {
                     if (code != null) {
                         ApproveScreen(current.api, code, platform.approveReturnTo(), platform::navigate, onDone = { approveCode = null }, onClose = platform::closeWindow)
                     } else {
-                        val store = remember(current.api) { current.store ?: Store(current.api, scope, platform) }
+                        val store = remember(current.api) { current.store ?: Store(current.api, scope, platform, report = reporterFor(current.api, scope, platform)::report) }
 
                         DisposableEffect(store) {
                             store.start()
@@ -222,4 +225,14 @@ private fun AppContent(platform: Platform) {
             }
         }
     }
+}
+
+private val processSession = kotlin.random.Random.nextLong().toULong().toString(16)
+
+private fun reporterFor(api: MyceliumApi, scope: CoroutineScope, platform: Platform): ClientReporter {
+    val reporter = ClientReporter(clientKind(platform.device().os), platform.clientSession ?: processSession, scope, api::reportClientEvents)
+
+    platform.onUncaughtError { failure -> reporter.report("error", failure.message ?: failure::class.simpleName.orEmpty(), mapOf("error" to failure::class.simpleName, "stack" to failure.stackTraceToString().take(4_000))) }
+
+    return reporter
 }

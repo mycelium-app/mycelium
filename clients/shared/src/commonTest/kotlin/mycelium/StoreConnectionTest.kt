@@ -10,13 +10,19 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import mycelium.api.MyceliumApi
+import mycelium.api.FellBehindCloseCode
+import mycelium.api.StreamClosed
 import mycelium.api.StreamMessage
 import mycelium.api.parseStreamMessage
 import mycelium.state.Store
@@ -57,6 +63,117 @@ class StoreConnectionTest {
     }
 
     private suspend fun Store.untilConnected() = withContext(Dispatchers.Default) { withTimeout(5_000) { state.first { it.connected } } }
+
+    private class ClosesFirst(private val code: Int?) {
+        var opened = 0
+
+        fun stream(onOpen: suspend () -> Unit): Flow<StreamMessage> = flow {
+            opened += 1
+            onOpen()
+
+            if (opened == 1) {
+                throw StreamClosed(code, "closed for the test")
+            }
+
+            awaitCancellation()
+        }
+    }
+
+    @Test
+    fun aStreamClosedForFallingBehindReopensWithoutShowingTheAppAsDisconnected() = runTest {
+        val sockets = ClosesFirst(FellBehindCloseCode)
+        val engine = MockEngine { respond("[]", HttpStatusCode.OK, json) }
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope, stream = sockets::stream)
+        val seen = mutableListOf<Boolean>()
+        backgroundScope.launch(Dispatchers.Default) { store.state.collect { seen += it.connected } }
+
+        store.start()
+        repeat(100) {
+            if (sockets.opened < 2) {
+                advanceTimeBy(100)
+                runCurrent()
+            }
+        }
+        withContext(Dispatchers.Default) { delay(200) }
+
+        assertEquals(2, sockets.opened)
+        assertTrue(true in seen, "$seen")
+        assertTrue(seen.dropWhile { !it }.all { it }, "$seen")
+    }
+
+    private val later = """{"id":"c2","owner":"u","node_id":"n","agent":"claude","cwd":"/work","title":"Missed while behind","status":"working","created_at":"2026-10-22T11:00:00Z","updated_at":"2026-10-22T11:00:00Z"}"""
+
+    @Test
+    fun aClientThatFellBehindEndsWithTheSameStateAsOneThatNeverLagged() = runTest {
+        val sockets = ClosesFirst(FellBehindCloseCode)
+        var listings = 0
+        val engine = MockEngine { request ->
+            val body = when {
+                request.url.encodedPath.endsWith("/conversations") -> if (sockets.opened < 2) "[$conversation]" else "[$conversation,$later]".also { listings++ }
+                else -> "[]"
+            }
+            respond(body, HttpStatusCode.OK, json)
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope, stream = sockets::stream)
+        val fresh = Store(MyceliumApi("https://mycelium.test", null, MockEngine { request -> respond(if (request.url.encodedPath.endsWith("/conversations")) "[$conversation,$later]" else "[]", HttpStatusCode.OK, json) }), backgroundScope, stream = Sockets()::stream)
+
+        store.start()
+        fresh.start()
+        repeat(100) {
+            if (sockets.opened < 2) {
+                advanceTimeBy(100)
+                runCurrent()
+            }
+        }
+        val resynced = withContext(Dispatchers.Default) { withTimeoutOrNull(5_000) { store.state.first { it.conversations.size == 2 } } }
+        val neverLagged = withContext(Dispatchers.Default) { withTimeoutOrNull(5_000) { fresh.state.first { it.conversations.size == 2 } } }
+        assertTrue(resynced != null && neverLagged != null, "opened ${sockets.opened}, listings $listings, lagged ${store.state.value.conversations.keys} ${store.state.value.streamOpenings}, fresh ${fresh.state.value.conversations.keys}")
+
+        assertEquals(neverLagged!!.conversations.keys, resynced!!.conversations.keys)
+        assertEquals(2, resynced.streamOpenings)
+        assertTrue(resynced.connected)
+    }
+
+    private class AlwaysFallsBehind {
+        var opened = 0
+
+        fun stream(onOpen: suspend () -> Unit): Flow<StreamMessage> = flow {
+            opened += 1
+            onOpen()
+            throw StreamClosed(FellBehindCloseCode, "fell behind")
+        }
+    }
+
+    @Test
+    fun aClientThatKeepsFallingBehindBacksOffInsteadOfReopeningAtFullSpeed() = runTest {
+        val sockets = AlwaysFallsBehind()
+        val store = Store(MyceliumApi("https://mycelium.test", null, MockEngine { respond("[]", HttpStatusCode.OK, json) }), backgroundScope, stream = sockets::stream)
+
+        store.start()
+        advanceTimeBy(5_000)
+        runCurrent()
+
+        assertTrue(sockets.opened in 2..8, "reopened ${sockets.opened} times in 5 seconds")
+        assertTrue(store.state.value.connected)
+    }
+
+    @Test
+    fun aLostStreamIsReportedWithItsCloseCodeAndHowLongItWasUp() = runTest {
+        val sockets = ClosesFirst(1006)
+        val engine = MockEngine { respond("[]", HttpStatusCode.OK, json) }
+        val reported = mutableListOf<Triple<String, String, Map<String, Any?>>>()
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope, stream = sockets::stream, report = { kind, message, detail -> reported += Triple(kind, message, detail) })
+
+        store.start()
+        withContext(Dispatchers.Default) { withTimeout(5_000) { while (sockets.opened < 2) delay(10) } }
+
+        val closed = reported.first { it.second == "closed" }
+        assertEquals("connection", closed.first)
+        assertEquals(1006, closed.third["close_code"])
+        assertEquals("closed for the test", closed.third["reason"])
+        assertTrue(closed.third["up_for_ms"] is Long, "$closed")
+        assertEquals(listOf("open", "closed", "open"), reported.map { it.second })
+    }
 
     @Test
     fun connectedDoesNotWaitForASlowConversationList() = runTest {

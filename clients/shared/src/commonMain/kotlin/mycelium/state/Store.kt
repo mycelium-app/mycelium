@@ -73,6 +73,8 @@ import mycelium.api.WalkthroughNote
 import mycelium.api.WalkthroughNoteRequest
 import mycelium.api.NodeResources
 import mycelium.api.EventKinds
+import mycelium.api.FellBehindCloseCode
+import mycelium.api.StreamClosed
 import kotlinx.serialization.json.JsonObject
 import mycelium.api.PatchConversationRequest
 import kotlin.time.Clock
@@ -103,6 +105,7 @@ class Store(
     private val platform: Platform? = null,
     private val stream: (suspend () -> Unit) -> Flow<StreamMessage> = api::stream,
     private val timeSource: TimeSource = TimeSource.Monotonic,
+    private val report: (kind: String, message: String, detail: Map<String, Any?>) -> Unit = { _, _, _ -> },
 ) {
     private val eventPageSize = platform?.eventPageSize ?: DefaultEventPageSize
     private val mutableState = MutableStateFlow(AppState())
@@ -200,10 +203,15 @@ class Store(
 
         streaming = scope.launch {
             var retry = FirstRetryMillis
+            var fellBehindRetry = FirstRetryMillis
+            var attempt = 0
+            var lostAt: TimeMark? = null
 
             while (true) {
                 connectAttemptedAt = timeSource.markNow()
+                attempt += 1
                 var connectedAt: TimeMark? = null
+                var fellBehind = false
 
                 try {
                     coroutineScope {
@@ -211,7 +219,10 @@ class Store(
                             connectedAt = timeSource.markNow()
                             lastHeardAt = connectedAt
                             streamedConversations.value = emptySet()
-                            mutableState.update { it.copy(connected = true) }
+                            mutableState.update { it.copy(connected = true, streamOpenings = it.streamOpenings + 1) }
+                            report("connection", "open", mapOf("attempt" to attempt, "down_for_ms" to lostAt?.elapsedNow()?.inWholeMilliseconds))
+                            attempt = 0
+                            lostAt = null
                             launch { refreshOverStream() }
                         }.collect { message ->
                             lastHeardAt = timeSource.markNow()
@@ -222,7 +233,28 @@ class Store(
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
-                } catch (_: Exception) {
+                } catch (closed: StreamClosed) {
+                    fellBehind = closed.code == FellBehindCloseCode
+                    report("connection", "closed", mapOf("close_code" to closed.code, "reason" to closed.reason, "up_for_ms" to connectedAt?.elapsedNow()?.inWholeMilliseconds))
+                } catch (failed: Exception) {
+                    report("connection", "failed", mapOf("error" to failed::class.simpleName, "reason" to failed.message, "attempt" to attempt, "up_for_ms" to connectedAt?.elapsedNow()?.inWholeMilliseconds))
+                }
+
+                if (fellBehind) {
+                    val stayedUp = connectedAt?.elapsedNow()?.inWholeMilliseconds ?: 0
+
+                    if (stayedUp < StableConnectionMillis) {
+                        delay(jittered(fellBehindRetry))
+                        fellBehindRetry = minOf(fellBehindRetry * 2, LongestRetryMillis)
+                    } else {
+                        fellBehindRetry = FirstRetryMillis
+                    }
+
+                    continue
+                }
+
+                if (lostAt == null) {
+                    lostAt = timeSource.markNow()
                 }
 
                 mutableState.update { it.copy(connected = false) }
