@@ -17,6 +17,7 @@ const MANAGED_IDLE_DAYS: i32 = 3;
 
 async fn sweep(state: &AppState) -> ApiResult<()> {
     sqlx::query("delete from integration_calls where at < now() - make_interval(days => $1)").bind(CALL_RECORD_DAYS).execute(&state.pool).await?;
+    sqlx::query("delete from client_events where received_at < now() - make_interval(days => $1)").bind(crate::client_events::RETENTION_DAYS).execute(&state.pool).await?;
 
     let quiet = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
         "update conversations set agent_active = false

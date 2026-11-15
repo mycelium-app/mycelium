@@ -13,6 +13,7 @@ pub enum Limited {
     StartDevice,
     PollDeviceToken,
     RedeemJoinToken,
+    ClientEvents,
 }
 
 impl Limited {
@@ -20,6 +21,7 @@ impl Limited {
         match self {
             Limited::StartDevice | Limited::RedeemJoinToken => 10.0,
             Limited::PollDeviceToken => 30.0,
+            Limited::ClientEvents => 20.0,
         }
     }
 
@@ -27,6 +29,7 @@ impl Limited {
         match self {
             Limited::StartDevice | Limited::RedeemJoinToken => 1.0 / 6.0,
             Limited::PollDeviceToken => 1.0,
+            Limited::ClientEvents => 1.0 / 3.0,
         }
     }
 }

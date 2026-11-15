@@ -4,6 +4,7 @@ mod artifacts;
 mod assistants;
 mod browser_task;
 pub(crate) mod call;
+mod client_events;
 mod conversations;
 mod decide;
 mod earlier_turns;
@@ -64,6 +65,7 @@ enum Area {
     Learning,
     Instructions,
     GoalAndUsage,
+    ClientEvents,
     Todos,
     ProjectIcon,
     Projects,
@@ -92,6 +94,7 @@ fn area_of(tool: &str) -> Option<Area> {
         "walkthrough" | "save_reflection" | "propose_exercise" | "note_learned" | "save_exercise_review" => Some(Area::Learning),
         "get_instructions" | "propose_instructions_edit" => Some(Area::Instructions),
         "get_goal" | "report_goal" | "get_account_usage" => Some(Area::GoalAndUsage),
+        "read_client_events" => Some(Area::ClientEvents),
         "set_todos" => Some(Area::Todos),
         "set_project_icon" => Some(Area::ProjectIcon),
         "create_project" | "update_project" => Some(Area::Projects),
@@ -124,6 +127,7 @@ async fn call_area(area: Area, call: ToolCall<'_>) -> ApiResult<ToolReply> {
         Area::Learning => learning::call(call).await,
         Area::Instructions => instructions::call(call).await,
         Area::GoalAndUsage => goal_and_usage::call(call).await,
+        Area::ClientEvents => client_events::call(call).await,
         Area::Todos => todos::call(call).await,
         Area::ProjectIcon => project_icon::call(call).await,
         Area::Projects => projects::call(call).await,
@@ -188,6 +192,7 @@ pub fn tool_definitions() -> Value {
         learning::definitions(),
         instructions::definitions(),
         goal_and_usage::definitions(),
+        client_events::definitions(),
         todos::definitions(),
         project_icon::definitions(),
         projects::definitions(),

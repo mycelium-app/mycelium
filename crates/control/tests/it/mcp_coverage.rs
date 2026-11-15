@@ -91,6 +91,7 @@ async fn every_covering_tool_exists() {
 }
 
 const COVERED: &[(&str, &str, &str)] = &[
+    ("GET", "/api/v1/client-events", "read_client_events"),
     ("PUT", "/api/v1/conversations/{id}/todos", "set_todos"),
     ("GET", "/api/v1/projects", "list_places"),
     ("POST", "/api/v1/projects", "create_project"),
@@ -164,6 +165,7 @@ const EXCEPTIONS: &[(&str, &str, &str)] = &[
     ("POST", "/api/v1/instruction-proposals/{id}/approve", "approving an approval card from an agent would let it approve its own request"),
     ("POST", "/api/v1/message-proposals/{id}/connect", "approving an approval card from an agent would let it approve its own request"),
     ("GET", "/api/v1/inbox/feed", "the Inbox column reads it, and agents only post to it with post_to_feed"),
+    ("POST", "/api/v1/client-events", "each Mycelium app reports its own errors and connection events; agents read them with read_client_events"),
     ("POST", "/api/v1/message-proposals/{id}/connect-groups", "approving an approval card from an agent would let it approve its own request"),
     ("POST", "/api/v1/message-proposals/{id}/approve", "approving an approval card from an agent would let it approve its own request"),
     ("POST", "/api/v1/start-proposals/{id}/approve", "approving an approval card from an agent would let it approve its own request"),

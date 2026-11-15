@@ -18,6 +18,7 @@ mod chat_import;
 mod chat_tool_setup;
 mod chat_tools;
 mod chat_agents;
+mod client_events;
 mod chats;
 mod continue_elsewhere;
 mod conversations;

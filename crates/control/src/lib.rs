@@ -20,6 +20,7 @@ mod auth;
 mod boot;
 mod outbound;
 mod caldav;
+mod client_events;
 mod coolify;
 mod chat_import;
 mod chat_tool_servers;
@@ -469,6 +470,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/start-proposals/{id}/connect", post(start_proposals::approve_and_connect))
         .route("/api/v1/start-proposals/{id}/decline", post(start_proposals::decline))
         .route("/api/v1/inbox/feed", get(inbox_feed::feed))
+        .route("/api/v1/client-events", get(client_events::list).post(client_events::create))
         .route("/api/v1/api-access-requests", get(api_access::list))
         .route("/api/v1/api-access-requests/{id}/approve", post(api_access::approve))
         .route("/api/v1/api-access-requests/{id}/decline", post(api_access::decline))
