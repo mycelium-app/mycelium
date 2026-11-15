@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.40
+
+- The web app no longer shows a notice for errors while it is running, including "Script error." from scripts outside the page such as the iPad keyboard. A notice appears only when the app cannot start or has not drawn anything, and it is smaller and can be dismissed.
+
 ## v0.34.39
 
 - The web app's error notice sits at the top of the visible page instead of over the message box, stays clear of the on-screen keyboard, and shows the same error only once per session.
