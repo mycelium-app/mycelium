@@ -12,6 +12,8 @@ pub const TOOLS_LISTING_GRACE: Duration = Duration::from_secs(90);
 pub const DATABASE_POOL_SIZE: u32 = 10;
 pub const DATABASE_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(3);
 pub const STREAM_RECHECK_INTERVAL: Duration = Duration::from_secs(30);
+pub const STREAM_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(25);
+pub const STREAM_CAPACITY: usize = 1024;
 
 #[derive(Debug, Clone)]
 pub struct OidcConfig {
@@ -102,6 +104,8 @@ pub struct Config {
     pub database_pool_size: u32,
     pub database_acquire_timeout: Duration,
     pub stream_recheck_interval: Duration,
+    pub stream_heartbeat_interval: Duration,
+    pub stream_capacity: usize,
     pub public_fetch: PublicFetchRouting,
 }
 
@@ -204,6 +208,8 @@ impl Config {
             database_pool_size: optional(lookup, "MYCELIUM_DATABASE_POOL_SIZE").map(|size| size.trim().parse()).transpose()?.unwrap_or(DATABASE_POOL_SIZE),
             database_acquire_timeout: optional(lookup, "MYCELIUM_DATABASE_ACQUIRE_TIMEOUT_SECONDS").map(|seconds| seconds.trim().parse().map(Duration::from_secs)).transpose()?.unwrap_or(DATABASE_ACQUIRE_TIMEOUT),
             stream_recheck_interval: STREAM_RECHECK_INTERVAL,
+            stream_heartbeat_interval: STREAM_HEARTBEAT_INTERVAL,
+            stream_capacity: STREAM_CAPACITY,
             public_fetch: PublicFetchRouting::default(),
         })
     }

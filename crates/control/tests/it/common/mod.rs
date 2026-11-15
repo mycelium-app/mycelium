@@ -174,6 +174,30 @@ impl StreamClient {
         }
     }
 
+    pub async fn pinged(&mut self) -> bool {
+        loop {
+            let frame = tokio::time::timeout(WAIT, self.socket.next()).await.expect("timed out waiting for a ping");
+
+            match frame {
+                Some(Ok(Message::Ping(_))) => return true,
+                None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return false,
+                Some(Ok(_)) => {}
+            }
+        }
+    }
+
+    pub async fn close_code(&mut self) -> Option<u16> {
+        loop {
+            let frame = tokio::time::timeout(WAIT, self.socket.next()).await.expect("timed out waiting for the stream to close");
+
+            match frame {
+                Some(Ok(Message::Close(close))) => return close.map(|close| u16::from(close.code)),
+                None | Some(Err(_)) => return None,
+                Some(Ok(_)) => {}
+            }
+        }
+    }
+
     pub async fn next(&mut self) -> StreamMessage {
         loop {
             let frame = tokio::time::timeout(WAIT, self.socket.next()).await.expect("timed out waiting for a stream message").unwrap().unwrap();
@@ -408,6 +432,8 @@ impl Server {
             database_pool_size: 30,
             database_acquire_timeout: std::time::Duration::from_secs(30),
             stream_recheck_interval: mycelium_control::STREAM_RECHECK_INTERVAL,
+            stream_heartbeat_interval: mycelium_control::STREAM_HEARTBEAT_INTERVAL,
+            stream_capacity: mycelium_control::STREAM_CAPACITY,
             public_fetch: Default::default(),
         };
         configure(&mut config);

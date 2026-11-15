@@ -130,6 +130,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
 ];
 
 const SILENT_ROUTES: &[&str] = &[
+    "POST /api/v1/client-events",
     "POST /api/v1/mention-triggers",
     "DELETE /api/v1/mention-triggers/{id}",
     "POST /api/v1/mcp-session-tokens/revoke",

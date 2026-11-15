@@ -26,7 +26,7 @@ static MIGRATOR: Migrator = sqlx::migrate!();
 
 pub fn new_state(config: Config) -> Result<AppState> {
     let pool = PgPoolOptions::new().max_connections(config.database_pool_size).acquire_timeout(config.database_acquire_timeout).connect_lazy(&config.database_url)?;
-    let (stream, _) = broadcast::channel(1024);
+    let (stream, _) = broadcast::channel(config.stream_capacity);
     let forge_cache = Arc::new(ForgeCache::new(config.forge_cache_ttl));
     let http_public = crate::outbound::public_client(&config.public_fetch)?;
 

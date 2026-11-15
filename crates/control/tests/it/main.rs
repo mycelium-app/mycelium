@@ -77,6 +77,7 @@ mod sessions;
 mod sign_in;
 mod snapshots;
 mod ssh_access;
+mod stream;
 mod start_proposals;
 mod subscription_prices;
 mod workflows;

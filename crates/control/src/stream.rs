@@ -4,10 +4,12 @@ use axum::http::header::ORIGIN;
 use axum::http::{HeaderMap, StatusCode};
 use crate::state::{AppState, Streamed};
 use axum::extract::State;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use tokio::sync::broadcast::{self, error::RecvError};
 use uuid::Uuid;
+
+const FELL_BEHIND: u16 = 4000;
 
 fn origin_of(url: &str) -> Option<String> {
     url::Url::parse(url).ok().map(|url| url.origin().ascii_serialization())
@@ -51,7 +53,9 @@ async fn session_is_live(state: &AppState, session: Uuid) -> bool {
 async fn forward(state: AppState, user: AuthUser, mut receiver: broadcast::Receiver<Streamed>, mut socket: WebSocket) {
     let user_id = user.id;
     let mut recheck = tokio::time::interval(state.config.stream_recheck_interval);
+    let mut heartbeat = tokio::time::interval(state.config.stream_heartbeat_interval);
     recheck.tick().await;
+    heartbeat.tick().await;
 
     loop {
         tokio::select! {
@@ -60,6 +64,11 @@ async fn forward(state: AppState, user: AuthUser, mut receiver: broadcast::Recei
                     if !session_is_live(&state, session).await {
                         break;
                     }
+                }
+            },
+            _ = heartbeat.tick() => {
+                if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    break;
                 }
             },
             streamed = receiver.recv() => match streamed {
@@ -76,7 +85,12 @@ async fn forward(state: AppState, user: AuthUser, mut receiver: broadcast::Recei
                         break;
                     }
                 }
-                Err(RecvError::Lagged(_)) | Err(RecvError::Closed) => break,
+                Err(RecvError::Lagged(missed)) => {
+                    tracing::info!("closing the stream of {user_id}, which fell {missed} messages behind");
+                    let _ = socket.send(Message::Close(Some(CloseFrame { code: FELL_BEHIND, reason: "fell behind".into() }))).await;
+                    break;
+                }
+                Err(RecvError::Closed) => break,
             },
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
