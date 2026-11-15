@@ -158,6 +158,33 @@ class StoreConnectionTest {
     }
 
     @Test
+    fun theConversationListAndAnOpenedConversationReportHowLongTheyTookUnderTheRequestIdTheySent() = runTest {
+        val requestIds = mutableMapOf<String, String?>()
+        val engine = MockEngine { request ->
+            val path = request.url.encodedPath
+            requestIds[path.substringAfterLast("/")] = request.headers["x-request-id"]
+            respond(if (path.endsWith("/conversations")) "[$conversation]" else "[]", HttpStatusCode.OK, json)
+        }
+        val reported = mutableListOf<Triple<String, String, Map<String, Any?>>>()
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope, stream = Sockets()::stream, report = { kind, message, detail -> reported += Triple(kind, message, detail) })
+
+        store.start()
+        withContext(Dispatchers.Default) { withTimeout(5_000) { store.state.first { it.conversations.isNotEmpty() } } }
+        runCatching { store.open("c1") }
+        withContext(Dispatchers.Default) { withTimeout(5_000) { while (reported.none { it.second == "conversation opened" }) delay(10) } }
+
+        val list = reported.first { it.second == "conversation list shown" }
+        val opened = reported.first { it.second == "conversation opened" }
+        assertEquals("timing", list.first)
+        assertEquals(requestIds["conversations"], list.third["request_id"])
+        assertTrue(list.third["ms"] is Long, "$list")
+        assertEquals(1, list.third["conversations"])
+        assertEquals(requestIds["events"], opened.third["request_id"])
+        assertEquals(false, opened.third["reopened"])
+        assertTrue(requestIds["events"]?.length == 36, "$requestIds")
+    }
+
+    @Test
     fun aLostStreamIsReportedWithItsCloseCodeAndHowLongItWasUp() = runTest {
         val sockets = ClosesFirst(1006)
         val engine = MockEngine { respond("[]", HttpStatusCode.OK, json) }
@@ -172,7 +199,7 @@ class StoreConnectionTest {
         assertEquals(1006, closed.third["close_code"])
         assertEquals("closed for the test", closed.third["reason"])
         assertTrue(closed.third["up_for_ms"] is Long, "$closed")
-        assertEquals(listOf("open", "closed", "open"), reported.map { it.second })
+        assertEquals(listOf("open", "closed", "open"), reported.filter { it.first == "connection" }.map { it.second })
     }
 
     @Test

@@ -112,6 +112,8 @@ class Store(
     private val mutableProblem = MutableStateFlow<String?>(null)
     private var streaming: Job? = null
     private var connectAttemptedAt = timeSource.markNow()
+    private val startedAt = timeSource.markNow()
+    private var listShownReported = false
     private var lastHeardAt = timeSource.markNow()
     private val streamedConversations = MutableStateFlow<Set<String>>(emptySet())
     private val sendsInFlight = MutableStateFlow<Set<Pair<String, String>>>(emptySet())
@@ -276,7 +278,8 @@ class Store(
         launch { wellness.load() }
         launch { voice.load() }
 
-        val conversations = async { untilLoaded { api.conversations(archived = false) } }
+        val listRequestId = newRequestId()
+        val conversations = async { untilLoaded { api.conversations(archived = false, requestId = listRequestId) } }
         val nodes = async { untilLoaded { api.nodes() } }
 
         val listed = conversations.await()
@@ -286,6 +289,11 @@ class Store(
             val streamed = it.conversations.filterKeys { id -> id in streamedConversations.value && id !in fetched }
 
             it.copy(conversations = fetched + streamed)
+        }
+
+        if (!listShownReported) {
+            listShownReported = true
+            report("timing", "conversation list shown", mapOf("ms" to startedAt.elapsedNow().inWholeMilliseconds, "request_id" to listRequestId, "conversations" to listed.size))
         }
 
         val opening = Semaphore(ConcurrentOpens)
@@ -1066,6 +1074,8 @@ class Store(
     }
 
     suspend fun open(conversationId: String) {
+        val openedAt = timeSource.markNow()
+        val eventsRequestId = newRequestId()
         val reopened = conversationId in state.value.openedConversations
         var after = if (reopened) state.value.events[conversationId]?.lastOrNull()?.seq ?: 0 else 0
         mutableState.update { it.copy(openedConversations = it.openedConversations + conversationId) }
@@ -1076,7 +1086,7 @@ class Store(
 
                 if (reopened) {
                     while (true) {
-                        val page = api.events(conversationId, after, eventPageSize)
+                        val page = api.events(conversationId, after, eventPageSize, requestId = eventsRequestId)
                         fetched += page
 
                         if (page.size < eventPageSize) {
@@ -1086,7 +1096,7 @@ class Store(
                         after = page.maxOf { it.seq }
                     }
                 } else {
-                    fetched += api.events(conversationId, before = Long.MAX_VALUE, limit = eventPageSize)
+                    fetched += api.events(conversationId, before = Long.MAX_VALUE, limit = eventPageSize, requestId = eventsRequestId)
                 }
 
                 mutableState.update {
@@ -1095,6 +1105,8 @@ class Store(
 
                     it.copy(events = it.events + (conversationId to mergeEvents(it.events[conversationId].orEmpty(), fetched)), sending = sending)
                 }
+
+                report("timing", "conversation opened", mapOf("ms" to openedAt.elapsedNow().inWholeMilliseconds, "request_id" to eventsRequestId, "events" to fetched.size, "reopened" to reopened))
             }
 
             launch {

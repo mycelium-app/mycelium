@@ -70,6 +70,8 @@ private const val StreamPingMillis = 20_000L
 
 private const val CloseReasonWaitMillis = 1_000L
 
+private const val RequestIdHeader = "x-request-id"
+
 const val FellBehindCloseCode = 4000
 
 class StreamClosed(val code: Int?, val reason: String) : Exception("The server closed the stream" + (code?.let { " with $it" } ?: "") + reason.takeIf { it.isNotEmpty() }?.let { ": $it" }.orEmpty())
@@ -992,8 +994,8 @@ class MyceliumApi(
     suspend fun search(query: String, limit: Int = 20): List<SearchHit> =
         call("/search") { client.get(it) { authorise(); parameter("q", query); parameter("limit", limit) } }.body()
 
-    suspend fun conversations(archived: Boolean = false): List<Conversation> =
-        call("/conversations") { client.get(it) { authorise(); parameter("archived", archived) } }.body()
+    suspend fun conversations(archived: Boolean = false, requestId: String? = null): List<Conversation> =
+        call("/conversations") { client.get(it) { authorise(); requestId?.let { id -> header(RequestIdHeader, id) }; parameter("archived", archived) } }.body()
 
     suspend fun createConversation(request: CreateConversationRequest): Conversation =
         call("/conversations") { client.post(it) { authorise(); json(request) } }.body()
@@ -1185,10 +1187,11 @@ class MyceliumApi(
 
     suspend fun sessionUpdates(id: String): List<JsonObject> = call("/conversations/$id/session") { client.get(it) { authorise() } }.body()
 
-    suspend fun events(id: String, after: Long = 0, limit: Int = 500, before: Long? = null): List<Event> =
+    suspend fun events(id: String, after: Long = 0, limit: Int = 500, before: Long? = null, requestId: String? = null): List<Event> =
         call("/conversations/$id/events") {
             client.get(it) {
                 authorise()
+                requestId?.let { id -> header(RequestIdHeader, id) }
 
                 if (before == null) {
                     parameter("after", after)
