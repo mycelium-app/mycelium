@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.41
+
+- The web, desktop and Android apps report their errors and connection events to the control plane: uncaught errors with their stack, the notices the web page shows, lost WebGL, and the live connection opening, closing with its code and reason, and the page being hidden or shown. Agents read them with read_client_events, and they are kept for 14 days with tokens and secrets removed.
+- The live connection no longer drops when an app falls behind a burst of updates, such as many agents streaming at once on an iPad: the app reopens it straight away and catches up, without showing that it is reconnecting. An idle connection is kept open with a ping every 25 seconds.
+
 ## v0.34.40
 
 - The web app no longer shows a notice for errors while it is running, including "Script error." from scripts outside the page such as the iPad keyboard. A notice appears only when the app cannot start or has not drawn anything, and it is smaller and can be dismissed.
