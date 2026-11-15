@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.39
+
+- The web app's error notice sits at the top of the visible page instead of over the message box, stays clear of the on-screen keyboard, and shows the same error only once per session.
+- Tapping the web app on an iPad no longer raises an error: notification permission is asked on a click, and a refusal is no longer reported as one.
+
 ## v0.34.38
 
 - People can sign in on extra addresses, such as plain HTTP inside a private network: list them in `MYCELIUM_EXTRA_ORIGINS` and add each one's `/auth/callback` to the identity provider. The public address keeps its callback and secure cookies.
