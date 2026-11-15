@@ -31,13 +31,13 @@ async fn an_error_a_client_reports_is_stored_and_read_back_with_where_it_came_fr
 async fn tokens_and_secrets_in_a_report_are_never_stored() {
     let server = Server::start().await;
     let user = &server.user;
-    let leaky = json!({"at": "2026-11-15T09:00:00Z", "kind": "connection", "message": "closed wss://mycelium.example.com/api/v1/stream?token=abc123secret with Bearer myc_cli_0123456789abcdef", "detail": {"url": "https://mycelium.example.com/auth/callback?code=the-code&state=s1", "authorization": "Bearer ghp_0123456789abcdefghijklmnopqrstuvwxyz"}});
+    let leaky = json!({"at": "2026-11-15T09:00:00Z", "kind": "connection", "message": "closed wss://mycelium.example.com/api/v1/stream?token=abc123secret with Bearer myc_cli_0123456789abcdef after password=hunter2secret", "detail": {"url": "https://mycelium.example.com/auth/callback?code=the-code&state=s1", "authorization": "Bearer ghp_0123456789abcdefghijklmnopqrstuvwxyz"}});
 
     user.json(user.post("/api/v1/client-events").json(&report(json!([leaky])))).await;
     let (_, read) = user.json(user.get("/api/v1/client-events")).await;
     let stored = read["events"][0].to_string();
 
-    for secret in ["abc123secret", "myc_cli_0123456789abcdef", "the-code", "ghp_0123456789abcdefghijklmnopqrstuvwxyz"] {
+    for secret in ["abc123secret", "myc_cli_0123456789abcdef", "the-code", "ghp_0123456789abcdefghijklmnopqrstuvwxyz", "hunter2secret"] {
         assert!(!stored.contains(secret), "{secret} was stored: {stored}");
     }
 

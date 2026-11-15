@@ -173,9 +173,7 @@ fn redacted_text(text: &str) -> String {
 }
 
 fn redacted_query(word: &str) -> String {
-    let Some((address, query)) = word.split_once('?') else {
-        return word.to_string();
-    };
+    let (address, query) = word.split_once('?').map_or(("", word), |(address, query)| (address, query));
     let pairs: Vec<String> = query
         .split('&')
         .map(|pair| match pair.split_once('=') {
@@ -183,6 +181,11 @@ fn redacted_query(word: &str) -> String {
             _ => pair.to_string(),
         })
         .collect();
+    let joined = pairs.join("&");
 
-    format!("{address}?{}", pairs.join("&"))
+    if word.contains('?') {
+        format!("{address}?{joined}")
+    } else {
+        joined
+    }
 }
