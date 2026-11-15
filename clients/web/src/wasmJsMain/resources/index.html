@@ -12,7 +12,7 @@
     #status svg { width: 20px; height: 20px; animation: spin 900ms linear infinite; }
     #status .problem { color: #ec8576; max-width: 40ch; }
     #status code { display: block; margin-top: 8px; color: #a8a8a8; font: 12px/16px ui-monospace, monospace; word-break: break-word; }
-    #notice { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 2; box-sizing: border-box; width: min(560px, calc(100% - 32px)); padding: 12px 16px; border: 1px solid #ec8576; border-radius: 8px; background: #161616; color: #ec8576; }
+    #notice { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); z-index: 2; box-sizing: border-box; width: min(560px, calc(100% - 32px)); padding: 12px 16px; border: 1px solid #ec8576; border-radius: 8px; background: #161616; color: #ec8576; }
     #notice p { margin: 0; }
     #notice code { display: block; margin-top: 8px; color: #a8a8a8; font: 12px/16px ui-monospace, monospace; word-break: break-word; }
     #notice button { margin-top: 8px; min-height: 24px; padding: 4px 12px; border: 1px solid currentColor; border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
@@ -31,9 +31,36 @@
 
     function showProblem(detail) {
       var status = loading();
-      if (!status) return showNotice("Mycelium hit an error. If it stops responding, reload the page.", detail, true);
+      if (!status) {
+        if (!firstTimeThisSession(String(detail || ""))) return;
+        return showNotice("Mycelium hit an error. If it stops responding, reload the page.", detail, true);
+      }
       status.innerHTML = '<p class="problem" role="alert">Mycelium could not start in this browser. Update the browser, or open Mycelium in a current Chrome, Edge or Firefox.<code></code></p>';
       status.querySelector("code").textContent = String(detail || "");
+    }
+
+    var noticesShown = [];
+
+    function firstTimeThisSession(detail) {
+      try {
+        noticesShown = JSON.parse(window.sessionStorage.getItem("mycelium.notices") || "[]");
+      } catch (error) {}
+      if (noticesShown.indexOf(detail) !== -1) return false;
+      noticesShown.push(detail);
+      try {
+        window.sessionStorage.setItem("mycelium.notices", JSON.stringify(noticesShown));
+      } catch (error) {}
+      return true;
+    }
+
+    function keepNoticeInView() {
+      var notice = document.getElementById("notice");
+      if (notice && window.visualViewport) notice.style.top = window.visualViewport.offsetTop + 16 + "px";
+    }
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", keepNoticeInView);
+      window.visualViewport.addEventListener("scroll", keepNoticeInView);
     }
 
     function showNotice(message, detail, dismissable) {
@@ -56,6 +83,7 @@
         notice.appendChild(dismiss);
       }
       notice.dataset.untilPainted = dismissable ? "" : "yes";
+      keepNoticeInView();
     }
 
     function hideNotice() {
