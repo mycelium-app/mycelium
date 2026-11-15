@@ -25,8 +25,10 @@ mod server_tools;
 mod ssh_access;
 mod terminals;
 mod todos;
+mod traces;
 mod workflows;
 
+use tracing::Instrument;
 use crate::error::{ApiError, ApiResult};
 use crate::mcp_tokens::SESSION_TOKEN_PREFIX;
 use crate::learned;
@@ -66,6 +68,7 @@ enum Area {
     Instructions,
     GoalAndUsage,
     ClientEvents,
+    Traces,
     Todos,
     ProjectIcon,
     Projects,
@@ -95,6 +98,7 @@ fn area_of(tool: &str) -> Option<Area> {
         "get_instructions" | "propose_instructions_edit" => Some(Area::Instructions),
         "get_goal" | "report_goal" | "get_account_usage" => Some(Area::GoalAndUsage),
         "read_client_events" => Some(Area::ClientEvents),
+        "read_traces" => Some(Area::Traces),
         "set_todos" => Some(Area::Todos),
         "set_project_icon" => Some(Area::ProjectIcon),
         "create_project" | "update_project" => Some(Area::Projects),
@@ -128,6 +132,7 @@ async fn call_area(area: Area, call: ToolCall<'_>) -> ApiResult<ToolReply> {
         Area::Instructions => instructions::call(call).await,
         Area::GoalAndUsage => goal_and_usage::call(call).await,
         Area::ClientEvents => client_events::call(call).await,
+        Area::Traces => traces::call(call).await,
         Area::Todos => todos::call(call).await,
         Area::ProjectIcon => project_icon::call(call).await,
         Area::Projects => projects::call(call).await,
@@ -193,6 +198,7 @@ pub fn tool_definitions() -> Value {
         instructions::definitions(),
         goal_and_usage::definitions(),
         client_events::definitions(),
+        traces::definitions(),
         todos::definitions(),
         project_icon::definitions(),
         projects::definitions(),
@@ -322,7 +328,15 @@ pub async fn respond(state: &AppState, node_id: Uuid, conversation_id: Option<Uu
 
             match (called.as_deref(), area) {
                 (Some(tool), Some(area)) => {
-                    let outcome = call_area(area, ToolCall { caller, tool, params: &params, arguments }).await?;
+                    let span = tracing::info_span!("mcp_tool", tool = tool, error = tracing::field::Empty, owner = tracing::field::Empty);
+
+                    if let Ok(owner) = caller.owner().await {
+                        span.record("owner", tracing::field::display(owner));
+                    }
+
+                    let outcome = call_area(area, ToolCall { caller, tool, params: &params, arguments }).instrument(span.clone()).await;
+                    span.record("error", outcome.as_ref().map_or(true, |reply| matches!(reply, ToolReply::Text { is_error: true, .. } | ToolReply::Invalid(_))));
+                    let outcome = outcome?;
 
                     match outcome {
                         ToolReply::Text { text, is_error } => reply(&id, tool_text(&text, is_error)),

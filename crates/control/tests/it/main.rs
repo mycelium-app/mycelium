@@ -86,6 +86,7 @@ mod tandoor;
 mod remote_images;
 mod web_search;
 mod todos;
+mod traces;
 mod terminal_tools;
 mod transcriptions;
 mod usage_history;

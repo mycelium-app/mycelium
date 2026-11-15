@@ -100,6 +100,7 @@ mod ssh_access;
 mod start_proposals;
 mod state;
 mod todos;
+mod traces;
 mod store;
 mod stream;
 mod terminals;
@@ -133,7 +134,8 @@ mod web_search;
 mod zulip;
 
 pub use forge_cache::FORGE_CACHE_TTL;
-pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, FORGE_WATCH_INTERVAL, OidcConfig, PublicFetchRouting, SCHEDULER_TICK, STEER_TIMEOUT, STREAM_CAPACITY, STREAM_HEARTBEAT_INTERVAL, STREAM_RECHECK_INTERVAL, TOOLS_LISTING_GRACE, VERSION_CHECK_INTERVAL};
+pub use traces::recorder;
+pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, FORGE_WATCH_INTERVAL, OidcConfig, PublicFetchRouting, SCHEDULER_TICK, STEER_TIMEOUT, STREAM_CAPACITY, STREAM_HEARTBEAT_INTERVAL, STREAM_RECHECK_INTERVAL, TRACE_KEPT_IN_FULL, TOOLS_LISTING_GRACE, VERSION_CHECK_INTERVAL};
 
 use anyhow::Result;
 use axum::Router;
@@ -145,8 +147,17 @@ use tokio::net::TcpListener;
 use tower::Layer;
 use tracing_subscriber::EnvFilter;
 
+fn install_tracing() {
+    use tracing_subscriber::Layer as _;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    let logs = tracing_subscriber::fmt::layer().with_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")));
+    let _ = tracing_subscriber::registry().with(logs).with(traces::recorder()).try_init();
+}
+
 pub async fn serve() -> Result<()> {
-    tracing_subscriber::fmt().with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))).init();
+    install_tracing();
 
     let config = Config::from_env()?;
     let listener = TcpListener::bind(config.listen).await?;
@@ -171,8 +182,10 @@ pub async fn run(config: Config, listener: TcpListener) -> Result<()> {
         tracing::warn!("MYCELIUM_ALLOWED_EMAILS is empty, so every account at the identity provider can sign in and run agents on every node.");
     }
 
+    install_tracing();
     let state = boot::new_state(config)?;
 
+    traces::store_regularly(state.clone());
     tokio::spawn(boot::migrate_until_ready(state.clone()));
     tokio::spawn(versions::refresh_regularly(state.clone()));
     tokio::spawn(schedules::run_regularly(state.clone()));
@@ -471,6 +484,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/start-proposals/{id}/decline", post(start_proposals::decline))
         .route("/api/v1/inbox/feed", get(inbox_feed::feed))
         .route("/api/v1/client-events", get(client_events::list).post(client_events::create))
+        .route("/api/v1/traces", get(traces::list))
         .route("/api/v1/api-access-requests", get(api_access::list))
         .route("/api/v1/api-access-requests/{id}/approve", post(api_access::approve))
         .route("/api/v1/api-access-requests/{id}/decline", post(api_access::decline))
@@ -540,6 +554,7 @@ fn router(state: AppState) -> Router {
         .route_layer(axum::middleware::from_fn_with_state(state.clone(), auth::refuse_cross_site_session_writes))
         .route_layer(axum::middleware::from_fn_with_state(state.clone(), experiments::gate))
         .route_layer(axum::middleware::from_fn_with_state(state.clone(), api_access::gate_scoped_tokens))
+        .route_layer(axum::middleware::from_fn(traces::http))
         .fallback_service(tower_http::set_header::SetResponseHeaderLayer::overriding(axum::http::header::CACHE_CONTROL, axum::http::HeaderValue::from_static("no-cache")).layer(web::single_page_app(&web_dir)))
         .with_state(state)
 }

@@ -179,7 +179,7 @@ impl McpConnection {
         let body = json!({"jsonrpc": "2.0", "method": method});
 
         if let Ok(request) = self.prepare(method, None, timeout) {
-            request.json(&body).send().await.ok();
+            crate::traces::send(request.json(&body)).await.ok();
         }
     }
 
@@ -233,7 +233,7 @@ impl McpConnection {
         let body = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
         let name = params["name"].as_str().filter(|_| method == "tools/call");
         let request = self.prepare(method, name, timeout)?;
-        let Ok(response) = request.json(&body).send().await else {
+        let Ok(response) = crate::traces::send(request.json(&body)).await else {
             return Err(McpError::Unreachable);
         };
         let status = response.status().as_u16();

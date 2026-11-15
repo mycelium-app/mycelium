@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 
+use tracing_subscriber::Layer as _;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use futures_util::{SinkExt, StreamExt};
 use mycelium_control::Config;
 use mycelium_proto::conversation::{AgentId, AgentInfo, Conversation};
@@ -384,7 +387,8 @@ impl Server {
     }
 
     pub async fn start_on(database_url: String, configure: impl FnOnce(&mut Config)) -> Server {
-        let _ = tracing_subscriber::fmt().with_test_writer().with_max_level(tracing::Level::WARN).try_init();
+        let logs = tracing_subscriber::fmt::layer().with_test_writer().with_filter(tracing_subscriber::filter::LevelFilter::WARN);
+        let _ = tracing_subscriber::registry().with(logs).with(mycelium_control::recorder()).try_init();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let directory = TempDir::new().unwrap();
@@ -434,6 +438,7 @@ impl Server {
             stream_recheck_interval: mycelium_control::STREAM_RECHECK_INTERVAL,
             stream_heartbeat_interval: mycelium_control::STREAM_HEARTBEAT_INTERVAL,
             stream_capacity: mycelium_control::STREAM_CAPACITY,
+            trace_kept_in_full: mycelium_control::TRACE_KEPT_IN_FULL,
             public_fetch: Default::default(),
         };
         configure(&mut config);

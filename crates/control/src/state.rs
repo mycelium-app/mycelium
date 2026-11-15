@@ -860,7 +860,8 @@ pub struct AppState {
 impl AppState {
     pub async fn ask_node<A: NodeAnswer>(&self, node_id: Uuid, timeout: Duration, message: impl FnOnce(Uuid) -> ControlToNode) -> Option<A> {
         let (request_id, answered) = self.hub.begin_request::<A>(node_id, message)?;
-        let answer = tokio::time::timeout(timeout, answered).await.ok().and_then(Result::ok);
+        let span = tracing::info_span!("node", answer = std::any::type_name::<A>().rsplit("::").next().unwrap_or_default(), node = %node_id);
+        let answer = tracing::Instrument::instrument(tokio::time::timeout(timeout, answered), span).await.ok().and_then(Result::ok);
         self.hub.forget_request::<A>(request_id);
 
         answer

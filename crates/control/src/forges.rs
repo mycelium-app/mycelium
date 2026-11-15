@@ -273,7 +273,7 @@ impl ForgeApi {
 
     async fn fetch(&self, http: &reqwest::Client, path: &str) -> Result<Value, ForgeError> {
         let request = self.authorised(http.get(format!("{}{path}", self.api_url())));
-        let response = request.send().await.map_err(|_| ForgeError::Unreachable)?;
+        let response = crate::traces::send(request).await.map_err(|_| ForgeError::Unreachable)?;
         let response = self.refused(response).await?;
         let status = response.status();
 
@@ -467,7 +467,7 @@ impl ForgeApi {
             }
         };
         let request = self.authorised(http.request(method, format!("{}{url}", self.api_url()))).json(&body);
-        let sent = request.send().await;
+        let sent = crate::traces::send(request).await;
 
         self.invalidate();
 
@@ -537,7 +537,7 @@ impl ForgeApi {
     }
 
     async fn send_change(&self, http: &reqwest::Client, method: reqwest::Method, url: String, body: Value) -> Result<Value, ForgeError> {
-        let sent = self.authorised(http.request(method, format!("{}{url}", self.api_url()))).json(&body).send().await;
+        let sent = crate::traces::send(self.authorised(http.request(method, format!("{}{url}", self.api_url()))).json(&body)).await;
 
         self.invalidate();
 
@@ -795,7 +795,7 @@ impl ForgeApi {
         let query = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { reviewThreads(first: 100) { nodes { isResolved comments(first: 100) { nodes { databaseId } } } } } } }";
         let body = serde_json::json!({"query": query, "variables": {"owner": owner, "name": name, "number": number}});
         let address = if self.base_url == "https://github.com" { "https://api.github.com/graphql".to_string() } else { format!("{}/api/graphql", self.base_url) };
-        let sent = self.authorised(http.post(address)).json(&body).send().await;
+        let sent = crate::traces::send(self.authorised(http.post(address)).json(&body)).await;
         let Ok(response) = sent else {
             return HashMap::new();
         };
@@ -833,7 +833,7 @@ impl ForgeApi {
             }
         };
         let request = self.authorised(http.get(format!("{}{path}", self.api_url()))).header("accept", accept);
-        let response = request.send().await.map_err(|_| ForgeError::Unreachable)?;
+        let response = crate::traces::send(request).await.map_err(|_| ForgeError::Unreachable)?;
         let response = self.refused(response).await?;
         let status = response.status();
 
@@ -963,7 +963,7 @@ impl ForgeApi {
             }
         };
         let request = self.authorised(http.post(format!("{}{path}", self.api_url()))).json(&body);
-        let sent = request.send().await;
+        let sent = crate::traces::send(request).await;
 
         self.invalidate();
 

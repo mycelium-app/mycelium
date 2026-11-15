@@ -147,7 +147,7 @@ pub async fn proxy(State(state): State<AppState>, user: AuthUser, Path((server_i
             }
         }
 
-        let response = match request.send().await {
+        let response = match crate::traces::send(request).await {
             Ok(response) => response,
             Err(_) => {
                 record(&state, &user, server, &tool, reading, true).await;

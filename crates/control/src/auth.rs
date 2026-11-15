@@ -114,6 +114,8 @@ impl FromRequestParts<AppState> for AuthUser {
             .execute(&state.pool)
             .await?;
 
+            crate::traces::record_owner(token.user_id);
+
             return Ok(AuthUser { id: token.user_id, email: token.email, name: token.name, session: Some(token.session), scopes: token.scopes, expires_at: token.expires_at });
         }
 
@@ -137,6 +139,10 @@ impl FromRequestParts<AppState> for AuthUser {
             .bind(user_agent)
             .execute(&state.pool)
             .await?;
+        }
+
+        if let Some((id, ..)) = &row {
+            crate::traces::record_owner(*id);
         }
 
         row.map(|(id, email, name, session)| AuthUser { id, email, name, session: Some(session), scopes: None, expires_at: None }).ok_or_else(ApiError::unauthorised)
@@ -280,7 +286,7 @@ pub async fn login(State(state): State<AppState>, headers: HeaderMap, Query(quer
 
 async fn discover(state: &AppState, oidc: &OidcConfig) -> ApiResult<Value> {
     let url = format!("{}/.well-known/openid-configuration", oidc.issuer.trim_end_matches('/'));
-    let response = state.http.get(url).send().await.map_err(ApiError::internal)?;
+    let response = crate::traces::send(state.http.get(url)).await.map_err(ApiError::internal)?;
 
     response.json().await.map_err(ApiError::internal)
 }
@@ -325,7 +331,7 @@ pub async fn callback(State(state): State<AppState>, headers: HeaderMap, Query(q
     }
 
     let body = url::form_urlencoded::Serializer::new(String::new()).extend_pairs(&form).finish();
-    let tokens: Value = state.http.post(token_endpoint).header(CONTENT_TYPE, "application/x-www-form-urlencoded").body(body).send().await.map_err(ApiError::internal)?.json().await.map_err(ApiError::internal)?;
+    let tokens: Value = crate::traces::send(state.http.post(token_endpoint).header(CONTENT_TYPE, "application/x-www-form-urlencoded").body(body)).await.map_err(ApiError::internal)?.json().await.map_err(ApiError::internal)?;
     let id_token = tokens["id_token"].as_str().ok_or_else(|| ApiError::internal("token response has no id_token"))?;
     let payload = id_token.split('.').nth(1).ok_or_else(|| ApiError::internal("malformed id_token"))?;
     let claims: Value = URL_SAFE_NO_PAD.decode(payload).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).ok_or_else(|| ApiError::internal("malformed id_token"))?;

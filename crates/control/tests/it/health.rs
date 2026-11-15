@@ -70,6 +70,7 @@ async fn readyz_is_503_and_healthz_stays_200_when_the_database_is_unreachable_at
             stream_recheck_interval: mycelium_control::STREAM_RECHECK_INTERVAL,
             stream_heartbeat_interval: mycelium_control::STREAM_HEARTBEAT_INTERVAL,
             stream_capacity: mycelium_control::STREAM_CAPACITY,
+            trace_kept_in_full: mycelium_control::TRACE_KEPT_IN_FULL,
             public_fetch: Default::default(),
         };
 
@@ -204,6 +205,7 @@ async fn a_failed_migration_keeps_the_process_up_and_reports_the_error() {
             stream_recheck_interval: mycelium_control::STREAM_RECHECK_INTERVAL,
             stream_heartbeat_interval: mycelium_control::STREAM_HEARTBEAT_INTERVAL,
             stream_capacity: mycelium_control::STREAM_CAPACITY,
+            trace_kept_in_full: mycelium_control::TRACE_KEPT_IN_FULL,
             public_fetch: Default::default(),
     };
 
