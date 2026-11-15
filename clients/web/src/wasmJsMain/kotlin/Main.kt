@@ -98,10 +98,10 @@ private external fun chooseFiles(onFile: (JsString, JsString, JsString) -> Unit)
 @JsFun("() => document.hasFocus()")
 private external fun pageFocused(): Boolean
 
-@JsFun("() => { if (typeof Notification !== 'undefined' && Notification.permission === 'default') { Notification.requestPermission(); } }")
+@JsFun("() => { if (typeof Notification !== 'undefined' && Notification.permission === 'default') { Promise.resolve(Notification.requestPermission()).catch(() => {}); } }")
 private external fun askNotificationPermission()
 
-@JsFun("() => { if (typeof Notification !== 'undefined' && Notification.permission === 'default') { document.addEventListener('pointerdown', () => Notification.requestPermission(), { once: true }); } }")
+@JsFun("() => { if (typeof Notification !== 'undefined' && Notification.permission === 'default') { document.addEventListener('click', () => { Promise.resolve(Notification.requestPermission()).catch(() => {}); }, { once: true }); } }")
 private external fun askNotificationPermissionOnFirstClick()
 
 @JsFun("""(title, body, id, onOpen) => {
