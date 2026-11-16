@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.34.44
+
+- The apps load the sidebar 50 conversations at a time instead of every conversation at once, with anything waiting on you, pinned, flagged or running always included, and the next page as the sidebar scrolls. Subagents, managed conversations, an assistant's chats and searches are asked for where they are shown. The last list appears straight away at start.
+- Integration tool calls reuse their MCP session instead of starting a new one each time.
+- The Apps tab answers from what is stored and refreshes from Coolify in the background, and starting, stopping or redeploying an app refreshes it at once.
+
 ## v0.34.43
 
 - The control plane gzips its answers, and the desktop and Android apps ask for it: the conversation list a phone downloads at start is about nine times smaller.
