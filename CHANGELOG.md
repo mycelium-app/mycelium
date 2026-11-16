@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.34.49
+
+- An OAuth integration whose token could not be refreshed shows Needs sign-in in Settings until it is signed in again, like FreeAgent does.
+- No control is shorter than 24 pixels in any density, so every target meets the minimum size. Small controls are 24 pixels at default density too, and taller ones still get shorter in compact density.
+- The setup flow's token form labels its expiry menu Expiration and its main button is the primary one, as in the design.
+- Closing the integration setup while a sign-in waits for the browser, or after it finished but before Add integration, cancels that sign-in.
+
 ## v0.34.48
 
 - Changing a conversation's model, account, agent or node while it is working takes effect at once: Mycelium stops the running turn, applies the change, and then sends any queued messages under the new settings. The move sheet has one Move, which stops the turn first. An agent that moves its own conversation still moves when its reply ends, and moves at a usage limit are unchanged.
