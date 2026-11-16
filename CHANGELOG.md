@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.46
+
+- Conversation events say when the control plane received them, so the time an agent's harness spends reviewing a tool call before sending it can be measured.
+- Mycelium's tools that only read are marked as read-only for agent harnesses.
+
 ## v0.34.45
 
 - The archive loads 100 conversations at a time and the next page as you scroll, instead of every archived conversation at once, and its search finds archived conversations on the server.
