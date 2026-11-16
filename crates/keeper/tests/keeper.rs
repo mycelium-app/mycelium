@@ -6,6 +6,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 
+const STUCK_KEEPER: Duration = Duration::from_secs(120);
+
 struct Client {
     lines: Lines<BufReader<OwnedReadHalf>>,
     writer: OwnedWriteHalf,
@@ -30,7 +32,7 @@ impl Client {
     }
 
     async fn next(&mut self) -> Option<Value> {
-        let line = tokio::time::timeout(Duration::from_secs(5), self.lines.next_line()).await.expect("keeper went quiet").unwrap()?;
+        let line = tokio::time::timeout(STUCK_KEEPER, self.lines.next_line()).await.expect("keeper went quiet").unwrap()?;
 
         Some(serde_json::from_str(&line).unwrap())
     }

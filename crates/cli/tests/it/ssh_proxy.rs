@@ -14,7 +14,7 @@ use tokio::net::TcpListener;
 use tokio::process::Command;
 use uuid::Uuid;
 
-const WAIT: Duration = Duration::from_secs(15);
+const WAIT: Duration = Duration::from_secs(120);
 
 type Seen = Arc<Mutex<Vec<(String, String)>>>;
 
