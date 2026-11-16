@@ -296,10 +296,10 @@ pub async fn append_event(tx: &mut Tx<'_>, conversation_id: Uuid, kind: EventKin
         &redacted
     };
 
-    let seq = sqlx::query_scalar::<_, i64>(
+    let inserted = sqlx::query_as::<_, (i64, chrono::DateTime<chrono::Utc>)>(
         "insert into events (conversation_id, seq, kind, payload, node_seq)
          select $1, coalesce(max(seq), 0) + 1, $2, $3, $4 from events where conversation_id = $1
-         on conflict do nothing returning seq",
+         on conflict do nothing returning seq, created_at",
     )
     .bind(conversation_id)
     .bind(enum_text(&kind))
@@ -308,7 +308,7 @@ pub async fn append_event(tx: &mut Tx<'_>, conversation_id: Uuid, kind: EventKin
     .fetch_optional(&mut **tx)
     .await?;
 
-    let Some(seq) = seq else {
+    let Some((seq, created_at)) = inserted else {
         return Ok(None);
     };
 
@@ -337,7 +337,7 @@ pub async fn append_event(tx: &mut Tx<'_>, conversation_id: Uuid, kind: EventKin
         _ => {}
     }
 
-    Ok(Some(Event { conversation_id, seq, kind, payload: payload.clone() }))
+    Ok(Some(Event { conversation_id, seq, kind, payload: payload.clone(), created_at: Some(created_at) }))
 }
 
 pub async fn note_agent_reply(tx: &mut Tx<'_>, conversation_id: Uuid, turn_end_seq: i64) -> sqlx::Result<()> {

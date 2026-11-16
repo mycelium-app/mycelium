@@ -88,6 +88,7 @@ mod tandoor;
 mod remote_images;
 mod web_search;
 mod todos;
+mod tool_review;
 mod traces;
 mod terminal_tools;
 mod transcriptions;

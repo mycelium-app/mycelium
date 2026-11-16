@@ -186,6 +186,33 @@ fn tool_text(text: &str, is_error: bool) -> Value {
     json!({"content": [{"type": "text", "text": text}], "isError": is_error})
 }
 
+const READ_ONLY_TOOLS: [&str; 24] = [
+    "find_integration_tools",
+    "list_places",
+    "get_workflow",
+    "recall",
+    "read_earlier_turns",
+    "assistant_list_files",
+    "assistant_read_file",
+    "assistant_list",
+    "get_instructions",
+    "get_goal",
+    "get_account_usage",
+    "read_client_events",
+    "read_traces",
+    "find_conversations",
+    "read_conversation",
+    "read_usage",
+    "list_watches",
+    "find_artifacts",
+    "read_artifact",
+    "read_artifact_feedback",
+    "environment_screenshot",
+    "terminal_list",
+    "terminal_read",
+    "list_needs_you",
+];
+
 pub fn tool_definitions() -> Value {
     let areas = [
         integration_tools::definitions(),
@@ -216,7 +243,15 @@ pub fn tool_definitions() -> Value {
         feed::definitions(),
     ];
 
-    Value::Array(areas.into_iter().flat_map(|definitions| definitions.as_array().cloned().unwrap_or_default()).collect())
+    Value::Array(areas.into_iter().flat_map(|definitions| definitions.as_array().cloned().unwrap_or_default()).map(annotated).collect())
+}
+
+fn annotated(mut definition: Value) -> Value {
+    if definition["name"].as_str().is_some_and(|name| READ_ONLY_TOOLS.contains(&name)) {
+        definition["annotations"] = json!({"readOnlyHint": true});
+    }
+
+    definition
 }
 
 pub const COWORK_INSTRUCTIONS: &str = "Cowork: when the person asks for something done in a browser or another app, do it in this conversation's environment. If none is running, start one with environment_start. For a goal on a web page, hand it to browser_task first; it runs each step quickly and tells you when it is done or blocked, and you carry on with screenshots and clicks only then. Click by describing the target (environment_click with target) rather than by coordinates when you can. Open other apps with environment_launch. When the person takes over, wait until they hand back, then take a screenshot before relying on what you saw earlier.";

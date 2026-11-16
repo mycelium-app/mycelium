@@ -1019,9 +1019,9 @@ pub async fn events(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 
     let rows = match query.before {
         Some(before) => {
-            sqlx::query_as::<_, (i64, String, Value)>(
+            sqlx::query_as::<_, (i64, String, Value, chrono::DateTime<chrono::Utc>)>(
                 "with page_start as (select min(seq) as seq from (select seq from events where conversation_id = $1 and seq < $2 order by seq desc limit $3) newest)
-                 select seq, kind, payload from events
+                 select seq, kind, payload, created_at from events
                  where conversation_id = $1 and seq < $2
                    and seq >= greatest(coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message' and seq <= (select seq from page_start)), 0), (select seq from page_start) - $3)
                  order by seq",
@@ -1033,7 +1033,7 @@ pub async fn events(State(state): State<AppState>, user: AuthUser, Path(id): Pat
             .await?
         }
         None => {
-            sqlx::query_as::<_, (i64, String, Value)>("select seq, kind, payload from events where conversation_id = $1 and seq > $2 order by seq limit $3")
+            sqlx::query_as::<_, (i64, String, Value, chrono::DateTime<chrono::Utc>)>("select seq, kind, payload, created_at from events where conversation_id = $1 and seq > $2 order by seq limit $3")
                 .bind(id)
                 .bind(query.after)
                 .bind(limit)
@@ -1044,8 +1044,8 @@ pub async fn events(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 
     let mut events = Vec::new();
 
-    for (seq, kind, payload) in rows {
-        events.push(Event { conversation_id: id, seq, kind: parse_enum(&kind)?, payload });
+    for (seq, kind, payload, created_at) in rows {
+        events.push(Event { conversation_id: id, seq, kind: parse_enum(&kind)?, payload, created_at: Some(created_at) });
     }
 
     Ok(Json(events))

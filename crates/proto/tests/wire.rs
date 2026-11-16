@@ -279,7 +279,7 @@ fn stream_messages_are_tagged_and_flatten_the_conversation_row() {
     assert_eq!(json["status"], "input");
     assert_eq!(json["agent"], "claude");
 
-    let event = round_trip(&StreamMessage::Event(Event { conversation_id: id(), seq: 3, kind: EventKind::TurnEnd, payload: json!({"stop_reason": "end_turn"}) }));
+    let event = round_trip(&StreamMessage::Event(Event { conversation_id: id(), seq: 3, kind: EventKind::TurnEnd, payload: json!({"stop_reason": "end_turn"}), created_at: None }));
 
     assert_eq!(event["type"], "event");
     assert_eq!(event["kind"], "turn_end");
