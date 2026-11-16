@@ -290,6 +290,36 @@ async fn two_apps_lists_in_quick_succession_refresh_from_coolify_once() {
 }
 
 #[tokio::test]
+async fn stopping_an_app_refreshes_the_stored_list_at_once_instead_of_after_the_wait() {
+    let server = Server::start().await;
+    let (base, fake) = fake_coolify().await;
+    let (_, account) = add_coolify(&server, &base).await;
+    store_apps(&server, &account, json!([{"uuid": "a1", "name": "notes (stored)", "status": "running"}])).await;
+    let mut stream = server.user.stream().await;
+
+    server.user.json(server.user.get("/api/v1/apps")).await;
+    stream.until(|message| matches!(message, StreamMessage::AppsChanged).then_some(())).await;
+    let before = fake.listings.load(Ordering::SeqCst);
+
+    let stopped = server.user.post("/api/v1/apps/a1/stop").send().await.unwrap();
+    server.user.json(server.user.get("/api/v1/apps")).await;
+    let mut listings = before;
+
+    for _ in 0..100 {
+        listings = fake.listings.load(Ordering::SeqCst);
+
+        if listings > before {
+            break;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+
+    assert_eq!(stopped.status(), 204);
+    assert_eq!(listings, before + 1);
+}
+
+#[tokio::test]
 async fn creating_an_app_asks_first_and_records_the_conversation_that_built_it() {
     let server = Server::start().await;
     let node = server.online_node("laptop").await;

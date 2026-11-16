@@ -971,12 +971,14 @@ pub async fn call(state: &AppState, owner: Uuid, server: &ServerRow, credentials
                     }
                     DEPLOY => {
                         let deployment = handle.deploy(state, &uuid, "agent", conversation).await?;
+                        apps_due(state, owner);
                         let entry = handle.application(&uuid).await.unwrap_or(Value::Null);
 
                         Ok(json!({"app_uuid": uuid, "app_name": entry["name"], "deployment_uuid": deployment, "address": first_address(&entry["fqdn"])}))
                     }
                     STOP | START => {
                         handle.call(reqwest::Method::POST, &format!("applications/{uuid}/{tool}"), None).await?;
+                        apps_due(state, owner);
 
                         Ok(json!({"app_uuid": uuid, "requested": tool}))
                     }
@@ -1212,6 +1214,7 @@ pub async fn delete_env(State(state): State<AppState>, user: AuthUser, Path((uui
 pub async fn redeploy(State(state): State<AppState>, user: AuthUser, Path(uuid): Path<String>) -> ApiResult<Json<Value>> {
     let (_, handle) = account(&state, user.id, None).await?;
     let deployment = handle.deploy(&state, &uuid, "person", None).await.map_err(failed)?;
+    apps_due(&state, user.id);
 
     Ok(Json(json!({"deployment_uuid": deployment})))
 }
@@ -1220,6 +1223,7 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Path(uuid): Pa
     let (_, handle) = account(&state, user.id, None).await?;
 
     handle.call(reqwest::Method::POST, &format!("applications/{uuid}/start"), None).await.map_err(failed)?;
+    apps_due(&state, user.id);
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1228,6 +1232,7 @@ pub async fn stop(State(state): State<AppState>, user: AuthUser, Path(uuid): Pat
     let (_, handle) = account(&state, user.id, None).await?;
 
     handle.call(reqwest::Method::POST, &format!("applications/{uuid}/stop"), None).await.map_err(failed)?;
+    apps_due(&state, user.id);
 
     Ok(StatusCode::NO_CONTENT)
 }
