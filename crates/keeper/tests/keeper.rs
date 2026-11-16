@@ -190,3 +190,36 @@ async fn a_second_keeper_for_the_same_session_is_refused_and_the_first_keeps_ser
     client.send(json!({"id": 1})).await;
     assert_eq!(client.next().await.unwrap(), json!({"seq": 1, "dir": "out", "frame": {"id": 1}}));
 }
+
+#[cfg(target_os = "linux")]
+fn running(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| stat.rsplit(')').next().is_some_and(|rest| !rest.trim_start().starts_with('Z')))
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn closing_the_agent_also_stops_the_processes_it_started() {
+    let dir = tempfile::tempdir().unwrap();
+    let child_file = dir.path().join("child.pid");
+    let keeper = start(dir.path(), &format!("sleep 600 & echo $! > {}; cat", child_file.display()));
+    let mut client = Client::attach(dir.path(), 0).await;
+    client.next().await.unwrap();
+    let mut child = None;
+
+    for _ in 0..100 {
+        child = std::fs::read_to_string(&child_file).ok().and_then(|text| text.trim().parse::<u32>().ok());
+
+        if child.is_some() {
+            break;
+        }
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let child = child.expect("the agent started its child");
+    client.writer.write_all(format!("{}\n", json!({"close": true})).as_bytes()).await.unwrap();
+    keeper.await.unwrap().unwrap();
+
+    assert!(!running(child), "the agent's child kept running after the agent was closed");
+}
+

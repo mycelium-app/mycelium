@@ -199,3 +199,47 @@ fn an_agent_stops_when_its_keeper_is_killed() {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_new_keeper_stops_what_a_killed_keepers_agent_left_running_before_its_own_agent_starts() {
+    let dir = tempfile::tempdir().unwrap();
+    let child_file = dir.path().join("child.pid");
+    let ready_file = dir.path().join("ready");
+    let wait_for = |file: &std::path::Path| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+
+        loop {
+            if let Some(text) = std::fs::read_to_string(file).ok().filter(|text| !text.trim().is_empty()) {
+                return text;
+            }
+
+            assert!(std::time::Instant::now() < deadline, "{} never appeared", file.display());
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    };
+    let alive = |pid: u32| std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| stat.rsplit(')').next().is_some_and(|rest| !rest.trim_start().starts_with('Z')));
+    let mut first = std::process::Command::new(assert_cmd::cargo::cargo_bin("mycelium"))
+        .args(["keeper", "--dir"])
+        .arg(dir.path())
+        .args(["--", "sh", "-c", &format!("sleep 600 & echo $! > {}; wait", child_file.display())])
+        .spawn()
+        .unwrap();
+    let left_running: u32 = wait_for(&child_file).trim().parse().unwrap();
+
+    first.kill().unwrap();
+    first.wait().unwrap();
+    let mut second = std::process::Command::new(assert_cmd::cargo::cargo_bin("mycelium"))
+        .args(["keeper", "--dir"])
+        .arg(dir.path())
+        .args(["--", "sh", "-c", &format!("echo ready > {}; exec sleep 600", ready_file.display())])
+        .spawn()
+        .unwrap();
+    wait_for(&ready_file);
+    let stopped = !alive(left_running);
+
+    second.kill().unwrap();
+    second.wait().unwrap();
+    assert!(stopped, "the killed keeper's agent left {left_running} running beside the new agent");
+}
+

@@ -11,6 +11,9 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::process::Command;
 use tokio::sync::{mpsc, watch};
 
+const SESSION_MARK: &str = "MYCELIUM_KEEPER_SESSION";
+const STRAY_GRACE_STEPS: u32 = 20;
+const STRAY_GRACE_STEP: std::time::Duration = std::time::Duration::from_millis(100);
 const EXIT_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 struct Journal {
@@ -48,7 +51,9 @@ pub async fn run(dir: PathBuf, command: Vec<String>) -> Result<()> {
     };
 
     std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    let dir = dir.canonicalize().with_context(|| format!("resolve {}", dir.display()))?;
     let _session = hold_session(&dir)?;
+    stop_strays(&dir).await;
     let socket_path = dir.join("keeper.sock");
     let _ = std::fs::remove_file(&socket_path);
     let _ = std::fs::remove_file(dir.join("exit.json"));
@@ -69,6 +74,7 @@ pub async fn run(dir: PathBuf, command: Vec<String>) -> Result<()> {
     });
 
     let mut agent = Command::new(program);
+    agent.env(SESSION_MARK, &dir);
     stop_with_keeper(&mut agent);
     let mut child = agent
         .args(args)
@@ -131,6 +137,7 @@ pub async fn run(dir: PathBuf, command: Vec<String>) -> Result<()> {
             child.wait().await?
         }
     };
+    stop_strays(&dir).await;
     let _ = tokio::time::timeout(EXIT_DRAIN_TIMEOUT, reader).await;
     let code = status.code().unwrap_or(-1);
     std::fs::write(dir.join("exit.json"), json!({"exit": code}).to_string())?;
@@ -233,6 +240,50 @@ fn hold_session(dir: &Path) -> Result<std::fs::File> {
 
     Ok(lock)
 }
+
+#[cfg(target_os = "linux")]
+async fn stop_strays(dir: &Path) {
+    let mark = format!("{SESSION_MARK}={}", dir.display());
+    let strays = marked_processes(&mark);
+
+    for pid in &strays {
+        unsafe { libc::kill(*pid, libc::SIGTERM) };
+    }
+
+    for _ in 0..STRAY_GRACE_STEPS {
+        if strays.iter().all(|pid| !running(*pid)) {
+            return;
+        }
+
+        tokio::time::sleep(STRAY_GRACE_STEP).await;
+    }
+
+    for pid in strays.iter().filter(|pid| running(**pid)) {
+        unsafe { libc::kill(*pid, libc::SIGKILL) };
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn marked_processes(mark: &str) -> Vec<libc::pid_t> {
+    let me = std::process::id() as libc::pid_t;
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+
+    entries
+        .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse::<libc::pid_t>().ok())
+        .filter(|pid| *pid != me)
+        .filter(|pid| std::fs::read(format!("/proc/{pid}/environ")).is_ok_and(|environ| environ.split(|byte| *byte == 0).any(|entry| entry == mark.as_bytes())))
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn running(pid: libc::pid_t) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| stat.rsplit(')').next().is_some_and(|rest| !rest.trim_start().starts_with('Z')))
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn stop_strays(_dir: &Path) {}
 
 #[cfg(target_os = "linux")]
 fn stop_with_keeper(agent: &mut Command) {
