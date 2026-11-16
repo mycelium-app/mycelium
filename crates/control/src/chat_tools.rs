@@ -298,7 +298,7 @@ impl Toolbox {
                     Ok(token) => token,
                     Err(error) => return Ok((error.message().to_string(), true)),
                 };
-                let connection = self.connections.entry(server.id).or_insert_with(|| McpConnection::new(&state.http, &server.url, token.as_deref(), server.key_header()));
+                let connection = self.connections.entry(server.id).or_insert_with(|| McpConnection::new(&state.http, &server.url, token.as_deref(), server.key_header()).remembering(&state.hub.mcp_sessions, server.id));
                 connection.set_token(token.as_deref());
 
                 let mut called = connection.call_tool(&tool.original, input).await;

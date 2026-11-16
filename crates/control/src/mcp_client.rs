@@ -1,6 +1,9 @@
 use crate::outbound::{BODY_LIMIT, Oversize, read_text_limited};
 use serde_json::{Value, json};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use uuid::Uuid;
 
 const MODERN_VERSION: &str = "2026-07-28";
 const LEGACY_VERSION: &str = "2025-11-25";
@@ -28,6 +31,7 @@ pub struct ToolOutput {
     pub is_error: bool,
 }
 
+#[derive(Clone)]
 enum Era {
     Unknown,
     Modern,
@@ -41,6 +45,12 @@ pub struct McpConnection {
     key_header: &'static str,
     era: Era,
     next_id: i64,
+    memory: Option<(Arc<McpSessions>, Uuid)>,
+}
+
+#[derive(Default)]
+pub struct McpSessions {
+    eras: Mutex<HashMap<Uuid, Era>>,
 }
 
 struct Reply {
@@ -62,9 +72,36 @@ impl McpError {
     }
 }
 
+impl McpSessions {
+    fn recall(&self, server: Uuid) -> Era {
+        let eras = self.eras.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        eras.get(&server).cloned().unwrap_or(Era::Unknown)
+    }
+
+    fn remember(&self, server: Uuid, era: &Era) {
+        if let Ok(mut eras) = self.eras.lock() {
+            eras.insert(server, era.clone());
+        }
+    }
+
+    pub fn forget(&self, server: Uuid) {
+        if let Ok(mut eras) = self.eras.lock() {
+            eras.remove(&server);
+        }
+    }
+}
+
 impl McpConnection {
     pub fn new(http: &reqwest::Client, url: &str, token: Option<&str>, key_header: &'static str) -> McpConnection {
-        McpConnection { http: http.clone(), url: url.to_string(), token: token.map(str::to_string), key_header, era: Era::Unknown, next_id: 0 }
+        McpConnection { http: http.clone(), url: url.to_string(), token: token.map(str::to_string), key_header, era: Era::Unknown, next_id: 0, memory: None }
+    }
+
+    pub fn remembering(mut self, sessions: &Arc<McpSessions>, server: Uuid) -> McpConnection {
+        self.era = sessions.recall(server);
+        self.memory = Some((sessions.clone(), server));
+
+        self
     }
 
     pub fn set_token(&mut self, token: Option<&str>) {
@@ -129,13 +166,40 @@ impl McpConnection {
     }
 
     async fn request(&mut self, method: &str, params: Value, timeout: Duration) -> Result<Value, McpError> {
-        if matches!(self.era, Era::Unknown) {
-            self.negotiate(timeout).await?;
+        let negotiated = matches!(self.era, Era::Unknown);
+
+        if negotiated {
+            self.renegotiate(timeout).await?;
         }
 
-        let reply = self.send(method, &params, timeout).await?;
+        let mut reply = self.send(method, &params, timeout).await?;
+
+        if !negotiated && Self::session_lost(&reply) {
+            self.renegotiate(timeout).await?;
+            reply = self.send(method, &params, timeout).await?;
+        }
 
         Self::result_of(reply)
+    }
+
+    async fn renegotiate(&mut self, timeout: Duration) -> Result<(), McpError> {
+        if let Some((sessions, server)) = &self.memory {
+            sessions.forget(*server);
+        }
+
+        self.negotiate(timeout).await?;
+
+        if let Some((sessions, server)) = &self.memory {
+            sessions.remember(*server, &self.era);
+        }
+
+        Ok(())
+    }
+
+    fn session_lost(reply: &Reply) -> bool {
+        let answered = serde_json::from_str::<Value>(&reply.body).is_ok_and(|body| body.get("result").is_some());
+
+        reply.status == 404 || (reply.status == 400 && !answered)
     }
 
     async fn negotiate(&mut self, timeout: Duration) -> Result<(), McpError> {

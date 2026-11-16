@@ -1186,6 +1186,7 @@ async fn link_mcp_server(state: &AppState, owner: Uuid, forge: &ForgeRow, kind: 
     match linked {
         Some(id) => {
             sqlx::query("update chat_tool_servers set bearer_token = $2, tools = $3 where id = $1").bind(id).bind(&forge.token).bind(sqlx::types::Json(tools)).execute(&state.pool).await?;
+            state.hub.mcp_sessions.forget(id);
         }
         None => {
             let host = url::Url::parse(&forge.base_url).ok().and_then(|parsed| parsed.host_str().map(str::to_string)).unwrap_or_default();

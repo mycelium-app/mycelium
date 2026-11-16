@@ -25,7 +25,7 @@ pub async fn listed(caller: &Caller<'_>) -> ApiResult<Vec<Value>> {
             Ok(token) => token,
             Err(error) => return (server, Err(Some(error.message().to_string()))),
         };
-        let mut connection = McpConnection::new(http, &server.url, token.as_deref(), server.key_header());
+        let mut connection = McpConnection::new(http, &server.url, token.as_deref(), server.key_header()).remembering(&state.hub.mcp_sessions, server.id);
         let mut tools = connection.list_tools().await;
 
         if matches!(tools, Err(McpError::Rejected)) && refreshable_after_rejection(server) {

@@ -483,6 +483,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("That tool server"))?;
+    state.hub.mcp_sessions.forget(row.id);
     state.hub.tools_changed(user.id);
 
     Ok(Json(reloaded(&state, user.id, row.id).await?))
@@ -589,6 +590,7 @@ pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Pat
         return Err(ApiError::not_found("That tool server"));
     }
 
+    state.hub.mcp_sessions.forget(id);
     state.hub.tools_changed(user.id);
 
     Ok(StatusCode::NO_CONTENT)

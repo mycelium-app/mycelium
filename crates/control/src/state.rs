@@ -272,6 +272,7 @@ pub struct Hub {
     chat_approvals: Mutex<HashMap<(Uuid, String), oneshot::Sender<String>>>,
     responses: Mutex<HashMap<(Uuid, String), PendingResponse>>,
     tool_streams: Mutex<HashMap<Uuid, broadcast::Sender<()>>>,
+    pub(crate) mcp_sessions: Arc<crate::mcp_client::McpSessions>,
 }
 
 impl Hub {

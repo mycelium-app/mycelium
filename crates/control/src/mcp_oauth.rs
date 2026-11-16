@@ -536,6 +536,7 @@ async fn connect(state: &AppState, pending: &PendingOAuth, server: Uuid, tokens:
         return Err(ApiError::not_found("That tool server"));
     }
 
+    state.hub.mcp_sessions.forget(server);
     state.hub.tools_changed(pending.owner);
     state.publish(Some(pending.owner), StreamMessage::IntegrationsChanged);
 

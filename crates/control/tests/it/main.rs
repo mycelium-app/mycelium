@@ -56,6 +56,7 @@ mod managed_archiving;
 mod mcp_coverage;
 mod mcp_inbox;
 mod mcp_live_tools;
+mod mcp_sessions;
 mod memory;
 mod mention_triggers;
 mod message_proposals;

@@ -95,7 +95,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             Ok(token) => token,
             Err(error) => return Ok(ToolReply::text(error.message(), true)),
         };
-        let mut connection = McpConnection::new(&state.http, &server.url, token.as_deref(), server.key_header());
+        let mut connection = McpConnection::new(&state.http, &server.url, token.as_deref(), server.key_header()).remembering(&state.hub.mcp_sessions, server.id);
 
         let mut called = connection.call_tool(tool, &arguments).await;
 
