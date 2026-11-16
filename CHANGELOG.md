@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.34.50
+
+- The web client stays connected to the live stream instead of reconnecting in a loop.
+- Dictation shows the words as they are heard in the composer, and the final words replace them.
+- Saying just "send" while dictating sends the message without the word; "send" inside a sentence stays in the text.
+
 ## v0.34.49
 
 - An OAuth integration whose token could not be refreshed shows Needs sign-in in Settings until it is signed in again, like FreeAgent does.
