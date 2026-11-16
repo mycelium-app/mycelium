@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.45
+
+- The archive loads 100 conversations at a time and the next page as you scroll, instead of every archived conversation at once, and its search finds archived conversations on the server.
+
 ## v0.34.44
 
 - The apps load the sidebar 50 conversations at a time instead of every conversation at once, with anything waiting on you, pinned, flagged or running always included, and the next page as the sidebar scrolls. Subagents, managed conversations, an assistant's chats and searches are asked for where they are shown. The last list appears straight away at start.
