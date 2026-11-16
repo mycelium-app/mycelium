@@ -521,7 +521,7 @@ async fn connect(state: &AppState, pending: &PendingOAuth, server: Uuid, tokens:
 
     let listed = fetch_tools(state, &pending.name, &pending.url, Some(&tokens.access_token), DEFAULT_KEY_HEADER, app).await?;
     let oauth = stored_oauth(pending)?;
-    let updated = sqlx::query("update chat_tool_servers set bearer_token = $3, oauth_refresh_token = $4, oauth_expires_at = $5, oauth = $6, tools = $7 where id = $1 and owner = $2")
+    let updated = sqlx::query("update chat_tool_servers set bearer_token = $3, oauth_refresh_token = $4, oauth_expires_at = $5, oauth = $6, tools = $7, oauth_failed_at = null where id = $1 and owner = $2")
         .bind(server)
         .bind(pending.owner)
         .bind(crate::secrets::Sealed::from(tokens.access_token.as_str()))

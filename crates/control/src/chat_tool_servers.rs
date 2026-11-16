@@ -73,7 +73,7 @@ impl KnownApp {
 pub fn known_app(id: &str) -> Option<&'static KnownApp> {
     KNOWN_APPS.iter().find(|app| app.id == id)
 }
-pub const SERVER_COLUMNS: &str = "id, name, tool_prefix, kind, url, account, settings, bearer_token, oauth_refresh_token, oauth_expires_at, oauth, enabled, tools, created_at, token_expires_at, last_used_at, last_error, policy, session_key, forge_id";
+pub const SERVER_COLUMNS: &str = "id, name, tool_prefix, kind, url, account, settings, bearer_token, oauth_refresh_token, oauth_expires_at, oauth_failed_at, oauth, enabled, tools, created_at, token_expires_at, last_used_at, last_error, policy, session_key, forge_id";
 
 #[derive(sqlx::FromRow, Clone)]
 pub struct ServerRow {
@@ -87,6 +87,7 @@ pub struct ServerRow {
     pub bearer_token: Option<Sealed>,
     pub oauth_refresh_token: Option<Sealed>,
     pub oauth_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub oauth_failed_at: Option<chrono::DateTime<chrono::Utc>>,
     pub oauth: Option<sqlx::types::Json<Value>>,
     pub enabled: bool,
     pub tools: sqlx::types::Json<Vec<StoredTool>>,
@@ -213,9 +214,14 @@ pub async fn renew(state: &AppState, row: &ServerRow) -> ApiResult<Option<String
     let (Some(refresh_token), Some(oauth)) = (current.oauth_refresh_token.as_deref(), current.oauth.as_ref()) else {
         return Ok(current.bearer_token.map(Sealed::into_string));
     };
-    let tokens = crate::mcp_oauth::refresh(state, &oauth.0, refresh_token).await.map_err(|_| ApiError::conflict("sign_in_again", format!("Sign in to {} again in Settings, Integrations.", current.name)))?;
+    let refreshed = crate::mcp_oauth::refresh(state, &oauth.0, refresh_token).await;
+    let Ok(tokens) = refreshed else {
+        sqlx::query("update chat_tool_servers set oauth_failed_at = now() where id = $1").bind(current.id).execute(&state.pool).await?;
 
-    sqlx::query("update chat_tool_servers set bearer_token = $2, oauth_refresh_token = coalesce($3, oauth_refresh_token), oauth_expires_at = $4 where id = $1")
+        return Err(ApiError::conflict("sign_in_again", format!("Sign in to {} again in Settings, Integrations.", current.name)));
+    };
+
+    sqlx::query("update chat_tool_servers set bearer_token = $2, oauth_refresh_token = coalesce($3, oauth_refresh_token), oauth_expires_at = $4, oauth_failed_at = null where id = $1")
         .bind(current.id)
         .bind(Sealed::from(tokens.access_token.as_str()))
         .bind(tokens.refresh_token.as_deref().map(Sealed::from))

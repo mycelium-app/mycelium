@@ -341,6 +341,28 @@ async fn a_failed_oauth_refresh_tells_the_person_to_sign_in_again_in_the_tool_li
 }
 
 #[tokio::test]
+async fn a_failed_oauth_refresh_marks_the_integration_as_needing_sign_in_until_it_is_signed_in_again() {
+    let server = Server::start().await;
+    let (_, node_token) = server.join("node", "laptop").await;
+    let (base, _) = start_app(false, 1).await;
+    let query = sign_in(&server, &base).await;
+    finish_sign_in(&server, &base, &query).await;
+    sqlx::query("update chat_tool_servers set oauth = jsonb_set(oauth, '{token_endpoint}', '\"http://127.0.0.1:1/token\"')").execute(&server.pool).await.unwrap();
+
+    listed_tools(&server, &node_token).await;
+    let (_, lapsed) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
+    assert_eq!(lapsed[0]["status"], "needs_sign_in", "{lapsed}");
+
+    let id = lapsed[0]["id"].as_str().unwrap().to_string();
+    let (status, started) = begin(&server, json!({"name": "Docs", "url": base, "kind": "outline", "server_id": id})).await;
+    assert_eq!(status, 200, "{started}");
+    callback(&server, &param(&query_of(started["authorize_url"].as_str().unwrap()), "state")).await;
+    let (_, signed_in) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
+
+    assert_eq!(signed_in[0]["status"], "connected", "{signed_in}");
+}
+
+#[tokio::test]
 async fn a_rejected_oauth_token_with_no_known_expiry_is_refreshed_and_the_tools_listed() {
     let server = Server::start().await;
     let (_, node_token) = server.join("node", "laptop").await;

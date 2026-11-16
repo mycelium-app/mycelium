@@ -302,6 +302,10 @@ impl ServerRow {
             return IntegrationStatus::NeedsSignIn;
         }
 
+        if self.oauth_failed_at.is_some() {
+            return IntegrationStatus::NeedsSignIn;
+        }
+
         match self.token_expires_at {
             Some(expires_at) if expires_at <= now => IntegrationStatus::Expired,
             Some(expires_at) if expires_at - now < chrono::Duration::days(EXPIRES_SOON_DAYS) => IntegrationStatus::ExpiresSoon,
