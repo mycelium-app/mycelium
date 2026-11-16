@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.runtime.Composable
+import kotlinx.coroutines.delay
+import kotlin.time.Clock
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -54,6 +56,8 @@ fun durationText(minutes: Long): String = when {
     else -> "${minutes / 60} h ${minutes % 60} min"
 }
 
+private const val ClockStepMillis = 1_000L
+
 @Composable
 fun WellnessPresence(store: Store, platform: Platform, phone: Boolean, raised: Boolean) {
     val wellness by store.wellness.state.collectAsState()
@@ -73,14 +77,22 @@ fun WellnessPresence(store: Store, platform: Platform, phone: Boolean, raised: B
             store.wellness.heartbeat(60, now)
         }
 
-        if (store.viewing != null && focused) {
-            store.wellness.tickActiveMinute()
-        }
-
         store.wellness.releaseHeld { store.hoursView().closed(it) }.takeIf { it.isNotEmpty() }?.let { released ->
             val single = released.singleOrNull()
 
             platform.notify(single?.title ?: "While you were away", if (single == null) "${released.size} agents finished" else "Finished", single?.conversationId.orEmpty(), false)
+        }
+    }
+
+    LaunchedEffect(store) {
+        var awayFrom: Long? = null
+
+        while (true) {
+            val now = Clock.System.now().toEpochMilliseconds()
+
+            store.wellness.advanceClock(now, awayFrom, working = store.viewing != null)
+            awayFrom = if (platform.windowFocused()) null else awayFrom ?: now
+            delay(ClockStepMillis)
         }
     }
 

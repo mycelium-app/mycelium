@@ -90,50 +90,70 @@ sealed interface BreakPhase {
 
     data object Due : BreakPhase
 
-    data class Snoozed(val minutesLeft: Int) : BreakPhase
+    data class Snoozed(val millisLeft: Long) : BreakPhase
 
     data object OnBreak : BreakPhase
 
     data object Noting : BreakPhase
 }
 
-data class BreakClock(val phase: BreakPhase = BreakPhase.Idle, val activeMinutes: Int = 0, val blocksDone: Int = 0, val snoozed: Boolean = false) {
+data class BreakClock(
+    val phase: BreakPhase = BreakPhase.Idle,
+    val workedMillis: Long = 0,
+    val overdueMillis: Long = 0,
+    val countedAt: Long? = null,
+    val blocksDone: Int = 0,
+    val snoozed: Boolean = false,
+) {
+    val activeMinutes: Int get() = (workedMillis / 60_000).toInt()
+
     fun remindsAfter(settings: WellnessSettings): Int? = when {
         settings.breakReminders -> settings.breakAfterMinutes
         else -> null
     }
 
     fun following(settings: WellnessSettings): BreakClock =
-        if (remindsAfter(settings) == null && (phase == BreakPhase.Due || phase is BreakPhase.Snoozed)) copy(phase = BreakPhase.Idle, activeMinutes = 0, snoozed = false) else this
+        if (remindsAfter(settings) == null && (phase == BreakPhase.Due || phase is BreakPhase.Snoozed)) copy(phase = BreakPhase.Idle, workedMillis = 0, overdueMillis = 0, snoozed = false) else this
 
-    fun tick(settings: WellnessSettings, quiet: Boolean): BreakClock {
-        val threshold = remindsAfter(settings) ?: return following(settings)
+    fun advance(settings: WellnessSettings, quiet: Boolean, now: Long, awayFrom: Long?): BreakClock {
+        val threshold = remindsAfter(settings) ?: return following(settings).copy(countedAt = now)
+        val from = countedAt ?: now
+        val pausedFrom = awayFrom?.let { it + ActivityIdleLimit.inWholeMilliseconds }
+        val counted = if (quiet) 0L else (now - from) - (pausedFrom?.let { (now - maxOf(it, from)).coerceAtLeast(0) } ?: 0L)
+        val moved = copy(countedAt = now)
 
-        if (quiet) {
-            return this
+        if (counted <= 0) {
+            return moved
         }
 
         return when (phase) {
             BreakPhase.Idle -> {
-                val minutes = activeMinutes + 1
+                val worked = workedMillis + counted
+                val limit = threshold * 60_000L
 
-                if (minutes >= threshold) copy(phase = BreakPhase.Due, activeMinutes = minutes) else copy(activeMinutes = minutes)
+                if (worked >= limit) moved.copy(phase = BreakPhase.Due, workedMillis = worked, overdueMillis = overdueMillis + (worked - limit)) else moved.copy(workedMillis = worked)
             }
 
-            is BreakPhase.Snoozed -> if (phase.minutesLeft <= 1) copy(phase = BreakPhase.Due, activeMinutes = activeMinutes + 1) else copy(phase = BreakPhase.Snoozed(phase.minutesLeft - 1), activeMinutes = activeMinutes + 1)
-            BreakPhase.Due, BreakPhase.OnBreak, BreakPhase.Noting -> this
+            BreakPhase.Due -> moved.copy(workedMillis = workedMillis + counted, overdueMillis = overdueMillis + counted)
+            is BreakPhase.Snoozed -> {
+                val left = phase.millisLeft - counted
+
+                if (left <= 0) moved.copy(phase = BreakPhase.Due, workedMillis = workedMillis + counted, overdueMillis = overdueMillis - left) else moved.copy(phase = BreakPhase.Snoozed(left), workedMillis = workedMillis + counted)
+            }
+
+            BreakPhase.OnBreak, BreakPhase.Noting -> moved
         }
     }
 
-    fun snooze(settings: WellnessSettings): BreakClock = if (phase == BreakPhase.Due && !snoozed) copy(phase = BreakPhase.Snoozed(settings.snoozeMinutes), snoozed = true) else this
+    fun snooze(settings: WellnessSettings): BreakClock = if (phase == BreakPhase.Due && !snoozed) copy(phase = BreakPhase.Snoozed(settings.snoozeMinutes * 60_000L), snoozed = true) else this
 
     fun breakLength(settings: WellnessSettings): Int = settings.breakMinutes
 
-    fun startBreak(): BreakClock = copy(phase = BreakPhase.OnBreak, activeMinutes = 0, blocksDone = blocksDone + 1, snoozed = false)
+    fun startBreak(): BreakClock = copy(phase = BreakPhase.OnBreak, workedMillis = 0, overdueMillis = 0, blocksDone = blocksDone + 1, snoozed = false)
 
-    fun endBreak(): BreakClock = copy(phase = BreakPhase.Noting, activeMinutes = 0)
+    fun endBreak(): BreakClock = copy(phase = BreakPhase.Noting, workedMillis = 0, overdueMillis = 0)
 
-    fun backToWork(): BreakClock = copy(phase = BreakPhase.Idle, activeMinutes = 0)
+    fun backToWork(): BreakClock = copy(phase = BreakPhase.Idle, workedMillis = 0, overdueMillis = 0)
 }
 
 fun countdownText(left: Duration): String {
@@ -292,10 +312,10 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
         return released
     }
 
-    fun tickActiveMinute() {
-        val closed = closedNow()
+    fun advanceClock(now: Long, awayFrom: Long?, working: Boolean) {
+        val quiet = closedNow() || !working
 
-        mutableState.update { it.copy(clock = it.clock.tick(it.settings, closed)) }
+        mutableState.update { it.copy(clock = it.clock.advance(it.settings, quiet, now, awayFrom)) }
     }
 
     fun noteInput() {
