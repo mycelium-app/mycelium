@@ -5,6 +5,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -17,6 +18,9 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import java.util.concurrent.CopyOnWriteArrayList
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
@@ -46,6 +50,7 @@ class SetupFlowSignInTest {
     private var probeAnswer = Registration
     private var statusAnswer = HttpStatusCode.OK to """{"state":"waiting"}"""
     private var finished = false
+    private var shown by mutableStateOf(true)
 
     private fun open() {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -66,7 +71,11 @@ class SetupFlowSignInTest {
 
         rule.setContent {
             MyceliumTheme(true) {
-                CompositionLocalProvider(LocalPlatform provides platform) { SetupFlow(store, "mcp", null, emptySet(), {}, { finished = true }, {}) }
+                CompositionLocalProvider(LocalPlatform provides platform) {
+                    if (shown) {
+                        SetupFlow(store, "mcp", null, emptySet(), {}, { finished = true }, {})
+                    }
+                }
             }
         }
         rule.onNodeWithContentDescription("Server address").performTextInput("https://mcp.example.test/mcp")
@@ -178,6 +187,50 @@ class SetupFlowSignInTest {
         rule.onNodeWithText("Finish signing in at auth.example.test in your browser. This step moves on when you are done.").assertDoesNotExist()
     }
 
+    private fun close() {
+        shown = false
+        rule.waitForIdle()
+    }
+
+    private fun cancelled() = requests.any { it.first == HttpMethod.Delete && it.second == "/integrations/oauth/si-1" }
+
+    @Test
+    fun closingTheDialogWhileWaitingForTheBrowserCancelsTheSignIn() {
+        open()
+        startSignIn()
+
+        close()
+
+        assertTrue(cancelled())
+    }
+
+    @Test
+    fun closingTheDialogAfterTheBrowserFinishedButBeforeAddingCancelsTheSignIn() {
+        open()
+        startSignIn()
+        statusAnswer = HttpStatusCode.OK to """{"state":"connected","server":null}"""
+        pollOnce()
+
+        close()
+
+        assertTrue(cancelled())
+    }
+
+    @Test
+    fun closingTheDialogAfterAddingTheIntegrationCancelsNothing() {
+        open()
+        startSignIn()
+        statusAnswer = HttpStatusCode.OK to """{"state":"connected","server":null}"""
+        pollOnce()
+        rule.onNodeWithText("Continue").performClick()
+        rule.onNodeWithText("Add integration").performClick()
+        rule.waitForIdle()
+
+        close()
+
+        assertTrue(!cancelled())
+    }
+
     @Test
     fun finishingInTheBrowserMovesToTestAndAddingSendsTheSignInInsteadOfAToken() {
         open()
@@ -230,6 +283,7 @@ class SetupFlowSignInTest {
         rule.onNodeWithText("Token").performClick()
         rule.onNodeWithContentDescription("Token").performTextInput("secret-token")
         rule.onNodeWithContentDescription("Expiration", substring = true).assertExists()
+        rule.onNodeWithText("Expiration").assertIsDisplayed()
         rule.onNodeWithText("Continue").performClick()
         rule.waitForIdle()
         rule.onNodeWithText("Continue").performClick()

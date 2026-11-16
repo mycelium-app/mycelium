@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -459,6 +461,7 @@ fun SetupFlow(
             val credential = if (caldav) secret else token
             val request = if (form) formRequest() else CreateChatToolServerRequest(name.trim(), address.trim(), credential.trim().ifEmpty { null }.takeIf { method != SignIn }, kind = kind.takeIf { it != "mcp" }, account = username.trim().takeIf { caldav }, tokenExpiresAt = expiresAt(), signIn = heldSignIn.takeIf { method == SignIn })
             val added = store.api.createChatToolServer(request)
+            heldSignIn = null
             onAdded(added)
 
             if (freeAgent) {
@@ -505,6 +508,14 @@ fun SetupFlow(
 
         if (problem != null) {
             testState = TestState.Failed(problem)
+        }
+    }
+
+    val unfinishedSignIn by rememberUpdatedState(pendingSignIn?.signIn ?: heldSignIn)
+
+    DisposableEffect(Unit) {
+        onDispose {
+            unfinishedSignIn?.let { signIn -> store.act { store.api.cancelChatToolServerSignIn(signIn) } }
         }
     }
 
@@ -670,6 +681,7 @@ fun SetupFlow(
                         Label("Sent as a bearer token. Stored on the control plane, never shown to agents.", style = Tokens.Type.Meta, color = colors.textMuted)
                     }
 
+                    Label("Expiration", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2), itemVerticalAlignment = Alignment.CenterVertically) {
                         OptionMenu("Expiration", ExpiryChoices, expiry, { expiry = it })
                         expiryNote()?.let { Label(it, style = Tokens.Type.Meta, color = colors.textMuted) }
@@ -847,7 +859,7 @@ fun SetupFlow(
                             else -> "Continue"
                         },
                         icon = if (signingIn) (if (signInFailure != null) MyIcon.Refresh else MyIcon.Globe) else null,
-                        variant = if (signingIn) ButtonVariant.Primary else ButtonVariant.Outline,
+                        variant = ButtonVariant.Primary,
                     )
                 }
             }
