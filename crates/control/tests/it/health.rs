@@ -299,6 +299,27 @@ async fn the_web_client_is_served_with_single_page_fallback_but_unknown_api_path
 }
 
 #[tokio::test]
+async fn api_answers_are_compressed_for_clients_that_accept_it() {
+    let server = Server::start().await;
+    let mut link = server.online_node("atlas").await;
+    let owner = sqlx::query_scalar::<_, uuid::Uuid>("select id from users where email = 'dev@example.com'").fetch_one(&server.pool).await.unwrap();
+    sqlx::query("insert into conversations (owner, node_id, agent, cwd, title, status) select $1, $2, 'claude', '/work/example-' || g, 'Fix the flaky sync test ' || g, 'review' from generate_series(1, 50) g").bind(owner).bind(link.id).execute(&server.pool).await.unwrap();
+    let _ = &mut link;
+    let user = &server.user;
+
+    let plain = user.get("/api/v1/conversations?archived=false").send().await.unwrap();
+    let plain_encoding = plain.headers().get("content-encoding").cloned();
+    let plain_size = plain.bytes().await.unwrap().len();
+    let gzipped = user.get("/api/v1/conversations?archived=false").header("accept-encoding", "gzip").send().await.unwrap();
+    let gzipped_encoding = gzipped.headers().get("content-encoding").and_then(|value| value.to_str().ok()).map(str::to_string);
+    let gzipped_size = gzipped.bytes().await.unwrap().len();
+
+    assert_eq!(plain_encoding, None);
+    assert_eq!(gzipped_encoding.as_deref(), Some("gzip"));
+    assert!(gzipped_size * 4 < plain_size, "{gzipped_size} of {plain_size} bytes");
+}
+
+#[tokio::test]
 async fn the_web_client_is_revalidated_on_every_load_so_a_release_replaces_it_at_once() {
     let server = Server::start().await;
     std::fs::write(server.web_dir.join("index.html"), "<html>mycelium</html>").unwrap();

@@ -557,4 +557,5 @@ fn router(state: AppState) -> Router {
         .route_layer(axum::middleware::from_fn(traces::http))
         .fallback_service(tower_http::set_header::SetResponseHeaderLayer::overriding(axum::http::header::CACHE_CONTROL, axum::http::HeaderValue::from_static("no-cache")).layer(web::single_page_app(&web_dir)))
         .with_state(state)
+        .layer(tower_http::compression::CompressionLayer::new())
 }
