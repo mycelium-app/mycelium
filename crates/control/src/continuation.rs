@@ -35,13 +35,15 @@ pub async fn request(State(state): State<AppState>, user: AuthUser, Path(id): Pa
     let account = request.account.as_deref().map(str::trim).filter(|account| !account.is_empty()).map(str::to_string);
     let target = Target { agent: request.agent, account, provider_id: request.provider_id, model: request.model, node_id: request.node_id, cwd: request.cwd };
 
-    if let Some(routing) = request.routing {
-        let row = crate::routing::choose(&state, user.id, id, routing).await?;
+    let interrupted = crate::prompts::interrupt(&state, user.id, id).await?;
+    let row = match request.routing {
+        Some(routing) => crate::routing::choose(&state, user.id, id, routing).await?,
+        None => continue_on(&state, user.id, id, target, None).await?,
+    };
 
-        return Ok(Json(row.to_proto()?));
+    if interrupted {
+        crate::prompts::pump(&state, id, false).await?;
     }
-
-    let row = continue_on(&state, user.id, id, target, None).await?;
 
     Ok(Json(row.to_proto()?))
 }
@@ -62,10 +64,6 @@ pub async fn continue_with(state: &AppState, owner: Uuid, id: Uuid, target: Targ
     let mut tx = state.pool.begin().await?;
     let before = lock_owned(&mut tx, id, owner).await?;
     let scratch_folder = before.scratch.then(|| before.cwd.clone());
-
-    if reason.is_none() && matches!(before.status.as_str(), "working" | "input") {
-        return Err(ApiError::conflict("conversation_busy", "This conversation is still working. Wait for the turn to finish or stop it, then continue elsewhere."));
-    }
 
     if reason.is_none() {
         sqlx::query("update conversations set routing = null where id = $1").bind(id).execute(&mut *tx).await?;

@@ -409,12 +409,6 @@ pub async fn carry_on(state: &AppState, owner: Uuid, id: Uuid, text: &str) -> Ap
 }
 
 pub async fn choose(state: &AppState, owner: Uuid, id: Uuid, routing: Routing) -> ApiResult<ConversationRow> {
-    let before = find_owned(&state.pool, id, owner).await?;
-
-    if matches!(before.status.as_str(), "working" | "input") {
-        return Err(ApiError::conflict("conversation_busy", "This conversation is still working. Wait for the turn to finish or stop it, then continue elsewhere."));
-    }
-
     let entries = entries_of(state, owner, routing).await?;
 
     if entries.is_empty() {

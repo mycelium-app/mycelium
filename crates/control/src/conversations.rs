@@ -598,6 +598,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
 
     let chosen_model = request.model.as_deref().map(str::trim);
     let mut switched_to = None;
+    let mut interrupted = false;
 
     if request.provider_id.is_some() || chosen_model.is_some() {
         if !chats::is_chat(&before) {
@@ -613,6 +614,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
         };
 
         switched_to = Some((provider, model.to_string()));
+        interrupted = crate::prompts::interrupt(&state, user.id, id).await?;
     }
 
     if (request.project_id.is_some() || request.clear_project == Some(true)) && chats::is_chat(&before) {
@@ -717,6 +719,10 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
 
     if request.project_id.is_some() || request.clear_project == Some(true) {
         spawn_branch_refresh(&state, id);
+    }
+
+    if interrupted {
+        crate::prompts::pump(&state, id, false).await?;
     }
 
     Ok(Json(conversation))

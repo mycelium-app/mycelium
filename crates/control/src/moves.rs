@@ -216,6 +216,10 @@ pub async fn request(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 
     state.publish(Some(user.id), StreamMessage::Move(progress.clone()));
 
+    if busy && !request.fork {
+        crate::prompts::stop(&state, user.id, id).await?;
+    }
+
     if !busy {
         tokio::spawn(carry_out(state.clone(), user.id, id, progress.clone()));
     }

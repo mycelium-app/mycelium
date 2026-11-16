@@ -558,21 +558,22 @@ async fn a_conversation_in_a_subfolder_of_the_project_continues_in_the_same_subf
 }
 
 #[tokio::test]
-async fn a_move_requested_mid_turn_waits_for_the_turn_to_end() {
+async fn a_move_requested_mid_turn_interrupts_the_turn_and_moves_once_it_has_stopped() {
     let mut moving = start(true, true).await;
     mirror_transcript(&mut moving).await;
-    let mut stream = moving.server.user.stream().await;
 
     let (status, accepted) = request_move(&moving, false).await;
     assert_eq!((status, accepted["state"].clone()), (202, json!("waiting")), "{accepted}");
-    stream
-        .until(|message| match message {
-            mycelium_proto::stream::StreamMessage::Move(progress) if progress.state == mycelium_proto::api::MoveState::Waiting => Some(()),
-            _ => None,
-        })
-        .await;
 
-    moving.source.send(NodeToControl::TurnEnd { conversation_id: moving.conversation, seq: 2, stop_reason: "end_turn".into(), usage: None }).await;
+    loop {
+        if let ControlToNode::Cancel { conversation_id } = moving.source.next().await
+            && conversation_id == moving.conversation
+        {
+            break;
+        }
+    }
+
+    moving.source.send(NodeToControl::TurnEnd { conversation_id: moving.conversation, seq: 2, stop_reason: "cancelled".into(), usage: None }).await;
 
     let (_, command) = answer_next(&mut moving.source, Ok(snapshot())).await;
     assert!(matches!(command, GitCommand::Snapshot { .. }));

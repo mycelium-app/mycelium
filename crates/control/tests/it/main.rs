@@ -24,6 +24,7 @@ mod continue_elsewhere;
 mod conversation_pages;
 mod conversations;
 mod idempotent_requests;
+mod instant_changes;
 mod decision_providers;
 mod discord;
 mod device_flow;

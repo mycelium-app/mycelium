@@ -638,6 +638,10 @@ async fn finish(state: &AppState, owner: Uuid, id: Uuid, stop_reason: &str, usag
         return Ok(());
     }
 
+    if stop_reason == "cancelled" {
+        return Ok(());
+    }
+
     let queued = sqlx::query_as::<_, (String, sqlx::types::Json<Vec<Attachment>>)>("delete from queued_prompts where id = (select id from queued_prompts where conversation_id = $1 and not editing order by position limit 1 for update) returning text, attachments")
         .bind(id)
         .fetch_optional(&state.pool)

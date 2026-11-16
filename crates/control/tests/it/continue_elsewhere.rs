@@ -195,7 +195,7 @@ async fn continuing_on_the_account_it_already_uses_is_refused() {
 }
 
 #[tokio::test]
-async fn continuing_while_the_agent_is_working_is_refused() {
+async fn continuing_while_the_agent_is_working_interrupts_it_and_then_continues() {
     let server = Server::start().await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn), login("work@example.org", LoginState::SignedIn)]).await;
     let (_, created) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/work/app", "account": "sam@example.com", "prompt": "Work"}))).await;
@@ -207,9 +207,27 @@ async fn continuing_while_the_agent_is_working_is_refused() {
     link.start_session(id, "acp-1").await;
     expect_prompt(&mut link).await;
 
-    let (status, body) = continue_on(&server, id, json!({"agent": "claude", "account": "work@example.org"})).await;
+    let asked = std::time::Instant::now();
+    let continuing = tokio::spawn({
+        let server_user = server.user.clone();
+        async move { server_user.json(server_user.post(&format!("/api/v1/conversations/{id}/continue")).json(&json!({"agent": "claude", "account": "work@example.org"}))).await }
+    });
 
-    assert_eq!((status, body["error"].as_str()), (409, Some("conversation_busy")));
+    loop {
+        if let ControlToNode::Cancel { conversation_id } = next_command(&mut link).await
+            && conversation_id == id
+        {
+            break;
+        }
+    }
+
+    let interrupted_after = asked.elapsed();
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 1, stop_reason: "cancelled".into(), usage: None }).await;
+    let (status, body) = continuing.await.unwrap();
+
+    assert!(interrupted_after < std::time::Duration::from_secs(1), "{interrupted_after:?}");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["account"], "work@example.org");
 }
 
 #[tokio::test]

@@ -24,6 +24,7 @@ use uuid::Uuid;
 
 const NODE_NOT_CONNECTED: &str = "The node is not connected. Your message is queued and goes as soon as it reconnects.";
 const LATE_STEER_WINDOW: Duration = Duration::from_secs(120);
+const INTERRUPT_WAIT: Duration = Duration::from_secs(10);
 
 #[derive(sqlx::FromRow)]
 struct LockedTurn {
@@ -620,6 +621,40 @@ pub async fn stop(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
     Ok(())
 }
 
+pub async fn interrupt(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<bool> {
+    let row = find_owned(&state.pool, id, owner).await?;
+    let ended = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!("select {TURN_HAS_ENDED}"))).bind(id).fetch_one(&state.pool).await?;
+
+    if !matches!(row.status.as_str(), "working" | "input") || ended {
+        return Ok(false);
+    }
+
+    let mut stream = state.stream.subscribe();
+    stop(state, owner, id).await?;
+    let turn_ended = async {
+        loop {
+            match stream.recv().await {
+                Ok(streamed) => {
+                    if let StreamMessage::Event(event) = &streamed.message
+                        && event.conversation_id == id
+                        && event.kind == EventKind::TurnEnd
+                    {
+                        return;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+            }
+        }
+    };
+
+    if tokio::time::timeout(INTERRUPT_WAIT, turn_ended).await.is_err() {
+        tracing::warn!("{id} did not end its turn within {INTERRUPT_WAIT:?} of being interrupted, so the change goes ahead anyway");
+    }
+
+    Ok(true)
+}
+
 pub async fn permission(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(answer): Json<PermissionAnswer>) -> ApiResult<StatusCode> {
     let mut tx = state.pool.begin().await?;
     let row = lock_owned(&mut tx, id, user.id).await?;
@@ -717,6 +752,7 @@ pub async fn config(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 }
 
 pub async fn set_config(state: &AppState, owner: Uuid, id: Uuid, request: ConfigRequest) -> ApiResult<()> {
+    let interrupted = request.model.is_some() && interrupt(state, owner, id).await?;
     let row = find_owned(&state.pool, id, owner).await?;
 
     let mut row = row;
@@ -760,6 +796,10 @@ pub async fn set_config(state: &AppState, owner: Uuid, id: Uuid, request: Config
     .await?;
 
     state.publish(Some(owner), StreamMessage::Conversation(updated.to_proto()?));
+
+    if interrupted {
+        pump(state, id, false).await?;
+    }
 
     Ok(())
 }
