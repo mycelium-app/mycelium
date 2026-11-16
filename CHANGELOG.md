@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.43
+
+- The control plane gzips its answers, and the desktop and Android apps ask for it: the conversation list a phone downloads at start is about nine times smaller.
+- Two flaky tests are fixed: the automatic logo tests wait for the node's answer, and the store tests wait for their requests in real time.
+
 ## v0.34.42
 
 - The control plane records how long each request and tool call takes, with the database queries, node round-trips and outside calls inside the slow ones, for 48 hours. Agents read them with read_traces to find where time goes, and every response carries an x-request-id.
