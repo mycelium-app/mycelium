@@ -58,6 +58,8 @@ pub struct ListQuery {
 }
 
 const SIDEBAR_PAGE: i64 = 50;
+const ARCHIVE_PAGE: i64 = 100;
+const ARCHIVED_ROW: &str = "owner = $1 and archived_at is not null and side_kind is distinct from 'check'";
 const LARGEST_PAGE: i64 = 200;
 const NESTING_DEPTH: usize = 6;
 const SIDEBAR_ROW: &str = "owner = $1 and archived_at is null and side_kind is distinct from 'check' and side_kind is distinct from 'subagent' and assistant_id is null and managed_by is null
@@ -68,6 +70,12 @@ const NEEDS_ATTENTION: &str = "owner = $1 and archived_at is null and side_kind 
 pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Query<ListQuery>) -> ApiResult<Json<Value>> {
     if query.view.as_deref() == Some("sidebar") {
         return Ok(Json(sidebar_page(&state, user.id, &query).await?));
+    }
+
+    if query.view.as_deref() == Some("archive") {
+        let (rows, next) = page_of(&state, user.id, ARCHIVED_ROW, &query, ARCHIVE_PAGE).await?;
+
+        return Ok(Json(json!({"conversations": protos(rows)?, "next": next})));
     }
 
     let filtered = query.parent.is_some() || query.assistant.is_some() || query.managed || query.q.is_some() || query.ids.is_some() || query.status.is_some();
@@ -100,14 +108,18 @@ fn parse_cursor(cursor: &str) -> Option<(chrono::DateTime<chrono::Utc>, Uuid)> {
     Some((chrono::DateTime::parse_from_rfc3339(at).ok()?.with_timezone(&chrono::Utc), id.parse().ok()?))
 }
 
-async fn sidebar_page(state: &AppState, owner: Uuid, query: &ListQuery) -> ApiResult<Value> {
-    let limit = query.limit.unwrap_or(SIDEBAR_PAGE).clamp(1, LARGEST_PAGE);
-    let cursor = match query.cursor.as_deref() {
-        Some(text) => Some(parse_cursor(text).ok_or_else(|| ApiError::bad_request("cursor_invalid", "Give the cursor exactly as the previous page returned it."))?),
-        None => None,
-    };
+fn cursor_of(query: &ListQuery) -> ApiResult<Option<(chrono::DateTime<chrono::Utc>, Uuid)>> {
+    match query.cursor.as_deref() {
+        Some(text) => Ok(Some(parse_cursor(text).ok_or_else(|| ApiError::bad_request("cursor_invalid", "Give the cursor exactly as the previous page returned it."))?)),
+        None => Ok(None),
+    }
+}
+
+async fn page_ids(state: &AppState, owner: Uuid, rows: &str, query: &ListQuery, default_limit: i64) -> ApiResult<(Vec<Uuid>, Option<String>)> {
+    let limit = query.limit.unwrap_or(default_limit).clamp(1, LARGEST_PAGE);
+    let cursor = cursor_of(query)?;
     let page = sqlx::query_as::<_, (Uuid, chrono::DateTime<chrono::Utc>)>(sqlx::AssertSqlSafe(format!(
-        "select id, updated_at from conversations where {SIDEBAR_ROW}
+        "select id, updated_at from conversations where {rows}
          and ($2::timestamptz is null or (updated_at, id) < ($2, $3)) order by updated_at desc, id desc limit $4"
     )))
     .bind(owner)
@@ -119,7 +131,20 @@ async fn sidebar_page(state: &AppState, owner: Uuid, query: &ListQuery) -> ApiRe
     let more = page.len() as i64 > limit;
     let page: Vec<_> = page.into_iter().take(limit as usize).collect();
     let next = page.last().filter(|_| more).map(|(id, at)| format!("{}_{id}", at.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)));
-    let mut ids: Vec<Uuid> = page.iter().map(|(id, _)| *id).collect();
+
+    Ok((page.into_iter().map(|(id, _)| id).collect(), next))
+}
+
+async fn page_of(state: &AppState, owner: Uuid, rows: &str, query: &ListQuery, default_limit: i64) -> ApiResult<(Vec<ConversationRow>, Option<String>)> {
+    let (ids, next) = page_ids(state, owner, rows, query, default_limit).await?;
+    let rows = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("select {CONVERSATION_COLUMNS} from conversations where owner = $1 and id = any($2) order by updated_at desc, id desc"))).bind(owner).bind(&ids).fetch_all(&state.pool).await?;
+
+    Ok((rows, next))
+}
+
+async fn sidebar_page(state: &AppState, owner: Uuid, query: &ListQuery) -> ApiResult<Value> {
+    let cursor = cursor_of(query)?;
+    let (mut ids, next) = page_ids(state, owner, SIDEBAR_ROW, query, SIDEBAR_PAGE).await?;
 
     if cursor.is_none() {
         let attention = sqlx::query_scalar::<_, Uuid>(sqlx::AssertSqlSafe(format!("select id from conversations where {NEEDS_ATTENTION}"))).bind(owner).fetch_all(&state.pool).await?;

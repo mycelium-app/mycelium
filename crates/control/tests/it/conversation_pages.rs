@@ -182,6 +182,49 @@ async fn the_archive_asks_for_done_conversations_only() {
 }
 
 #[tokio::test]
+async fn the_archive_is_read_a_page_at_a_time_newest_first_without_repeats() {
+    let server = Server::start().await;
+    let seeded = seeded(&server).await;
+
+    for index in 0..25 {
+        insert(&server, &seeded, &format!("Archived {index:02}"), index, "archived_at = now()").await;
+    }
+
+    insert(&server, &seeded, "Still open", 0, "").await;
+
+    let (_, first) = server.user.json(server.user.get("/api/v1/conversations?view=archive&limit=10")).await;
+    let mut seen = titles(&first);
+    let mut next = first["next"].as_str().map(str::to_string);
+
+    while let Some(cursor) = next {
+        let (_, following) = server.user.json(server.user.get(&format!("/api/v1/conversations?view=archive&limit=10&cursor={}", urlencoding(&cursor)))).await;
+        seen.extend(titles(&following));
+        next = following["next"].as_str().map(str::to_string);
+    }
+
+    let expected: Vec<String> = (0..25).map(|index| format!("Archived {index:02}")).collect();
+
+    assert_eq!(titles(&first).len(), 10);
+    assert_eq!(seen, expected);
+}
+
+#[tokio::test]
+async fn archive_search_finds_an_old_archived_conversation() {
+    let server = Server::start().await;
+    let seeded = seeded(&server).await;
+
+    for index in 0..120 {
+        insert(&server, &seeded, &format!("Archived {index:03}"), index, "archived_at = now()").await;
+    }
+
+    insert(&server, &seeded, "Rotate the restic keys", 99999, "archived_at = now()").await;
+
+    let (_, found) = server.user.json(server.user.get("/api/v1/conversations?q=restic&archived=true")).await;
+
+    assert_eq!(titles(&found), ["Rotate the restic keys"]);
+}
+
+#[tokio::test]
 async fn an_older_app_that_asks_without_a_view_still_gets_the_whole_list() {
     let server = Server::start().await;
     let seeded = seeded(&server).await;
