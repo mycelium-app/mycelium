@@ -45,9 +45,36 @@ pub fn derived_title(text: &str, attachments: &[mycelium_proto::conversation::At
 pub struct ListQuery {
     #[serde(default)]
     archived: bool,
+    view: Option<String>,
+    cursor: Option<String>,
+    limit: Option<i64>,
+    parent: Option<Uuid>,
+    assistant: Option<Uuid>,
+    #[serde(default)]
+    managed: bool,
+    q: Option<String>,
+    ids: Option<String>,
 }
 
-pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Query<ListQuery>) -> ApiResult<Json<Vec<Conversation>>> {
+const SIDEBAR_PAGE: i64 = 50;
+const LARGEST_PAGE: i64 = 200;
+const NESTING_DEPTH: usize = 6;
+const SIDEBAR_ROW: &str = "owner = $1 and archived_at is null and side_kind is distinct from 'check' and side_kind is distinct from 'subagent' and assistant_id is null and managed_by is null
+     and (parent_id is null or not exists (select 1 from conversations shown_parent where shown_parent.id = conversations.parent_id and shown_parent.archived_at is null))";
+const NEEDS_ATTENTION: &str = "owner = $1 and archived_at is null and side_kind is distinct from 'check'
+     and (pinned_at is not null or flagged_at is not null or status in ('input', 'working') or resume_at is not null or snoozed_until is not null or conversation_action_items(id) <> '[]'::jsonb)";
+
+pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Query<ListQuery>) -> ApiResult<Json<Value>> {
+    if query.view.as_deref() == Some("sidebar") {
+        return Ok(Json(sidebar_page(&state, user.id, &query).await?));
+    }
+
+    let filtered = query.parent.is_some() || query.assistant.is_some() || query.managed || query.q.is_some() || query.ids.is_some();
+
+    if filtered {
+        return Ok(Json(json!({"conversations": filtered_list(&state, user.id, &query).await?})));
+    }
+
     let rows = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
         "select {CONVERSATION_COLUMNS}
@@ -59,13 +86,131 @@ pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Q
     .fetch_all(&state.pool)
     .await?;
 
-    let mut conversations = Vec::new();
+    Ok(Json(serde_json::to_value(protos(rows)?).map_err(ApiError::internal)?))
+}
 
-    for row in rows {
-        conversations.push(row.to_proto()?);
+fn protos(rows: Vec<ConversationRow>) -> ApiResult<Vec<Conversation>> {
+    rows.into_iter().map(|row| row.to_proto()).collect()
+}
+
+fn parse_cursor(cursor: &str) -> Option<(chrono::DateTime<chrono::Utc>, Uuid)> {
+    let (at, id) = cursor.split_once('_')?;
+
+    Some((chrono::DateTime::parse_from_rfc3339(at).ok()?.with_timezone(&chrono::Utc), id.parse().ok()?))
+}
+
+async fn sidebar_page(state: &AppState, owner: Uuid, query: &ListQuery) -> ApiResult<Value> {
+    let limit = query.limit.unwrap_or(SIDEBAR_PAGE).clamp(1, LARGEST_PAGE);
+    let cursor = match query.cursor.as_deref() {
+        Some(text) => Some(parse_cursor(text).ok_or_else(|| ApiError::bad_request("cursor_invalid", "Give the cursor exactly as the previous page returned it."))?),
+        None => None,
+    };
+    let page = sqlx::query_as::<_, (Uuid, chrono::DateTime<chrono::Utc>)>(sqlx::AssertSqlSafe(format!(
+        "select id, updated_at from conversations where {SIDEBAR_ROW}
+         and ($2::timestamptz is null or (updated_at, id) < ($2, $3)) order by updated_at desc, id desc limit $4"
+    )))
+    .bind(owner)
+    .bind(cursor.map(|(at, _)| at))
+    .bind(cursor.map(|(_, id)| id))
+    .bind(limit + 1)
+    .fetch_all(&state.pool)
+    .await?;
+    let more = page.len() as i64 > limit;
+    let page: Vec<_> = page.into_iter().take(limit as usize).collect();
+    let next = page.last().filter(|_| more).map(|(id, at)| format!("{}_{id}", at.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)));
+    let mut ids: Vec<Uuid> = page.iter().map(|(id, _)| *id).collect();
+
+    if cursor.is_none() {
+        let attention = sqlx::query_scalar::<_, Uuid>(sqlx::AssertSqlSafe(format!("select id from conversations where {NEEDS_ATTENTION}"))).bind(owner).fetch_all(&state.pool).await?;
+        let assistants = sqlx::query_scalar::<_, Uuid>("select conversation_id from assistants where owner = $1 and conversation_id is not null").bind(owner).fetch_all(&state.pool).await?;
+        ids.extend(attention);
+        ids.extend(assistants);
     }
 
-    Ok(Json(conversations))
+    ids = with_relatives(state, owner, ids).await?;
+
+    let rows = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("select {CONVERSATION_COLUMNS} from conversations where owner = $1 and id = any($2) order by updated_at desc"))).bind(owner).bind(&ids).fetch_all(&state.pool).await?;
+    let mut answer = json!({"conversations": protos(rows)?, "next": next});
+
+    if cursor.is_none() {
+        let settled = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+            "select count(*) from conversations where {SIDEBAR_ROW} and status = 'done' and pinned_at is null and snoozed_until is null and resume_at is null and agent <> $2 and not scratch"
+        )))
+        .bind(owner)
+        .bind(chats::CHAT_AGENT)
+        .fetch_one(&state.pool)
+        .await?;
+        answer["counts"] = json!({"settled": settled});
+    }
+
+    Ok(answer)
+}
+
+async fn with_relatives(state: &AppState, owner: Uuid, mut ids: Vec<Uuid>) -> ApiResult<Vec<Uuid>> {
+    ids.sort();
+    ids.dedup();
+    let mut frontier = ids.clone();
+
+    for _ in 0..NESTING_DEPTH {
+        let children = sqlx::query_scalar::<_, Uuid>("select id from conversations where owner = $1 and parent_id = any($2) and archived_at is null and side_kind is distinct from 'subagent' and side_kind is distinct from 'check' and not (id = any($3))")
+            .bind(owner)
+            .bind(&frontier)
+            .bind(&ids)
+            .fetch_all(&state.pool)
+            .await?;
+
+        if children.is_empty() {
+            break;
+        }
+
+        ids.extend(children.iter().copied());
+        frontier = children;
+    }
+
+    let mut frontier = ids.clone();
+
+    for _ in 0..NESTING_DEPTH {
+        let related = sqlx::query_scalar::<_, Uuid>("select distinct related from conversations, unnest(array[parent_id, managed_by]) related where owner = $1 and id = any($2) and related is not null and not (related = any($3))")
+            .bind(owner)
+            .bind(&frontier)
+            .bind(&ids)
+            .fetch_all(&state.pool)
+            .await?;
+
+        if related.is_empty() {
+            break;
+        }
+
+        ids.extend(related.iter().copied());
+        frontier = related;
+    }
+
+    Ok(ids)
+}
+
+async fn filtered_list(state: &AppState, owner: Uuid, query: &ListQuery) -> ApiResult<Vec<Conversation>> {
+    let limit = query.limit.unwrap_or(SIDEBAR_PAGE).clamp(1, LARGEST_PAGE);
+    let ids: Option<Vec<Uuid>> = query.ids.as_deref().map(|ids| ids.split(',').filter_map(|id| id.trim().parse().ok()).collect());
+    let pattern = query.q.as_deref().map(str::trim).filter(|text| !text.is_empty()).map(|text| format!("%{}%", text.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")));
+    let rows = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
+        "select {CONVERSATION_COLUMNS} from conversations where owner = $1 and side_kind is distinct from 'check'
+         and ($2::uuid is null or parent_id = $2) and ($3::uuid is null or assistant_id = $3) and (not $4 or managed_by is not null)
+         and ($5::text is null or title ilike $5) and ($6::uuid[] is null or id = any($6))
+         and ($6::uuid[] is not null or (archived_at is not null) = $7)
+         order by updated_at desc limit $8"
+    )))
+    .bind(owner)
+    .bind(query.parent)
+    .bind(query.assistant)
+    .bind(query.managed)
+    .bind(pattern)
+    .bind(ids)
+    .bind(query.archived)
+    .bind(limit)
+    .fetch_all(&state.pool)
+    .await?;
+
+    protos(rows)
 }
 
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateConversationRequest>) -> ApiResult<(StatusCode, Json<Conversation>)> {

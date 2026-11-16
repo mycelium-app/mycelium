@@ -21,6 +21,7 @@ mod chat_agents;
 mod client_events;
 mod chats;
 mod continue_elsewhere;
+mod conversation_pages;
 mod conversations;
 mod idempotent_requests;
 mod decision_providers;
