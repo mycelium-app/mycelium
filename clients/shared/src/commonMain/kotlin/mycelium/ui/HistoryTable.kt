@@ -268,6 +268,7 @@ fun HistoryTable(
     stamp: (String, Boolean) -> String,
     onOpen: (String) -> Unit,
     modifier: Modifier = Modifier,
+    onNearEnd: (() -> Unit)? = null,
     rowMenu: @Composable (Conversation) -> Unit,
 ) {
     val colors = MyTheme.colors
@@ -385,6 +386,7 @@ fun HistoryTable(
             },
             rowModifier = { index -> if (items[index] is HistoryItem.Row) Modifier.hoverHighlight() else Modifier },
             narrowBreakpoint = NarrowWidth,
+            onNearEnd = onNearEnd,
         )
 
         if (items.isEmpty()) {

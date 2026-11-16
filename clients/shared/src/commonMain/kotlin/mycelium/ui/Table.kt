@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -130,6 +132,8 @@ fun resolveTable(min: List<Int>, natural: List<Int>, weight: List<Float>, availa
 
 private val LazyMaxHeight = 400.dp
 
+private const val NearEndRows = 10
+
 @Composable
 fun Table(
     columns: List<Col>,
@@ -149,6 +153,7 @@ fun Table(
     detail: (@Composable (Int) -> Unit)? = null,
     rowSpan: (Int) -> (@Composable () -> Unit)? = { null },
     rowModifier: @Composable (Int) -> Modifier = { Modifier },
+    onNearEnd: (() -> Unit)? = null,
 ) {
     val colors = MyTheme.colors
     val density = LocalDensity.current
@@ -208,6 +213,17 @@ fun Table(
         val wraps = visible.any { columns[it].overflow == Overflow.Wrap }
         val scroll = rememberScrollState()
         val list = rememberLazyListState()
+
+        if (onNearEnd != null) {
+            LaunchedEffect(list) {
+                snapshotFlow { list.layoutInfo.visibleItemsInfo.lastOrNull()?.index to list.layoutInfo.totalItemsCount }.collect { (last, total) ->
+                    if (last != null && last >= total - NearEndRows) {
+                        onNearEnd()
+                    }
+                }
+            }
+        }
+
         val boundedHeight = constraints.hasBoundedHeight
         val hairline = Tokens.Size.Hairline
         val rowLine = colors.border

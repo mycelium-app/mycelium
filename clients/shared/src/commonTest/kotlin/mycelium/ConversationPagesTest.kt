@@ -133,4 +133,23 @@ class ConversationPagesTest {
 
         assertTrue("c1" in next.state.value.conversations, "${next.state.value.conversations.keys}")
     }
+
+    @Test
+    fun theArchiveIsAskedForAPageAtATimeAndAnOlderServersWholeArchiveIsOnePage() = runTest {
+        val asked = mutableListOf<String>()
+        val paged = MockEngine { request ->
+            asked += "${request.url.parameters["view"]} ${request.url.parameters["archived"]} ${request.url.parameters["cursor"]}"
+            respond("""{"conversations":[${conversationJson("a1")}],"next":"page-2"}""", HttpStatusCode.OK, json)
+        }
+        val older = MockEngine { respond("[${conversationJson("a1")},${conversationJson("a2")}]", HttpStatusCode.OK, json) }
+
+        val first = MyceliumApi("https://mycelium.test", null, paged).archivedPage()
+        MyceliumApi("https://mycelium.test", null, paged).archivedPage("page-2")
+        val whole = MyceliumApi("https://mycelium.test", null, older).archivedPage()
+
+        assertEquals(listOf("archive true null", "archive true page-2"), asked)
+        assertEquals("page-2", first.next)
+        assertEquals(listOf("a1", "a2"), whole.conversations.map { it.id })
+        assertNull(whole.next)
+    }
 }

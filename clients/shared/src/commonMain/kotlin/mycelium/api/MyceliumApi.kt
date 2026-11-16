@@ -1010,12 +1010,18 @@ class MyceliumApi(
                 parameter("view", "sidebar")
                 cursor?.let { next -> parameter("cursor", next) }
             }
-        }.body<JsonElement>().let { answer ->
-            when (answer) {
-                is JsonArray -> ConversationPage(MyceliumJson.decodeFromJsonElement<List<Conversation>>(answer))
-                else -> MyceliumJson.decodeFromJsonElement<ConversationPage>(answer)
+        }.body<JsonElement>().let(::pageFrom)
+    }
+
+    suspend fun archivedPage(cursor: String? = null): ConversationPage = withContext(Dispatchers.Default) {
+        call("/conversations") {
+            client.get(it) {
+                authorise()
+                parameter("view", "archive")
+                parameter("archived", true)
+                cursor?.let { next -> parameter("cursor", next) }
             }
-        }
+        }.body<JsonElement>().let(::pageFrom)
     }
 
     suspend fun conversationsWhere(parent: String? = null, assistant: String? = null, managed: Boolean = false, query: String? = null, status: String? = null, archived: Boolean = false, limit: Int? = null): List<Conversation> = withContext(Dispatchers.Default) {
@@ -1413,4 +1419,9 @@ class MyceliumApi(
     fun close() {
         client.close()
     }
+}
+
+private fun pageFrom(answer: JsonElement): ConversationPage = when (answer) {
+    is JsonArray -> ConversationPage(MyceliumJson.decodeFromJsonElement<List<Conversation>>(answer))
+    else -> MyceliumJson.decodeFromJsonElement<ConversationPage>(answer)
 }

@@ -37,6 +37,7 @@ import mycelium.state.formatTokens
 import mycelium.state.readOnly
 
 private const val DoneConversationsShown = 200
+private const val ArchivedMatchesShown = 200
 private const val SearchDebounceMillis = 250L
 
 private const val HistoryColumnsPreference = "history-columns"
@@ -86,6 +87,8 @@ private const val PastList = "past conversations"
 fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
     val colors = MyTheme.colors
     var archived by remember { mutableStateOf<List<Conversation>>(emptyList()) }
+    var archivedNext by remember { mutableStateOf<String?>(null) }
+    var loadingArchived by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf(PastFilter.All) }
     var query by remember { mutableStateOf("") }
     var usage by remember { mutableStateOf<Map<String, ActivityRow>?>(null) }
@@ -106,7 +109,30 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
     }
 
     val loadFailures by store.loadFailures.collectAsState()
-    val load = { store.load(PastList) { archived = store.api.conversations(archived = true) } }
+    val load = {
+        store.load(PastList) {
+            val page = store.api.archivedPage()
+            archived = page.conversations
+            archivedNext = page.next
+        }
+    }
+    val loadMoreArchived = {
+        val next = archivedNext
+
+        if (next != null && !loadingArchived) {
+            loadingArchived = true
+            store.act {
+                try {
+                    val page = store.api.archivedPage(next)
+                    val held = archived.map { it.id }.toSet()
+                    archived = archived + page.conversations.filter { it.id !in held }
+                    archivedNext = page.next
+                } finally {
+                    loadingArchived = false
+                }
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         load()
@@ -128,6 +154,11 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
         delay(SearchDebounceMillis)
 
         searchProblem = attempt { hits = store.api.search(query.trim()) }
+        store.act {
+            val found = store.api.conversationsWhere(query = query.trim(), archived = true, limit = ArchivedMatchesShown)
+            val held = archived.map { it.id }.toSet()
+            archived = archived + found.filter { it.id !in held }
+        }
     }
 
     val filters = layout.filters
@@ -218,7 +249,7 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
             return@Column
         }
 
-        HistoryTable(groups, layout, { layout = it }, widths, { widths = it }, stamp, onOpen, Modifier.weight(1f)) { row ->
+        HistoryTable(groups, layout, { layout = it }, widths, { widths = it }, stamp, onOpen, Modifier.weight(1f), onNearEnd = loadMoreArchived) { row ->
             val isArchived = row.archivedAt != null
 
             RowMenu(row.title) { close ->
