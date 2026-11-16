@@ -8,9 +8,11 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use chrono::{DateTime, NaiveDateTime, Utc};
+use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::time::Duration;
+use std::sync::PoisonError;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 const CREATE_APP: &str = "create_app";
@@ -32,6 +34,12 @@ const MAX_LOG_LINES: u64 = 1000;
 const TAIL_LINES: usize = 12;
 const TIMEOUT: Duration = Duration::from_secs(30);
 const SECRET_HIDDEN: &str = "Secret, hidden";
+const APPS_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+
+pub enum AppsRefresh {
+    Running,
+    Finished(Instant),
+}
 
 enum Failure {
     Unreachable(String),
@@ -218,7 +226,7 @@ fn request(http: &reqwest::Client, credentials: &Credentials, method: reqwest::M
 
 async fn send(builder: reqwest::RequestBuilder, address: &str) -> Outcome<Value> {
     let host = host_of(address);
-    let response = builder.send().await.map_err(|_| Failure::Unreachable(format!("Could not reach {host}. Check the address and that Coolify is running.")))?;
+    let response = crate::traces::send(builder).await.map_err(|_| Failure::Unreachable(format!("Could not reach {host}. Check the address and that Coolify is running.")))?;
     let status = response.status();
     let body: Value = response.json().await.unwrap_or(Value::Null);
 
@@ -880,7 +888,7 @@ async fn deployment_card(state: &AppState, account: &Account, uuid: &str) -> Out
     }))
 }
 
-pub async fn call(state: &AppState, _owner: Uuid, server: &ServerRow, credentials: &Credentials, conversation: Option<Uuid>, tool: &str, arguments: &Value) -> CallOutput {
+pub async fn call(state: &AppState, owner: Uuid, server: &ServerRow, credentials: &Credentials, conversation: Option<Uuid>, tool: &str, arguments: &Value) -> CallOutput {
     let handle = Account { http: state.http.clone(), credentials: Credentials { address: credentials.address.clone(), account: String::new(), secret: credentials.secret.clone(), settings: credentials.settings.clone(), session: None }, server_id: server.id };
     let app = arguments["app"].as_str().map(str::trim).filter(|uuid| !uuid.is_empty()).map(str::to_string);
     let outcome: Outcome<Value> = async {
@@ -898,7 +906,12 @@ pub async fn call(state: &AppState, _owner: Uuid, server: &ServerRow, credential
             }
             "list_projects" => Ok(naming(&list_of(&handle.call(reqwest::Method::GET, "projects", None).await?, "projects"))),
             "list_servers" => Ok(naming(&list_of(&handle.call(reqwest::Method::GET, "servers", None).await?, "servers"))),
-            CREATE_APP => handle.create_app(state, arguments, conversation).await,
+            CREATE_APP => {
+                let created = handle.create_app(state, arguments, conversation).await?;
+                apps_due(state, owner);
+
+                Ok(created)
+            }
             CREATE_DATABASE => handle.create_database(arguments).await,
             API => {
                 if handle.scoped() {
@@ -923,7 +936,7 @@ pub async fn call(state: &AppState, _owner: Uuid, server: &ServerRow, credential
                     None => builder,
                 };
                 let host = host_of(&handle.credentials.address);
-                let response = builder.send().await.map_err(|_| Failure::Unreachable(format!("Could not reach {host}. Check the address and that Coolify is running.")))?;
+                let response = crate::traces::send(builder).await.map_err(|_| Failure::Unreachable(format!("Could not reach {host}. Check the address and that Coolify is running.")))?;
                 let status = response.status();
                 let text = response.text().await.unwrap_or_default();
                 let body = serde_json::from_str::<Value>(&text).unwrap_or(Value::String(text));
@@ -1041,23 +1054,105 @@ pub async fn set_target(State(state): State<AppState>, user: AuthUser, Path(id):
 
     sqlx::query("update chat_tool_servers set settings = $3 where id = $1 and owner = $2").bind(id).bind(user.id).bind(crate::secrets::SealedSettings(settings)).execute(&state.pool).await?;
     state.hub.tools_changed(user.id);
+    apps_due(&state, user.id);
 
     Ok(Json(serde_json::to_value(crate::chat_tool_servers::reloaded(&state, user.id, id).await?).map_err(ApiError::internal)?))
+}
+
+fn apps_due(state: &AppState, owner: Uuid) {
+    let mut refreshes = state.apps_refreshes.lock().unwrap_or_else(PoisonError::into_inner);
+
+    if matches!(refreshes.get(&owner), Some(AppsRefresh::Finished(_))) {
+        refreshes.remove(&owner);
+    }
+}
+
+async fn stored_apps(state: &AppState, server_id: Uuid) -> sqlx::Result<Vec<Value>> {
+    sqlx::query_scalar::<_, Value>("select view || jsonb_build_object('conversation_id', conversation_id) from coolify_apps where server_id = $1 and view is not null order by listed_order").bind(server_id).fetch_all(&state.pool).await
+}
+
+async fn refresh_apps(state: &AppState, owner: Uuid, handle: &Account) -> Outcome<Vec<Value>> {
+    let apps = handle.applications().await?;
+    let projects = handle.project_names().await;
+    let mut views = Vec::new();
+
+    for entry in &apps {
+        views.push(handle.app_view(state, entry, None, &projects).await);
+    }
+
+    let before = stored_apps(state, handle.server_id).await.map_err(|error| Failure::Other(error.to_string()))?;
+
+    sqlx::query(
+        "with listed as (select app, ordinality from jsonb_array_elements($2) with ordinality as listing(app, ordinality)), \
+         unlisted as (update coolify_apps set view = null, listed_order = null where server_id = $1 and app_uuid not in (select app->>'uuid' from listed)) \
+         insert into coolify_apps (server_id, app_uuid, view, listed_order) select $1, app->>'uuid', app, ordinality::integer from listed \
+         on conflict (server_id, app_uuid) do update set view = excluded.view, listed_order = excluded.listed_order",
+    )
+    .bind(handle.server_id)
+    .bind(Value::Array(views.clone()))
+    .execute(&state.pool)
+    .await
+    .map_err(|error| Failure::Other(error.to_string()))?;
+
+    if before != views {
+        state.publish(Some(owner), StreamMessage::AppsChanged);
+    }
+
+    Ok(views)
 }
 
 pub async fn list_apps(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Value>> {
     let Ok((_, handle)) = account(&state, user.id, None).await else {
         return Ok(Json(json!({"apps": []})));
     };
-    let apps = handle.applications().await.map_err(failed)?;
-    let projects = handle.project_names().await;
-    let mut views = Vec::new();
+    let stored = stored_apps(&state, handle.server_id).await?;
+    let (due, listed_before) = {
+        let mut refreshes = state.apps_refreshes.lock().unwrap_or_else(PoisonError::into_inner);
+        let listed_before = refreshes.contains_key(&user.id);
+        let due = match refreshes.get(&user.id) {
+            Some(AppsRefresh::Running) => false,
+            Some(AppsRefresh::Finished(at)) => at.elapsed() >= APPS_REFRESH_INTERVAL,
+            None => true,
+        };
 
-    for entry in &apps {
-        views.push(handle.app_view(&state, entry, None, &projects).await);
+        if due {
+            refreshes.insert(user.id, AppsRefresh::Running);
+        }
+
+        (due, listed_before)
+    };
+
+    if !due {
+        return Ok(Json(json!({"apps": stored})));
     }
 
-    Ok(Json(json!({"apps": views})))
+    if stored.is_empty() && !listed_before {
+        let refreshed = refresh_apps(&state, user.id, &handle).await;
+        let mut refreshes = state.apps_refreshes.lock().unwrap_or_else(PoisonError::into_inner);
+
+        return match refreshed {
+            Ok(views) => {
+                refreshes.insert(user.id, AppsRefresh::Finished(Instant::now()));
+
+                Ok(Json(json!({"apps": views})))
+            }
+            Err(failure) => {
+                refreshes.remove(&user.id);
+
+                Err(failed(failure))
+            }
+        };
+    }
+
+    tokio::spawn(async move {
+        if let Err(failure) = refresh_apps(&state, user.id, &handle).await {
+            tracing::warn!("refreshing the apps list from Coolify failed: {}", failure.message());
+        }
+
+        state.apps_refreshes.lock().unwrap_or_else(PoisonError::into_inner).insert(user.id, AppsRefresh::Finished(Instant::now()));
+    });
+
+    Ok(Json(json!({"apps": stored})))
 }
 
 pub async fn get_app(State(state): State<AppState>, user: AuthUser, Path(uuid): Path<String>) -> ApiResult<Json<Value>> {

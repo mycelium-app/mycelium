@@ -350,6 +350,10 @@ class Store(
             learning.reload()
         }
 
+        if (message is StreamMessage.AppsChanged && mutableState.value.apps != null) {
+            act { refreshApps() }
+        }
+
         announceFinished(before, message)
     }
 

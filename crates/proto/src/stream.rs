@@ -106,6 +106,7 @@ pub enum StreamMessage {
     },
     ForgeChanged,
     WellnessChanged,
+    AppsChanged,
     Device {
         user_code: String,
         kind: DeviceKind,

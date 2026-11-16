@@ -5,8 +5,12 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use crate::common::{Server, serve};
+use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use uuid::Uuid;
 
 const TOKEN: &str = "1|coolify-token-secret";
 const SECRET_VALUE: &str = "hunter2-do-not-leak";
@@ -16,6 +20,8 @@ struct FakeCoolify {
     created: Mutex<Vec<Value>>,
     envs: Mutex<Vec<Value>>,
     deleted: Mutex<Vec<String>>,
+    listings: AtomicUsize,
+    listing_delay: Mutex<Duration>,
 }
 
 fn authorised(headers: &HeaderMap) -> bool {
@@ -50,7 +56,11 @@ async fn environments(Path(project): Path<String>) -> Json<Value> {
     }
 }
 
-async fn applications() -> Json<Value> {
+async fn applications(State(fake): State<Arc<FakeCoolify>>) -> Json<Value> {
+    fake.listings.fetch_add(1, Ordering::SeqCst);
+    let delay = *fake.listing_delay.lock().unwrap();
+    tokio::time::sleep(delay).await;
+
     Json(json!([
         {"uuid": "a1", "name": "notes", "status": "running:healthy", "fqdn": "https://notes.apps.example.com", "environment_id": 7, "destination": {"server": {"name": "Main"}}, "git_repository": "slop/notes", "git_branch": "main"},
         {"uuid": "site", "name": "landing", "status": "running:healthy", "environment_id": 8},
@@ -164,6 +174,12 @@ async fn add_whole_instance(server: &Server, base: &str) -> (u16, Value) {
     server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Coolify", "kind": "coolify", "url": base, "bearer_token": TOKEN}))).await
 }
 
+async fn store_apps(server: &Server, account: &Value, apps: Value) {
+    let id: Uuid = account["id"].as_str().unwrap().parse().unwrap();
+
+    sqlx::query("insert into coolify_apps (server_id, app_uuid, view, listed_order) select $1, app->>'uuid', app, listed.ordinality::integer from jsonb_array_elements($2) with ordinality as listed(app, ordinality)").bind(id).bind(apps).execute(&server.pool).await.unwrap();
+}
+
 fn mcp(tool: &str, arguments: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": format!("coolify__{tool}"), "arguments": arguments}})
 }
@@ -224,6 +240,53 @@ async fn there_are_no_apps_without_a_coolify_account_and_only_the_projects_apps_
     assert_eq!(none["apps"], json!([]));
     assert_eq!(some["apps"].as_array().unwrap().len(), 1);
     assert_eq!((some["apps"][0]["name"].clone(), some["apps"][0]["status"].clone()), (json!("notes"), json!("running")));
+}
+
+#[tokio::test]
+async fn the_apps_list_answers_from_the_stored_apps_without_waiting_for_coolify() {
+    let server = Server::start().await;
+    let (base, fake) = fake_coolify().await;
+    let (_, account) = add_coolify(&server, &base).await;
+    store_apps(&server, &account, json!([{"uuid": "a1", "name": "notes (stored)", "status": "stopped"}])).await;
+    *fake.listing_delay.lock().unwrap() = Duration::from_secs(5);
+
+    let started = Instant::now();
+    let (status, apps) = server.user.json(server.user.get("/api/v1/apps")).await;
+
+    assert_eq!(status, 200, "{apps}");
+    assert!(started.elapsed() < Duration::from_secs(2), "took {:?}", started.elapsed());
+    assert_eq!(apps["apps"][0]["name"], "notes (stored)");
+}
+
+#[tokio::test]
+async fn the_background_refresh_stores_what_coolify_lists_for_the_next_answer() {
+    let server = Server::start().await;
+    let (base, _) = fake_coolify().await;
+    let (_, account) = add_coolify(&server, &base).await;
+    store_apps(&server, &account, json!([{"uuid": "a1", "name": "notes (stored)", "status": "stopped"}])).await;
+    let mut stream = server.user.stream().await;
+
+    let (_, stale) = server.user.json(server.user.get("/api/v1/apps")).await;
+    stream.until(|message| matches!(message, StreamMessage::AppsChanged).then_some(())).await;
+    let (_, fresh) = server.user.json(server.user.get("/api/v1/apps")).await;
+
+    assert_eq!(stale["apps"][0]["name"], "notes (stored)");
+    assert_eq!((fresh["apps"][0]["name"].clone(), fresh["apps"][0]["status"].clone()), (json!("notes"), json!("running")));
+}
+
+#[tokio::test]
+async fn two_apps_lists_in_quick_succession_refresh_from_coolify_once() {
+    let server = Server::start().await;
+    let (base, fake) = fake_coolify().await;
+    let (_, account) = add_coolify(&server, &base).await;
+    store_apps(&server, &account, json!([{"uuid": "a1", "name": "notes (stored)", "status": "stopped"}])).await;
+    let mut stream = server.user.stream().await;
+
+    server.user.json(server.user.get("/api/v1/apps")).await;
+    server.user.json(server.user.get("/api/v1/apps")).await;
+    stream.until(|message| matches!(message, StreamMessage::AppsChanged).then_some(())).await;
+
+    assert_eq!(fake.listings.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]

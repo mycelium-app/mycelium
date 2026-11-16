@@ -856,6 +856,7 @@ pub struct AppState {
     pub http: reqwest::Client,
     pub http_public: reqwest::Client,
     pub forge_cache: Arc<ForgeCache>,
+    pub apps_refreshes: Arc<Mutex<HashMap<Uuid, crate::coolify::AppsRefresh>>>,
 }
 
 impl AppState {

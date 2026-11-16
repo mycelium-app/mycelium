@@ -237,6 +237,7 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.ForgeChanged -> state.copy(forgeRevision = state.forgeRevision + 1)
 
     is StreamMessage.WellnessChanged -> state
+    is StreamMessage.AppsChanged -> state
 
     is StreamMessage.ScreenOpened -> state
 

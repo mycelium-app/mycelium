@@ -80,6 +80,8 @@ sealed interface StreamMessage {
 
     data object WellnessChanged : StreamMessage
 
+    data object AppsChanged : StreamMessage
+
     data class ScreenOpened(val route: String) : StreamMessage
 
     data class NeedsYouFocused(val key: String) : StreamMessage
@@ -159,6 +161,7 @@ fun parseStreamMessage(text: String): StreamMessage? {
         "watches_changed" -> StreamMessage.WatchesChanged(element.requireString("conversation_id"))
         "forge_changed" -> StreamMessage.ForgeChanged
         "wellness_changed" -> StreamMessage.WellnessChanged
+        "apps_changed" -> StreamMessage.AppsChanged
         "open_screen" -> StreamMessage.ScreenOpened(element.requireString("route"))
         "needs_you_focus" -> StreamMessage.NeedsYouFocused(element.requireString("key"))
         "node_resources" -> StreamMessage.NodeResourcesSampled(

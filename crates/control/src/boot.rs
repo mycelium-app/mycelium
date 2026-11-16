@@ -41,6 +41,7 @@ pub fn new_state(config: Config) -> Result<AppState> {
         http: crate::outbound::client()?,
         http_public,
         forge_cache,
+        apps_refreshes: Arc::default(),
     })
 }
 
