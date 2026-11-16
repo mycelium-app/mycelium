@@ -44,7 +44,7 @@ private object EveryVoiceFeature : Platform by QuietPlatform {
     }
 
     override fun dictation(): Dictation = object : Dictation {
-        override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit) = Unit
+        override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit, onHearing: (String) -> Unit) = Unit
 
         override fun stop() = Unit
     }

@@ -17,7 +17,7 @@ private const val Stopped = "Dictation stopped. Try again."
 class AndroidDictation(private val context: Context, private val requestPermission: ((Boolean) -> Unit) -> Unit) : Dictation {
     private var recogniser: SpeechRecognizer? = null
 
-    override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit) {
+    override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit, onHearing: (String) -> Unit) {
         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
         if (granted) {

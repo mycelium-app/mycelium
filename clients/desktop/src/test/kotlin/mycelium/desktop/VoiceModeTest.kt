@@ -58,7 +58,7 @@ private class ListeningDictation : Dictation {
     var onStopped: (DictationProblem?) -> Unit = {}
     var starts = 0
 
-    override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit) {
+    override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit, onHearing: (String) -> Unit) {
         starts += 1
         this.onHeard = onHeard
         this.onStopped = onStopped

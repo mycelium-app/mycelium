@@ -56,7 +56,7 @@ private class FakeWakeListener(private val events: MutableList<String>) : WakeLi
 }
 
 private class RecordingDictation(private val events: MutableList<String>) : Dictation {
-    override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit) {
+    override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit, onHearing: (String) -> Unit) {
         events += "dictation started"
     }
 

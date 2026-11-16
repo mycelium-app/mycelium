@@ -14,7 +14,7 @@ sealed class DictationProblem {
 }
 
 interface Dictation {
-    fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit)
+    fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit, onHearing: (String) -> Unit = {})
 
     fun stop()
 
@@ -45,7 +45,7 @@ class ProviderDictation(private val recorder: AudioRecorder, private val transcr
     private var onHeard: (String) -> Unit = {}
     private var onStopped: (DictationProblem?) -> Unit = {}
 
-    override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit) {
+    override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit, onHearing: (String) -> Unit) {
         this.onHeard = onHeard
         this.onStopped = onStopped
         recorder.start { problem -> onStopped(problem) }

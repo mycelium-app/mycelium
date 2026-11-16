@@ -364,22 +364,44 @@ fun Composer(
         }
 
         listening = true
+        var hearingFrom = -1
+        var hearingLength = 0
+
+        fun replaceHearing(words: String) {
+            val start = if (hearingFrom >= 0) hearingFrom else text.selection.end
+            val end = if (hearingFrom >= 0) hearingFrom + hearingLength else text.selection.end
+            val separator = if (words.isNotEmpty() && start > 0 && !text.text[start - 1].isWhitespace()) " " else ""
+            val inserted = if (words.isEmpty()) "" else separator + words
+
+            changeText(TextFieldValue(text.text.substring(0, start) + inserted + text.text.substring(end), TextRange(start + inserted.length)))
+            hearingFrom = if (inserted.isEmpty()) -1 else start
+            hearingLength = inserted.length
+        }
+
         dictation?.start(
             onHeard = { heard ->
-                if (!dictationOpen[0] || heard.isBlank()) {
+                if (!dictationOpen[0]) {
                     return@start
                 }
 
-                val cursor = text.selection.end
-                val separator = if (cursor > 0 && !text.text[cursor - 1].isWhitespace()) " " else ""
-                val inserted = separator + heard
-                val updated = text.text.substring(0, cursor) + inserted + text.text.substring(text.selection.end)
+                val command = heard.trim().trimEnd('.', '!', '?', ',')
 
-                changeText(TextFieldValue(updated, TextRange(cursor + inserted.length)))
+                replaceHearing(if (heard.isBlank() || command.equals("send", ignoreCase = true)) "" else heard)
+                hearingFrom = -1
+                hearingLength = 0
+
+                if (command.equals("send", ignoreCase = true)) {
+                    submit()
+                }
             },
             onStopped = { problem ->
                 listening = false
                 dictationProblem = problem
+            },
+            onHearing = { words ->
+                if (dictationOpen[0]) {
+                    replaceHearing(words)
+                }
             },
         )
     }

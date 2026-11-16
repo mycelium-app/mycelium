@@ -63,7 +63,7 @@ private const val Now = "2026-10-22T10:00:00Z"
 private val BarLabels = listOf("Attach files", "Dictate", "Teach me", "Set a goal", "Model: ", "Mode: ", "Conversation usage", "Stop the agent")
 
 private val SilentDictation = object : Dictation {
-    override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit) = Unit
+    override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit, onHearing: (String) -> Unit) = Unit
 
     override fun stop() = Unit
 }

@@ -1,5 +1,6 @@
 package mycelium.desktop
 
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -43,10 +44,12 @@ private const val ChosenSpeechPrivacy = """{"voice_enabled":true,"speech_to_text
 private const val ChatOnlyProvider = """[{"id":"p1","kind":"openai_compatible","name":"Chat","models":["gpt-4o-mini"],"created_at":"2026-10-22T10:00:00Z"}]"""
 
 private class FakeDictation : Dictation {
+    var onHearing: (String) -> Unit = {}
     var onHeard: (String) -> Unit = {}
     var onStopped: (DictationProblem?) -> Unit = {}
 
-    override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit) {
+    override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit, onHearing: (String) -> Unit) {
+        this.onHearing = onHearing
         this.onHeard = onHeard
         this.onStopped = onStopped
     }
@@ -110,6 +113,52 @@ class DictationTest {
         rule.runOnIdle { dictation.onHeard("fix the build") }
 
         rule.onNode(hasSetTextAction()).assertTextEquals("Please fix the build")
+    }
+
+    private fun prompts() = requests.filter { (request, _) -> request.method == HttpMethod.Post && request.url.encodedPath.endsWith("/conversations/c1/prompt") }
+
+    @Test
+    fun words_still_being_heard_show_in_the_draft_and_the_final_words_replace_them() {
+        val dictation = FakeDictation()
+        open(SpeakingPlatform(dictation = dictation))
+
+        rule.onNode(hasSetTextAction()).performTextInput("Please")
+        rule.onNodeWithContentDescription("Dictate").performClick()
+        rule.runOnIdle { dictation.onHearing("fix the") }
+        rule.onNode(hasSetTextAction()).assertTextEquals("Please fix the")
+        rule.runOnIdle { dictation.onHearing("fix the build") }
+        rule.onNode(hasSetTextAction()).assertTextEquals("Please fix the build")
+        rule.runOnIdle { dictation.onHeard("fix the build.") }
+
+        rule.onNode(hasSetTextAction()).assertTextEquals("Please fix the build.")
+    }
+
+    @Test
+    fun saying_send_on_its_own_sends_the_message_without_the_word() {
+        val dictation = FakeDictation()
+        open(SpeakingPlatform(dictation = dictation))
+
+        rule.onNode(hasSetTextAction()).performTextInput("Please fix the build")
+        rule.onNodeWithContentDescription("Dictate").performClick()
+        rule.runOnIdle { dictation.onHearing("send") }
+        rule.runOnIdle { dictation.onHeard("Send.") }
+        rule.waitUntil(5_000) { prompts().isNotEmpty() }
+
+        assertTrue(String(prompts().single().second).contains("\"text\":\"Please fix the build\""), String(prompts().single().second))
+        assertEquals("", rule.onNode(hasSetTextAction()).fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
+    }
+
+    @Test
+    fun send_inside_a_sentence_stays_in_the_draft() {
+        val dictation = FakeDictation()
+        open(SpeakingPlatform(dictation = dictation))
+
+        rule.onNode(hasSetTextAction()).performTextInput("Please")
+        rule.onNodeWithContentDescription("Dictate").performClick()
+        rule.runOnIdle { dictation.onHeard("send the logs") }
+
+        rule.onNode(hasSetTextAction()).assertTextEquals("Please send the logs")
+        assertTrue(prompts().isEmpty())
     }
 
     @Test

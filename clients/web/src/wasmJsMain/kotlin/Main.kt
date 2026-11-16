@@ -134,24 +134,27 @@ private external fun playChime()
 @JsFun("() => !!(window.SpeechRecognition || window.webkitSpeechRecognition)")
 private external fun speechRecognitionExists(): Boolean
 
-@JsFun("""(onHeard, onEnded) => {
+@JsFun("""(onHeard, onHearing, onEnded) => {
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new Recognition();
     let failure = '';
     recognition.continuous = true;
-    recognition.interimResults = false;
+    recognition.interimResults = true;
     recognition.lang = navigator.language;
     recognition.onresult = (event) => {
+        let interim = '';
         for (let index = event.resultIndex; index < event.results.length; index++) {
-            if (event.results[index].isFinal) { onHeard(event.results[index][0].transcript); }
+            const transcript = event.results[index][0].transcript;
+            if (event.results[index].isFinal) { onHeard(transcript); } else { interim += transcript; }
         }
+        onHearing(interim);
     };
     recognition.onerror = (event) => { failure = event.error || 'failed'; };
     recognition.onend = () => onEnded(failure);
     recognition.start();
     return recognition;
 }""")
-private external fun startSpeechRecognition(onHeard: (JsString) -> Unit, onEnded: (JsString) -> Unit): JsAny
+private external fun startSpeechRecognition(onHeard: (JsString) -> Unit, onHearing: (JsString) -> Unit, onEnded: (JsString) -> Unit): JsAny
 
 @JsFun("(recognition) => { recognition.stop(); }")
 private external fun stopSpeechRecognition(recognition: JsAny)
@@ -192,8 +195,8 @@ private class WebAudioPlayer : AudioPlayer {
 private class WebDictation : Dictation {
     private var recognition: JsAny? = null
 
-    override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit) {
-        recognition = startSpeechRecognition({ heard -> onHeard(heard.toString()) }) { failure ->
+    override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit, onHearing: (String) -> Unit) {
+        recognition = startSpeechRecognition({ heard -> onHeard(heard.toString()) }, { hearing -> onHearing(hearing.toString()) }) { failure ->
             recognition = null
             onStopped(
                 when (failure.toString()) {
