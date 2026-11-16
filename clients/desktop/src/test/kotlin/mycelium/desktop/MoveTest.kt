@@ -141,7 +141,7 @@ class MoveTest {
 
         rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/move" } }
         assertEquals("""{"node_id":"n2"}""", requests.last { it.first == "POST /api/v1/conversations/c1/move" }.second)
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Waiting for the turn to end", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Stopping the current turn", substring = true).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Cancel move").assertIsDisplayed()
     }
 
@@ -160,16 +160,15 @@ class MoveTest {
     }
 
     @Test
-    fun interruptingAndMovingNowQueuesTheMoveThenStopsTheTurn() {
+    fun movingARunningConversationSendsOnlyTheMoveAndLeavesStoppingTheTurnToTheControlPlane() {
         sheet(store(Movable, progress("waiting")), ConversationStatus.Working)
         waitForPlan()
 
-        rule.onNodeWithContentDescription("More ways to move after this turn").performClick()
-        rule.onNodeWithText("Interrupt and move now").performClick()
+        rule.onNodeWithText("Move").performClick()
 
-        rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/cancel" } }
-        val order = requests.map { it.first }.filter { it.startsWith("POST") }
-        assertEquals(listOf("POST /api/v1/conversations/c1/move", "POST /api/v1/conversations/c1/cancel"), order)
+        rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/move" } }
+        rule.waitForIdle()
+        assertEquals(listOf("POST /api/v1/conversations/c1/move"), requests.map { it.first }.filter { it.startsWith("POST") })
     }
 
     @Test
