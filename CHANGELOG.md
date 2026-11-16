@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.34.51
+
+- The break reminder is a card at the bottom of the left sidebar, above Usage and the other open cards, so nothing overlaps it. It shows how long the break is overdue in minutes and seconds, announces itself once, and offers Start break and one Snooze.
+- The break clock counts elapsed time: it keeps counting for up to three minutes after the window loses focus, and a longer absence pauses it without clearing it. Overdue time pauses while snoozed or on a break, starting a break resets it, and time with no conversation open is not counted.
+- Mycelium refuses an Outline document patch that would delete table rows, because Outline would remove the rest of the table with them. The error names the rows and says to patch the whole table with every row to keep.
+
 ## v0.34.50
 
 - The web client stays connected to the live stream instead of reconnecting in a loop.
