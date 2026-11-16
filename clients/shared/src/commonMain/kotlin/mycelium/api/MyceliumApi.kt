@@ -34,7 +34,7 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.JsonArray
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -1390,7 +1390,7 @@ class MyceliumApi(
         call("/conversations/$id/config") { client.post(it) { authorise(); json(request) } }
     }
 
-    fun stream(onOpen: suspend () -> Unit = {}): Flow<StreamMessage> = flow {
+    fun stream(onOpen: suspend () -> Unit = {}): Flow<StreamMessage> = channelFlow {
         val socketUrl = root.replaceFirst("http", "ws") + "/api/v1/stream"
 
         client.webSocket(socketUrl, request = { authorise() }) {
@@ -1401,7 +1401,7 @@ class MyceliumApi(
                     val message = runCatching { parseStreamMessage(frame.readText()) }.getOrNull()
 
                     if (message != null) {
-                        emit(message)
+                        send(message)
                     }
                 }
             }
