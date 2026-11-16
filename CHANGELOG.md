@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.48
+
+- Changing a conversation's model, account, agent or node while it is working takes effect at once: Mycelium stops the running turn, applies the change, and then sends any queued messages under the new settings. The move sheet has one Move, which stops the turn first. An agent that moves its own conversation still moves when its reply ends, and moves at a usage limit are unchanged.
+
 ## v0.34.47
 
 - An agent's whole process tree stops with it: the agent CLI an ACP adapter starts no longer outlives a restart or a killed keeper, and a new keeper stops anything a dead one left running before its own agent starts, so a conversation can no longer have two copies of its agent at work.
@@ -95,10 +99,6 @@ Running an action item's command needs its node on Mycelium v0.34.30 or later; o
 - An agent can ask to start one conversation in a group its group is not connected to. Instead of refusing, start_conversation shows a card naming both groups, the project, node and first message; Create starts exactly that conversation and never connects the groups, and Create and connect links only the two conversations.
 - A refused API call says why: the action needs full access, the conversation is in a group the token cannot reach, or the token lacks a named scope.
 - A conversation that fails before its first message tells the conversation that started it why, and read_conversation shows a conversation's errors among its messages.
-
-## v0.34.27
-
-- Publishes the changes listed under v0.34.26, whose desktop and web build did not complete, so v0.34.26 was never released.
 
 ## v0.34.28
 
