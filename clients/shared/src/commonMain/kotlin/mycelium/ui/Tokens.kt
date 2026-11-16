@@ -136,7 +136,7 @@ object Tokens {
         val ControlMd: Dp = 28.dp
         val ControlLg: Dp = 32.dp
         val Row: Dp = 32.dp
-        val DensityFloor: Dp = 20.dp
+        val DensityFloor: Dp = 24.dp
         val Bar: Dp = 40.dp
         val DiffFile: Dp = 30.dp
         val CommandOutput: Dp = 240.dp

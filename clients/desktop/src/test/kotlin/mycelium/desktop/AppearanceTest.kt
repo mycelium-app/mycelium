@@ -9,6 +9,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
@@ -34,6 +36,7 @@ import mycelium.ui.Display
 import mycelium.ui.Label
 import mycelium.ui.LocalAppearance
 import mycelium.ui.MotionSetting
+import mycelium.ui.MyButton
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.SettingsScreen
 import mycelium.ui.ThreadView
@@ -65,6 +68,7 @@ class AppearanceTest {
                 MyceliumTheme(true) {
                     Column {
                         Box(Modifier.height(420.dp)) { SettingsScreen(store, Me("u", "sam@example.com", "Sam"), "https://mycelium.test", onSignOut = {}) }
+                        MyButton({}, text = "Sample button")
                         Label("Sample code", style = Tokens.Type.Code)
                         Label("Motion is ${display.reducedMotion.name}")
                         Label("Stamped " + timestamp("2026-10-22T10:00:00Z"))
@@ -97,12 +101,23 @@ class AppearanceTest {
     @Test
     fun aCompactDensityShortensControls() {
         show()
-        val before = rule.onNodeWithContentDescription("Density").getUnclippedBoundsInRoot().let { it.bottom - it.top }
+        val button = hasText("Sample button") and hasClickAction()
+        val before = rule.onNode(button).getUnclippedBoundsInRoot().let { it.bottom - it.top }
 
         choose("Compact")
         rule.waitForIdle()
 
-        assertTrue(rule.onNodeWithContentDescription("Density").getUnclippedBoundsInRoot().let { it.bottom - it.top } < before)
+        assertTrue(rule.onNode(button).getUnclippedBoundsInRoot().let { it.bottom - it.top } < before)
+    }
+
+    @Test
+    fun noControlIsShorterThanTheTargetSizeInCompactDensity() {
+        show()
+
+        choose("Compact")
+        rule.waitForIdle()
+
+        assertTrue(rule.onNodeWithContentDescription("Density").getUnclippedBoundsInRoot().let { it.bottom - it.top } >= 24.dp)
     }
 
     @Test
