@@ -96,6 +96,7 @@ mod sessions;
 mod skills;
 mod snapshots;
 mod open_outline;
+mod outline_patch;
 mod ssh_access;
 mod start_proposals;
 mod state;

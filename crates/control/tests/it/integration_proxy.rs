@@ -15,9 +15,10 @@ const KEY: &str = "outline-key-1234";
 #[derive(Default)]
 struct FakeOutline {
     api_calls: Mutex<Vec<(String, Option<String>)>>,
+    tool_calls: Mutex<Vec<Value>>,
 }
 
-async fn mcp(headers: HeaderMap, Json(body): Json<Value>) -> Response {
+async fn mcp(State(fake): State<Arc<FakeOutline>>, headers: HeaderMap, Json(body): Json<Value>) -> Response {
     if headers.get("authorization").and_then(|value| value.to_str().ok()) != Some(&format!("Bearer {KEY}")) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
@@ -28,7 +29,12 @@ async fn mcp(headers: HeaderMap, Json(body): Json<Value>) -> Response {
 
     let result = match body["method"].as_str().unwrap_or_default() {
         "initialize" => json!({"protocolVersion": "2025-11-25", "capabilities": {"tools": {}}, "serverInfo": {"name": "outline", "version": "1"}}),
-        "tools/list" => json!({"tools": [{"name": "search", "description": "Search", "inputSchema": {"type": "object"}}]}),
+        "tools/list" => json!({"tools": [{"name": "search", "description": "Search", "inputSchema": {"type": "object"}}, {"name": "update_document", "description": "Update a document", "inputSchema": {"type": "object"}}]}),
+        "tools/call" => {
+            fake.tool_calls.lock().unwrap().push(body["params"].clone());
+
+            json!({"content": [{"type": "text", "text": "Updated"}]})
+        }
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
 
@@ -312,4 +318,25 @@ async fn open_outline_with_two_integrations_asks_which_one() {
 
     assert_eq!(opened["isError"], json!(true));
     assert!(opened["content"][0]["text"].as_str().unwrap().starts_with("This conversation has more than one Outline integration"));
+}
+
+#[tokio::test]
+async fn an_outline_patch_that_would_delete_a_table_row_is_refused_before_it_reaches_outline() {
+    let server = Server::start().await;
+    let mut link = server.online_node("atlas").await;
+    let (_, fake) = add_outline(&server).await;
+    let conversation = working_conversation(&server, &mut link).await;
+    let anonymous = server.anonymous();
+    let request = anonymous
+        .post("/api/v1/mcp")
+        .header("authorization", format!("Bearer {}", link.token))
+        .header("x-mycelium-conversation", conversation.to_string())
+        .json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "docs__update_document", "arguments": {"id": "aB3dE5fG", "editMode": "patch", "findText": "| Jest | done |", "text": "\n"}}}));
+    let (_, body) = anonymous.json(request).await;
+
+    assert_eq!(body["result"]["isError"], json!(true), "{body}");
+    let text = body["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.starts_with("Nothing was changed. This patch would delete 1 table row."), "{text}");
+    assert!(text.contains("| Jest | done |"), "{text}");
+    assert!(fake.tool_calls.lock().unwrap().is_empty());
 }

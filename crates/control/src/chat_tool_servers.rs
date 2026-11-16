@@ -126,6 +126,13 @@ impl ServerRow {
         self.known_app().map_or(DEFAULT_KEY_HEADER, |app| app.key_header)
     }
 
+    pub fn refusal(&self, tool: &str, arguments: &Value) -> Option<String> {
+        match self.known_app()?.id {
+            "outline" => crate::outline_patch::refusal(tool, arguments),
+            _ => None,
+        }
+    }
+
     fn visible_settings(&self) -> Value {
         let mut settings = self.settings.0.clone();
 

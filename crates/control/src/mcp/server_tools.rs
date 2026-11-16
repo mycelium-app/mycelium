@@ -31,6 +31,10 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
         return Ok(ToolReply::text(&chat_tools::expired_text(&server.name), true));
     }
 
+    if let Some(refusal) = server.refusal(tool, &arguments) {
+        return Ok(ToolReply::text(&refusal, true));
+    }
+
     let conversation = caller.conversation_id().await?;
     let mut decision = "auto";
     let mut answer = None;

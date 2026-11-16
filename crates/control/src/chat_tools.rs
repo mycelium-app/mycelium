@@ -294,6 +294,10 @@ impl Toolbox {
                 Ok(output.text_only())
             }
             Source::Remote { server } => {
+                if let Some(refusal) = server.refusal(&tool.original, input) {
+                    return Ok((refusal, true));
+                }
+
                 let token = match bearer(state, server).await {
                     Ok(token) => token,
                     Err(error) => return Ok((error.message().to_string(), true)),
