@@ -54,6 +54,7 @@ pub struct ListQuery {
     managed: bool,
     q: Option<String>,
     ids: Option<String>,
+    status: Option<String>,
 }
 
 const SIDEBAR_PAGE: i64 = 50;
@@ -69,7 +70,7 @@ pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Q
         return Ok(Json(sidebar_page(&state, user.id, &query).await?));
     }
 
-    let filtered = query.parent.is_some() || query.assistant.is_some() || query.managed || query.q.is_some() || query.ids.is_some();
+    let filtered = query.parent.is_some() || query.assistant.is_some() || query.managed || query.q.is_some() || query.ids.is_some() || query.status.is_some();
 
     if filtered {
         return Ok(Json(json!({"conversations": filtered_list(&state, user.id, &query).await?})));
@@ -196,7 +197,7 @@ async fn filtered_list(state: &AppState, owner: Uuid, query: &ListQuery) -> ApiR
         "select {CONVERSATION_COLUMNS} from conversations where owner = $1 and side_kind is distinct from 'check'
          and ($2::uuid is null or parent_id = $2) and ($3::uuid is null or assistant_id = $3) and (not $4 or managed_by is not null)
          and ($5::text is null or title ilike $5) and ($6::uuid[] is null or id = any($6))
-         and ($6::uuid[] is not null or (archived_at is not null) = $7)
+         and ($6::uuid[] is not null or (archived_at is not null) = $7) and ($9::text is null or status = $9)
          order by updated_at desc limit $8"
     )))
     .bind(owner)
@@ -207,6 +208,7 @@ async fn filtered_list(state: &AppState, owner: Uuid, query: &ListQuery) -> ApiR
     .bind(ids)
     .bind(query.archived)
     .bind(limit)
+    .bind(query.status.as_deref())
     .fetch_all(&state.pool)
     .await?;
 
