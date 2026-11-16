@@ -170,6 +170,18 @@ async fn the_settled_count_covers_every_settled_conversation_not_only_the_loaded
 }
 
 #[tokio::test]
+async fn the_archive_asks_for_done_conversations_only() {
+    let server = Server::start().await;
+    let seeded = seeded(&server).await;
+    insert(&server, &seeded, "Finished", 9000, "status = 'done'").await;
+    insert(&server, &seeded, "Still open", 1, "").await;
+
+    let (_, done) = server.user.json(server.user.get("/api/v1/conversations?status=done&limit=200")).await;
+
+    assert_eq!(titles(&done), ["Finished"]);
+}
+
+#[tokio::test]
 async fn an_older_app_that_asks_without_a_view_still_gets_the_whole_list() {
     let server = Server::start().await;
     let seeded = seeded(&server).await;
