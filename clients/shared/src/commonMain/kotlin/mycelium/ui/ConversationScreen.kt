@@ -136,7 +136,6 @@ import mycelium.state.statusSectionName
 @Composable
 fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenNode: (String) -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}, panels: Boolean = true, header: HeaderSlots? = null, onManageActions: () -> Unit = {}) {
     val api = store.api
-    var fetched by remember(id) { mutableStateOf<Conversation?>(null) }
     var watches by remember(id) { mutableStateOf<List<Watch>>(emptyList()) }
 
     LaunchedEffect(id, state.watchesRevision[id]) {
@@ -153,7 +152,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     var dismissedPins by remember(id) { mutableStateOf(store.pinDismissals[id]) }
     val compact = LocalTouch.current
     var signIn by remember { mutableStateOf<LoginSession?>(null) }
-    val conversation = state.conversations[id] ?: fetched
+    val conversation = state.conversations[id]
     val workspace = conversation?.let { "${it.nodeId}:${it.cwd}" }
     val threadAssistant = conversation?.assistantId?.let { state.assistants[it] }
 
@@ -256,11 +255,16 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     }
 
     LaunchedEffect(id) {
-        store.act { store.open(id) }
-
         if (state.conversations[id] == null) {
-            store.act { fetched = api.conversation(id) }
+            store.act {
+                store.loadConversationWithAncestors(id)
+                store.open(id)
+            }
+        } else {
+            store.act { store.open(id) }
         }
+
+        store.loadConversationsWhere(parent = id)
     }
 
     if (conversation == null) {

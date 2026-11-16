@@ -52,6 +52,10 @@ fun AssistantScreen(store: Store, state: AppState, id: String, onOpenSettings: (
         return
     }
 
+    LaunchedEffect(id) {
+        store.loadConversationsWhere(assistant = id)
+    }
+
     val earlier = state.conversations.values.filter { it.assistantId == id && it.id != assistant.conversationId && it.parentId == null }.sortedByDescending { it.createdAt }
     val conversationId = assistant.conversationId
     val title: @Composable RowScope.() -> Unit = { AssistantTitle(state, assistant, onBack) }

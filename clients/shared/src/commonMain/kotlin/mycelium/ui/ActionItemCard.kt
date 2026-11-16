@@ -66,7 +66,9 @@ fun ActionItemCard(store: Store, state: AppState, conversationId: String, reques
     val conversation = state.conversations[conversationId]
     val node = item.nodeName ?: "its node"
 
-    fun done() = store.completeActionItem(state.conversations.getValue(conversationId), item.id)
+    fun done() {
+        state.conversations[conversationId]?.let { store.completeActionItem(it, item.id) }
+    }
 
     Card {
         CardHead {

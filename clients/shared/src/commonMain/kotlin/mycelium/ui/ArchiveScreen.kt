@@ -36,6 +36,7 @@ import mycelium.state.formatCost
 import mycelium.state.formatTokens
 import mycelium.state.readOnly
 
+private const val DoneConversationsShown = 200
 private const val SearchDebounceMillis = 250L
 
 private const val HistoryColumnsPreference = "history-columns"
@@ -109,6 +110,7 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
 
     LaunchedEffect(Unit) {
         load()
+        store.loadConversationsWhere(status = "done", limit = DoneConversationsShown)
         store.act { usage = store.api.conversationUsage().associateBy { it.key } }
     }
 

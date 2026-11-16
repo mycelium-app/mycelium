@@ -27,7 +27,11 @@ import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.JsonArray
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -997,6 +1001,46 @@ class MyceliumApi(
 
     suspend fun conversations(archived: Boolean = false, requestId: String? = null): List<Conversation> =
         call("/conversations") { client.get(it) { authorise(); requestId?.let { id -> header(RequestIdHeader, id) }; parameter("archived", archived) } }.body()
+
+    suspend fun conversationPage(cursor: String? = null, requestId: String? = null): ConversationPage = withContext(Dispatchers.Default) {
+        call("/conversations") {
+            client.get(it) {
+                authorise()
+                requestId?.let { id -> header(RequestIdHeader, id) }
+                parameter("view", "sidebar")
+                cursor?.let { next -> parameter("cursor", next) }
+            }
+        }.body<JsonElement>().let { answer ->
+            when (answer) {
+                is JsonArray -> ConversationPage(MyceliumJson.decodeFromJsonElement<List<Conversation>>(answer))
+                else -> MyceliumJson.decodeFromJsonElement<ConversationPage>(answer)
+            }
+        }
+    }
+
+    suspend fun conversationsWhere(parent: String? = null, assistant: String? = null, managed: Boolean = false, query: String? = null, status: String? = null, archived: Boolean = false, limit: Int? = null): List<Conversation> = withContext(Dispatchers.Default) {
+        call("/conversations") {
+            client.get(it) {
+                authorise()
+                parent?.let { id -> parameter("parent", id) }
+                assistant?.let { id -> parameter("assistant", id) }
+
+                if (managed) {
+                    parameter("managed", true)
+                }
+
+                query?.let { text -> parameter("q", text) }
+                status?.let { value -> parameter("status", value) }
+                parameter("archived", archived)
+                limit?.let { most -> parameter("limit", most) }
+            }
+        }.body<JsonElement>().let { answer ->
+            when (answer) {
+                is JsonArray -> MyceliumJson.decodeFromJsonElement<List<Conversation>>(answer)
+                else -> MyceliumJson.decodeFromJsonElement<ConversationList>(answer).conversations
+            }
+        }
+    }
 
     suspend fun createConversation(request: CreateConversationRequest): Conversation =
         call("/conversations") { client.post(it) { authorise(); json(request) } }.body()

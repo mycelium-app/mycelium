@@ -76,6 +76,9 @@ import mycelium.api.EventKinds
 import mycelium.api.FellBehindCloseCode
 import mycelium.api.StreamClosed
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import mycelium.api.MyceliumJson
 import mycelium.api.PatchConversationRequest
 import kotlin.time.Clock
 import kotlin.time.Instant
@@ -95,6 +98,7 @@ private const val MaxCachedAttachments = 20
 
 private const val MaxCachedAvatars = 200
 private const val MaxCachedPreviews = 200
+private const val ConversationCachePreference = "conversation-cache"
 
 private const val CloneWaitMillis = 600_000L
 private const val ClonePollMillis = 2_000L
@@ -154,6 +158,13 @@ class Store(
     val walkthroughNotes: StateFlow<Map<String, List<WalkthroughNote>>> = mutableWalkthroughNotes.asStateFlow()
 
     init {
+        val cached = cachedConversations()
+
+        if (cached.isNotEmpty()) {
+            mutableState.update { it.copy(conversations = merged(it.conversations, cached)) }
+            report("timing", "conversation list shown from cache", mapOf("ms" to startedAt.elapsedNow().inWholeMilliseconds, "conversations" to cached.size))
+        }
+
         scope.launch {
             state.collect { app ->
                 voice.observe(app)
@@ -279,17 +290,14 @@ class Store(
         launch { voice.load() }
 
         val listRequestId = newRequestId()
-        val conversations = async { untilLoaded { api.conversations(archived = false, requestId = listRequestId) } }
+        val conversations = async { untilLoaded { api.conversationPage(requestId = listRequestId) } }
         val nodes = async { untilLoaded { api.nodes() } }
 
-        val listed = conversations.await()
+        val page = conversations.await()
+        val listed = page.conversations
 
-        mutableState.update {
-            val fetched = listed.associate { c -> c.id to (it.conversations[c.id]?.takeIf { held -> held.updatedAt > c.updatedAt } ?: c) }
-            val streamed = it.conversations.filterKeys { id -> id in streamedConversations.value && id !in fetched }
-
-            it.copy(conversations = fetched + streamed)
-        }
+        mutableState.update { it.copy(conversations = merged(it.conversations, listed), nextConversations = page.next, settledCount = page.counts?.settled) }
+        cacheConversations(listed)
 
         if (!listShownReported) {
             listShownReported = true
@@ -439,11 +447,58 @@ class Store(
         refreshExperiments()
         wellness.load()
         voice.load()
-        val conversations = api.conversations(archived = false)
+        val page = api.conversationPage()
         val nodes = api.nodes()
 
-        mutableState.update { it.copy(conversations = conversations.associateBy { c -> c.id }, nodes = nodes.associateBy { n -> n.id }) }
+        mutableState.update { it.copy(conversations = merged(it.conversations, page.conversations), nextConversations = page.next, settledCount = page.counts?.settled, nodes = nodes.associateBy { n -> n.id }) }
     }
+
+    private var loadingMoreConversations = false
+
+    fun loadMoreConversations() {
+        val next = state.value.nextConversations ?: return
+
+        if (loadingMoreConversations) {
+            return
+        }
+
+        loadingMoreConversations = true
+        act {
+            try {
+                val page = api.conversationPage(cursor = next)
+                mutableState.update { it.copy(conversations = merged(it.conversations, page.conversations), nextConversations = page.next) }
+            } finally {
+                loadingMoreConversations = false
+            }
+        }
+    }
+
+    fun loadConversationsWhere(parent: String? = null, assistant: String? = null, managed: Boolean = false, query: String? = null, status: String? = null, limit: Int? = null) {
+        act {
+            val found = api.conversationsWhere(parent = parent, assistant = assistant, managed = managed, query = query, status = status, limit = limit)
+            mutableState.update { it.copy(conversations = merged(it.conversations, found)) }
+        }
+    }
+
+    suspend fun loadConversationWithAncestors(id: String) {
+        var next: String? = id
+
+        while (next != null && next !in state.value.conversations) {
+            val loaded = api.conversation(next)
+            mutableState.update { it.copy(conversations = merged(it.conversations, listOf(loaded))) }
+            next = loaded.parentId
+        }
+    }
+
+    private fun merged(held: Map<String, Conversation>, loaded: List<Conversation>): Map<String, Conversation> =
+        held + loaded.associate { c -> c.id to (held[c.id]?.takeIf { kept -> kept.updatedAt > c.updatedAt } ?: c) }
+
+    private fun cacheConversations(listed: List<Conversation>) {
+        platform?.savePreference(ConversationCachePreference, MyceliumJson.encodeToString(listed))
+    }
+
+    private fun cachedConversations(): List<Conversation> =
+        platform?.loadPreference(ConversationCachePreference)?.let { runCatching { MyceliumJson.decodeFromString<List<Conversation>>(it) }.getOrNull() }.orEmpty()
 
     suspend fun refreshNodes() {
         val nodes = api.nodes()

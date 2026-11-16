@@ -317,3 +317,12 @@ data class Watch(
     val note: String? = null,
     @SerialName("due_at") val dueAt: String? = null,
 )
+
+@Serializable
+data class ConversationCounts(val settled: Int = 0)
+
+@Serializable
+data class ConversationPage(val conversations: List<Conversation> = emptyList(), val next: String? = null, val counts: ConversationCounts? = null)
+
+@Serializable
+data class ConversationList(val conversations: List<Conversation> = emptyList())

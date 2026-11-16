@@ -38,6 +38,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -678,6 +679,7 @@ private fun routeGroup(route: Route, state: AppState, selected: String): String 
     else -> groupChoiceOf(selected)
 }
 
+private const val LoadMoreWithinRows = 10
 private const val WorkspacesMode = "Workspaces"
 private const val ChatsMode = "Chats"
 
@@ -813,6 +815,20 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
 
         val list = rememberLazyListState()
 
+        LaunchedEffect(list) {
+            snapshotFlow { list.layoutInfo.visibleItemsInfo.lastOrNull()?.index to list.layoutInfo.totalItemsCount }.collect { (last, total) ->
+                if (last != null && last >= total - LoadMoreWithinRows) {
+                    store.loadMoreConversations()
+                }
+            }
+        }
+
+        LaunchedEffect(managedOpen) {
+            if (managedOpen) {
+                store.loadConversationsWhere(managed = true)
+            }
+        }
+
         LazyColumn(Modifier.weight(1f).fillMaxWidth().scrollbar(list), list, contentPadding = PaddingValues(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S2)) {
             if (!everythingClosed) {
                 sidebarAssistantItems(store, state, sidebarAssistants(state.assistants.values, scope), route, onRoute, showGroup = groupChoiceOf(scope) == AllGroups)
@@ -856,7 +872,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                     val settled = section.status == ConversationStatus.Done
 
                     item(key = "section-${section.status}") {
-                        SectionHeading(section.name, open = settledOpen.takeIf { settled }, count = section.rows.size.takeIf { settled }, onToggle = { settledOpen = !settledOpen; platform.savePreference(SettledOpenPreference, settledOpen.toString()) }) {
+                        SectionHeading(section.name, open = settledOpen.takeIf { settled }, count = (state.settledCount?.takeIf { groupChoiceOf(scope) == AllGroups } ?: section.rows.size).takeIf { settled }, onToggle = { settledOpen = !settledOpen; platform.savePreference(SettledOpenPreference, settledOpen.toString()) }) {
                             StatusGlyph(section.status, Tokens.Size.IconMd)
                         }
                     }

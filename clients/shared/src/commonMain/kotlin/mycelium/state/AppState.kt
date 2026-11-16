@@ -111,6 +111,8 @@ data class AppState(
     val needsYouFocus: String? = null,
     val connected: Boolean = false,
     val streamOpenings: Int = 0,
+    val nextConversations: String? = null,
+    val settledCount: Int? = null,
 )
 
 private fun followAssistant(state: AppState, conversation: Conversation): AppState {

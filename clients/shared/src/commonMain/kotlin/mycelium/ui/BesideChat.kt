@@ -13,10 +13,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
@@ -24,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import mycelium.state.AppState
 import mycelium.state.Store
 
+private const val PickerSearchDelayMillis = 250L
 private const val BesideChatPreference = "beside-chat"
 
 private const val BesideChatPickerRows = 30
@@ -53,6 +56,13 @@ fun BesideChat(
     var chatShown by remember(subjectKey) { mutableStateOf(attached != null && !compact) }
     var picking by remember(subjectKey) { mutableStateOf(false) }
     var query by remember(subjectKey) { mutableStateOf("") }
+
+    LaunchedEffect(picking, query) {
+        if (picking && query.isNotBlank()) {
+            delay(PickerSearchDelayMillis)
+            store.loadConversationsWhere(query = query.trim())
+        }
+    }
     var chatWidth by remember { mutableStateOf(Tokens.Size.SidePanel) }
 
     fun resizeChat(width: Dp) {
