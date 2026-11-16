@@ -9,6 +9,8 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import mycelium.api.Conversation
@@ -39,7 +41,7 @@ class ConversationTitleTest {
         val store = storeAnswering(predicted, sent, backgroundScope)
 
         store.rename(conversation, "")
-        withTimeout(5_000) { while (store.state.value.conversations["c1"]?.title != "Share the restore strings") delay(10) }
+        withContext(Dispatchers.Default) { withTimeout(5_000) { while (store.state.value.conversations["c1"]?.title != "Share the restore strings") delay(10) } }
 
         assertEquals(listOf("""{"clear_title":true}"""), sent.value)
         assertEquals(false, store.state.value.conversations["c1"]?.titleUserSet)
@@ -53,7 +55,7 @@ class ConversationTitleTest {
         store.rename(conversation.copy(title = "Old", titleUserSet = false), "Restore work")
 
         assertEquals(true, store.state.value.conversations["c1"]?.titleUserSet)
-        withTimeout(5_000) { while (sent.value.isEmpty()) delay(10) }
+        withContext(Dispatchers.Default) { withTimeout(5_000) { while (sent.value.isEmpty()) delay(10) } }
         assertEquals(listOf("""{"title":"Restore work"}"""), sent.value)
     }
 }

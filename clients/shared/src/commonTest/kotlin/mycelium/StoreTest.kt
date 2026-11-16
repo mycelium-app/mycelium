@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -60,7 +61,7 @@ class StoreTest {
 
         store.addWalkthroughNote("c1", "w1", WalkthroughNoteRequest(step = 0, comment = "Stage this"))
 
-        withTimeout(5_000) { while (store.walkthroughNotes.value["c1"].isNullOrEmpty()) delay(10) }
+        withContext(Dispatchers.Default) { withTimeout(5_000) { while (store.walkthroughNotes.value["c1"].isNullOrEmpty()) delay(10) } }
         withContext(Dispatchers.Default) { delay(100) }
         assertEquals(listOf("n1"), store.walkthroughNotes.value.getValue("c1").map { it.id })
     }
@@ -80,8 +81,7 @@ class StoreTest {
         store.typeIntoTerminal("t1", "\r")
         store.typeIntoTerminal("t2", "x")
 
-        withTimeout(5_000) { while (posted.value.size < 2) delay(10) }
-        val joined = posted.value.joinToString("|")
+        val joined = withContext(Dispatchers.Default) { withTimeout(5_000) { posted.first { it.size >= 2 } } }.joinToString("|")
 
         assertEquals("/api/v1/terminals/t1/input {\"data\":\"bHMN\"}|/api/v1/terminals/t2/input {\"data\":\"eA==\"}", joined)
     }
@@ -115,7 +115,7 @@ class StoreTest {
         store.keepTerminalWorkspace("c1", TerminalWorkspace(TerminalTabs().open()))
         store.keepTerminalWorkspace("c1", TerminalWorkspace(TerminalTabs().open().split(SplitDirection.Right)))
 
-        withTimeout(5_000) { while (saved.value.isEmpty()) delay(10) }
+        withContext(Dispatchers.Default) { withTimeout(5_000) { while (saved.value.isEmpty()) delay(10) } }
         withContext(Dispatchers.Default) { delay(700) }
 
         assertEquals(1, saved.value.size)
@@ -135,7 +135,7 @@ class StoreTest {
 
         store.stopTerminal("t1")
 
-        withTimeout(5_000) { while (requested.value.isEmpty()) delay(10) }
+        withContext(Dispatchers.Default) { withTimeout(5_000) { while (requested.value.isEmpty()) delay(10) } }
         assertEquals(listOf("DELETE /api/v1/terminals/t1"), requested.value)
     }
 
