@@ -96,6 +96,7 @@ class MyceliumApi(
         install(ContentNegotiation) { json(MyceliumJson) }
         install(HttpTimeout) { connectTimeoutMillis = ConnectTimeoutMillis }
         install(WebSockets) { pingIntervalMillis = StreamPingMillis }
+        acceptGzip()
         expectSuccess = false
     }
 

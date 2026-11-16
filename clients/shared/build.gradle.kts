@@ -80,9 +80,11 @@ kotlin {
         }
         jvmMain.dependencies {
             implementation(libs.ktor.client.cio)
+            implementation(libs.ktor.client.encoding)
         }
         androidMain.dependencies {
             implementation(libs.ktor.client.cio)
+            implementation(libs.ktor.client.encoding)
         }
         wasmJsMain.dependencies {
             implementation(libs.ktor.client.js)
