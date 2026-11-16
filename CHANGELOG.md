@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.47
+
+- An agent's whole process tree stops with it: the agent CLI an ACP adapter starts no longer outlives a restart or a killed keeper, and a new keeper stops anything a dead one left running before its own agent starts, so a conversation can no longer have two copies of its agent at work.
+- Keeper and SSH proxy tests wait for the event they expect instead of a short wall-clock read, so a busy machine no longer fails them.
+
 ## v0.34.46
 
 - Conversation events say when the control plane received them, so the time an agent's harness spends reviewing a tool call before sending it can be measured.
