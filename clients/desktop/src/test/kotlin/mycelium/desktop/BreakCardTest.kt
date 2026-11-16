@@ -18,25 +18,25 @@ import androidx.compose.ui.test.performClick
 import mycelium.state.BreakClock
 import mycelium.state.BreakPhase
 import mycelium.state.DefaultWellnessSettings
-import mycelium.ui.BreakToast
+import mycelium.ui.BreakCard
 import mycelium.ui.MyceliumTheme
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
 @OptIn(ExperimentalTestApi::class)
-class BreakToastTest {
+class BreakCardTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val due = BreakClock(BreakPhase.Due, activeMinutes = 50)
+    private val due = BreakClock(BreakPhase.Due, workedMillis = 50 * 60_000L)
 
     private fun button(label: String) = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button) and hasText(label)
 
     @Test
     fun aFirstReminderOffersStartBreakAndSnoozeAndCannotBeClosed() {
         val taken = mutableListOf<String>()
-        rule.setContent { MyceliumTheme(true) { BreakToast(due, 5, { taken += "snooze" }, { taken += "break" }) } }
+        rule.setContent { MyceliumTheme(true) { BreakCard(due, 5, { taken += "snooze" }, { taken += "break" }) } }
 
         rule.onNodeWithText("Time for a break").assertIsDisplayed()
         assertEquals(0, rule.onAllNodesWithContentDescription("Dismiss").fetchSemanticsNodes().size)
@@ -50,10 +50,18 @@ class BreakToastTest {
     }
 
     @Test
+    fun theReminderShowsHowLongTheBreakIsOverdueInMinutesAndSeconds() {
+        rule.setContent { MyceliumTheme(true) { BreakCard(due.copy(overdueMillis = 754_000L), 5, {}, {}) } }
+
+        rule.onNodeWithText("12:34 overdue").assertIsDisplayed()
+        rule.onNodeWithText("A 5 minute break will do.").assertIsDisplayed()
+    }
+
+    @Test
     fun onceTheSnoozeRunsOutOnlyStartBreakIsOffered() {
         val settings = DefaultWellnessSettings
-        val back = (1..settings.snoozeMinutes).fold(due.snooze(settings)) { clock, _ -> clock.tick(settings, quiet = false) }
-        rule.setContent { MyceliumTheme(true) { BreakToast(back, 5, {}, {}) } }
+        val back = due.snooze(settings).copy(countedAt = 0).advance(settings, false, settings.snoozeMinutes * 60_000L, null)
+        rule.setContent { MyceliumTheme(true) { BreakCard(back, 5, {}, {}) } }
 
         rule.onNode(button("Start break")).assertIsDisplayed()
         assertEquals(0, rule.onAllNodes(button("Snooze")).fetchSemanticsNodes().size)
@@ -63,7 +71,7 @@ class BreakToastTest {
 
     @Test
     fun nothingShowsUnlessABreakIsDue() {
-        rule.setContent { MyceliumTheme(true) { BreakToast(BreakClock(), 5, {}, {}) } }
+        rule.setContent { MyceliumTheme(true) { BreakCard(BreakClock(), 5, {}, {}) } }
 
         assertEquals(0, rule.onAllNodesWithText("Time for a break").fetchSemanticsNodes().size)
     }

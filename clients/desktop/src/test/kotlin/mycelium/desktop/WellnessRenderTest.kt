@@ -9,7 +9,7 @@ import mycelium.Platform
 import mycelium.state.BreakClock
 import mycelium.state.BreakPhase
 import mycelium.state.Store
-import mycelium.ui.BreakToast
+import mycelium.ui.BreakCard
 import mycelium.ui.TimeAndFocusSettings
 import mycelium.ui.WellnessScreen
 import org.junit.Rule
@@ -42,7 +42,7 @@ class WellnessRenderTest {
                 assertTrue(renderAt("wellness-puzzles", dark, phone) { WellnessScreen(store, ReadingPlatform(), startOn = "puzzles") }.length() > 3_000)
                 assertTrue(renderAt("wellness-skills", dark, phone) { WellnessScreen(store, OpeningPlatform(), startOn = "skills") }.length() > 3_000)
                 assertTrue(renderAt("time-and-focus", dark, phone) { TimeAndFocusSettings(store) }.length() > 3_000)
-                assertTrue(renderAt("break-toast", dark, phone) { Box(Modifier.fillMaxSize(), Alignment.BottomEnd) { BreakToast(BreakClock(BreakPhase.Due, activeMinutes = 50), 5, {}, {}) } }.length() > 1_000)
+                assertTrue(renderAt("break-toast", dark, phone) { Box(Modifier.fillMaxSize(), Alignment.BottomEnd) { BreakCard(BreakClock(BreakPhase.Due, workedMillis = 50 * 60_000L), 5, {}, {}) } }.length() > 1_000)
             }
         }
     }

@@ -24,6 +24,7 @@ import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -97,7 +98,7 @@ class UsageCardTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private fun showShell(openRouter: Boolean = false, failAfterFirst: Boolean = false, initialRoute: Route = Route.Chat("c1")): AtomicInteger {
+    private fun showShell(openRouter: Boolean = false, failAfterFirst: Boolean = false, initialRoute: Route = Route.Chat("c1"), prepare: (Store) -> Unit = {}): AtomicInteger {
         val usageRequests = AtomicInteger()
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
@@ -118,6 +119,7 @@ class UsageCardTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
+        prepare(store)
         rule.setContent { MyceliumTheme(true) { Shell(store, UsageCardPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = initialRoute) } }
 
         return usageRequests
@@ -419,6 +421,22 @@ class UsageCardTest {
         rule.onNodeWithContentDescription("Usage").performClick()
 
         rule.onNodeWithText("This chat").assertIsDisplayed()
+    }
+
+    @Test
+    fun aDueBreakReminderSitsInTheSidebarAboveTheOpenUsageCardWithoutOverlappingIt() {
+        showShell(prepare = { store ->
+            store.wellness.advanceClock(0, null, working = true)
+            store.wellness.advanceClock(51 * 60_000L, null, working = true)
+        })
+
+        rule.onNodeWithContentDescription("Usage").performClick()
+        val usage = rule.onNode(hasText("Usage") and isHeading()).getUnclippedBoundsInRoot()
+        val start = rule.onNodeWithText("Start break").getUnclippedBoundsInRoot()
+
+        assertTrue(rule.onNodeWithText("Time for a break").getUnclippedBoundsInRoot().bottom <= usage.top)
+        assertTrue(start.bottom <= usage.top, "$start overlaps $usage")
+        assertTrue(start.left < usage.right && start.right > usage.left, "$start is not in the sidebar column of $usage")
     }
 }
 

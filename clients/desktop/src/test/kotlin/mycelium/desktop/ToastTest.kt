@@ -19,7 +19,7 @@ import mycelium.api.MyceliumApi
 import mycelium.state.BreakClock
 import mycelium.state.BreakPhase
 import mycelium.state.Store
-import mycelium.ui.BreakToast
+import mycelium.ui.BreakCard
 import mycelium.ui.ErrorToast
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.Route
@@ -70,7 +70,7 @@ class ToastTest {
             MyceliumTheme(true) {
                 Column {
                     ErrorToast(failure, onDismiss = {}, onRetry = { taken += "retry" })
-                    BreakToast(BreakClock(BreakPhase.Due, activeMinutes = 50), 5, { taken += "snooze" }, { taken += "break" })
+                    BreakCard(BreakClock(BreakPhase.Due, workedMillis = 50 * 60_000L), 5, { taken += "snooze" }, { taken += "break" })
                 }
             }
         }

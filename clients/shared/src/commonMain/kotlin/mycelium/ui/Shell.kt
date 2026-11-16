@@ -886,6 +886,10 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
             }
         }
 
+        val wellness by store.wellness.state.collectAsState()
+
+        BreakCard(wellness.clock, wellness.clock.breakLength(wellness.settings), store.wellness::snooze, store.wellness::startBreak, Modifier.padding(Tokens.Space.S1_5))
+
         if (usageOpen) {
             val current = viewedConversation(route, state)?.let { state.conversations[it] }
 

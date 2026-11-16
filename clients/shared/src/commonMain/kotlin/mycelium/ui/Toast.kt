@@ -27,7 +27,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import mycelium.state.BreakPhase
 import mycelium.state.Store
 
 private val ComposerClearance = 96.dp
@@ -108,7 +107,6 @@ fun ErrorToast(message: String, onDismiss: () -> Unit, modifier: Modifier = Modi
 fun ToastHost(store: Store, phone: Boolean, raised: Boolean) {
     val problem by store.problem.collectAsState()
     val retryable by store.retryable.collectAsState()
-    val wellness by store.wellness.state.collectAsState()
     val inset = if (phone) Tokens.Space.S2 else Tokens.Space.S4
     val clearance = if (raised) ComposerClearance else 0.dp
     val width = if (phone) Modifier.fillMaxWidth() else Modifier.widthIn(max = Tokens.Size.Menu * 1.4f)
@@ -117,15 +115,6 @@ fun ToastHost(store: Store, phone: Boolean, raised: Boolean) {
         Column(width, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.Bottom)) {
             problem?.let { message ->
                 ErrorToast(message, onDismiss = store::dismissProblem, onRetry = if (retryable != null) store::retryProblem else null)
-            }
-
-            if (wellness.clock.phase == BreakPhase.Due) {
-                BreakToast(
-                    wellness.clock,
-                    wellness.clock.breakLength(wellness.settings),
-                    onSnooze = store.wellness::snooze,
-                    onStartBreak = store.wellness::startBreak,
-                )
             }
         }
     }
