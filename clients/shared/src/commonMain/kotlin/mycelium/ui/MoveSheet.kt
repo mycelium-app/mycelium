@@ -18,7 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.launch
-import mycelium.api.ConversationStatus
 import mycelium.api.Conversation
 import mycelium.api.MovePlan
 import mycelium.api.MoveRequest
@@ -53,7 +52,7 @@ fun MoveSheet(store: Store, state: AppState, conversation: Conversation, onDismi
         }
     }
 
-    fun submit(fork: Boolean, interrupt: Boolean = false) {
+    fun submit(fork: Boolean) {
         val chosen = target
 
         if (chosen == null) {
@@ -73,10 +72,6 @@ fun MoveSheet(store: Store, state: AppState, conversation: Conversation, onDismi
 
         scope.launch {
             failure = attempt { store.requestMove(conversation.id, MoveRequest(chosen.id, fork)) }
-
-            if (failure == null && interrupt) {
-                failure = attempt { store.api.cancel(conversation.id) }
-            }
 
             if (failure != null) {
                 requested = false
@@ -110,7 +105,7 @@ fun MoveSheet(store: Store, state: AppState, conversation: Conversation, onDismi
 
             if (progress != null) {
                 when (progress.state) {
-                    MoveState.Waiting -> Label("Waiting for the turn to end. The move starts as soon as it does.", style = Tokens.Type.Meta, color = colors.textMuted)
+                    MoveState.Waiting -> Label("Stopping the current turn. The move starts as soon as it has stopped.", style = Tokens.Type.Meta, color = colors.textMuted)
                     MoveState.Moving -> IndeterminateProgress("Moving to ${state.nodes[progress.nodeId]?.name.orEmpty()}")
                     else -> Unit
                 }
@@ -122,13 +117,9 @@ fun MoveSheet(store: Store, state: AppState, conversation: Conversation, onDismi
                 if (progress?.state == MoveState.Waiting) {
                     MyButton({ scope.launch { failure = attempt { store.cancelMove(conversation.id) } } }, text = "Cancel move", size = ButtonSize.Sm, muted = true)
                 } else if (!busy) {
-                    val running = conversation.status == ConversationStatus.Working || conversation.status == ConversationStatus.Input
-                    val alternatives = listOfNotNull(
-                        if (running) SplitAlternative("Interrupt and move now", { submit(false, interrupt = true) }, icon = MyIcon.Stop) else null,
-                        SplitAlternative("Copy to ${target?.name ?: "the node"}, keep this running", { submit(true) }, icon = MyIcon.Copy),
-                    )
+                    val alternatives = listOf(SplitAlternative("Copy to ${target?.name ?: "the node"}, keep this running", { submit(true) }, icon = MyIcon.Copy))
 
-                    SplitButton(if (running) "Move after this turn" else "Move", { submit(false) }, alternatives, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+                    SplitButton("Move", { submit(false) }, alternatives, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
                 }
             }
         }
