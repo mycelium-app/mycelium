@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.52
+
+- An assistant runs one session at a time. Starting a new session closes any earlier session still mid-turn, and moves its watches, wake-ups, managed conversations and connections to the new session. Messages and watch notifications sent to an earlier session go to the current one, or start the next session when the assistant has none, instead of reopening the old session.
+
 ## v0.34.51
 
 - The break reminder is a card at the bottom of the left sidebar, above Usage and the other open cards, so nothing overlaps it. It shows how long the break is overdue in minutes and seconds, announces itself once, and offers Start break and one Snooze.
