@@ -45,6 +45,21 @@ pub async fn deliver(state: &AppState, owner: Uuid, watch: Uuid, watcher: Uuid, 
         return Ok(false);
     }
 
+    let watcher = match crate::assistants::earlier_session_of(state, watcher).await? {
+        Some((_, Some(current))) => current,
+        Some((assistant_id, None)) => {
+            let woken = crate::assistants::wake(state, owner, assistant_id, mycelium_proto::api::PromptRequest { text, ..Default::default() }, &crate::assistants::StartOverrides::default()).await;
+
+            if let Err(error) = woken {
+                sqlx::query("delete from watch_notifications where watch_id = $1 and key = $2").bind(watch).bind(key).execute(&state.pool).await?;
+
+                return Err(error);
+            }
+
+            return Ok(true);
+        }
+        None => watcher,
+    };
     let (archived, chat) = sqlx::query_as::<_, (bool, bool)>("select archived_at is not null, agent = $2 from conversations where id = $1").bind(watcher).bind(crate::chats::CHAT_AGENT).fetch_one(&state.pool).await?;
 
     if archived {

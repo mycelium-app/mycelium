@@ -523,6 +523,7 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
 
                     sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started.id).execute(&state.pool).await?;
                     crate::todos::carry(state, owner, id, started.id).await?;
+                    take_over(state, owner, id, started.id).await?;
 
                     chats::send(state, owner, started.id, text, request.attachments).await?
                 }
@@ -533,6 +534,7 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
 
                     sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started.id).execute(&state.pool).await?;
                     crate::todos::carry(state, owner, id, started.id).await?;
+                    take_over(state, owner, id, started.id).await?;
                     prompts::send(state, owner, started.id, request.clone()).await?;
 
                     store::find_owned(&state.pool, started.id, owner).await?.to_proto()?
@@ -550,17 +552,55 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
     Ok(conversation)
 }
 
+async fn end_session(state: &AppState, owner: Uuid, id: Uuid, conversation_id: Uuid) -> ApiResult<()> {
+    let row = store::find_owned(&state.pool, conversation_id, owner).await?;
+
+    if chats::is_chat(&row) {
+        return chats::stop(state, owner, conversation_id).await;
+    }
+
+    if let Err(error) = conversations::close_for(state, owner, conversation_id).await {
+        tracing::warn!("could not close the working session of assistant {id}: {}", error.message());
+    }
+
+    Ok(())
+}
+
+pub async fn earlier_session_of(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<(Uuid, Option<Uuid>)>> {
+    let found = sqlx::query_as::<_, (Uuid, Option<Uuid>)>("select a.id, a.conversation_id from conversations c join assistants a on a.id = c.assistant_id where c.id = $1 and c.parent_id is null and a.archived_at is null and a.conversation_id is distinct from c.id")
+        .bind(conversation_id)
+        .fetch_optional(&state.pool)
+        .await?;
+
+    Ok(found)
+}
+
+async fn take_over(state: &AppState, owner: Uuid, id: Uuid, current: Uuid) -> ApiResult<()> {
+    let earlier = sqlx::query_as::<_, (Uuid, bool)>("select id, status in ('working', 'input') from conversations where assistant_id = $1 and parent_id is null and id <> $2").bind(id).bind(current).fetch_all(&state.pool).await?;
+    let ids: Vec<Uuid> = earlier.iter().map(|(conversation_id, _)| *conversation_id).collect();
+
+    for (conversation_id, _) in earlier.iter().filter(|(_, running)| *running) {
+        end_session(state, owner, id, *conversation_id).await?;
+    }
+
+    sqlx::query("update watches w set ended_at = now() where w.watcher_id = any($2) and w.ended_at is null and w.kind = 'conversation' and exists (select 1 from watches other where other.ended_at is null and other.kind = 'conversation' and other.target_id = w.target_id and (other.watcher_id = $1 or (other.watcher_id = any($2) and other.id < w.id)))")
+        .bind(current)
+        .bind(&ids)
+        .execute(&state.pool)
+        .await?;
+    sqlx::query("update watches set watcher_id = $1 where watcher_id = any($2) and ended_at is null").bind(current).bind(&ids).execute(&state.pool).await?;
+    sqlx::query("update conversations set managed_by = $1 where managed_by = any($2)").bind(current).bind(&ids).execute(&state.pool).await?;
+    crate::conversation_connections::carry(state, owner, &ids, current).await?;
+    state.publish(Some(owner), StreamMessage::WatchesChanged { conversation_id: current });
+
+    Ok(())
+}
+
 pub async fn clear(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Assistant>> {
     let assistant = find_owned(&state, id, user.id).await?;
 
     if let Some(conversation_id) = assistant.conversation_id {
-        let row = store::find_owned(&state.pool, conversation_id, user.id).await?;
-
-        if chats::is_chat(&row) {
-            chats::stop(&state, user.id, conversation_id).await?;
-        } else if let Err(error) = conversations::close_for(&state, user.id, conversation_id).await {
-            tracing::warn!("could not close the working session of assistant {id}: {}", error.message());
-        }
+        end_session(&state, user.id, id, conversation_id).await?;
     }
 
     sqlx::query("update assistants set conversation_id = null, updated_at = now() where id = $1").bind(id).execute(&state.pool).await?;

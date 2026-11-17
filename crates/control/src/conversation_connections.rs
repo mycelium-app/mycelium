@@ -117,6 +117,22 @@ pub async fn connect(
     Ok(connection)
 }
 
+pub async fn carry(state: &AppState, owner: Uuid, from: &[Uuid], to: Uuid) -> ApiResult<()> {
+    let others = sqlx::query_scalar::<_, Uuid>(sqlx::AssertSqlSafe(format!("select distinct case when c.source_id = any($2) then c.target_id else c.source_id end from conversation_connections c where c.owner = $1 and (c.source_id = any($2) or c.target_id = any($2)) and {}", live())))
+        .bind(owner)
+        .bind(from)
+        .fetch_all(&state.pool)
+        .await?;
+
+    for other in others.into_iter().filter(|other| *other != to && !from.contains(other)) {
+        if let Err(error) = connect(state, owner, to, other).await {
+            tracing::warn!("could not carry the connection with {other} over to {to}: {}", error.message());
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn list(
     State(state): State<AppState>,
     user: AuthUser,

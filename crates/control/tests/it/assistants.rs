@@ -674,6 +674,66 @@ async fn a_prompt_while_the_session_waits_mid_turn_queues_into_it_even_when_its_
     assert!(!events.iter().any(|event| event["kind"] == "continued"));
 }
 
+#[tokio::test]
+async fn a_new_session_ends_the_earlier_one_mid_turn_and_takes_over_its_watches_managed_chats_and_messages() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let assistant = harness_assistant(&server, json!([link.id])).await;
+    let id = assistant["id"].as_str().unwrap();
+    let assistant_id: Uuid = id.parse().unwrap();
+    let first: Uuid = prompt(&server.user, id, "Run the daily review").await["id"].as_str().unwrap().parse().unwrap();
+    next_matching(&mut link, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
+    link.start_session(first, "acp-1").await;
+    link.expect_prompt().await;
+    let owner_chat = server.create_conversation(link.id, None).await.id;
+    sqlx::query("update conversations set status = 'working' where id = $1").bind(first).execute(&server.pool).await.unwrap();
+    sqlx::query("update conversations set managed_by = $1 where id = $2").bind(first).bind(owner_chat).execute(&server.pool).await.unwrap();
+    sqlx::query("insert into watches (owner, watcher_id, kind, target_id) select owner, id, 'conversation', $2 from conversations where id = $1").bind(first).bind(owner_chat).execute(&server.pool).await.unwrap();
+    sqlx::query("insert into watches (owner, watcher_id, kind, due_at, note) select owner, id, 'timer', now() + interval '1 hour', 'Check the rollout' from conversations where id = $1").bind(first).execute(&server.pool).await.unwrap();
+    sqlx::query("update assistants set conversation_id = null where id = $1").bind(assistant_id).execute(&server.pool).await.unwrap();
+
+    let second: Uuid = prompt(&server.user, id, "Read REVIEW-PENDING.md and run the review").await["id"].as_str().unwrap().parse().unwrap();
+
+    next_matching(&mut link, |message| matches!(message, ControlToNode::CloseSession { conversation_id } if *conversation_id == first).then_some(())).await;
+    let watchers = sqlx::query_scalar::<_, Uuid>("select watcher_id from watches where ended_at is null order by kind").fetch_all(&server.pool).await.unwrap();
+    let manager = sqlx::query_scalar::<_, Option<Uuid>>("select managed_by from conversations where id = $1").bind(owner_chat).fetch_one(&server.pool).await.unwrap();
+    assert_ne!(second, first);
+    assert_eq!((watchers, manager), (vec![second, second], Some(second)));
+    assert_ne!(server.conversation(first).await["status"], json!("working"));
+
+    common::call_tool(&server, &link.token, owner_chat, "send_to_conversation", json!({"conversation": first.to_string(), "message": "Oi is live", "reason": "Report the rollout"})).await;
+    let target = sqlx::query_scalar::<_, Uuid>("select target_id from message_proposals where conversation_id = $1").bind(owner_chat).fetch_one(&server.pool).await.unwrap();
+    assert_eq!(target, second);
+}
+
+#[tokio::test]
+async fn a_wake_up_due_on_a_cleared_session_starts_the_assistants_next_session_instead_of_reopening_it() {
+    let server = Server::start_with(|config| config.scheduler_tick = std::time::Duration::from_millis(50)).await;
+    let mut link = server.online_node("laptop").await;
+    let assistant = harness_assistant(&server, json!([link.id])).await;
+    let id = assistant["id"].as_str().unwrap();
+    let first: Uuid = prompt(&server.user, id, "Run the daily review").await["id"].as_str().unwrap().parse().unwrap();
+    next_matching(&mut link, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
+    link.start_session(first, "acp-1").await;
+    link.expect_prompt().await;
+    server.user.json(server.user.post(&format!("/api/v1/assistants/{id}/clear"))).await;
+
+    sqlx::query("insert into watches (owner, watcher_id, kind, due_at, note) select owner, id, 'timer', now(), 'Check the rollout' from conversations where id = $1").bind(first).execute(&server.pool).await.unwrap();
+
+    let second = common::eventually("the assistant to start its next session", || async {
+        let (_, fetched) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}"))).await;
+
+        fetched["conversation_id"].as_str().map(|conversation| conversation.parse::<Uuid>().unwrap())
+    })
+    .await;
+    let reopened = server.events(first).await.iter().filter(|event| event["kind"] == "user_message").count();
+    assert_ne!(second, first);
+    assert_eq!(reopened, 1);
+    let (_, queue) = server.user.json(server.user.get(&format!("/api/v1/conversations/{second}/queue"))).await;
+    let delivered = format!("{}{queue}", events_text(&server.events(second).await));
+    assert!(delivered.contains("Check the rollout"), "{delivered}");
+}
+
 fn events_text(events: &[Value]) -> String {
     serde_json::to_string(events).unwrap()
 }

@@ -142,7 +142,14 @@ async fn resolve_assistant(state: &AppState, owner: Uuid, target: &str) -> ApiRe
 
 pub async fn propose(state: &AppState, conversation_id: Uuid, target: &str, message: &str, reason: &str) -> ApiResult<Result<(MessageProposal, Option<prompts::Sent>, u64), String>> {
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
-    let target_id = match resolve_for_sender(state, owner, target, Some(conversation_id)).await? {
+    let resolved = match resolve_for_sender(state, owner, target, Some(conversation_id)).await? {
+        Ok(Resolved::Conversation(target_id)) => match crate::assistants::earlier_session_of(state, target_id).await? {
+            Some((assistant_id, _)) => resolve_assistant(state, owner, &assistant_id.to_string()).await?,
+            None => Ok(Resolved::Conversation(target_id)),
+        },
+        other => other,
+    };
+    let target_id = match resolved {
         Ok(Resolved::Conversation(target_id)) => target_id,
         Ok(Resolved::SessionlessAssistant(assistant)) => return start_assistant_chat(state, owner, conversation_id, assistant, message, reason).await,
         Err(reason) => return Ok(Err(format!("Nothing was proposed. {reason}"))),
