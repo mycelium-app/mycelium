@@ -88,6 +88,8 @@ enum NodeCommand {
         join_token: Option<String>,
     },
     Status,
+    /// Sign this node in to Mistral Vibe with a Mistral account, through vibe-acp
+    VibeSignIn,
 }
 
 #[tokio::main]
@@ -118,6 +120,7 @@ async fn main() -> Result<()> {
             mycelium_node::run().await
         }
         Command::Node { command: NodeCommand::Status } => mycelium_node::status().await,
+        Command::Node { command: NodeCommand::VibeSignIn } => mycelium_node::vibe_sign_in::run().await,
         Command::Keeper { dir, command } => mycelium_keeper::run(dir, command).await,
         Command::SshProxy { node, token_file, control_plane } => mycelium_node::ssh_proxy::run(node, token_file, control_plane).await,
         Command::Version => {

@@ -183,7 +183,7 @@ pub fn login_state(home: &Path, accounts_dir: &Path, available: &[AgentInfo], us
                 (AgentId::Claude, None) => claude_credential(home),
                 (AgentId::Claude, Some(_)) => ("oauth_token", account.dir.join(".credentials.json").exists()),
                 (AgentId::Codex, _) => ("device_auth", account.dir.join("auth.json").exists()),
-                (AgentId::Vibe, profile) => ("api_key", (profile.is_none() && std::env::var_os("MISTRAL_API_KEY").is_some()) || vibe_key_stored(&account.dir)),
+                (AgentId::Vibe, profile) => ("browser", (profile.is_none() && std::env::var_os("MISTRAL_API_KEY").is_some()) || vibe_key_stored(&account.dir)),
             };
             let state = if credential_present { LoginState::SignedIn } else { LoginState::SignedOut };
 
@@ -215,10 +215,15 @@ fn vibe_key_stored(dir: &Path) -> bool {
 }
 
 pub fn login_command(agent: AgentId, method: &str) -> Option<Vec<String>> {
+    if (agent, method) == (AgentId::Vibe, "browser") {
+        let node = std::env::current_exe().ok()?;
+
+        return Some(vec![node.display().to_string(), "node".to_string(), "vibe-sign-in".to_string()]);
+    }
+
     let words: &[&str] = match (agent, method) {
         (AgentId::Claude, "oauth_token") => &["claude", "auth", "login"],
         (AgentId::Codex, "device_auth") => &["codex", "login", "--device-auth"],
-        (AgentId::Vibe, "api_key") => &["vibe", "--setup"],
         _ => return None,
     };
 
@@ -299,7 +304,8 @@ mod tests {
     fn each_agent_signs_in_with_the_method_it_reports() {
         assert_eq!(login_command(AgentId::Claude, "oauth_token"), Some(vec!["claude".to_string(), "auth".to_string(), "login".to_string()]));
         assert_eq!(login_command(AgentId::Codex, "device_auth"), Some(vec!["codex".to_string(), "login".to_string(), "--device-auth".to_string()]));
-        assert_eq!(login_command(AgentId::Vibe, "api_key"), Some(vec!["vibe".to_string(), "--setup".to_string()]));
+        assert_eq!(login_command(AgentId::Vibe, "browser").unwrap()[1..], ["node".to_string(), "vibe-sign-in".to_string()]);
+        assert_eq!(login_command(AgentId::Vibe, "api_key"), None);
     }
 
     #[test]
@@ -347,7 +353,7 @@ mod tests {
     }
 
     #[test]
-    fn a_vibe_account_is_signed_in_with_an_api_key_once_its_env_file_holds_one() {
+    fn a_vibe_account_signs_in_through_the_browser_and_counts_a_key_in_its_env_file() {
         let home = tempfile::tempdir().unwrap();
         let accounts = home.path().join("accounts");
         write(&accounts.join("vibe").join("blank").join(".env"), "MISTRAL_API_KEY=\n");
@@ -358,7 +364,7 @@ mod tests {
 
         let listed: Vec<(Option<&str>, &str, LoginState)> = logins.iter().skip(1).map(|login| (login.account.as_deref(), login.method.as_str(), login.state)).collect();
         assert_eq!(logins[0].account.as_deref(), Some("default"));
-        assert_eq!(listed, vec![(Some("blank"), "api_key", LoginState::SignedOut), (Some("fresh"), "api_key", LoginState::SignedOut), (Some("work"), "api_key", LoginState::SignedIn)]);
+        assert_eq!(listed, vec![(Some("blank"), "browser", LoginState::SignedOut), (Some("fresh"), "browser", LoginState::SignedOut), (Some("work"), "browser", LoginState::SignedIn)]);
         assert!(!format!("{logins:?}").contains("placeholder-key"));
     }
 

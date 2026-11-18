@@ -32,6 +32,7 @@ pub mod test_run;
 pub mod transcripts;
 pub mod update;
 pub mod usage;
+pub mod vibe_sign_in;
 
 pub use daemon::run;
 pub use join::{JoinOptions, join};

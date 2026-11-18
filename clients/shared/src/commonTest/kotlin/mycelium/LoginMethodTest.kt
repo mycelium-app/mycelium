@@ -9,6 +9,6 @@ class LoginMethodTest {
     fun signInAsksTheNodeForTheMethodNamesItAccepts() {
         assertEquals("oauth_token", loginMethodFor("claude"))
         assertEquals("device_auth", loginMethodFor("codex"))
-        assertEquals("api_key", loginMethodFor("vibe"))
+        assertEquals("browser", loginMethodFor("vibe"))
     }
 }

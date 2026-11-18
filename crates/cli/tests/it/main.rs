@@ -5,3 +5,4 @@ mod join;
 mod node;
 mod node_update;
 mod ssh_proxy;
+mod vibe_sign_in;
