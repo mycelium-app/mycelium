@@ -139,16 +139,17 @@ unit_path_finds_agents_where_people_install_them() {
 
 unit_passes_agent_overrides_through() {
   reset_home
-  MYCELIUM_CLAUDE_ACP=/opt/claude-acp MYCELIUM_CODEX_ACP=/opt/codex-acp MYCELIUM_BINARY="$work/fake-mycelium" run_install https://control.example >/dev/null
+  MYCELIUM_CLAUDE_ACP=/opt/claude-acp MYCELIUM_CODEX_ACP=/opt/codex-acp MYCELIUM_VIBE_ACP=/opt/vibe-acp MYCELIUM_BINARY="$work/fake-mycelium" run_install https://control.example >/dev/null
   unit="$work/home/.config/systemd/user/mycelium-node.service"
   grep -q '^Environment="MYCELIUM_CLAUDE_ACP=/opt/claude-acp"' "$unit" &&
-    grep -q '^Environment="MYCELIUM_CODEX_ACP=/opt/codex-acp"' "$unit"
+    grep -q '^Environment="MYCELIUM_CODEX_ACP=/opt/codex-acp"' "$unit" &&
+    grep -q '^Environment="MYCELIUM_VIBE_ACP=/opt/vibe-acp"' "$unit"
 }
 
 unit_omits_agent_overrides_when_unset() {
   reset_home
   MYCELIUM_BINARY="$work/fake-mycelium" run_install https://control.example >/dev/null
-  ! grep -q 'MYCELIUM_CLAUDE_ACP\|MYCELIUM_CODEX_ACP' "$work/home/.config/systemd/user/mycelium-node.service"
+  ! grep -q 'MYCELIUM_CLAUDE_ACP\|MYCELIUM_CODEX_ACP\|MYCELIUM_VIBE_ACP' "$work/home/.config/systemd/user/mycelium-node.service"
 }
 
 only_x86_64_linux_builds_are_downloaded() {

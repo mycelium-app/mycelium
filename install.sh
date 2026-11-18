@@ -99,6 +99,9 @@ service_agent_plist_environment() {
   if [ -n "${MYCELIUM_CODEX_ACP:-}" ]; then
     echo "<key>MYCELIUM_CODEX_ACP</key><string>$MYCELIUM_CODEX_ACP</string>"
   fi
+  if [ -n "${MYCELIUM_VIBE_ACP:-}" ]; then
+    echo "<key>MYCELIUM_VIBE_ACP</key><string>$MYCELIUM_VIBE_ACP</string>"
+  fi
 }
 
 service_agent_environment() {
@@ -107,6 +110,9 @@ service_agent_environment() {
   fi
   if [ -n "${MYCELIUM_CODEX_ACP:-}" ]; then
     echo "Environment=\"MYCELIUM_CODEX_ACP=$MYCELIUM_CODEX_ACP\""
+  fi
+  if [ -n "${MYCELIUM_VIBE_ACP:-}" ]; then
+    echo "Environment=\"MYCELIUM_VIBE_ACP=$MYCELIUM_VIBE_ACP\""
   fi
 }
 

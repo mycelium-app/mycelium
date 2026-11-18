@@ -1,5 +1,5 @@
 use crate::acp::Command;
-use crate::agents::{ALL_AGENTS, account_env, account_homes, accounts_dir, detect_agents, find_account, pod_agents, login_command, login_state, new_account, resolve_program};
+use crate::agents::{account_env, account_homes, accounts_dir, detect_agents, find_account, pod_agents, login_command, login_state, new_account, resolve_program};
 use crate::usage::{CODEX_USAGE_ENDPOINT, USAGE_ENDPOINT, USAGE_MIN_AGE, UsageCache};
 use crate::instructions::deliver;
 use crate::config::{NodeConfig, agent_command, codex_command, agent_env, config_path, with_developer_instructions};
@@ -806,7 +806,7 @@ impl Daemon {
     }
 
     fn hold_instructions(&self, revision: String, global: Option<String>, take_over: bool) {
-        let installed: Vec<AgentId> = ALL_AGENTS.into_iter().filter(|agent| (self.options.agent_commands)(*agent).first().and_then(|program| resolve_program(program)).is_some()).collect();
+        let installed: Vec<AgentId> = AgentId::ALL.into_iter().filter(|agent| (self.options.agent_commands)(*agent).first().and_then(|program| resolve_program(program)).is_some()).collect();
         let unmanaged = match global {
             Some(global) => deliver(&self.options.home, &accounts_dir(&self.config.state_dir), &installed, &global, take_over),
             None => Vec::new(),

@@ -772,6 +772,29 @@ async fn a_session_started_for_another_agent_replaces_the_running_one() {
 }
 
 #[tokio::test]
+async fn a_node_with_vibe_acp_reports_mistral_vibe_and_runs_a_conversation_with_it() {
+    let mut control = ControlServer::start().await;
+    let mut fixture = Fixture::new(&control.url);
+    let agent = fake_acp();
+    fixture.options.agent_commands = Arc::new(move |agent_id| if agent_id == AgentId::Vibe { vec![agent.clone()] } else { vec!["/nonexistent/agent-acp".to_string()] });
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let NodeToControl::Hello { agents, .. } = connection.next().await else {
+        panic!("the first message must be hello");
+    };
+    assert!(agents.iter().any(|agent| agent.agent == AgentId::Vibe && agent.available));
+    assert!(agents.iter().any(|agent| agent.agent == AgentId::Claude && !agent.available));
+    let conversation = Uuid::from_u128(77);
+
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Vibe, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, reload: false, env: vec![], mcp_token: String::new() });
+    connection.next_matching(|message| matches!(message, NodeToControl::SessionStarted { .. })).await;
+    prompt(&connection, conversation, "hello");
+
+    let reply = connection.next_matching(|message| update_text(message).is_some() || matches!(message, NodeToControl::SessionClosed { .. } | NodeToControl::SessionFailed { .. })).await;
+    assert_eq!(update_text(&reply).unwrap(), "one");
+}
+
+#[tokio::test]
 async fn after_a_reconnect_only_unacknowledged_messages_are_replayed_once() {
     let mut control = ControlServer::start().await;
     let fixture = Fixture::new(&control.url);

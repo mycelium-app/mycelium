@@ -8,6 +8,7 @@ use uuid::Uuid;
 pub enum Routing {
     ClaudeAny,
     CodexAny,
+    VibeAny,
     AnyModel,
 }
 
@@ -16,18 +17,28 @@ impl Routing {
         match self {
             Routing::ClaudeAny => "claude_any",
             Routing::CodexAny => "codex_any",
+            Routing::VibeAny => "vibe_any",
             Routing::AnyModel => "any_model",
         }
     }
 
     pub fn parse(text: &str) -> Option<Routing> {
-        [Routing::ClaudeAny, Routing::CodexAny, Routing::AnyModel].into_iter().find(|routing| routing.as_str() == text)
+        [Routing::ClaudeAny, Routing::CodexAny, Routing::VibeAny, Routing::AnyModel].into_iter().find(|routing| routing.as_str() == text)
+    }
+
+    pub fn for_agent(agent: AgentId) -> Routing {
+        match agent {
+            AgentId::Claude => Routing::ClaudeAny,
+            AgentId::Codex => Routing::CodexAny,
+            AgentId::Vibe => Routing::VibeAny,
+        }
     }
 
     pub fn agent(self) -> Option<AgentId> {
         match self {
             Routing::ClaudeAny => Some(AgentId::Claude),
             Routing::CodexAny => Some(AgentId::Codex),
+            Routing::VibeAny => Some(AgentId::Vibe),
             Routing::AnyModel => None,
         }
     }
@@ -68,6 +79,8 @@ pub struct DefaultModes {
     pub claude: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vibe: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

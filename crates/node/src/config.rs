@@ -287,6 +287,7 @@ pub fn agent_command(agent: AgentId) -> Vec<String> {
     let (variable, default) = match agent {
         AgentId::Claude => ("MYCELIUM_CLAUDE_ACP", "claude-agent-acp"),
         AgentId::Codex => ("MYCELIUM_CODEX_ACP", "codex-acp"),
+        AgentId::Vibe => ("MYCELIUM_VIBE_ACP", "vibe-acp"),
     };
     let value = std::env::var(variable).unwrap_or_else(|_| default.to_string());
 
@@ -300,7 +301,7 @@ pub fn codex_command() -> String {
 pub fn agent_env(agent: AgentId) -> Vec<(String, String)> {
     match agent {
         AgentId::Claude => vec![("CLAUDE_CODE_DISABLE_AUTO_MEMORY".to_string(), "1".to_string())],
-        AgentId::Codex => Vec::new(),
+        AgentId::Codex | AgentId::Vibe => Vec::new(),
     }
 }
 

@@ -675,6 +675,7 @@ code: a single-use token valid for an hour, minted in the UI for one node name a
 |---|---|---|
 | `claude` | `claude-agent-acp` (`MYCELIUM_CLAUDE_ACP`) | method `oauth_token`: `claude auth login`, verify against `claude --help` |
 | `codex` | `codex-acp` (`MYCELIUM_CODEX_ACP`) | method `device_auth`: `codex login --device-auth` |
+| `vibe` | `vibe-acp` (`MYCELIUM_VIBE_ACP`) | method `api_key`: `vibe --setup`, signed in when `MISTRAL_API_KEY` is set or `$VIBE_HOME/.env` holds it |
 
 An agent is available when its ACP command resolves on `PATH`. The daemon reports versions from
 `<cmd> --version` where it answers.

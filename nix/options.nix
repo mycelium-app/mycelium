@@ -24,6 +24,6 @@
     type = lib.types.listOf lib.types.package;
     default = [ ];
     example = lib.literalExpression "[ pkgs.claude-code pkgs.codex ]";
-    description = "Packages whose bin directories are added to the node's PATH, so it finds the agent commands (claude-agent-acp, codex-acp).";
+    description = "Packages whose bin directories are added to the node's PATH, so it finds the agent commands (claude-agent-acp, codex-acp, vibe-acp).";
   };
 }

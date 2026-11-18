@@ -7,13 +7,25 @@ use uuid::Uuid;
 pub enum AgentId {
     Claude,
     Codex,
+    Vibe,
 }
 
 impl AgentId {
+    pub const ALL: [AgentId; 3] = [AgentId::Claude, AgentId::Codex, AgentId::Vibe];
+
     pub fn as_str(self) -> &'static str {
         match self {
             AgentId::Claude => "claude",
             AgentId::Codex => "codex",
+            AgentId::Vibe => "vibe",
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            AgentId::Claude => "Claude Code",
+            AgentId::Codex => "Codex",
+            AgentId::Vibe => "Mistral Vibe",
         }
     }
 }
@@ -23,6 +35,7 @@ impl AgentId {
 pub enum ConversationAgent {
     Claude,
     Codex,
+    Vibe,
     Chat,
 }
 

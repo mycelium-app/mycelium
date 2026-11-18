@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 const CLOCK_TICKS_PER_SECOND: f32 = 100.0;
 const BUSIEST_PROCESSES: usize = 8;
-const AGENT_PROGRAMS: &[&str] = &["claude-agent-acp", "codex-acp", "claude", "codex"];
+const AGENT_PROGRAMS: &[&str] = &["claude-agent-acp", "codex-acp", "vibe-acp", "claude", "codex", "vibe"];
 const LISTEN_STATE: &str = "0A";
 const DOCKER_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -171,7 +171,7 @@ pub fn keeper_conversation(arguments: &[&str]) -> Option<Uuid> {
 fn is_agent(arguments: &[&str]) -> bool {
     let program = arguments.first().and_then(|first| Path::new(first).file_name()).and_then(|name| name.to_str()).unwrap_or_default();
 
-    AGENT_PROGRAMS.contains(&program) || arguments.iter().any(|argument| argument.contains("claude-agent-acp") || argument.contains("codex-acp"))
+    AGENT_PROGRAMS.contains(&program) || arguments.iter().any(|argument| argument.contains("claude-agent-acp") || argument.contains("codex-acp") || argument.contains("vibe-acp"))
 }
 
 struct Seen {

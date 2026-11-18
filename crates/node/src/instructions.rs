@@ -7,14 +7,7 @@ pub const MARKER: &str = "<!-- Managed by Mycelium. Changes made here are overwr
 fn file_name(agent: AgentId) -> &'static str {
     match agent {
         AgentId::Claude => "CLAUDE.md",
-        AgentId::Codex => "AGENTS.md",
-    }
-}
-
-fn agent_label(agent: AgentId) -> &'static str {
-    match agent {
-        AgentId::Claude => "Claude Code",
-        AgentId::Codex => "Codex",
+        AgentId::Codex | AgentId::Vibe => "AGENTS.md",
     }
 }
 
@@ -57,13 +50,13 @@ pub fn deliver(home: &Path, accounts_dir: &Path, agents: &[AgentId], global: &st
             let existing = std::fs::read_to_string(&target);
 
             match existing {
-                Ok(text) if !text.starts_with(MARKER) && !take_over => unmanaged.push(format!("{}: {}", agent_label(*agent), target.display())),
+                Ok(text) if !text.starts_with(MARKER) && !take_over => unmanaged.push(format!("{}: {}", AgentId::display_name(*agent), target.display())),
                 Ok(text) if !text.starts_with(MARKER) => {
                     let moved = set_aside(&target).and_then(|()| write(&target, &content));
 
                     if let Err(error) = moved {
                         tracing::warn!("could not take over {}: {error}", target.display());
-                        unmanaged.push(format!("{}: {}", agent_label(*agent), target.display()));
+                        unmanaged.push(format!("{}: {}", AgentId::display_name(*agent), target.display()));
                     }
                 }
                 Ok(text) if text == content => {}

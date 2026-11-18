@@ -11,7 +11,7 @@ use tokio::process::Command;
 
 const VERSION_TIMEOUT: Duration = Duration::from_secs(3);
 
-pub const ALL_AGENTS: [AgentId; 2] = [AgentId::Claude, AgentId::Codex];
+const POD_AGENTS: [AgentId; 2] = [AgentId::Claude, AgentId::Codex];
 
 pub fn resolve_program(program: &str) -> Option<PathBuf> {
     if program.contains('/') {
@@ -45,7 +45,7 @@ async fn report_version(program: &Path) -> Option<String> {
 pub async fn detect_agents(commands: impl Fn(AgentId) -> Vec<String>) -> Vec<AgentInfo> {
     let mut agents = Vec::new();
 
-    for agent in ALL_AGENTS {
+    for agent in AgentId::ALL {
         let command = commands(agent);
         let resolved = command.first().and_then(|program| resolve_program(program));
         let version = match &resolved {
@@ -60,7 +60,7 @@ pub async fn detect_agents(commands: impl Fn(AgentId) -> Vec<String>) -> Vec<Age
 }
 
 pub fn pod_agents() -> Vec<AgentInfo> {
-    ALL_AGENTS.into_iter().map(|agent| AgentInfo { agent, version: None, available: true, update_available: None }).collect()
+    POD_AGENTS.into_iter().map(|agent| AgentInfo { agent, version: None, available: true, update_available: None }).collect()
 }
 
 pub async fn detect_default_agents() -> Vec<AgentInfo> {
@@ -81,6 +81,7 @@ pub fn account_homes(home: &Path, accounts_dir: &Path, agent: AgentId) -> Vec<Ac
     let default_dir = match agent {
         AgentId::Claude => home.join(".claude"),
         AgentId::Codex => home.join(".codex"),
+        AgentId::Vibe => home.join(".vibe"),
     };
     let mut homes = vec![AccountHome { profile: None, dir: default_dir }];
     let Ok(entries) = std::fs::read_dir(accounts_dir.join(agent.as_str())) else {
@@ -102,13 +103,14 @@ pub fn transcript_root(agent: AgentId, account: &AccountHome) -> PathBuf {
     match agent {
         AgentId::Claude => account.dir.join("projects"),
         AgentId::Codex => account.dir.join("sessions"),
+        AgentId::Vibe => account.dir.join("logs").join("session"),
     }
 }
 
 pub fn transcript_roots(home: &Path, accounts: &Path, configured: &[PathBuf]) -> Vec<PathBuf> {
     let mut roots = configured.to_vec();
 
-    for agent in [AgentId::Claude, AgentId::Codex] {
+    for agent in AgentId::ALL {
         for account in account_homes(home, accounts, agent) {
             let root = transcript_root(agent, &account);
 
@@ -137,6 +139,7 @@ pub fn account_label(home: &Path, agent: AgentId, account: &AccountHome) -> Opti
 
                 claims["email"].as_str().map(str::to_string)
             }
+            AgentId::Vibe => None,
         }
     })();
 
@@ -165,6 +168,7 @@ pub fn account_env(agent: AgentId, account: &AccountHome) -> Vec<(String, String
     let variable = match agent {
         AgentId::Claude => "CLAUDE_CONFIG_DIR",
         AgentId::Codex => "CODEX_HOME",
+        AgentId::Vibe => "VIBE_HOME",
     };
 
     vec![(variable.to_string(), account.dir.display().to_string())]
@@ -179,6 +183,7 @@ pub fn login_state(home: &Path, accounts_dir: &Path, available: &[AgentInfo], us
                 (AgentId::Claude, None) => claude_credential(home),
                 (AgentId::Claude, Some(_)) => ("oauth_token", account.dir.join(".credentials.json").exists()),
                 (AgentId::Codex, _) => ("device_auth", account.dir.join("auth.json").exists()),
+                (AgentId::Vibe, profile) => ("api_key", (profile.is_none() && std::env::var_os("MISTRAL_API_KEY").is_some()) || vibe_key_stored(&account.dir)),
             };
             let state = if credential_present { LoginState::SignedIn } else { LoginState::SignedOut };
 
@@ -205,10 +210,15 @@ fn claude_credential(home: &Path) -> (&'static str, bool) {
     ("oauth_token", home.join(".claude").join(".credentials.json").exists())
 }
 
+fn vibe_key_stored(dir: &Path) -> bool {
+    std::fs::read_to_string(dir.join(".env")).is_ok_and(|env| env.lines().any(|line| line.trim().strip_prefix("MISTRAL_API_KEY=").is_some_and(|key| !key.trim().trim_matches(['"', '\'']).is_empty())))
+}
+
 pub fn login_command(agent: AgentId, method: &str) -> Option<Vec<String>> {
     let words: &[&str] = match (agent, method) {
         (AgentId::Claude, "oauth_token") => &["claude", "auth", "login"],
         (AgentId::Codex, "device_auth") => &["codex", "login", "--device-auth"],
+        (AgentId::Vibe, "api_key") => &["vibe", "--setup"],
         _ => return None,
     };
 
@@ -254,7 +264,7 @@ mod tests {
 
         let agents = detect_agents(|agent| match agent {
             AgentId::Claude => vec![claude.display().to_string()],
-            AgentId::Codex => vec![missing.clone()],
+            AgentId::Codex | AgentId::Vibe => vec![missing.clone()],
         })
         .await;
 
@@ -289,6 +299,7 @@ mod tests {
     fn each_agent_signs_in_with_the_method_it_reports() {
         assert_eq!(login_command(AgentId::Claude, "oauth_token"), Some(vec!["claude".to_string(), "auth".to_string(), "login".to_string()]));
         assert_eq!(login_command(AgentId::Codex, "device_auth"), Some(vec!["codex".to_string(), "login".to_string(), "--device-auth".to_string()]));
+        assert_eq!(login_command(AgentId::Vibe, "api_key"), Some(vec!["vibe".to_string(), "--setup".to_string()]));
     }
 
     #[test]
@@ -333,6 +344,21 @@ mod tests {
 
         let listed: Vec<(Option<&str>, LoginState)> = logins.iter().map(|login| (login.account.as_deref(), login.state)).collect();
         assert_eq!(listed, vec![(Some("sam@example.com"), LoginState::SignedIn), (Some("side"), LoginState::SignedOut), (Some("work@acme.example"), LoginState::SignedIn)]);
+    }
+
+    #[test]
+    fn a_vibe_account_is_signed_in_with_an_api_key_once_its_env_file_holds_one() {
+        let home = tempfile::tempdir().unwrap();
+        let accounts = home.path().join("accounts");
+        write(&accounts.join("vibe").join("blank").join(".env"), "MISTRAL_API_KEY=\n");
+        write(&accounts.join("vibe").join("work").join(".env"), "OTHER=1\nMISTRAL_API_KEY='placeholder-key'\n");
+        std::fs::create_dir_all(accounts.join("vibe").join("fresh")).unwrap();
+
+        let logins = login_state(home.path(), &accounts, &available(AgentId::Vibe), &no_usage());
+
+        let listed: Vec<(Option<&str>, &str, LoginState)> = logins.iter().skip(1).map(|login| (login.account.as_deref(), login.method.as_str(), login.state)).collect();
+        assert_eq!(listed, vec![(Some("blank"), "api_key", LoginState::SignedOut), (Some("fresh"), "api_key", LoginState::SignedOut), (Some("work"), "api_key", LoginState::SignedIn)]);
+        assert!(!format!("{logins:?}").contains("placeholder-key"));
     }
 
     #[test]
