@@ -19,6 +19,8 @@ import mycelium.state.NotifyFinishedPreference
 import mycelium.state.PickedFile
 import mycelium.state.decodeBase64
 import mycelium.state.mediaTypeOf
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 
 @JsFun("() => Intl.DateTimeFormat().resolvedOptions().timeZone || ''")
 private external fun browserTimeZone(): String
@@ -43,6 +45,25 @@ private external fun openTab(url: String)
 
 @JsFun("() => { window.close(); }")
 private external fun closeThisWindow()
+
+@JsFun("""(onMessage) => {
+    const channel = new BroadcastChannel('mycelium-chat-windows');
+    channel.onmessage = (event) => onMessage(String(event.data));
+    window.myceliumChatWindows = channel;
+}""")
+private external fun listenToChatWindows(onMessage: (JsString) -> Unit)
+
+@JsFun("(message) => { if (window.myceliumChatWindows) { window.myceliumChatWindows.postMessage(message); } }")
+private external fun tellChatWindows(message: String)
+
+@JsFun("(message) => { window.addEventListener('pagehide', () => { if (window.myceliumChatWindows) { window.myceliumChatWindows.postMessage(message); } }); }")
+private external fun tellChatWindowsOnLeave(message: String)
+
+@JsFun("(url, name) => { window.open(url, name, 'popup,width=720,height=800'); }")
+private external fun openChatTab(url: String, name: String)
+
+@JsFun("(name) => { const found = window.open('', name); if (found) { found.focus(); } }")
+private external fun focusChatTab(name: String)
 
 @JsFun("(text) => { navigator.clipboard.writeText(text); }")
 private external fun writeClipboard(text: String)
@@ -276,6 +297,61 @@ private object WebPlatform : Platform {
 
     override fun closeWindow() = closeThisWindow()
 
+    private val openChats = MutableStateFlow<Set<String>>(emptySet())
+
+    private val shownChat = pageQuery().removePrefix("?").split("&").firstNotNullOfOrNull { pair ->
+        pair.takeIf { it.startsWith("chat=") }?.removePrefix("chat=")?.ifBlank { null }
+    }
+
+    override val opensChatWindows = true
+
+    override val chatWindows: StateFlow<Set<String>> = openChats
+
+    override val windowChat: String? get() = shownChat
+
+    fun listenForChatWindows() {
+        listenToChatWindows { raw ->
+            val (verb, id) = raw.toString().split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
+
+            when {
+                verb == "open" && shownChat == null -> openChats.value += id
+                verb == "closed" && shownChat == null -> openChats.value -= id
+                verb == "close" && id == shownChat -> closeChatWindow(id)
+                verb == "list" && shownChat != null -> tellChatWindows("open:$shownChat")
+            }
+        }
+
+        if (shownChat != null) {
+            tellChatWindows("open:$shownChat")
+            tellChatWindowsOnLeave("closed:$shownChat")
+        } else {
+            tellChatWindows("list")
+        }
+    }
+
+    override fun openChatWindow(id: String, atPointer: Boolean) {
+        if (id in openChats.value) {
+            focusChatWindow(id)
+
+            return
+        }
+
+        openChats.value += id
+        openChatTab("${pageOrigin()}/?chat=$id", "mycelium-chat-$id")
+    }
+
+    override fun focusChatWindow(id: String) = focusChatTab("mycelium-chat-$id")
+
+    override fun closeChatWindow(id: String) {
+        if (id == shownChat) {
+            tellChatWindows("closed:$id")
+            closeThisWindow()
+        } else {
+            openChats.value -= id
+            tellChatWindows("close:$id")
+        }
+    }
+
     override fun copyToClipboard(text: String) = writeClipboard(text)
 
     override suspend fun readClipboard(): String? = suspendCoroutine { continuation -> readClipboardText { text -> continuation.resume(text?.toString()) } }
@@ -322,6 +398,7 @@ private external fun hideLoading()
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
     tellPageTheVersion(mycelium.ClientVersion)
+    WebPlatform.listenForChatWindows()
 
     if (WebPlatform.loadPreference(NotifyFinishedPreference) != false.toString()) {
         askNotificationPermissionOnFirstClick()
