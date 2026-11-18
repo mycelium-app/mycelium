@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.53
+
+- Drop-down lists open in the desktop app's built-in browser, so the design editor's page picker can be used to move between pages instead of only the arrow keys.
+- A sideways trackpad swipe, and Shift with the wheel, pan the design canvas sideways.
+
 ## v0.34.52
 
 - An assistant runs one session at a time. Starting a new session closes any earlier session still mid-turn, and moves its watches, wake-ups, managed conversations and connections to the new session. Messages and watch notifications sent to an earlier session go to the current one, or start the next session when the assistant has none, instead of reopening the old session.
