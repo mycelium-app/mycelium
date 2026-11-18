@@ -60,6 +60,28 @@ class OffscreenBrowserTest {
     }
 
     @Test
+    fun aDropDownListThePageOpensIsDrawnOverThePageUntilItCloses() {
+        val browser = Proxy.newProxyInstance(CefBrowser::class.java.classLoader, arrayOf(CefBrowser::class.java)) { _, _, _ -> null } as CefBrowser
+        val host = OffscreenBrowser()
+        val red = byteArrayOf(0, 0, -1, -1)
+        val blue = byteArrayOf(-1, 0, 0, -1)
+
+        host.onPaint(browser, false, emptyArray(), ByteBuffer.wrap(ByteArray(4 * 4 * 4) { red[it % 4] }), 4, 4)
+        host.onPopupSize(browser, java.awt.Rectangle(1, 2, 2, 1))
+        host.onPopupShow(browser, true)
+        host.onPaint(browser, true, emptyArray(), ByteBuffer.wrap(ByteArray(2 * 1 * 4) { blue[it % 4] }), 2, 1)
+        val open = assertNotNull(host.frame()).toPixelMap()
+
+        assertEquals(listOf(Color.Red, Color.Blue, Color.Blue, Color.Red), (0..3).map { open[it, 2] })
+        assertEquals(Color.Red, open[1, 1])
+
+        host.onPopupShow(browser, false)
+        val closed = assertNotNull(host.frame()).toPixelMap()
+
+        assertEquals(Color.Red, closed[1, 2])
+    }
+
+    @Test
     fun aClickLandsOnThePhysicalPixelUnderThePointer() {
         val press = MouseEvent(window, MouseEvent.MOUSE_PRESSED, 0, InputEvent.BUTTON1_DOWN_MASK, 900, 700, 1, false, MouseEvent.BUTTON1)
 

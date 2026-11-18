@@ -89,6 +89,9 @@ class OffscreenBrowser : CefRenderHandler {
     private var frameHeight = 0
     private var image: ImageBitmap? = null
     private var imageStale = false
+    private var popupShown = false
+    private var popupArea = Rectangle()
+    private var popupPixels = ByteArray(0)
 
     fun resize(widthPx: Int, heightPx: Int, uiScale: Double) {
         val (width, height) = viewSize(widthPx, heightPx)
@@ -146,7 +149,24 @@ class OffscreenBrowser : CefRenderHandler {
         if (imageStale || image == null) {
             val info = ImageInfo(frameWidth, frameHeight, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
 
-            image = Image.makeRaster(info, pixels, frameWidth * 4).toComposeImageBitmap()
+            val shown = pixels.copyOf()
+            val left = popupArea.x.coerceAtLeast(0)
+            val right = minOf(popupArea.x + popupArea.width, frameWidth)
+
+            if (popupShown && left < right) {
+                for (row in popupArea.y.coerceAtLeast(0) until minOf(popupArea.y + popupArea.height, frameHeight)) {
+                    val from = ((row - popupArea.y) * popupArea.width + (left - popupArea.x)) * 4
+                    val count = (right - left) * 4
+
+                    if (from + count > popupPixels.size) {
+                        break
+                    }
+
+                    System.arraycopy(popupPixels, from, shown, (row * frameWidth + left) * 4, count)
+                }
+            }
+
+            image = Image.makeRaster(info, shown, frameWidth * 4).toComposeImageBitmap()
             imageStale = false
         }
 
@@ -167,12 +187,43 @@ class OffscreenBrowser : CefRenderHandler {
 
     override fun getDeviceScaleFactor(browser: CefBrowser): Double = 1.0
 
-    override fun onPopupShow(browser: CefBrowser, show: Boolean) = Unit
+    override fun onPopupShow(browser: CefBrowser, show: Boolean) {
+        synchronized(lock) {
+            popupShown = show
 
-    override fun onPopupSize(browser: CefBrowser, size: Rectangle) = Unit
+            if (!show) {
+                popupPixels = ByteArray(0)
+            }
+
+            imageStale = true
+        }
+
+        SwingUtilities.invokeLater { frames++ }
+    }
+
+    override fun onPopupSize(browser: CefBrowser, size: Rectangle) {
+        synchronized(lock) {
+            popupArea = Rectangle(size)
+        }
+    }
 
     override fun onPaint(browser: CefBrowser, popup: Boolean, dirtyRects: Array<out Rectangle>, buffer: ByteBuffer, width: Int, height: Int) {
-        if (popup || width <= 0 || height <= 0) {
+        if (width <= 0 || height <= 0) {
+            return
+        }
+
+        if (popup) {
+            synchronized(lock) {
+                val length = width * height * 4
+
+                popupPixels = ByteArray(length)
+                buffer.duplicate().apply { rewind() }.get(popupPixels, 0, minOf(length, buffer.capacity()))
+                popupArea = Rectangle(popupArea.x, popupArea.y, width, height)
+                imageStale = true
+            }
+
+            SwingUtilities.invokeLater { frames++ }
+
             return
         }
 
