@@ -139,7 +139,7 @@ pub fn account_label(home: &Path, agent: AgentId, account: &AccountHome) -> Opti
 
                 claims["email"].as_str().map(str::to_string)
             }
-            AgentId::Vibe => None,
+            AgentId::Vibe => account.profile.is_none().then(|| "default".to_string()),
         }
     })();
 
@@ -357,6 +357,7 @@ mod tests {
         let logins = login_state(home.path(), &accounts, &available(AgentId::Vibe), &no_usage());
 
         let listed: Vec<(Option<&str>, &str, LoginState)> = logins.iter().skip(1).map(|login| (login.account.as_deref(), login.method.as_str(), login.state)).collect();
+        assert_eq!(logins[0].account.as_deref(), Some("default"));
         assert_eq!(listed, vec![(Some("blank"), "api_key", LoginState::SignedOut), (Some("fresh"), "api_key", LoginState::SignedOut), (Some("work"), "api_key", LoginState::SignedIn)]);
         assert!(!format!("{logins:?}").contains("placeholder-key"));
     }
