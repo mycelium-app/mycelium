@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.34.55
+
+- Mistral Vibe is a third agent beside Claude Code and Codex. A node with `vibe-acp` on its PATH (or `MYCELIUM_VIBE_ACP`) reports it, and conversations, assistants, subagents, workflows and Any model routing can run on it. It shows as Mistral Vibe with its own mark wherever agents are listed.
+- A node signs in to Mistral Vibe with a Mistral account in the browser: the sign-in page shows in the app like the Claude and Codex logins, and the key is kept in the account's `.env` on the node. A `MISTRAL_API_KEY` in the node's environment also counts as signed in.
+- A Mistral Vibe account's monthly allowance shows in the Usage card and the account's usage, with its plan and whether pay-as-you-go is on. An account whose organisation hides usage shows its plan and says so.
+- Known gaps: a key that Vibe saved to the OS keyring when run directly shows as signed out; Vibe does not take per-conversation instructions, so an assistant on Vibe gets only the global instructions; Vibe sessions cannot be imported.
+
 ## v0.34.54
 
 - A chat can be popped out into its own window: Open in new window in the conversation's More menu or the sidebar row menu, or drag its row out of the sidebar on desktop. The main window shows that the chat is open in its own window, with Go to window and Show here, and the row shows the pop-out icon. The chat window shows only that conversation, and Show in main window or closing it brings the chat back. On the web the chat opens in a browser window.
