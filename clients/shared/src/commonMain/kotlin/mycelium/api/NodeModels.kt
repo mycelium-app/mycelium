@@ -37,6 +37,8 @@ data class LoginInfo(
     @SerialName("usage_read_at") val usageReadAt: String? = null,
     @SerialName("reset_credits") val resetCredits: ResetCredits? = null,
     val managed: Boolean = false,
+    val plan: String? = null,
+    @SerialName("usage_note") val usageNote: String? = null,
 )
 
 @Serializable

@@ -26,7 +26,7 @@ fun accountShortName(account: String): String = account.substringAfter('@')
 
 data class AccountOnNode(val nodeName: String, val state: LoginState)
 
-data class AgentAccount(val agent: String, val label: String, val method: String, val nodes: List<AccountOnNode>, val windows: List<UsageWindow> = emptyList(), val usageReadAt: String? = null, val resetCredits: ResetCredits? = null)
+data class AgentAccount(val agent: String, val label: String, val method: String, val nodes: List<AccountOnNode>, val windows: List<UsageWindow> = emptyList(), val usageReadAt: String? = null, val resetCredits: ResetCredits? = null, val plan: String? = null, val usageNote: String? = null)
 
 fun agentAccounts(nodes: Collection<NodeSummary>): List<AgentAccount> {
     val grouped = linkedMapOf<Triple<String, String?, String?>, MutableList<Pair<NodeSummary, LoginInfo>>>()
@@ -47,8 +47,9 @@ fun agentAccounts(nodes: Collection<NodeSummary>): List<AgentAccount> {
 
     return grouped.map { (key, entries) ->
         val freshest = entries.map { it.second }.filter { it.windows.isNotEmpty() }.maxByOrNull { it.usageReadAt.orEmpty() }
+        val described = entries.map { it.second }.filter { it.plan != null || it.usageNote != null }.maxByOrNull { it.usageReadAt.orEmpty() }
 
-        AgentAccount(key.first, entries.first().second.account?.trim()?.ifBlank { null } ?: UnnamedAccount, entries.first().second.method, entries.map { (node, login) -> AccountOnNode(node.name, login.state) }, freshest?.windows.orEmpty(), freshest?.usageReadAt, freshest?.resetCredits)
+        AgentAccount(key.first, entries.first().second.account?.trim()?.ifBlank { null } ?: UnnamedAccount, entries.first().second.method, entries.map { (node, login) -> AccountOnNode(node.name, login.state) }, freshest?.windows.orEmpty(), freshest?.usageReadAt, freshest?.resetCredits, described?.plan, described?.usageNote)
     }.sortedWith(compareBy({ AgentOrder.indexOf(it.agent).let { index -> if (index < 0) AgentOrder.size else index } }, { it.label }))
 }
 
@@ -208,6 +209,7 @@ fun newChatAccounts(nodes: Collection<NodeSummary>): List<PickerAccount> {
 fun windowName(name: String): String = when (name) {
     "five_hour" -> "5-hour window"
     "seven_day" -> "weekly window"
+    "monthly" -> "monthly allowance"
     else -> name.removePrefix("seven_day_").replace('_', ' ').let { "weekly $it window" }
 }
 
@@ -251,6 +253,7 @@ data class CompactWindowUsage(val percent: Int, val forecast: String?, val summa
 fun windowShortName(name: String): String = when {
     name == "five_hour" -> "5h"
     name.startsWith("seven_day") -> "7d"
+    name == "monthly" -> "mo"
     else -> name
 }
 

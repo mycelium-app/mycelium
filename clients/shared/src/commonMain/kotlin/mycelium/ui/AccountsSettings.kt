@@ -174,8 +174,10 @@ private fun AccountUsage(store: Store, account: AgentAccount) {
     val localDateTime: (Long) -> String? = { millis -> platform?.localDateTime(millis) }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+        account.plan?.let { plan -> Label("Plan: $plan", style = Tokens.Type.Meta) }
+
         if (account.windows.isEmpty()) {
-            Label("Usage unknown", style = Tokens.Type.Meta, color = colors.textMuted)
+            Label(account.usageNote ?: "Usage unknown", style = Tokens.Type.Meta, color = colors.textMuted)
         }
 
         for (window in account.windows) {

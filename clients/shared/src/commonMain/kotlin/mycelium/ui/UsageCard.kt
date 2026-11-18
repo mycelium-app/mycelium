@@ -88,7 +88,7 @@ fun UsageCard(
                 .border(Tokens.Size.Hairline, colors.border, BlockShape)
                 .verticalScroll(rememberScrollState()),
         ) {
-            val reported = accounts.filter { (account, _) -> account.windows.isNotEmpty() }
+            val reported = accounts.filter { (account, _) -> account.windows.isNotEmpty() || account.usageNote != null }
             val updated = usageUpdated(reported.mapNotNull { (account, _) -> account.usageReadAt } + providers.mapNotNull { it.readAt }, now)
 
             Row(Modifier.fillMaxWidth().padding(start = Tokens.Space.S1_5, top = Tokens.Space.S0_5, end = Tokens.Space.S1, bottom = Tokens.Space.S0_5), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
@@ -167,7 +167,7 @@ internal fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (s
             val (window, usage) = entry
             val name = windowName(window.name).replaceFirstChar { it.uppercase() }
             val pace = evenPacePercent(window, now)
-            val description = listOfNotNull(name, "${usage.percent}% used", usage.resetDescription.takeIf { it.isNotEmpty() }, pace?.let { "even pace $it%" }).joinToString(", ")
+            val description = listOfNotNull(name, "${usage.percent}% used", usage.resetDescription.takeIf { it.isNotEmpty() }, pace?.let { "even pace $it%" }, account.plan).joinToString(", ")
             val attention = usage.attention
 
             Row(Modifier.fillMaxWidth().height(UsageRowHeight), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
@@ -195,6 +195,21 @@ internal fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (s
 
                         Label(usage.reset, style = figureStyle, color = if (attention) colors.statusAttention else colors.textMuted, maxLines = 1)
                     }
+                }
+            }
+        }
+
+        val note = account.usageNote
+
+        if (shown.isEmpty() && note != null) {
+            Row(Modifier.fillMaxWidth().height(UsageRowHeight), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.width(UsageNameWidth), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(agentIcon(account.agent), colors.text, Tokens.Size.IconSm)
+                    Label(accountShortName(account.label), style = Tokens.Type.MetaStrong, maxLines = 1)
+                }
+
+                Hinted(listOfNotNull(account.plan, note).joinToString(". "), Modifier.weight(1f)) {
+                    Label(note, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
                 }
             }
         }

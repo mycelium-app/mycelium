@@ -20,6 +20,7 @@ import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import mycelium.ui.Meter
 import mycelium.ui.MyTheme
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
@@ -190,6 +191,29 @@ class UsageCardTest {
         rule.onNodeWithText("7d").assertIsDisplayed()
         rule.onNodeWithText("71%").assertIsDisplayed()
         rule.onNode(hasContentDescription("Weekly window, 71% used, at this rate runs out in", substring = true)).assertExists()
+    }
+
+    @Test
+    fun aMistralVibeAccountShowsItsMonthlyAllowanceWithItsPlan() {
+        val resets = (kotlin.time.Clock.System.now() + 12.days).toString()
+        val account = AgentAccount("vibe", "default", "browser", emptyList(), windows = listOf(UsageWindow("monthly", 37.5, resetsAt = resets)), plan = "Pro, pay-as-you-go on")
+
+        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false)) } }
+
+        rule.onNodeWithText("mo").assertIsDisplayed()
+        rule.onNodeWithText("38%").assertIsDisplayed()
+        rule.onNode(hasContentDescription("Monthly allowance, 38% used", substring = true)).assertExists()
+        rule.onNode(hasContentDescription("Pro, pay-as-you-go on", substring = true)).assertExists()
+    }
+
+    @Test
+    fun aMistralVibeAccountThatCannotSeeItsUsageSaysSoInsteadOfAWindow() {
+        val account = AgentAccount("vibe", "team", "browser", emptyList(), plan = "Team", usageNote = "This Mistral account cannot see its usage.")
+
+        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false)) } }
+
+        rule.onNodeWithText("This Mistral account cannot see its usage.").assertIsDisplayed()
+        rule.onAllNodesWithText("No account has reported usage yet.").assertCountEquals(0)
     }
 
     @Test
