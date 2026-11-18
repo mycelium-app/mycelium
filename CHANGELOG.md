@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.54
+
+- A chat can be popped out into its own window: Open in new window in the conversation's More menu or the sidebar row menu, or drag its row out of the sidebar on desktop. The main window shows that the chat is open in its own window, with Go to window and Show here, and the row shows the pop-out icon. The chat window shows only that conversation, and Show in main window or closing it brings the chat back. On the web the chat opens in a browser window.
+
 ## v0.34.53
 
 - Drop-down lists open in the desktop app's built-in browser, so the design editor's page picker can be used to move between pages instead of only the arrow keys.
