@@ -31,7 +31,7 @@ pub async fn run() -> Result<()> {
         bail!("This version of Mistral Vibe cannot sign in from Mycelium. Update it, then try again.");
     }
 
-    send(&mut stdin, 2, "authenticate", json!({"methodId": DELEGATED, "action": "start"})).await?;
+    send(&mut stdin, 2, "authenticate", json!({"methodId": DELEGATED, "_meta": {"action": "start"}})).await?;
     let started = answer(&mut lines, 2).await?;
     let attempt = &started["_meta"][DELEGATED];
     let (Some(url), Some(attempt_id)) = (attempt["signInUrl"].as_str(), attempt["attemptId"].as_str()) else {
@@ -41,7 +41,7 @@ pub async fn run() -> Result<()> {
     };
 
     println!("Open this page to sign in to Mistral Vibe with your Mistral account: {url}");
-    send(&mut stdin, 3, "authenticate", json!({"methodId": DELEGATED, "action": "complete", "attemptId": attempt_id})).await?;
+    send(&mut stdin, 3, "authenticate", json!({"methodId": DELEGATED, "_meta": {"action": "complete", "attemptId": attempt_id}})).await?;
     answer(&mut lines, 3).await?;
     println!("Signed in to Mistral Vibe.");
 

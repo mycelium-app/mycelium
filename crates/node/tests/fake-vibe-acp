@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Fake Mistral Vibe ACP agent for its delegated browser sign-in.
 
-initialize advertises browser-auth-delegated when the client asks for it. authenticate with action
-"start" returns a sign-in page for attempt a1, and "complete" saves a key to $VIBE_HOME/.env and
+initialize advertises browser-auth-delegated when the client asks for it. authenticate takes its
+action in _meta, as Vibe's ACP library spreads _meta into the arguments: "start" returns a sign-in page for attempt a1, and "complete" saves a key to $VIBE_HOME/.env and
 reports completion. It refuses to sign in unless the keyring is switched off, as Vibe would then
 keep the key where the node cannot see it.
 """
@@ -13,15 +13,16 @@ import sys
 for line in sys.stdin:
     message = json.loads(line)
     method, params, ident = message.get("method"), message.get("params") or {}, message.get("id")
+    arguments = params.get("_meta") or {}
     if method == "initialize":
         delegated = (params.get("clientCapabilities") or {}).get("_meta", {}).get("browser-auth-delegated") is True
         methods = [{"id": "browser-auth", "name": "Sign in through Mistral AI Studio"}]
         if delegated:
             methods.append({"id": "browser-auth-delegated", "name": "Sign in through Mistral AI Studio"})
         result = {"protocolVersion": 1, "authMethods": methods}
-    elif method == "authenticate" and params.get("action") == "start":
+    elif method == "authenticate" and arguments.get("action") == "start":
         result = {"_meta": {"browser-auth-delegated": {"attemptId": "a1", "expiresAt": "2099-01-01T00:00:00Z", "signInUrl": "https://console.example.test/vibe/sign-in?attempt=a1"}}}
-    elif method == "authenticate" and params.get("action") == "complete" and params.get("attemptId") == "a1":
+    elif method == "authenticate" and arguments.get("action") == "complete" and arguments.get("attemptId") == "a1":
         if os.environ.get("PYTHON_KEYRING_BACKEND") != "keyring.backends.fail.Keyring":
             print(json.dumps({"jsonrpc": "2.0", "id": ident, "error": {"code": -32603, "message": "the key went to the keyring"}}), flush=True)
             continue
