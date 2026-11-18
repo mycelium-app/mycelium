@@ -56,3 +56,13 @@ export function wheelZoomFactor(deltaY: number): number
 {
   return Math.exp(-deltaY * 0.01);
 }
+
+export function wheelPan(wheel: { deltaX: number; deltaY: number; shiftKey: boolean }): Point
+{
+  if (wheel.shiftKey && wheel.deltaX === 0)
+  {
+    return { x: 0 - wheel.deltaY, y: 0 };
+  }
+
+  return { x: 0 - wheel.deltaX, y: 0 - wheel.deltaY };
+}

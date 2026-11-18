@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampZoom, fitBounds, maximumZoom, minimumZoom, panBy, screenToWorld, unionBounds, zoomAt } from './viewport';
+import { clampZoom, fitBounds, maximumZoom, minimumZoom, panBy, screenToWorld, unionBounds, wheelPan, zoomAt } from './viewport';
 
 describe('viewport', () =>
 {
@@ -23,6 +23,22 @@ describe('viewport', () =>
   it('pans by a screen offset', () =>
   {
     expect(panBy({ x: 1, y: 2, zoom: 2 }, 10, -5)).toEqual({ x: 11, y: -3, zoom: 2 });
+  });
+
+  it('pans sideways for a horizontal trackpad swipe', () =>
+  {
+    expect(wheelPan({ deltaX: 30, deltaY: 0, shiftKey: false })).toEqual({ x: -30, y: 0 });
+  });
+
+  it('pans sideways for a shifted wheel turn that arrives as vertical', () =>
+  {
+    expect(wheelPan({ deltaX: 0, deltaY: 40, shiftKey: true })).toEqual({ x: -40, y: 0 });
+    expect(wheelPan({ deltaX: 40, deltaY: 0, shiftKey: true })).toEqual({ x: -40, y: 0 });
+  });
+
+  it('pans in both directions for a diagonal swipe', () =>
+  {
+    expect(wheelPan({ deltaX: 12, deltaY: -20, shiftKey: false })).toEqual({ x: -12, y: 20 });
   });
 
   it('fits bounds in the middle of the canvas and never zooms in past 100 per cent', () =>

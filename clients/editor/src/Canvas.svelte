@@ -5,7 +5,7 @@
   import { type Bounds, type Handle, type ItemType, findItem, itemBounds, simplifyPoints } from './lib/doc';
   import { cursorFor, handleCursor, hitItem, visibleHandles } from './lib/hit';
   import { editor } from './lib/instance';
-  import { type Point, panBy, screenToWorld, wheelZoomFactor, zoomAt } from './lib/viewport';
+  import { type Point, panBy, screenToWorld, wheelPan, wheelZoomFactor, zoomAt } from './lib/viewport';
 
   type Gesture =
     | { kind: 'pan'; last: Point }
@@ -294,7 +294,9 @@
       }
       else
       {
-        editor.viewport = panBy(editor.viewport, -event.deltaX, -event.deltaY);
+        const pan = wheelPan(event);
+
+        editor.viewport = panBy(editor.viewport, pan.x, pan.y);
       }
     };
 
