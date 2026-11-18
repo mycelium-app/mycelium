@@ -33,6 +33,7 @@ import mycelium.state.ModelOption
 import mycelium.state.Store
 import mycelium.state.agentAccounts
 import mycelium.state.agentName
+import mycelium.state.HarnessAgents
 import mycelium.state.displayName
 import mycelium.state.modelOptions
 import mycelium.state.reportedModes
@@ -45,7 +46,11 @@ private val DefaultModeNameWidth = 120.dp
 
 private const val SameAsAgent = ""
 
-fun defaultModeOf(settings: AgentSettings, agent: String): String? = if (agent == "codex") settings.defaultModes.codex else settings.defaultModes.claude
+fun defaultModeOf(settings: AgentSettings, agent: String): String? = when (agent) {
+    "codex" -> settings.defaultModes.codex
+    "vibe" -> settings.defaultModes.vibe
+    else -> settings.defaultModes.claude
+}
 
 private fun accountModeOf(settings: AgentSettings, account: AgentAccount): String? = settings.accountModes.firstOrNull { it.agent == account.agent && it.account == account.label }?.mode
 
@@ -83,7 +88,7 @@ fun AgentsSettings(store: Store) {
                 Label("New conversations start in this mode instead of the one in ~/.claude or ~/.codex.", style = Tokens.Type.Meta, color = colors.textMuted)
                 Label("Environment tools never ask, in any mode: they only reach the environment.", style = Tokens.Type.Meta, color = colors.textMuted)
 
-                for (agent in listOf("claude", "codex")) {
+                for (agent in HarnessAgents) {
                     val modes = reportedModes(state.nodes.values, agent)
 
                     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
@@ -93,7 +98,11 @@ fun AgentsSettings(store: Store) {
                             modeName(modes, defaultModeOf(current, agent)).orEmpty(),
                             { label ->
                                 val picked = modes.first { it.name == label }.id
-                                val defaults = if (agent == "codex") current.defaultModes.copy(codex = picked) else current.defaultModes.copy(claude = picked)
+                                val defaults = when (agent) {
+                                    "codex" -> current.defaultModes.copy(codex = picked)
+                                    "vibe" -> current.defaultModes.copy(vibe = picked)
+                                    else -> current.defaultModes.copy(claude = picked)
+                                }
 
                                 runner { settings = store.api.saveAgentSettings(SaveAgentSettingsRequest(defaults, current.anyModel)) }
                             },

@@ -59,6 +59,7 @@ fun bestLogin(logins: List<LoginInfo>, now: Instant = Clock.System.now()): Login
 fun routingName(routing: String): String = when (routing) {
     Routing.ClaudeAny -> "Claude Code, any account"
     Routing.CodexAny -> "Codex, any account"
+    Routing.VibeAny -> "Mistral Vibe, any account"
     else -> "Any model"
 }
 
@@ -80,10 +81,14 @@ fun modelChoiceName(choice: ModelChoice, providers: List<ModelProvider>): String
     return listOfNotNull(provider, choice.model).joinToString(" · ")
 }
 
-fun anyAccountId(agent: String): String = RoutingPrefix + if (agent == "codex") Routing.CodexAny else Routing.ClaudeAny
+fun anyAccountId(agent: String): String = RoutingPrefix + when (agent) {
+    "codex" -> Routing.CodexAny
+    "vibe" -> Routing.VibeAny
+    else -> Routing.ClaudeAny
+}
 
 fun routingButtonText(id: String?): String? = when (id?.removePrefix(RoutingPrefix)?.takeIf { id.startsWith(RoutingPrefix) }) {
-    Routing.ClaudeAny, Routing.CodexAny -> "Any account"
+    Routing.ClaudeAny, Routing.CodexAny, Routing.VibeAny -> "Any account"
     Routing.AnyModel -> "Any model"
     else -> null
 }
@@ -91,6 +96,7 @@ fun routingButtonText(id: String?): String? = when (id?.removePrefix(RoutingPref
 fun routingAgent(id: String): String? = when (id.removePrefix(RoutingPrefix).takeIf { id.startsWith(RoutingPrefix) }) {
     Routing.ClaudeAny -> "claude"
     Routing.CodexAny -> "codex"
+    Routing.VibeAny -> "vibe"
     else -> null
 }
 

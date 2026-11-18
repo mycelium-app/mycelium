@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import mycelium.state.agentName
 import mycelium.api.Assistant
 import mycelium.api.AssistantFile
 import mycelium.api.AssistantPreferences
@@ -420,7 +421,7 @@ private val FallBackConditions = listOf(
     "model_error" to "The model fails",
 )
 
-private fun harnessName(agent: String): String = if (agent == "codex") "Codex" else "Claude Code"
+private fun harnessName(agent: String): String = if (agent == "claude") "Claude Code" else agentName(agent)
 
 private fun <T> List<T>.moved(from: Int, to: Int): List<T> = toMutableList().also { it.add(to, it.removeAt(from)) }
 

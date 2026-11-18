@@ -69,7 +69,7 @@ fun PullRequestList(store: Store, state: AppState, requests: List<PullRequestIte
                                 val agent = state.nodes[project.nodeId]?.agents?.firstOrNull { it.available }?.agent
 
                                 if (agent == null) {
-                                    failure = "No agent is installed on that node. Install Claude Code or Codex there, then try again."
+                                    failure = "No agent is installed on that node. Install Claude Code, Codex or Mistral Vibe there, then try again."
                                 } else {
                                     store.act { onOpened(store.api.startPullRequestWorkspace(project.id, request.number, agent)) }
                                 }

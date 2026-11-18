@@ -63,7 +63,7 @@ fun splitSignedOut(accounts: List<AgentAccount>): AgentAccountSplit {
 data class AgentPick(val agent: String, val account: String?, val label: String, val hint: String, val nodeId: String? = null)
 
 fun agentPicks(nodes: Collection<NodeSummary>): List<AgentPick> =
-    listOf("claude", "codex").flatMap { agent ->
+    HarnessAgents.flatMap { agent ->
         val signedIn = nodes.flatMap { node -> node.logins.filter { it.agent == agent && it.state == LoginState.SignedIn && it.account != null }.map { node to it.account.orEmpty() } }
         val accounts = signedIn.map { it.second }.distinct().sorted()
 
@@ -335,4 +335,4 @@ fun nextUsageTick(windows: List<UsageWindow>, now: Instant = Clock.System.now())
 
 fun newAccountName(): String = "account-${Random.nextInt(1000, 10000)}"
 
-private val AgentOrder = listOf("claude", "codex")
+private val AgentOrder = HarnessAgents

@@ -50,6 +50,11 @@ fun fallbackModes(agent: String): List<Choice> = when (agent) {
         Choice("agent", "Auto review"),
         Choice("agent-full-access", "Full access"),
     )
+    "vibe" -> listOf(
+        Choice("ask", "Ask"),
+        Choice("accept-edits", "Accept Edits"),
+        Choice("auto-approve", "Auto Approve"),
+    )
     else -> emptyList()
 }
 

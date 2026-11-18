@@ -80,7 +80,7 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
         val agent = node?.agents?.firstOrNull { it.available }?.agent
 
         if (agent == null) {
-            failure = "No agent is installed on ${node?.name ?: "that node"}. Install Claude Code or Codex there, then try again."
+            failure = "No agent is installed on ${node?.name ?: "that node"}. Install Claude Code, Codex or Mistral Vibe there, then try again."
             return
         }
 

@@ -58,7 +58,7 @@ fun NoNodeNotice(color: Color, modifier: Modifier = Modifier) {
 
 @Composable
 fun NoAgentNotice(node: NodeSummary) {
-    Label("No agent is installed on ${node.name}. Install Claude Code or Codex there, then try again.", color = MyTheme.colors.statusFailed)
+    Label("No agent is installed on ${node.name}. Install Claude Code, Codex or Mistral Vibe there, then try again.", color = MyTheme.colors.statusFailed)
 }
 
 @Composable

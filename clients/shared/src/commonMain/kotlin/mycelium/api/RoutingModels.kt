@@ -6,11 +6,12 @@ import kotlinx.serialization.Serializable
 object Routing {
     const val ClaudeAny = "claude_any"
     const val CodexAny = "codex_any"
+    const val VibeAny = "vibe_any"
     const val AnyModel = "any_model"
 }
 
 @Serializable
-data class DefaultModes(val claude: String? = null, val codex: String? = null)
+data class DefaultModes(val claude: String? = null, val codex: String? = null, val vibe: String? = null)
 
 @Serializable
 data class AccountMode(val agent: String, val account: String, val mode: String)

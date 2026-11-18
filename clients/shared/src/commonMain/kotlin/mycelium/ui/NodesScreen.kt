@@ -44,6 +44,7 @@ data class LoginSession(val loginId: String, val agent: String)
 
 fun loginMethodFor(agent: String): String = when (agent) {
     "codex" -> "device_auth"
+    "vibe" -> "api_key"
     else -> "oauth_token"
 }
 

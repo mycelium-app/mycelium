@@ -18,6 +18,10 @@ import mycelium.state.priceLabel
 import mycelium.state.routedLabel
 import mycelium.state.routedStatus
 import mycelium.state.scheduleAccountChoice
+import mycelium.state.anyAccountId
+import mycelium.state.routingAgent
+import mycelium.state.routingName
+import mycelium.state.routingButtonText
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -89,6 +93,14 @@ class RoutingTest {
         assertEquals("routing:claude_any", scheduleAccountChoice(withAccounts, "claude", null))
         assertEquals("routing:any_model", scheduleAccountChoice(withAccounts, "claude", "routing:any_model"))
         assertNull(scheduleAccountChoice(nodeWith(), "claude", null))
+    }
+
+    @Test
+    fun mistralVibeRoutesBetweenItsOwnAccountsUnderItsOwnName() {
+        assertEquals("routing:vibe_any", anyAccountId("vibe"))
+        assertEquals("vibe", routingAgent("routing:vibe_any"))
+        assertEquals("Mistral Vibe, any account", routingName("vibe_any"))
+        assertEquals("Any account", routingButtonText("routing:vibe_any"))
     }
 
     @Test

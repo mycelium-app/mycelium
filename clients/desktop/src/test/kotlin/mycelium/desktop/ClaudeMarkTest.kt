@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.dp
 import mycelium.ui.Icon
 import mycelium.ui.MyIcon
+import mycelium.ui.agentIcon
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -32,5 +33,20 @@ class ClaudeMarkTest {
 
         assertEquals(Color.White, pixels[pixels.width / 2, pixels.height / 2])
         assertEquals(Color.White, pixels[pixels.width * 3 / 8, pixels.height / 6])
+    }
+
+    @Test
+    fun mistralVibesMarkIsSolidBlocksWithGapsBetweenThem() {
+        rule.setContent {
+            Box(Modifier.testTag("mark").background(Color.Black)) {
+                Icon(agentIcon("vibe"), Color.White, 96.dp)
+            }
+        }
+
+        val pixels = rule.onNodeWithTag("mark").captureToImage().toPixelMap()
+
+        assertEquals(Color.White, pixels[pixels.width / 2, pixels.height / 2])
+        assertEquals(Color.Black, pixels[pixels.width / 2, pixels.height / 6])
+        assertEquals(Color.White, pixels[pixels.width / 6, pixels.height / 6])
     }
 }

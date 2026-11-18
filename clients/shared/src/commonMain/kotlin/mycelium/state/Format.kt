@@ -4,9 +4,12 @@ import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Instant
 
+val HarnessAgents = listOf("claude", "codex", "vibe")
+
 fun agentName(agent: String): String = when (agent) {
     "claude" -> "Claude Code"
     "codex" -> "Codex"
+    "vibe" -> "Mistral Vibe"
     "chat" -> "Chat"
     else -> agent
 }
