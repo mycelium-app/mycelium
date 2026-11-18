@@ -720,7 +720,7 @@ async fn a_conversation_whose_starter_was_renamed_becomes_managed_by_it_and_one_
 }
 
 async fn signed_in(fleet: &mut Fleet) {
-    let login = mycelium_proto::conversation::LoginInfo { managed: false, agent: mycelium_proto::conversation::AgentId::Claude, account: Some("sam@example.com".into()), method: "oauth_token".into(), state: mycelium_proto::conversation::LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None };
+    let login = mycelium_proto::conversation::LoginInfo { managed: false, plan: None, usage_note: None, agent: mycelium_proto::conversation::AgentId::Claude, account: Some("sam@example.com".into()), method: "oauth_token".into(), state: mycelium_proto::conversation::LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None };
     fleet.link.send(mycelium_proto::link::NodeToControl::Logins { logins: vec![login] }).await;
     let user = fleet.server.user.clone();
     crate::common::eventually("the account", || async {

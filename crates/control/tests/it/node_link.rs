@@ -217,7 +217,7 @@ async fn a_node_cannot_write_into_another_nodes_conversation() {
     intruder.send(NodeToControl::SessionStarted { conversation_id: conversation.id, acp_session_id: "forged".into(), modes: None, models: None, config_options: None }).await;
 
     let mut stream = server.user.stream().await;
-    intruder.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, agent: AgentId::Claude, account: None, method: "token".into(), state: LoginState::SignedOut, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }).await;
+    intruder.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, plan: None, usage_note: None, agent: AgentId::Claude, account: None, method: "token".into(), state: LoginState::SignedOut, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }).await;
     stream.until(|message| matches!(message, StreamMessage::Node(node) if node.id == intruder.id && !node.logins.is_empty()).then_some(())).await;
 
     assert!(server.events(conversation.id).await.is_empty());
@@ -435,7 +435,7 @@ async fn an_agent_sign_in_is_started_on_the_node_and_its_output_streams_to_clien
     assert_eq!(status, 204);
     assert_eq!(link.next().await, ControlToNode::LoginInput { login_id, text: "abc123\n".into() });
 
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, agent: AgentId::Claude, account: Some("me@example.com".into()), method: "token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, plan: None, usage_note: None, agent: AgentId::Claude, account: Some("me@example.com".into()), method: "token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }).await;
     link.send(NodeToControl::LoginFinished { login_id, ok: true }).await;
     stream.until(|message| matches!(message, StreamMessage::LoginFinished { ok: true, .. }).then_some(())).await;
 
@@ -777,4 +777,23 @@ async fn a_node_flooding_the_link_with_messages_is_disconnected() {
     }
 
     assert!(refused || link.closed().await);
+}
+
+#[tokio::test]
+async fn a_vibe_login_keeps_its_plan_its_monthly_window_and_why_usage_is_missing() {
+    let server = Server::start().await;
+    let mut link = server.online_node("atlas").await;
+    let window = mycelium_proto::conversation::UsageWindow { name: "monthly".into(), used_percent: 37.5, resets_at: Some("2099-02-01T00:00:00Z".parse().unwrap()), rate_per_hour: None, runs_out_at: None };
+    let signed_in = |account: &str, plan: &str, note: Option<&str>, windows: Vec<mycelium_proto::conversation::UsageWindow>| LoginInfo { managed: account != "default", plan: Some(plan.into()), usage_note: note.map(str::to_string), agent: AgentId::Vibe, account: Some(account.into()), method: "browser".into(), state: LoginState::SignedIn, usage_left: None, windows, usage_read_at: Some(chrono::Utc::now()), reset_credits: None };
+
+    link.send(NodeToControl::Logins { logins: vec![signed_in("default", "Pro, pay-as-you-go on", None, vec![window]), signed_in("team", "Team", Some("This Mistral account cannot see its usage."), vec![])] }).await;
+
+    let logins = crate::common::eventually("the Vibe logins to be stored", || async {
+        let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
+
+        Some(nodes[0]["logins"].clone()).filter(|logins| logins.as_array().is_some_and(|logins| logins.len() == 2))
+    })
+    .await;
+    assert_eq!((logins[0]["plan"].clone(), logins[0]["windows"][0]["name"].clone(), logins[0]["windows"][0]["used_percent"].clone()), (json!("Pro, pay-as-you-go on"), json!("monthly"), json!(37.5)));
+    assert_eq!((logins[1]["plan"].clone(), logins[1]["usage_note"].clone(), logins[1]["windows"].clone()), (json!("Team"), json!("This Mistral account cannot see its usage."), serde_json::Value::Null));
 }

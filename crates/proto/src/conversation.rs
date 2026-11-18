@@ -288,6 +288,10 @@ pub struct LoginInfo {
     pub reset_credits: Option<ResetCredits>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub managed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_note: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

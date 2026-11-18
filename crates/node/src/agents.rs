@@ -183,15 +183,15 @@ pub fn login_state(home: &Path, accounts_dir: &Path, available: &[AgentInfo], us
                 (AgentId::Claude, None) => claude_credential(home),
                 (AgentId::Claude, Some(_)) => ("oauth_token", account.dir.join(".credentials.json").exists()),
                 (AgentId::Codex, _) => ("device_auth", account.dir.join("auth.json").exists()),
-                (AgentId::Vibe, profile) => ("browser", (profile.is_none() && std::env::var_os("MISTRAL_API_KEY").is_some()) || vibe_key_stored(&account.dir)),
+                (AgentId::Vibe, profile) => ("browser", vibe_key(&account.dir, profile.is_none()).is_some()),
             };
             let state = if credential_present { LoginState::SignedIn } else { LoginState::SignedOut };
 
             let reading = usage.reading(&account.dir).filter(|_| credential_present);
             let usage_left = reading.as_ref().and_then(|reading| usage_left(&reading.windows));
-            let (windows, usage_read_at, reset_credits) = reading.map_or((Vec::new(), None, None), |reading| (reading.windows, Some(reading.read_at), reading.reset_credits));
+            let (windows, usage_read_at, reset_credits, plan, usage_note) = reading.map_or((Vec::new(), None, None, None, None), |reading| (reading.windows, Some(reading.read_at), reading.reset_credits, reading.plan, reading.usage_note));
 
-            logins.push(LoginInfo { agent: info.agent, account: account_label(home, info.agent, &account), method: method.to_string(), state, usage_left, windows, usage_read_at, reset_credits, managed: account.profile.is_some() });
+            logins.push(LoginInfo { agent: info.agent, account: account_label(home, info.agent, &account), method: method.to_string(), state, usage_left, windows, usage_read_at, reset_credits, managed: account.profile.is_some(), plan, usage_note });
         }
     }
 
@@ -210,8 +210,10 @@ fn claude_credential(home: &Path) -> (&'static str, bool) {
     ("oauth_token", home.join(".claude").join(".credentials.json").exists())
 }
 
-fn vibe_key_stored(dir: &Path) -> bool {
-    std::fs::read_to_string(dir.join(".env")).is_ok_and(|env| env.lines().any(|line| line.trim().strip_prefix("MISTRAL_API_KEY=").is_some_and(|key| !key.trim().trim_matches(['"', '\'']).is_empty())))
+pub fn vibe_key(dir: &Path, default: bool) -> Option<String> {
+    let stored = std::fs::read_to_string(dir.join(".env")).ok().and_then(|env| env.lines().find_map(|line| line.trim().strip_prefix("MISTRAL_API_KEY=").map(|key| key.trim().trim_matches(['"', '\'']).to_string()))).filter(|key| !key.is_empty());
+
+    stored.or_else(|| default.then(|| std::env::var("MISTRAL_API_KEY").ok()).flatten().filter(|key| !key.is_empty()))
 }
 
 pub fn login_command(agent: AgentId, method: &str) -> Option<Vec<String>> {

@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use mycelium_proto::conversation::{ResetCredits, UsageWindow};
 use serde::Deserialize;
+use crate::agents::vibe_key;
 use crate::codex_app_server::read_reset_credits;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -9,6 +10,10 @@ use std::time::{Duration, Instant};
 
 pub const USAGE_ENDPOINT: &str = "https://api.anthropic.com/api/oauth/usage";
 pub const CODEX_USAGE_ENDPOINT: &str = "https://chatgpt.com/backend-api/wham/usage";
+pub const VIBE_BILLING_ENDPOINT: &str = "https://api.mistral.ai/v1/billing";
+const VIBE_BILLING_TIMEOUT: Duration = Duration::from_secs(3);
+const VIBE_DEFAULT_HOME: &str = ".vibe";
+const VIBE_NO_PERMISSION: &str = "This Mistral account cannot see its usage. An organisation admin can give it the permission to see inference usage.";
 pub const USAGE_MIN_AGE: Duration = Duration::from_secs(300);
 const USAGE_TIMEOUT: Duration = Duration::from_secs(5);
 const LEADING_WINDOWS: [&str; 2] = ["five_hour", "seven_day"];
@@ -18,11 +23,14 @@ pub struct Reading {
     pub windows: Vec<UsageWindow>,
     pub read_at: DateTime<Utc>,
     pub reset_credits: Option<ResetCredits>,
+    pub plan: Option<String>,
+    pub usage_note: Option<String>,
 }
 
 pub struct UsageCache {
     endpoint: String,
     codex_endpoint: String,
+    vibe_endpoint: String,
     codex_command: String,
     min_age: Duration,
     http: reqwest::Client,
@@ -31,7 +39,13 @@ pub struct UsageCache {
 
 impl UsageCache {
     pub fn new(endpoint: &str, codex_endpoint: &str, codex_command: &str, min_age: Duration) -> UsageCache {
-        UsageCache { endpoint: endpoint.to_string(), codex_endpoint: codex_endpoint.to_string(), codex_command: codex_command.to_string(), min_age, http: reqwest::Client::new(), entries: Mutex::new(HashMap::new()) }
+        UsageCache { endpoint: endpoint.to_string(), codex_endpoint: codex_endpoint.to_string(), vibe_endpoint: VIBE_BILLING_ENDPOINT.to_string(), codex_command: codex_command.to_string(), min_age, http: reqwest::Client::new(), entries: Mutex::new(HashMap::new()) }
+    }
+
+    pub fn with_vibe_endpoint(mut self, endpoint: &str) -> UsageCache {
+        self.vibe_endpoint = endpoint.to_string();
+
+        self
     }
 
     pub fn reading(&self, config_dir: &Path) -> Option<Reading> {
@@ -67,6 +81,10 @@ impl UsageCache {
     }
 
     async fn fetch(&self, config_dir: &Path) -> Option<Reading> {
+        if let Some(key) = vibe_key(config_dir, config_dir.file_name().is_some_and(|name| name == VIBE_DEFAULT_HOME)) {
+            return self.fetch_vibe(&key).await;
+        }
+
         let (windows, reset_credits) = match read_json(&config_dir.join(".credentials.json")) {
             Some(credentials) => (self.fetch_claude(&credentials).await?, None),
             None => {
@@ -80,7 +98,35 @@ impl UsageCache {
             return None;
         }
 
-        Some(Reading { windows, read_at: Utc::now(), reset_credits })
+        Some(Reading { windows, read_at: Utc::now(), reset_credits, plan: None, usage_note: None })
+    }
+
+    async fn fetch_vibe(&self, key: &str) -> Option<Reading> {
+        let read = |path: &'static str| self.http.get(format!("{}/{path}", self.vibe_endpoint.trim_end_matches('/'))).timeout(VIBE_BILLING_TIMEOUT).bearer_auth(key).send();
+        let (subscription, budget) = tokio::join!(read("subscription"), read("budget"));
+        let subscription = match subscription {
+            Ok(response) if response.status().is_success() => response.json::<serde_json::Value>().await.ok(),
+            _ => None,
+        };
+        let (budget, usage_note) = match budget {
+            Ok(response) if response.status().is_success() => (response.json::<serde_json::Value>().await.ok().map(|body| body["vibe_budget"].clone()), None),
+            Ok(response) if response.status() == reqwest::StatusCode::FORBIDDEN => (None, Some(VIBE_NO_PERMISSION.to_string())),
+            _ => (None, None),
+        };
+        let windows: Vec<UsageWindow> = budget.iter().filter_map(|budget| {
+            let used_percent = budget["usage_percentage"].as_f64()?;
+            let resets_at = budget["reset_at"].as_str().and_then(|text| text.parse::<DateTime<Utc>>().ok());
+
+            Some(UsageWindow { name: "monthly".to_string(), used_percent, resets_at, rate_per_hour: None, runs_out_at: None })
+        }).collect();
+        let pay_as_you_go = budget.as_ref().and_then(|budget| budget["payg_enabled"].as_bool()).or_else(|| subscription.as_ref().and_then(|subscription| subscription["vibe_payg_enabled"].as_bool())) == Some(true);
+        let plan = subscription.as_ref().and_then(|subscription| subscription["plan_name"].as_str()).map(|plan| if pay_as_you_go { format!("{plan}, pay-as-you-go on") } else { plan.to_string() });
+
+        if plan.is_none() && windows.is_empty() {
+            return None;
+        }
+
+        Some(Reading { windows, read_at: Utc::now(), reset_credits: None, plan, usage_note })
     }
 
     async fn fetch_claude(&self, credentials: &serde_json::Value) -> Option<Vec<UsageWindow>> {
@@ -190,6 +236,73 @@ mod tests {
         tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
 
         format!("http://{address}/api/oauth/usage")
+    }
+
+    async fn serve_billing(budget_status: u16, seen: Seen) -> String {
+        let answer = |path: &'static str, status: u16, body: serde_json::Value, seen: Seen| {
+            get(move |headers: HeaderMap| {
+                let seen = seen.clone();
+                let body = body.clone();
+
+                async move {
+                    seen.lock().unwrap().push((path.to_string(), headers.get("authorization").and_then(|value| value.to_str().ok()).unwrap_or_default().to_string()));
+
+                    (axum::http::StatusCode::from_u16(status).unwrap(), axum::Json(body))
+                }
+            })
+        };
+        let router = Router::new()
+            .route("/v1/billing/subscription", answer("subscription", 200, json!({"plan_name": "Pro", "vibe_payg_enabled": false}), seen.clone()))
+            .route("/v1/billing/budget", answer("budget", budget_status, json!({"vibe_budget": {"usage_percentage": 37.5, "initial_budget": 120.0, "reset_at": "2099-02-01T00:00:00Z", "payg_enabled": true}}), seen));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+
+        format!("http://{address}/v1/billing")
+    }
+
+    async fn vibe_reading(budget_status: u16) -> (Option<Reading>, Vec<(String, String)>) {
+        let seen = Seen::default();
+        let endpoint = serve_billing(budget_status, seen.clone()).await;
+        let account = tempfile::tempdir().unwrap();
+        std::fs::write(account.path().join(".env"), "MISTRAL_API_KEY=placeholder-vibe-key\n").unwrap();
+        let cache = UsageCache::new(USAGE_ENDPOINT, CODEX_USAGE_ENDPOINT, "codex", USAGE_MIN_AGE).with_vibe_endpoint(&endpoint);
+
+        cache.refresh(&[account.path().to_path_buf()]).await;
+
+        let mut requests = seen.lock().unwrap().clone();
+        requests.sort();
+
+        (cache.reading(account.path()), requests)
+    }
+
+    #[tokio::test]
+    async fn a_vibe_account_reports_its_monthly_budget_and_plan_read_with_its_key() {
+        let (reading, requests) = vibe_reading(200).await;
+        let reading = reading.unwrap();
+
+        assert_eq!(reading.windows, vec![UsageWindow { name: "monthly".into(), used_percent: 37.5, resets_at: Some("2099-02-01T00:00:00Z".parse().unwrap()), rate_per_hour: None, runs_out_at: None }]);
+        assert_eq!((reading.plan.as_deref(), reading.usage_note), (Some("Pro, pay-as-you-go on"), None));
+        assert_eq!(requests, vec![("budget".to_string(), "Bearer placeholder-vibe-key".to_string()), ("subscription".to_string(), "Bearer placeholder-vibe-key".to_string())]);
+    }
+
+    #[tokio::test]
+    async fn a_vibe_member_who_cannot_see_usage_gets_the_plan_and_the_reason_without_a_window() {
+        let (reading, _) = vibe_reading(403).await;
+        let reading = reading.unwrap();
+
+        assert!(reading.windows.is_empty());
+        assert_eq!(reading.plan.as_deref(), Some("Pro"));
+        assert_eq!(reading.usage_note.as_deref(), Some(VIBE_NO_PERMISSION));
+    }
+
+    #[tokio::test]
+    async fn a_platform_without_a_vibe_budget_gets_the_plan_only() {
+        let (reading, _) = vibe_reading(404).await;
+        let reading = reading.unwrap();
+
+        assert!(reading.windows.is_empty());
+        assert_eq!((reading.plan.as_deref(), reading.usage_note), (Some("Pro"), None));
     }
 
     fn account_with_token(token: &str) -> tempfile::TempDir {

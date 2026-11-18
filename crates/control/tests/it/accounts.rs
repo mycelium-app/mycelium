@@ -5,7 +5,7 @@ use mycelium_proto::link::{ControlToNode, NodeToControl};
 use serde_json::json;
 
 fn login(account: &str, state: LoginState) -> LoginInfo {
-    LoginInfo { managed: false, agent: AgentId::Claude, account: Some(account.into()), method: "oauth_token".into(), state, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }
+    LoginInfo { managed: false, plan: None, usage_note: None, agent: AgentId::Claude, account: Some(account.into()), method: "oauth_token".into(), state, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }
 }
 
 async fn node_with_accounts(server: &Server, accounts: Vec<LoginInfo>) -> common::NodeLink {
@@ -48,13 +48,13 @@ async fn a_node_lists_every_account_signed_in_to_one_agent_and_forgets_the_ones_
 #[tokio::test]
 async fn the_usage_left_an_account_reports_is_shown_on_the_node_and_replaced_by_the_next_report() {
     let server = Server::start().await;
-    let mut link = node_with_accounts(&server, vec![LoginInfo { managed: false, usage_left: Some(18), ..login("sam@example.com", LoginState::SignedIn) }, login("work@acme.example", LoginState::SignedIn)]).await;
+    let mut link = node_with_accounts(&server, vec![LoginInfo { managed: false, plan: None, usage_note: None, usage_left: Some(18), ..login("sam@example.com", LoginState::SignedIn) }, login("work@acme.example", LoginState::SignedIn)]).await;
 
     let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
     let usage = |nodes: &serde_json::Value| nodes[0]["logins"].as_array().unwrap().iter().map(|login| login["usage_left"].clone()).collect::<Vec<_>>();
     assert_eq!(usage(&nodes), vec![json!(18), serde_json::Value::Null]);
 
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, usage_left: Some(60), ..login("sam@example.com", LoginState::SignedIn) }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, plan: None, usage_note: None, usage_left: Some(60), ..login("sam@example.com", LoginState::SignedIn) }] }).await;
 
     let user = server.user.clone();
     common::eventually("the refreshed usage", || async {
@@ -71,7 +71,7 @@ fn window(name: &str, used: f64, resets_in_hours: i64) -> mycelium_proto::conver
 
 async fn report_usage(link: &mut common::NodeLink, hours_ago: i64, windows: Vec<mycelium_proto::conversation::UsageWindow>) {
     let read_at = chrono::Utc::now() - chrono::Duration::hours(hours_ago);
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, windows, usage_read_at: Some(read_at), ..login("sam@example.com", LoginState::SignedIn) }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, plan: None, usage_note: None, windows, usage_read_at: Some(read_at), ..login("sam@example.com", LoginState::SignedIn) }] }).await;
 }
 
 async fn first_login(server: &Server, settled: impl Fn(&serde_json::Value) -> bool) -> serde_json::Value {
@@ -107,7 +107,7 @@ async fn an_unknown_usage_report_preserves_the_last_reading_without_preserving_s
     report_usage(&mut link, 0, vec![window("five_hour", 42.0, 2)]).await;
     let before = first_login(&server, |login| login["usage_read_at"].is_string()).await;
 
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, method: "refresh".into(), ..login("sam@example.com", LoginState::SignedOut) }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, plan: None, usage_note: None, method: "refresh".into(), ..login("sam@example.com", LoginState::SignedOut) }] }).await;
     let after = first_login(&server, |login| login["method"] == "refresh").await;
 
     assert_eq!(after["state"], "signed_out");
@@ -145,7 +145,7 @@ async fn an_older_usage_report_does_not_replace_a_newer_control_plane_reading() 
     let mut link = server.online_node("laptop").await;
     report_usage(&mut link, 0, vec![window("five_hour", 42.0, 2)]).await;
     let before = first_login(&server, |login| login["usage_read_at"].is_string()).await;
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, method: "older".into(), windows: vec![window("five_hour", 10.0, 2)], usage_read_at: Some(chrono::Utc::now() - chrono::Duration::hours(1)), ..login("sam@example.com", LoginState::SignedIn) }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, plan: None, usage_note: None, method: "older".into(), windows: vec![window("five_hour", 10.0, 2)], usage_read_at: Some(chrono::Utc::now() - chrono::Duration::hours(1)), ..login("sam@example.com", LoginState::SignedIn) }] }).await;
     let after = first_login(&server, |login| login["method"] == "older").await;
 
     assert_eq!(after["windows"][0]["used_percent"], before["windows"][0]["used_percent"]);
@@ -286,7 +286,7 @@ async fn banked_resets_a_node_reports_appear_on_its_login() {
         credits: Some(vec![mycelium_proto::conversation::ResetCredit { id: "a".into(), expires_at: Some(chrono::Utc::now() + chrono::Duration::days(14)), title: Some("Bonus reset".into()), manual: false }]),
     };
 
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, reset_credits: Some(credits), ..login("sam@example.com", LoginState::SignedIn) }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, plan: None, usage_note: None, reset_credits: Some(credits), ..login("sam@example.com", LoginState::SignedIn) }] }).await;
     let reported = first_login(&server, |login| login["reset_credits"].is_object()).await;
 
     assert_eq!(reported["reset_credits"]["available_count"], json!(2));
@@ -306,7 +306,7 @@ async fn banked_resets_a_node_reports_appear_on_its_login() {
 fn codex_login(account: &str, banked: u32) -> LoginInfo {
     let reset_credits = Some(mycelium_proto::conversation::ResetCredits { available_count: banked, credits: None });
 
-    LoginInfo { managed: false, agent: AgentId::Codex, method: "device_auth".into(), reset_credits, ..login(account, LoginState::SignedIn) }
+    LoginInfo { managed: false, plan: None, usage_note: None, agent: AgentId::Codex, method: "device_auth".into(), reset_credits, ..login(account, LoginState::SignedIn) }
 }
 
 async fn use_reset(server: &Server, account: &str, key: &str) -> (u16, serde_json::Value) {
@@ -494,7 +494,7 @@ async fn using_a_reset_when_the_accounts_node_is_offline_says_so() {
 #[tokio::test]
 async fn removing_a_login_mycelium_made_tells_the_node_and_drops_it_from_the_list() {
     let server = Server::start().await;
-    let managed = LoginInfo { managed: true, ..login("account-1970", LoginState::SignedOut) };
+    let managed = LoginInfo { managed: true, plan: None, usage_note: None, ..login("account-1970", LoginState::SignedOut) };
     let mut link = node_with_accounts(&server, vec![managed, login("sam@example.com", LoginState::SignedIn)]).await;
 
     let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/nodes/{}/logins/claude/account-1970", link.id))).await;
@@ -525,7 +525,7 @@ async fn the_agents_own_sign_in_cannot_be_removed() {
 #[tokio::test]
 async fn another_users_login_is_not_found() {
     let server = Server::start().await;
-    let link = node_with_accounts(&server, vec![LoginInfo { managed: true, ..login("account-1970", LoginState::SignedOut) }]).await;
+    let link = node_with_accounts(&server, vec![LoginInfo { managed: true, plan: None, usage_note: None, ..login("account-1970", LoginState::SignedOut) }]).await;
     let other = server.second_user("other@example.com").await;
 
     let (status, _) = other.json(other.delete(&format!("/api/v1/nodes/{}/logins/claude/account-1970", link.id))).await;

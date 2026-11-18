@@ -1,6 +1,6 @@
 use crate::acp::Command;
 use crate::agents::{account_env, account_homes, accounts_dir, detect_agents, find_account, pod_agents, login_command, login_state, new_account, resolve_program};
-use crate::usage::{CODEX_USAGE_ENDPOINT, USAGE_ENDPOINT, USAGE_MIN_AGE, UsageCache};
+use crate::usage::{CODEX_USAGE_ENDPOINT, USAGE_ENDPOINT, USAGE_MIN_AGE, UsageCache, VIBE_BILLING_ENDPOINT};
 use crate::instructions::deliver;
 use crate::config::{NodeConfig, agent_command, codex_command, agent_env, config_path, with_developer_instructions};
 use crate::join::hostname;
@@ -54,6 +54,7 @@ pub struct DaemonOptions {
     pub transcript_poll: Duration,
     pub usage_endpoint: String,
     pub codex_usage_endpoint: String,
+    pub vibe_billing_endpoint: String,
     pub codex_command: String,
 }
 
@@ -71,6 +72,7 @@ impl DaemonOptions {
             transcript_poll: Duration::from_secs(2),
             usage_endpoint: USAGE_ENDPOINT.to_string(),
             codex_usage_endpoint: CODEX_USAGE_ENDPOINT.to_string(),
+            vibe_billing_endpoint: VIBE_BILLING_ENDPOINT.to_string(),
             codex_command: codex_command(),
             home,
         })
@@ -119,7 +121,7 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     };
     let logins_home = options.home.clone();
     let logins_accounts = accounts_dir(&config.state_dir);
-    let usage = Arc::new(UsageCache::new(&options.usage_endpoint, &options.codex_usage_endpoint, &options.codex_command, USAGE_MIN_AGE));
+    let usage = Arc::new(UsageCache::new(&options.usage_endpoint, &options.codex_usage_endpoint, &options.codex_command, USAGE_MIN_AGE).with_vibe_endpoint(&options.vibe_billing_endpoint));
     let logins_usage = usage.clone();
     let login_report = Arc::new(move || NodeToControl::Logins { logins: login_state(&logins_home, &logins_accounts, &agents, &logins_usage) });
     let transcripts = TranscriptFollower::new(options.home.clone(), options.transcript_roots.clone(), config.state_dir.join("transcripts.json"), out.clone());
@@ -228,7 +230,7 @@ async fn follow_usage(daemon: Arc<Daemon>) {
         ticker.tick().await;
 
         let accounts = accounts_dir(&daemon.config.state_dir);
-        let folders: Vec<PathBuf> = [AgentId::Claude, AgentId::Codex].into_iter().flat_map(|agent| account_homes(&daemon.options.home, &accounts, agent)).map(|account| account.dir).collect();
+        let folders: Vec<PathBuf> = AgentId::ALL.into_iter().flat_map(|agent| account_homes(&daemon.options.home, &accounts, agent)).map(|account| account.dir).collect();
 
         daemon.usage.refresh(&folders).await;
 

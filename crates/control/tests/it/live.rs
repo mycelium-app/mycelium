@@ -499,7 +499,7 @@ async fn recording_and_removing_a_claude_reset_streams_the_account_with_and_with
     let mut link = server.connect_node(id, &token).await;
 
     link.hello(vec![]).await;
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, agent: AgentId::Claude, account: Some("sam@example.com".into()), method: "token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, plan: None, usage_note: None, agent: AgentId::Claude, account: Some("sam@example.com".into()), method: "token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }).await;
     node_message(&mut stream, id, |node| node.logins.len() == 1).await;
 
     let (_, created) = server.user.json(server.user.post("/api/v1/usage/manual-resets").json(&json!({"agent": "claude", "account": "sam@example.com", "kind": "full", "expires_on": "2999-11-27"}))).await;
@@ -523,7 +523,7 @@ async fn a_node_connecting_greeting_reporting_logins_and_leaving_is_streamed() {
     let greeted = node_message(&mut stream, id, |node| node.online && !node.agents.is_empty()).await;
     assert_eq!(greeted.agents[0].agent, AgentId::Claude);
 
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, agent: AgentId::Claude, account: Some("me@example.com".into()), method: "token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, plan: None, usage_note: None, agent: AgentId::Claude, account: Some("me@example.com".into()), method: "token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }).await;
     let signed_in = node_message(&mut stream, id, |node| !node.logins.is_empty()).await;
     assert_eq!(signed_in.logins[0].state, LoginState::SignedIn);
 
@@ -538,7 +538,7 @@ async fn removing_a_login_mycelium_made_is_streamed() {
     let mut stream = server.user.stream().await;
     let mut link = server.connect_node(id, &token).await;
     link.hello(vec![]).await;
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: true, agent: AgentId::Claude, account: Some("account-1970".into()), method: "token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: true, plan: None, usage_note: None, agent: AgentId::Claude, account: Some("account-1970".into()), method: "token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }).await;
     node_message(&mut stream, id, |node| !node.logins.is_empty()).await;
 
     let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/nodes/{id}/logins/claude/account-1970"))).await;
