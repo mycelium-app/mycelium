@@ -57,6 +57,14 @@ import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
+import java.awt.MouseInfo
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.key
+import androidx.compose.ui.window.WindowPosition
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 
 @Serializable
 private data class StoredConnection(val baseUrl: String, val token: String)
@@ -140,6 +148,62 @@ private object DesktopPlatform : Platform {
     }
 
     override val opensIdes = true
+
+    private val openChats = MutableStateFlow<Set<String>>(emptySet())
+    private val chatWindowPlaces = mutableMapOf<String, java.awt.Point?>()
+    private val chatWindowFrames = mutableMapOf<String, java.awt.Window>()
+
+    override val opensChatWindows = true
+
+    override val chatWindows: StateFlow<Set<String>> = openChats
+
+    override fun openChatWindow(id: String, atPointer: Boolean) {
+        if (id in openChats.value) {
+            focusChatWindow(id)
+
+            return
+        }
+
+        chatWindowPlaces[id] = if (atPointer) MouseInfo.getPointerInfo()?.location else null
+        openChats.value += id
+    }
+
+    override fun focusChatWindow(id: String) {
+        chatWindowFrames[id]?.let { frame ->
+            frame.toFront()
+            frame.requestFocus()
+        }
+    }
+
+    override fun closeChatWindow(id: String) {
+        openChats.value -= id
+    }
+
+    @Composable
+    override fun ChatWindows(content: @Composable (String) -> Unit) {
+        val open by openChats.collectAsState()
+
+        for (id in open) {
+            key(id) {
+                val place = chatWindowPlaces[id]
+                val state = rememberWindowState(size = DpSize(720.dp, 800.dp), position = if (place != null) WindowPosition(place.x.dp, place.y.dp) else WindowPosition.PlatformDefault)
+
+                Window(onCloseRequest = { closeChatWindow(id) }, title = "Mycelium", state = state, onPreviewKeyEvent = TerminalShortcut::handle) {
+                    DisposableEffect(window) {
+                        chatWindowFrames[id] = window
+
+                        onDispose { chatWindowFrames.remove(id) }
+                    }
+
+                    val density = LocalDensity.current
+
+                    CompositionLocalProvider(LocalDensity provides Density(density.density * scale.value, density.fontScale)) {
+                        content(id)
+                    }
+                }
+            }
+        }
+    }
 
     override fun hostname(): String? = runCatching { InetAddress.getLocalHost().hostName }.getOrNull()
 
