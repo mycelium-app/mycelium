@@ -167,7 +167,7 @@ internal fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (s
             val (window, usage) = entry
             val name = windowName(window.name).replaceFirstChar { it.uppercase() }
             val pace = evenPacePercent(window, now)
-            val description = listOfNotNull(name, "${usage.percent}% used", usage.resetDescription.takeIf { it.isNotEmpty() }, pace?.let { "even pace $it%" }, account.plan).joinToString(", ")
+            val description = listOfNotNull(name, "${usage.percent}% used", usage.resetDescription.takeIf { it.isNotEmpty() }, pace?.let { "even pace $it%" }).joinToString(", ")
             val attention = usage.attention
 
             Row(Modifier.fillMaxWidth().height(UsageRowHeight), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
@@ -200,6 +200,7 @@ internal fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (s
         }
 
         val note = account.usageNote
+        val plan = account.plan
 
         if (shown.isEmpty() && note != null) {
             Row(Modifier.fillMaxWidth().height(UsageRowHeight), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
@@ -208,9 +209,13 @@ internal fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (s
                     Label(accountShortName(account.label), style = Tokens.Type.MetaStrong, maxLines = 1)
                 }
 
-                Hinted(listOfNotNull(account.plan, note).joinToString(". "), Modifier.weight(1f)) {
-                    Label(note, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                Hinted(note, Modifier.weight(1f).semantics { contentDescription = note }) {
+                    Label(listOfNotNull(plan, "usage hidden").joinToString(", ").replaceFirstChar { it.uppercase() }, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+            }
+        } else if (shown.isNotEmpty() && plan != null) {
+            Row(Modifier.fillMaxWidth().height(UsageRowHeight), verticalAlignment = Alignment.CenterVertically) {
+                Label(plan, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
 
@@ -349,7 +354,7 @@ private fun SpendFigureLabel(figure: SpendFigure) {
 
 private val UsageRowHeight = 18.dp
 private val UsageNameWidth = 92.dp
-private val UsageWindowWidth = 14.dp
+private val UsageWindowWidth = 18.dp
 private val UsageMeterMinWidth = 24.dp
 private const val WidestPercent = "100%"
 private const val WidestReset = "23h 59m"

@@ -36,7 +36,7 @@ class ClaudeMarkTest {
     }
 
     @Test
-    fun mistralVibesMarkIsSolidBlocksWithGapsBetweenThem() {
+    fun mistralVibesMarkIsAnOutlinedM() {
         rule.setContent {
             Box(Modifier.testTag("mark").background(Color.Black)) {
                 Icon(agentIcon("vibe"), Color.White, 96.dp)
@@ -45,8 +45,7 @@ class ClaudeMarkTest {
 
         val pixels = rule.onNodeWithTag("mark").captureToImage().toPixelMap()
 
-        assertEquals(Color.White, pixels[pixels.width / 2, pixels.height / 2])
-        assertEquals(Color.Black, pixels[pixels.width / 2, pixels.height / 6])
-        assertEquals(Color.White, pixels[pixels.width / 6, pixels.height / 6])
+        assertEquals(Color.White, pixels[pixels.width / 6, pixels.height / 2])
+        assertEquals(Color.Black, pixels[pixels.width * 13 / 48, pixels.height * 2 / 3])
     }
 }

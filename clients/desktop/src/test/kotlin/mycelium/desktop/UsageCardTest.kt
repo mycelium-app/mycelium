@@ -203,7 +203,7 @@ class UsageCardTest {
         rule.onNodeWithText("mo").assertIsDisplayed()
         rule.onNodeWithText("38%").assertIsDisplayed()
         rule.onNode(hasContentDescription("Monthly allowance, 38% used", substring = true)).assertExists()
-        rule.onNode(hasContentDescription("Pro, pay-as-you-go on", substring = true)).assertExists()
+        rule.onNodeWithText("Pro, pay-as-you-go on").assertIsDisplayed()
     }
 
     @Test
@@ -212,8 +212,9 @@ class UsageCardTest {
 
         rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false)) } }
 
-        rule.onNodeWithText("This Mistral account cannot see its usage.").assertIsDisplayed()
-        rule.onAllNodesWithText("No account has reported usage yet.").assertCountEquals(0)
+        rule.onNodeWithText("Team, usage hidden").assertIsDisplayed()
+        rule.onNode(hasContentDescription("This Mistral account cannot see its usage.")).assertExists()
+        rule.onAllNodesWithText("This Mistral account cannot see its usage.").assertCountEquals(0)
     }
 
     @Test
