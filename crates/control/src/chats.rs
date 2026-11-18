@@ -107,19 +107,12 @@ async fn create_unclaimed(state: &AppState, user: &AuthUser, request: CreateChat
         let matching: Vec<_> = signed_in.into_iter().filter(|candidate| account.is_none_or(|account| candidate.account == account)).collect();
         let chosen = routing::best(&matching).or_else(|| routing::most_left(matching.iter()));
         let Some(chosen) = chosen else {
-            let name = match agent {
-                AgentId::Claude => "Claude Code",
-                AgentId::Codex => "Codex",
-            };
+            let name = agent.display_name();
             let signed_in_as = account.map(|account| format!(" as {account}")).unwrap_or_default();
 
             return Err(ApiError::conflict("no_node_online", format!("No node with {name} signed in{signed_in_as} is online. Start one from Nodes, or choose another account.")));
         };
-        let smart = match (account, agent) {
-            (Some(_), _) => None,
-            (None, AgentId::Claude) => Some(Routing::ClaudeAny),
-            (None, AgentId::Codex) => Some(Routing::CodexAny),
-        };
+        let smart = account.is_none().then(|| Routing::for_agent(agent));
         let started = CreateConversationRequest {
             mode: None,
             config: None,

@@ -91,6 +91,7 @@ fn root_of(agent: AgentId) -> &'static str {
     match agent {
         AgentId::Claude => ".claude/projects/",
         AgentId::Codex => ".codex/sessions/",
+        AgentId::Vibe => ".vibe/logs/session/",
     }
 }
 
@@ -98,7 +99,7 @@ pub(crate) fn session_id_of_path(agent: AgentId, path: &str) -> String {
     let stem = path.rsplit('/').next().unwrap_or(path).trim_end_matches(".jsonl");
 
     match agent {
-        AgentId::Claude => stem.to_string(),
+        AgentId::Claude | AgentId::Vibe => stem.to_string(),
         AgentId::Codex => stem.chars().rev().take(36).collect::<Vec<_>>().into_iter().rev().collect(),
     }
 }
@@ -661,6 +662,7 @@ fn parse_file(path: &Path, agent: AgentId, sidechain: bool) -> std::io::Result<O
     Ok(match agent {
         AgentId::Claude => parse_claude(lines, sidechain),
         AgentId::Codex => parse_codex(lines),
+        AgentId::Vibe => None,
     })
 }
 

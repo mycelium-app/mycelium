@@ -135,7 +135,7 @@ pub async fn continue_with(state: &AppState, owner: Uuid, id: Uuid, target: Targ
         .await?;
         payload = json!({"kind": if from_chat { "model" } else { "handoff" }, "agent": CHAT_AGENT, "provider_id": provider.id, "provider_name": provider.name, "model": model, "from": from, "reason": reason});
     } else {
-        let agent: AgentId = parse_enum(&target.agent).map_err(|_| ApiError::bad_request("agent_unknown", "Choose Claude Code, Codex or a chat model to continue on."))?;
+        let agent: AgentId = parse_enum(&target.agent).map_err(|_| ApiError::bad_request("agent_unknown", "Choose Claude Code, Codex, Mistral Vibe or a chat model to continue on."))?;
         let earlier = if from_chat { earlier_workspace(&mut tx, id).await? } else { None };
         let node_id = target.node_id.or_else(|| earlier.as_ref().and_then(|earlier| earlier["node_id"].as_str()?.parse().ok())).unwrap_or(before.node_id);
         let own_folder = assistants::folder_of(id);
@@ -230,7 +230,7 @@ pub async fn continue_with(state: &AppState, owner: Uuid, id: Uuid, target: Targ
 
 async fn earlier_workspace(tx: &mut crate::store::Tx<'_>, id: Uuid) -> ApiResult<Option<Value>> {
     let found = sqlx::query_scalar::<_, sqlx::types::Json<Value>>(
-        "select payload->'from' from events where conversation_id = $1 and kind = 'continued' and payload->'from'->>'agent' in ('claude', 'codex') order by seq desc limit 1",
+        "select payload->'from' from events where conversation_id = $1 and kind = 'continued' and payload->'from'->>'agent' in ('claude', 'codex', 'vibe') order by seq desc limit 1",
     )
     .bind(id)
     .fetch_optional(&mut **tx)
@@ -277,10 +277,9 @@ pub async fn recent_turns(state: &AppState, id: Uuid, before_seq: i64, limit: i6
 }
 
 fn side_label(agent: &str, account: Option<&str>, provider_name: Option<&str>, model: Option<&str>) -> String {
-    match agent {
-        "claude" => format!("Claude Code{}", account.map(|account| format!(" ({account})")).unwrap_or_default()),
-        "codex" => format!("Codex{}", account.map(|account| format!(" ({account})")).unwrap_or_default()),
-        _ => [provider_name, model].into_iter().flatten().collect::<Vec<_>>().join(" "),
+    match parse_enum::<AgentId>(agent) {
+        Ok(agent) => format!("{}{}", agent.display_name(), account.map(|account| format!(" ({account})")).unwrap_or_default()),
+        Err(_) => [provider_name, model].into_iter().flatten().collect::<Vec<_>>().join(" "),
     }
 }
 

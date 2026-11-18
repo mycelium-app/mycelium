@@ -93,7 +93,7 @@ pub fn definitions() -> Value {
                     "id": {"type": "string", "description": "The assistant id, as assistant_list returned it."},
                     "description": {"type": "string"},
                     "group": {"type": "string", "description": "The name of one of the person's groups."},
-                    "models": {"type": "array", "items": {"type": "object", "properties": {"agent": {"type": "string", "enum": ["claude", "codex"]}, "provider_id": {"type": "string"}, "model": {"type": "string"}, "account": {"type": "string"}}}, "description": "The models in order of preference."},
+                    "models": {"type": "array", "items": {"type": "object", "properties": {"agent": {"type": "string", "enum": ["claude", "codex", "vibe"]}, "provider_id": {"type": "string"}, "model": {"type": "string"}, "account": {"type": "string"}}}, "description": "The models in order of preference."},
                     "nodes": {"type": "array", "items": {"type": "string"}, "description": "Node ids the assistant may run on."},
                     "instructions": {"type": "string", "description": "The whole new instructions text."},
                     "reason": {"type": "string", "description": "Why the instructions change, shown with the proposal."},

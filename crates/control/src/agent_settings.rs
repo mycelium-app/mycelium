@@ -14,14 +14,8 @@ use uuid::Uuid;
 
 const CLAUDE_MODES: [(&str, &str); 5] = [("default", "Manual"), ("acceptEdits", "Accept edits"), ("plan", "Plan"), ("auto", "Auto"), ("bypassPermissions", "Bypass permissions")];
 const CODEX_MODES: [(&str, &str); 4] = [("read-only", "Read-only"), ("workspace-write", "Workspace access"), ("agent", "Auto review"), ("agent-full-access", "Full access")];
+const VIBE_MODES: [(&str, &str); 3] = [("ask", "Ask"), ("accept-edits", "Accept Edits"), ("auto-approve", "Auto Approve")];
 const ANY_MODEL_LIMIT: usize = 20;
-
-fn agent_name(agent: AgentId) -> &'static str {
-    match agent {
-        AgentId::Claude => "Claude Code",
-        AgentId::Codex => "Codex",
-    }
-}
 
 async fn offered_modes(state: &AppState, agent: AgentId) -> ApiResult<Vec<HarnessModel>> {
     let reported = sqlx::query_scalar::<_, Sql<Vec<HarnessModel>>>("select modes from harness_models where agent = $1 and modes is not null order by reported_at desc").bind(enum_text(&agent)).fetch_all(&state.pool).await?;
@@ -37,6 +31,7 @@ async fn offered_modes(state: &AppState, agent: AgentId) -> ApiResult<Vec<Harnes
         let known = match agent {
             AgentId::Claude => CLAUDE_MODES.as_slice(),
             AgentId::Codex => CODEX_MODES.as_slice(),
+            AgentId::Vibe => VIBE_MODES.as_slice(),
         };
         offered = known.iter().map(|(id, name)| HarnessModel { id: id.to_string(), name: name.to_string() }).collect();
     }
@@ -56,14 +51,14 @@ fn valid_mode(agent: AgentId, offered: &[HarnessModel], mode: &str) -> ApiResult
         None => "a mode".to_string(),
     };
 
-    Err(ApiError::bad_request("mode_invalid", format!("Choose {choices} as the default mode for {}.", agent_name(agent))))
+    Err(ApiError::bad_request("mode_invalid", format!("Choose {choices} as the default mode for {}.", AgentId::display_name(agent))))
 }
 
 fn valid_entry(entry: &ModelChoice) -> ApiResult<()> {
     let kinds = [entry.agent.is_some(), entry.provider_id.is_some()].into_iter().filter(|kind| *kind).count();
 
     if kinds != 1 {
-        return Err(ApiError::bad_request("any_model_entry_invalid", "Each entry in the Any model list is either Claude Code, Codex or a chat model. Remove the entry and add it again."));
+        return Err(ApiError::bad_request("any_model_entry_invalid", "Each entry in the Any model list is either Claude Code, Codex, Mistral Vibe or a chat model. Remove the entry and add it again."));
     }
 
     Ok(())
@@ -88,8 +83,8 @@ pub async fn get(State(state): State<AppState>, user: AuthUser) -> ApiResult<Jso
 }
 
 pub async fn read(state: &AppState, owner: Uuid) -> ApiResult<AgentSettings> {
-    let stored = sqlx::query_as::<_, (Option<String>, Option<String>, Sql<Vec<ModelChoice>>, Sql<HashMap<Uuid, NodePreference>>)>("select default_mode_claude, default_mode_codex, any_model, node_preferences from user_settings where owner = $1").bind(owner).fetch_optional(&state.pool).await?;
-    let (claude, codex, any_model, node_preferences) = stored.map_or((None, None, Vec::new(), HashMap::new()), |(claude, codex, any_model, node_preferences)| (claude, codex, without_duplicates(any_model.0), node_preferences.0));
+    let stored = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>, Sql<Vec<ModelChoice>>, Sql<HashMap<Uuid, NodePreference>>)>("select default_mode_claude, default_mode_codex, default_mode_vibe, any_model, node_preferences from user_settings where owner = $1").bind(owner).fetch_optional(&state.pool).await?;
+    let (claude, codex, vibe, any_model, node_preferences) = stored.map_or((None, None, None, Vec::new(), HashMap::new()), |(claude, codex, vibe, any_model, node_preferences)| (claude, codex, vibe, without_duplicates(any_model.0), node_preferences.0));
     let overrides = sqlx::query_as::<_, (String, String, String)>("select agent, account, default_mode from account_settings where owner = $1 and default_mode is not null order by agent, account").bind(owner).fetch_all(&state.pool).await?;
     let mut account_modes = Vec::new();
 
@@ -97,7 +92,7 @@ pub async fn read(state: &AppState, owner: Uuid) -> ApiResult<AgentSettings> {
         account_modes.push(AccountMode { agent: parse_enum(&agent)?, account, mode });
     }
 
-    Ok(AgentSettings { default_modes: DefaultModes { claude, codex }, account_modes, any_model, node_preferences })
+    Ok(AgentSettings { default_modes: DefaultModes { claude, codex, vibe }, account_modes, any_model, node_preferences })
 }
 
 pub async fn save(State(state): State<AppState>, user: AuthUser, Json(request): Json<SaveAgentSettingsRequest>) -> ApiResult<Json<AgentSettings>> {
@@ -107,6 +102,10 @@ pub async fn save(State(state): State<AppState>, user: AuthUser, Json(request): 
 
     if let Some(mode) = &request.default_modes.codex {
         valid_mode(AgentId::Codex, &offered_modes(&state, AgentId::Codex).await?, mode)?;
+    }
+
+    if let Some(mode) = &request.default_modes.vibe {
+        valid_mode(AgentId::Vibe, &offered_modes(&state, AgentId::Vibe).await?, mode)?;
     }
 
     let any_model = without_duplicates(request.any_model);
@@ -120,12 +119,13 @@ pub async fn save(State(state): State<AppState>, user: AuthUser, Json(request): 
     }
 
     sqlx::query(
-        "insert into user_settings (owner, default_mode_claude, default_mode_codex, any_model, node_preferences) values ($1, $2, $3, $4, coalesce($5, '{}'::jsonb))
-         on conflict (owner) do update set default_mode_claude = excluded.default_mode_claude, default_mode_codex = excluded.default_mode_codex, any_model = excluded.any_model, node_preferences = coalesce($5, user_settings.node_preferences)",
+        "insert into user_settings (owner, default_mode_claude, default_mode_codex, default_mode_vibe, any_model, node_preferences) values ($1, $2, $3, $4, $5, coalesce($6, '{}'::jsonb))
+         on conflict (owner) do update set default_mode_claude = excluded.default_mode_claude, default_mode_codex = excluded.default_mode_codex, default_mode_vibe = excluded.default_mode_vibe, any_model = excluded.any_model, node_preferences = coalesce($6, user_settings.node_preferences)",
     )
     .bind(user.id)
     .bind(&request.default_modes.claude)
     .bind(&request.default_modes.codex)
+    .bind(&request.default_modes.vibe)
     .bind(Sql(&any_model))
     .bind(request.node_preferences.as_ref().map(Sql))
     .execute(&state.pool)
@@ -172,6 +172,7 @@ pub async fn default_mode(state: &AppState, owner: Uuid, agent: AgentId, account
     let column = match agent {
         AgentId::Claude => "default_mode_claude",
         AgentId::Codex => "default_mode_codex",
+        AgentId::Vibe => "default_mode_vibe",
     };
     let chosen = sqlx::query_scalar::<_, Option<String>>(sqlx::AssertSqlSafe(format!("select {column} from user_settings where owner = $1"))).bind(owner).fetch_optional(&state.pool).await?.flatten();
 

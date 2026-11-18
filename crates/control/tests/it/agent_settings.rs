@@ -100,6 +100,19 @@ async fn a_codex_default_is_applied_with_the_modes_codex_reports() {
 }
 
 #[tokio::test]
+async fn a_mistral_vibe_default_is_kept_and_applied_with_the_modes_vibe_reports() {
+    let server = Server::start().await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![LoginInfo { agent: AgentId::Vibe, method: "api_key".into(), ..with_usage("work", 90) }]).await;
+    let (status, saved) = save(&server, json!({"default_modes": {"vibe": "auto-approve"}, "any_model": [{"agent": "vibe"}]})).await;
+    assert_eq!((status, saved["default_modes"]["vibe"].clone()), (200, json!("auto-approve")), "{saved}");
+    let modes = json!({"currentModeId": "accept-edits", "availableModes": [{"id": "ask", "name": "Ask"}, {"id": "accept-edits", "name": "Accept Edits"}, {"id": "auto-approve", "name": "Auto Approve"}]});
+
+    start_reporting(&server, &mut link, "vibe", "work", modes).await;
+
+    assert_eq!(mode_set_on_start(&mut link).await.as_deref(), Some("auto-approve"));
+}
+
+#[tokio::test]
 async fn settings_offer_and_accept_the_modes_a_node_last_reported() {
     let server = Server::start().await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 90)]).await;

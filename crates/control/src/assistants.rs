@@ -1276,7 +1276,7 @@ async fn label_of(state: &AppState, choice: &Choice) -> ApiResult<String> {
         }
         Choice::Workspace { agent, node_id, .. } => {
             let name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(node_id).fetch_one(&state.pool).await?;
-            let agent = if *agent == AgentId::Codex { "Codex" } else { "Claude Code" };
+            let agent = agent.display_name();
 
             Ok(format!("{agent} on {name}"))
         }

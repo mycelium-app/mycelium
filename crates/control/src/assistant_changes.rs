@@ -153,7 +153,7 @@ pub async fn update_from_agent(state: &AppState, owner: Uuid, conversation_id: O
     if let Some(models) = arguments.get("models") {
         match serde_json::from_value::<Vec<ModelChoice>>(models.clone()) {
             Ok(models) => preferences.models = models,
-            Err(_) => return Ok(Err("Nothing was changed. Each model needs an agent (claude or codex) or a provider_id with a model, and optionally an account.".to_string())),
+            Err(_) => return Ok(Err("Nothing was changed. Each model needs an agent (claude, codex or vibe) or a provider_id with a model, and optionally an account.".to_string())),
         }
     }
 

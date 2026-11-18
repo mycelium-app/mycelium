@@ -236,11 +236,7 @@ async fn enqueue(state: &AppState, owner: Uuid, conversation_id: Uuid, text: &st
 }
 
 pub fn agent_name(agent: &str) -> &str {
-    match agent {
-        "claude" => "Claude Code",
-        "codex" => "Codex",
-        other => other,
-    }
+    mycelium_proto::conversation::AgentId::ALL.into_iter().find(|known| known.as_str() == agent).map_or(agent, |known| known.display_name())
 }
 
 async fn deliver(state: &AppState, owner: Uuid, conversation_id: Uuid, text: &str) -> ApiResult<()> {

@@ -935,7 +935,7 @@ pub async fn index_agent_run(state: &AppState, conversation: Uuid, run_id: &str,
         return Ok(());
     };
     let plan = json!({"title": format!("Workflow in {title}"), "steps": [], "max_rounds": 1});
-    let started_by = json!(WorkflowActor { kind: "assistant".into(), name: if agent == "codex" { "Codex".into() } else { "Claude Code".into() } });
+    let started_by = json!(WorkflowActor { kind: "assistant".into(), name: crate::store::parse_enum::<mycelium_proto::conversation::AgentId>(&agent).map_or("Claude Code", mycelium_proto::conversation::AgentId::display_name).into() });
     let mut tx = state.pool.begin().await?;
     sqlx::query("insert into workflows (id,owner,conversation_id,title,plan,steps,kind,run_id,started_by,project_id) values ($1,$2,$3,$4,$5,'[]','agent_run',$6,$7,(select project_id from conversations where id=$3)) on conflict do nothing")
         .bind(Uuid::new_v4()).bind(owner).bind(conversation).bind(format!("Workflow in {title}")).bind(plan).bind(run_id).bind(started_by).execute(&mut *tx).await?;

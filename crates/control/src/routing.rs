@@ -95,9 +95,8 @@ fn any_account(agent: AgentId) -> ModelChoice {
 
 async fn entries_of(state: &AppState, owner: Uuid, routing: Routing) -> ApiResult<Vec<ModelChoice>> {
     match routing {
-        Routing::ClaudeAny => Ok(vec![any_account(AgentId::Claude)]),
-        Routing::CodexAny => Ok(vec![any_account(AgentId::Codex)]),
         Routing::AnyModel => Ok(agent_settings::read(state, owner).await?.any_model),
+        single => Ok(single.agent().map(any_account).into_iter().collect()),
     }
 }
 
@@ -146,10 +145,9 @@ pub async fn start_pick(state: &AppState, owner: Uuid, node_id: Uuid, routing: R
         }
     }
 
-    exhausted.ok_or_else(|| match routing {
-        Routing::ClaudeAny => ApiError::conflict("no_routing_choice", "No Claude Code account is signed in on this node. Sign in to one in Settings, Providers, or choose another node."),
-        Routing::CodexAny => ApiError::conflict("no_routing_choice", "No Codex account is signed in on this node. Sign in to one in Settings, Providers, or choose another node."),
-        Routing::AnyModel => ApiError::conflict("no_routing_choice", "Nothing in your Any model list can start on this node. Sign in to an account it lists, or edit the list in Settings, Agents."),
+    exhausted.ok_or_else(|| match routing.agent() {
+        Some(agent) => ApiError::conflict("no_routing_choice", format!("No {} account is signed in on this node. Sign in to one in Settings, Providers, or choose another node.", agent.display_name())),
+        None => ApiError::conflict("no_routing_choice", "Nothing in your Any model list can start on this node. Sign in to an account it lists, or edit the list in Settings, Agents."),
     })
 }
 
@@ -162,11 +160,7 @@ pub async fn for_agent_start(state: &AppState, owner: Uuid, node_id: Uuid, asked
         return Ok(None);
     }
 
-    let routing = match kept_agent {
-        Some(AgentId::Claude) => Routing::ClaudeAny,
-        Some(AgentId::Codex) => Routing::CodexAny,
-        None => Routing::AnyModel,
-    };
+    let routing = kept_agent.map_or(Routing::AnyModel, Routing::for_agent);
     let pickable = start_pick(state, owner, node_id, routing).await.is_ok();
 
     Ok(pickable.then_some(routing))

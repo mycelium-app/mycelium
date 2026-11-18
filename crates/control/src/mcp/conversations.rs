@@ -43,8 +43,8 @@ pub fn definitions() -> Value {
                     "node": {"type": "string", "description": "The name of the node the folder is on, or the project and its worktree are on."},
                     "prompt": {"type": "string", "description": "The first message. Write it so it makes sense without this conversation."},
                     "title": {"type": "string", "description": "A title for the new conversation."},
-                    "agent": {"type": "string", "description": "claude or codex. Defaults to this conversation's agent."},
-                    "routing": {"type": "string", "enum": ["any_model", "claude_any", "codex_any"], "description": "Which accounts it may move between when one reaches its usage limit. Defaults to any_model, or to the named agent's accounts when agent is given."},
+                    "agent": {"type": "string", "description": "claude, codex or vibe. Defaults to this conversation's agent."},
+                    "routing": {"type": "string", "enum": ["any_model", "claude_any", "codex_any", "vibe_any"], "description": "Which accounts it may move between when one reaches its usage limit. Defaults to any_model, or to the named agent's accounts when agent is given."},
                     "reason": {"type": "string", "description": "A short reason, shown in this conversation's transcript."},
                 },
                 "required": ["group", "prompt", "reason"],
@@ -431,12 +431,12 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 None => sqlx::query_scalar::<_, String>("select agent from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?,
             };
             let Ok(agent) = crate::store::parse_enum(&agent) else {
-                return Ok(nothing("The agent is claude or codex.".to_string()));
+                return Ok(nothing("The agent is claude, codex or vibe.".to_string()));
             };
             let asked = match field("routing") {
                 Some(text) => match mycelium_proto::routing::Routing::parse(text) {
                     Some(routing) => Some(routing),
-                    None => return Ok(nothing("The routing is any_model, claude_any or codex_any.".to_string())),
+                    None => return Ok(nothing("The routing is any_model, claude_any, codex_any or vibe_any.".to_string())),
                 },
                 None => None,
             };
