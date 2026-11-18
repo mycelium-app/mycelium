@@ -152,6 +152,11 @@ import mycelium.state.sidebarSections
 import mycelium.state.statusSectionName
 import mycelium.state.untilEarliestOpening
 import mycelium.state.workingBehindClosedDoors
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.foundation.gestures.detectDragGestures
 
 sealed interface Route {
     data object Empty : Route
@@ -239,6 +244,31 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
     LaunchedEffect(store) {
         store.openRequests.collect { route = Route.Chat(it) }
     }
+
+    val chatWindows by platform.chatWindows.collectAsState()
+    var shownWindows by remember { mutableStateOf(chatWindows) }
+
+    LaunchedEffect(chatWindows) {
+        (shownWindows - chatWindows).lastOrNull()?.let { route = Route.Chat(it) }
+        shownWindows = chatWindows
+    }
+
+    @Composable
+    fun ChatWindow(id: String) {
+        Box(Modifier.fillMaxSize().background(MyTheme.colors.bgContent)) {
+            RouteContent(store, state, platform, me, Route.Chat(id), shownScope, hours, groupFilter.choose, onOpenOutOfHours = { openRequest = OpenRequest(it) }, onRoute = { route = it }, onSignOut = onSignOut, phone = false, window = id)
+        }
+    }
+
+    val windowChat = platform.windowChat
+
+    if (windowChat != null) {
+        ChatWindow(windowChat)
+
+        return
+    }
+
+    platform.ChatWindows { id -> ChatWindow(id) }
 
     SideEffect {
         store.viewing = viewedConversation(route, state)
@@ -545,7 +575,7 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
 }
 
 @Composable
-private fun RouteContent(store: Store, state: AppState, platform: Platform, me: Me, route: Route, groupFilter: String, hours: HoursView, onChooseGroup: (String) -> Unit, onOpenOutOfHours: (String?) -> Unit, onRoute: (Route) -> Unit, onSignOut: () -> Unit, phone: Boolean) {
+private fun RouteContent(store: Store, state: AppState, platform: Platform, me: Me, route: Route, groupFilter: String, hours: HoursView, onChooseGroup: (String) -> Unit, onOpenOutOfHours: (String?) -> Unit, onRoute: (Route) -> Unit, onSignOut: () -> Unit, phone: Boolean, window: String? = null) {
     var settingsStart by remember { mutableStateOf<SettingsSection?>(null) }
     var settingsGroup by remember { mutableStateOf<String?>(null) }
     var settingsGroupTab by remember { mutableStateOf<String?>(null) }
@@ -614,7 +644,26 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
                 } else when (route) {
                     Route.Inbox -> InboxScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenUsageHistory = { onRoute(Route.UsageHistory) })
                     Route.Empty, Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenNodes = { onRoute(Route.Nodes) })
-                    is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenNode = { onRoute(Route.Node(it)) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) })
+                    is Route.Chat -> {
+                        val chatWindows by platform.chatWindows.collectAsState()
+
+                        ConversationScreen(
+                            store,
+                            state,
+                            route.id,
+                            onArchived = { if (window != null) platform.closeChatWindow(window) else onRoute(Route.Empty) },
+                            onOpenNodes = { onRoute(Route.Nodes) },
+                            onOpenNode = { onRoute(Route.Node(it)) },
+                            onOpenConversation = { onRoute(Route.Chat(it)) },
+                            onOpenArtefact = { onRoute(Route.Artefact(it)) },
+                            windowItem = when {
+                                window != null -> WindowItem("Show in main window", MyIcon.PopIn) { platform.closeChatWindow(window) }
+                                platform.opensChatWindows -> WindowItem("Open in new window", MyIcon.PopOut) { platform.openChatWindow(route.id) }
+                                else -> null
+                            },
+                            elsewhere = if (window == null && route.id in chatWindows) Elsewhere({ platform.focusChatWindow(route.id) }, { platform.closeChatWindow(route.id) }) else null,
+                        )
+                    }
                     Route.NewChat -> NewChatScreen(store, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenSettings = { onRoute(Route.Settings) }, onOpenNodes = { onRoute(Route.Nodes) })
                     is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId, onOpenNodes = { onRoute(Route.Nodes) })
                     Route.Nodes -> NodesScreen(store, state, platform, onOpenNode = { onRoute(Route.Node(it)) })
@@ -1125,10 +1174,37 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
     val shownTitle = projectName?.let { "$it ${row.title}" } ?: row.title
     val pullRequestText = conversationPullRequestText(row.pullRequestLabel, row.pullRequestState)
     val place = listOfNotNull(row.branch, pullRequestText).joinToString("  ").takeUnless { it == "main" }.orEmpty()
+    val poppedOut = platform?.let { row.id in it.chatWindows.collectAsState().value } == true
+    val windowSize by rememberUpdatedState(LocalWindowInfo.current.containerSize)
+    var origin by remember { mutableStateOf(Offset.Zero) }
 
     Box(
         Modifier
             .fillMaxWidth()
+            .onGloballyPositioned { origin = it.positionInWindow() }
+            .then(
+                if (platform?.opensChatWindows == true) {
+                    Modifier.pointerInput(row.id) {
+                        var pointer = Offset.Zero
+
+                        detectDragGestures(
+                            onDragStart = { pointer = it },
+                            onDragEnd = {
+                                val dropped = origin + pointer
+
+                                if (dropped.x < 0 || dropped.y < 0 || dropped.x > windowSize.width || dropped.y > windowSize.height) {
+                                    platform.openChatWindow(row.id, atPointer = true)
+                                }
+                            },
+                        ) { change, moved ->
+                            change.consume()
+                            pointer += moved
+                        }
+                    }
+                } else {
+                    Modifier
+                },
+            )
             .rowContextMenu(menu),
         contentAlignment = Alignment.CenterStart,
     ) {
@@ -1161,7 +1237,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                     onClick,
                     selected = selected || menu.open,
                     shape = BlockShape,
-                    description = "$shownTitle${if (unread) ", unread" else ""}, $statusName${row.flagReason?.let { ", $it" }.orEmpty()}, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.readOnly) ", subagent" else ", side chat" }.orEmpty()}${if (row.hasSession && place.isNotEmpty()) ", " + listOfNotNull(row.branch?.let { "branch $it" }, pullRequestText).joinToString(", ") else ""}",
+                    description = "$shownTitle${if (unread) ", unread" else ""}, $statusName${row.flagReason?.let { ", $it" }.orEmpty()}, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.readOnly) ", subagent" else ", side chat" }.orEmpty()}${if (row.hasSession && place.isNotEmpty()) ", " + listOfNotNull(row.branch?.let { "branch $it" }, pullRequestText).joinToString(", ") else ""}${if (poppedOut) ", open in its own window" else ""}",
                 )
                 .padding(start = Tokens.Space.S2 + (if (inChatsSection && sideChats == 0) 0.dp else Tokens.Space.S3) + indent, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
@@ -1236,6 +1312,10 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                 Label(timestamp(row.updatedAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
             }
 
+            if (poppedOut) {
+                Icon(MyIcon.PopOut, colors.textMuted, Tokens.Size.IconSm)
+            }
+
             if (inChatsSection) {
                 Box(Modifier.testTag("status-slot").size(Tokens.Size.IconSm), contentAlignment = Alignment.Center) {
                     if (badge != null) {
@@ -1263,6 +1343,10 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
             MenuItem(if (row.pinnedAt == null) "Pin" else "Unpin", onClick = { close(); onPin() }, leading = MyIcon.Pin)
             MenuItem(if (row.snoozedUntil == null) "Snooze" else "Wake now", onClick = { close(); if (row.snoozedUntil == null) snoozing = true else onSnooze(null) }, leading = MyIcon.Clock)
             MenuItem("Rename", onClick = { close(); renaming = true }, leading = MyIcon.Pencil)
+
+            if (platform?.opensChatWindows == true) {
+                MenuItem("Open in new window", onClick = { close(); platform.openChatWindow(row.id) }, leading = MyIcon.PopOut)
+            }
 
             if (row.hasSession) {
                 MenuItem("Close session", onClick = { close(); onCloseSession() }, leading = MyIcon.Stop)

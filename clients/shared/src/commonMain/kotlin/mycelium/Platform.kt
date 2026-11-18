@@ -7,6 +7,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import mycelium.state.PickedFile
 import mycelium.ui.ButtonVariant
@@ -56,6 +58,21 @@ interface Platform {
     fun approveReturnTo(): String? = null
 
     fun closeWindow() {}
+
+    val opensChatWindows: Boolean get() = false
+
+    val chatWindows: StateFlow<Set<String>> get() = NoChatWindows
+
+    val windowChat: String? get() = null
+
+    fun openChatWindow(id: String, atPointer: Boolean = false) = Unit
+
+    fun focusChatWindow(id: String) = Unit
+
+    fun closeChatWindow(id: String) = Unit
+
+    @Composable
+    fun ChatWindows(content: @Composable (String) -> Unit) = Unit
 
     fun currentPath(): String
 
@@ -144,3 +161,5 @@ interface Platform {
 }
 
 expect fun reportUncaughtErrors(report: (Throwable) -> Unit)
+
+private val NoChatWindows: StateFlow<Set<String>> = MutableStateFlow(emptySet())

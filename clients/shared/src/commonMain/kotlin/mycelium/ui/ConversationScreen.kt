@@ -134,7 +134,7 @@ import mycelium.state.loginMethodName
 import mycelium.state.statusSectionName
 
 @Composable
-fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenNode: (String) -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}, panels: Boolean = true, header: HeaderSlots? = null, onManageActions: () -> Unit = {}) {
+fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenNode: (String) -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}, panels: Boolean = true, header: HeaderSlots? = null, onManageActions: () -> Unit = {}, windowItem: WindowItem? = null, elsewhere: Elsewhere? = null) {
     val api = store.api
     var watches by remember(id) { mutableStateOf<List<Watch>>(emptyList()) }
 
@@ -670,11 +670,18 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             onArchived()
                         }
                     },
+                    windowItem = windowItem,
                     watches = watches,
                     watchStatus = { watched -> state.conversations[watched]?.status },
                     onOpenWatch = onOpenConversation,
                     onStopWatch = { watch -> store.act { api.deleteWatch(watch.id) } },
                 )
+
+                if (elsewhere != null) {
+                    PoppedOutNotice(conversation.title, elsewhere, Modifier.weight(1f))
+
+                    return@Column
+                }
 
                 val diffs = store.diffTabs.collectAsState().value[id] ?: DiffTabs()
                 val activeDiff = diffs.tabs.firstOrNull { it.key == diffs.active }
@@ -994,6 +1001,7 @@ private fun ConversationHeader(
     onCloseSession: () -> Unit,
     onArchive: () -> Unit,
     onDelete: () -> Unit,
+    windowItem: WindowItem?,
     watches: List<Watch>,
     watchStatus: (String) -> ConversationStatus?,
     onOpenWatch: (String) -> Unit,
@@ -1187,6 +1195,10 @@ private fun ConversationHeader(
                         MenuItem("Let an assistant manage this", onClick = { menuOpen = false; manageMenuOpen = true }, leading = MyIcon.Agent)
                     }
 
+                    if (windowItem != null) {
+                        MenuItem(windowItem.label, onClick = { menuOpen = false; windowItem.onClick() }, leading = windowItem.icon)
+                    }
+
                     if (conversation.hasWorkspace) {
                         MenuItem(if (terminalShown) "Hide terminal" else "Show terminal", onClick = { menuOpen = false; onTerminal() }, hint = "Ctrl+`", leading = MyIcon.Terminal)
                     }
@@ -1235,6 +1247,26 @@ private fun ConversationHeader(
 }
 
 class IdeControls(val main: Ide, val others: List<Ide>, val where: String, val open: (Ide) -> Unit, val onSettings: () -> Unit)
+
+class WindowItem(val label: String, val icon: MyIcon, val onClick: () -> Unit)
+
+class Elsewhere(val onGoTo: () -> Unit, val onShowHere: () -> Unit)
+
+@Composable
+private fun PoppedOutNotice(title: String, elsewhere: Elsewhere, modifier: Modifier) {
+    Column(
+        modifier.fillMaxWidth().padding(Tokens.Space.S8).semantics { contentDescription = title },
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(MyIcon.PopOut, MyTheme.colors.textMuted)
+        Label("This chat is open in its own window.", Modifier.widthIn(max = 360.dp), style = Tokens.Type.Prose, color = MyTheme.colors.textMuted)
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+            MyButton(elsewhere.onGoTo, text = "Go to window", variant = ButtonVariant.Primary)
+            MyButton(elsewhere.onShowHere, text = "Show here", variant = ButtonVariant.Outline)
+        }
+    }
+}
 
 class HeaderSlots(val title: @Composable RowScope.() -> Unit, val menu: @Composable (close: () -> Unit) -> Unit, val notices: @Composable () -> Unit)
 
