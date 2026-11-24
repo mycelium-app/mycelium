@@ -544,7 +544,11 @@ async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid
         tracing::warn!("goal handling after a failed session failed for {conversation_id}: {}", error.message());
     }
 
-    let payload = limit.map_or_else(|| json!({"message": message}), |limit| limit.payload);
+    let payload = match limit {
+        Some(limit) => limit.payload,
+        None if message.to_lowercase().contains("authentication required") => json!({"message": message, "sign_in_required": true}),
+        None => json!({"message": message}),
+    };
     let recorded = record(state, node_id, conversation_id, seq, EventKind::Error, payload, Some(ConversationStatus::Failed)).await?;
 
     if recorded && let Err(error) = crate::watches::conversation_ended(state, conversation_id, crate::watches::Ending::Failed).await {

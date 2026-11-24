@@ -630,3 +630,27 @@ async fn another_person_cannot_schedule_or_cancel_a_resume() {
 
     assert_eq!((scheduled, cancelled), (404, 404));
 }
+
+#[tokio::test]
+async fn a_failure_that_needs_the_account_signed_in_again_says_so() {
+    let server = Server::start().await;
+    let mut link = server.online_node("orion").await;
+    let id = working_conversation(&server, &mut link).await;
+
+    hit_limit(&server, &mut link, id, "Authentication required").await;
+
+    let payload = last_error(&server, id).await;
+    assert_eq!(payload["sign_in_required"], true, "{payload}");
+    assert!(payload["usage_limit"].is_null());
+}
+
+#[tokio::test]
+async fn an_ordinary_failure_does_not_ask_for_a_sign_in() {
+    let server = Server::start().await;
+    let mut link = server.online_node("orion").await;
+    let id = working_conversation(&server, &mut link).await;
+
+    hit_limit(&server, &mut link, id, "The agent crashed").await;
+
+    assert!(last_error(&server, id).await["sign_in_required"].is_null());
+}

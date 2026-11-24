@@ -762,6 +762,12 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         modifier = Modifier.weight(1f),
                         onSuggest = ::send,
                         onRetry = if (conversation.status == ConversationStatus.Failed) ({ store.act { api.retryConversation(id) } }) else null,
+                        onSignIn = if (conversation.status == ConversationStatus.Failed) ({
+                            store.act {
+                                val started = api.startLogin(conversation.nodeId, conversation.agent, loginMethodFor(conversation.agent), conversation.account)
+                                signIn = LoginSession(started.loginId, conversation.agent)
+                            }
+                        }) else null,
                         onDismissFailure = if (conversation.status == ConversationStatus.Failed) ({ store.dismissFailure(conversation) }) else null,
                         limitActions = if (conversation.status == ConversationStatus.Failed) limitActions else null,
                         agent = conversation.agent,

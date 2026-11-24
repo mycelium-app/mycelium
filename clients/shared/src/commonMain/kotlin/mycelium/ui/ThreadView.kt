@@ -131,6 +131,7 @@ fun ThreadView(
     modifier: Modifier = Modifier,
     onSuggest: (String) -> Unit = {},
     onRetry: (() -> Unit)? = null,
+    onSignIn: (() -> Unit)? = null,
     onDismissFailure: (() -> Unit)? = null,
     limitActions: LimitActions? = null,
     agent: String = "",
@@ -264,7 +265,7 @@ fun ThreadView(
                             )
                         } else {
                             CompositionLocalProvider(LocalImageJump provides jumpToImage, LocalImageGallery provides gallery, LocalShownImages provides shownImages, LocalPinnedKeys provides pinnedKeys) {
-                                ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) onDismissFailure else null, if (index == lastFailure) limitActions else null, agent, runsOnModel)
+                                ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) onSignIn else null, if (index == lastFailure) onDismissFailure else null, if (index == lastFailure) limitActions else null, agent, runsOnModel)
                             }
                         }
                     }
@@ -307,7 +308,7 @@ fun ThreadView(
 val LocalReadAloud = compositionLocalOf<((String) -> Unit)?> { null }
 
 @Composable
-private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?, onDismissFailure: (() -> Unit)?, limitActions: LimitActions?, agent: String, runsOnModel: Boolean) {
+private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?, onSignIn: (() -> Unit)?, onDismissFailure: (() -> Unit)?, limitActions: LimitActions?, agent: String, runsOnModel: Boolean) {
     when (item) {
         is ThreadItem.UserMessage -> UserMessage(item.text, item.files, item.images, item.goalSentAt, item.goalNudge, item.goalWhy, item.spoken, item.spokenAt, agent)
         is ThreadItem.GoalReport -> GoalReportBlock(item, agent)
@@ -328,6 +329,8 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
         is ThreadItem.TurnEnd -> Unit
         is ThreadItem.Failure -> if (item.limit != null) {
             UsageLimitCard(item.limit, agent, limitActions, item.message.removePrefix("Internal error: "))
+        } else if (item.signInRequired && onSignIn != null && onDismissFailure != null) {
+            ErrorBanner(item.message, onDismiss = onDismissFailure, actions = { MyButton(onSignIn, text = "Sign in", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Sign in ${agentName(agent)} again") })
         } else if (onRetry != null && onDismissFailure != null) {
             ErrorBanner(item.message, onDismiss = onDismissFailure, actions = { MyButton(onRetry, text = "Retry", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Retry this conversation") })
         } else {

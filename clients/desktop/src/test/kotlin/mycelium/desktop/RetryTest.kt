@@ -6,6 +6,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.engine.mock.toByteArray
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
@@ -21,9 +22,12 @@ import mycelium.ui.Shell
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 private const val FailedJson = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Plan the rollout","status":"failed",
-"acp_session_id":"s1","mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}"""
+"acp_session_id":"s1","account":"sam@example.com","mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}"""
+
+private const val SignInError = """[{"conversation_id":"c1","seq":1,"kind":"error","payload":{"message":"Authentication required","sign_in_required":true}}]"""
 
 private const val LimitError = """[{"conversation_id":"c1","seq":1,"kind":"error","payload":{"message":"This node already runs 4 conversations, its limit."}}]"""
 
@@ -35,6 +39,7 @@ class RetryTest {
     val scopes = TestScopes()
 
     private val retried = CopyOnWriteArrayList<String>()
+    private val logins = CopyOnWriteArrayList<String>()
 
     private fun store(events: String = LimitError): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -45,6 +50,12 @@ class RetryTest {
                 retried += path
 
                 return@MockEngine respond("", HttpStatusCode.NoContent)
+            }
+
+            if (request.method == HttpMethod.Post && path.endsWith("/logins")) {
+                logins += path + " " + String(request.body.toByteArray())
+
+                return@MockEngine respond("""{"login_id":"l1"}""", HttpStatusCode.OK, json)
             }
 
             val body = when {
@@ -98,5 +109,20 @@ class RetryTest {
         rule.waitUntil(5_000) { retried.isNotEmpty() }
 
         assertEquals(listOf("/api/v1/conversations/c1/retry"), retried)
+    }
+
+    @Test
+    fun aFailureThatNeedsASignInStartsTheSignInForThatAccountInsteadOfRetrying() {
+        show(store(SignInError))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Sign in Claude Code again").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, rule.onAllNodesWithContentDescription("Retry", substring = true).fetchSemanticsNodes().size)
+
+        rule.onNodeWithContentDescription("Sign in Claude Code again").performClick()
+        rule.waitUntil(5_000) { logins.isNotEmpty() }
+
+        assertTrue(logins.single().startsWith("/api/v1/nodes/n1/logins "), logins.single())
+        assertTrue(logins.single().contains("\"account\":\"sam@example.com\""), logins.single())
+        assertEquals(emptyList(), retried)
     }
 }

@@ -179,7 +179,7 @@ sealed interface ThreadItem {
 
     data class TurnEnd(override val key: String, val stopReason: String) : ThreadItem
 
-    data class Failure(override val key: String, val message: String, val limit: UsageLimitNote? = null) : ThreadItem
+    data class Failure(override val key: String, val message: String, val limit: UsageLimitNote? = null, val signInRequired: Boolean = false) : ThreadItem
 
     data class Workflow(override val key: String, val progress: WorkflowProgress) : ThreadItem
 
@@ -286,7 +286,7 @@ class ThreadBuilder {
         val limit = usageLimitFrom(payload)
 
         items.removeAll { it is ThreadItem.Failure && limit != null && it.limit == limit }
-        items += ThreadItem.Failure(key, payload.string("message") ?: "The agent stopped with an error.", limit)
+        items += ThreadItem.Failure(key, payload.string("message") ?: "The agent stopped with an error.", limit, payload.boolean("sign_in_required") == true)
     }
 
     private fun fold(event: Event) {
