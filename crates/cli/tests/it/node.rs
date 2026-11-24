@@ -671,7 +671,7 @@ async fn an_agent_that_is_not_installed_fails_the_session() {
 }
 
 #[tokio::test]
-async fn closing_a_session_ends_the_agent_without_reporting_a_failure() {
+async fn closing_a_session_ends_the_agent_and_confirms_it_without_reporting_a_failure() {
     let mut control = ControlServer::start().await;
     let fixture = Fixture::new(&control.url);
     let _daemon = fixture.start_daemon();
@@ -682,6 +682,7 @@ async fn closing_a_session_ends_the_agent_without_reporting_a_failure() {
     connection.send(ControlToNode::CloseSession { conversation_id: conversation });
 
     wait_for_file(&fixture.session_dir(conversation).join("exit.json")).await;
+    connection.next_matching(|message| matches!(message, NodeToControl::SessionClosed { conversation_id } if *conversation_id == conversation)).await;
     assert_eq!(connection.nothing_more().await, None);
 }
 

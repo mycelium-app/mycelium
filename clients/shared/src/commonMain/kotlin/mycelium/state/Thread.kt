@@ -210,7 +210,7 @@ private const val MaxDiffSide = 400
 
 fun buildThread(events: List<Event>): List<ThreadItem> = ThreadBuilder().build(events)
 
-fun turnIsOpen(events: List<Event>): Boolean = events.lastOrNull { it.kind == EventKinds.UserMessage || it.kind == EventKinds.TurnEnd }?.kind == EventKinds.UserMessage
+fun turnIsOpen(events: List<Event>): Boolean = events.lastOrNull { it.kind == EventKinds.UserMessage || it.kind == EventKinds.TurnEnd || it.kind == EventKinds.Error }?.kind == EventKinds.UserMessage
 
 fun currentTodos(items: List<ThreadItem>): List<PlanEntry> = items.filterIsInstance<ThreadItem.Plan>().lastOrNull()?.entries.orEmpty()
 

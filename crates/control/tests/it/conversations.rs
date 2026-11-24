@@ -1193,7 +1193,7 @@ async fn close(server: &Server, id: Uuid) -> u16 {
 }
 
 #[tokio::test]
-async fn closing_a_working_conversation_ends_its_agent_and_leaves_it_done_and_not_archived() {
+async fn closing_a_working_conversation_ends_its_turn_once_the_node_confirms_the_agent_exited() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let id = started_conversation(&server, &mut link, Some("long task")).await;
@@ -1203,7 +1203,14 @@ async fn closing_a_working_conversation_ends_its_agent_and_leaves_it_done_and_no
     assert_eq!(close(&server, id).await, 204);
 
     assert_eq!(link.next().await, ControlToNode::CloseSession { conversation_id: id });
-    assert_eq!(status_of(&server, id).await, "done");
+    assert_ne!(server.events(id).await.last().unwrap()["kind"], "turn_end");
+
+    link.send(NodeToControl::SessionClosed { conversation_id: id }).await;
+
+    let events = common::eventually("the close to be confirmed", || async { let events = server.events(id).await; (events.last().unwrap()["kind"] == "turn_end").then_some(events) }).await;
+    let last = events.last().unwrap();
+    assert_eq!((last["kind"].as_str(), last["payload"]["stop_reason"].as_str()), (Some("turn_end"), Some("cancelled")));
+    assert_eq!(server.conversation(id).await["agent_active"], false);
     let (_, listed) = server.user.json(server.user.get("/api/v1/conversations")).await;
     assert!(listed.as_array().unwrap().iter().any(|conversation| conversation["id"] == id.to_string()));
 }
@@ -1237,7 +1244,7 @@ async fn closing_an_idle_conversation_ends_its_running_agent_and_keeps_its_statu
 }
 
 #[tokio::test]
-async fn closing_an_idle_conversation_without_a_running_agent_tells_the_node_nothing() {
+async fn closing_again_asks_the_node_again_so_a_leftover_agent_is_ended() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let id = started_conversation(&server, &mut link, None).await;
@@ -1245,9 +1252,41 @@ async fn closing_an_idle_conversation_without_a_running_agent_tells_the_node_not
     assert_eq!(link.next().await, ControlToNode::CloseSession { conversation_id: id });
 
     assert_eq!(close(&server, id).await, 204);
+    assert_eq!(link.next().await, ControlToNode::CloseSession { conversation_id: id });
 
     server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/cancel"))).await;
     assert_eq!(link.next().await, ControlToNode::Cancel { conversation_id: id });
+}
+
+#[tokio::test]
+async fn a_failed_turn_has_ended_so_stopping_it_sends_the_node_no_cancel() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("long task")).await;
+    link.expect_prompt().await;
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: "Authentication required".into() }).await;
+    common::eventually("the conversation to fail", || async { (status_of(&server, id).await == "failed").then_some(()) }).await;
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/cancel"))).await;
+    assert_eq!(status, 204);
+    close(&server, id).await;
+
+    assert_eq!(link.next().await, ControlToNode::CloseSession { conversation_id: id });
+}
+
+#[tokio::test]
+async fn closing_a_failed_conversation_dismisses_it_and_ends_its_agent() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("long task")).await;
+    link.expect_prompt().await;
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: "Authentication required".into() }).await;
+    common::eventually("the conversation to fail", || async { (status_of(&server, id).await == "failed").then_some(()) }).await;
+
+    assert_eq!(close(&server, id).await, 204);
+
+    assert_eq!(link.next().await, ControlToNode::CloseSession { conversation_id: id });
+    assert_eq!(status_of(&server, id).await, "done");
 }
 
 #[tokio::test]

@@ -4,6 +4,7 @@ import kotlin.time.Clock
 import kotlin.time.Instant
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
+import mycelium.api.NodeSummary
 
 const val ChatAgent = "chat"
 
@@ -33,6 +34,8 @@ val Conversation.place: ConversationPlace
 val Conversation.hasWorkspace: Boolean get() = place == ConversationPlace.Folder
 
 val Conversation.hasSession: Boolean get() = !runsOnModel
+
+fun Conversation.sessionOpenOn(node: NodeSummary?): Boolean = hasSession && node != null && node.online && id in node.sessions
 
 val Conversation.isAssistantSession: Boolean get() = assistantId != null
 

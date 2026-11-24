@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -27,6 +28,8 @@ private fun conversation(status: String, agentActive: Boolean) =
 
 private const val RunningTurn = """[{"conversation_id":"c1","seq":1,"kind":"user_message","payload":{"text":"go"}}]"""
 
+private const val FailedTurn = """[{"conversation_id":"c1","seq":1,"kind":"user_message","payload":{"text":"go"}},{"conversation_id":"c1","seq":2,"kind":"error","payload":{"message":"Authentication required"}}]"""
+
 private const val EndedTurn = """[{"conversation_id":"c1","seq":1,"kind":"user_message","payload":{"text":"go"}},{"conversation_id":"c1","seq":2,"kind":"turn_end","payload":{"stopReason":"end_turn"}}]"""
 
 class ComposerWorkingTest {
@@ -36,9 +39,17 @@ class ComposerWorkingTest {
     @get:Rule
     val scopes = TestScopes()
 
+    private val posted = java.util.concurrent.CopyOnWriteArrayList<String>()
+
     private fun show(conversation: String, events: String = EndedTurn) {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
+
+            if (request.method == io.ktor.http.HttpMethod.Post) {
+                posted += path
+
+                return@MockEngine respond("", HttpStatusCode.NoContent)
+            }
             val body = when {
                 path.endsWith("/conversations") -> "[$conversation]"
                 path.endsWith("/conversations/c1") -> conversation
@@ -90,5 +101,33 @@ class ComposerWorkingTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Stopping").fetchSemanticsNodes().isNotEmpty() }
         assertEquals(0, rule.onAllNodesWithContentDescription("Stop the agent").fetchSemanticsNodes().size)
         rule.captureScreen("composer-stopping")
+    }
+
+    @Test
+    fun aStopTheNodeNeverAcknowledgesEndsInAFailureWithAWayOutInsteadOfSpinning() {
+        show(conversation("working", agentActive = true), RunningTurn)
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Stop the agent").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Stop the agent").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Stopping").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.mainClock.advanceTimeBy(16_000)
+        rule.waitForIdle()
+
+        assertEquals(0, rule.onAllNodesWithText("Stopping").fetchSemanticsNodes().size)
+        rule.onNodeWithContentDescription("Error: The agent didn't stop. Close the session to end it.").assertExists()
+        rule.onNodeWithText("Close session").performClick()
+
+        rule.waitUntil(5_000) { "/api/v1/conversations/c1/close" in posted }
+        assertEquals(listOf("/api/v1/conversations/c1/cancel", "/api/v1/conversations/c1/close"), posted.filter { it.endsWith("/cancel") || it.endsWith("/close") })
+    }
+
+    @Test
+    fun aTurnThatEndedInAnErrorDoesNotOfferStop() {
+        show(conversation("failed", agentActive = false), FailedTurn)
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Authentication required", substring = true).fetchSemanticsNodes().isNotEmpty() }
+
+        assertEquals(0, rule.onAllNodesWithContentDescription("Stop the agent").fetchSemanticsNodes().size)
     }
 }

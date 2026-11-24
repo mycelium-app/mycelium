@@ -338,6 +338,10 @@ impl Actor {
                             self.perform(actions, &mut connection).await;
                         }
 
+                        if state.is_closing() {
+                            let _ = self.out.send(NodeToControl::SessionClosed { conversation_id: self.conversation_id });
+                        }
+
                         continue;
                     };
 

@@ -881,8 +881,13 @@ pub async fn close_for(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()>
     let mut tx = state.pool.begin().await?;
     let row = lock_owned(&mut tx, id, owner).await?;
 
-    let active = matches!(row.status.as_str(), "working" | "input");
-    if chats::is_chat(&row) || !(active || state.hub.has_session(row.node_id, id)) {
+    if row.status == "failed" {
+        sqlx::query("update conversations set resume_at = null where id = $1").bind(id).execute(&mut *tx).await?;
+        let dismissed = set_status(&mut tx, id, ConversationStatus::Done).await?;
+        state.publish(Some(owner), StreamMessage::Conversation(dismissed.to_proto()?));
+    }
+
+    if chats::is_chat(&row) {
         tx.commit().await?;
         crate::environments::stop_with_conversation(state, id, false).await;
 
@@ -894,7 +899,7 @@ pub async fn close_for(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()>
     }
 
     state.hub.forget_prompts_of(id);
-    if active {
+    if matches!(row.status.as_str(), "working" | "input") {
         let updated = set_status(&mut tx, id, ConversationStatus::Done).await?;
         state.publish(Some(owner), StreamMessage::Conversation(updated.to_proto()?));
     }

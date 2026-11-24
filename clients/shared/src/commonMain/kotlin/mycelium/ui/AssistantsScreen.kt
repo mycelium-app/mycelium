@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import mycelium.api.Assistant
 import mycelium.api.PatchAssistantRequest
 import mycelium.api.ConversationStatus
+import mycelium.state.sessionOpenOn
 import mycelium.state.AllGroups
 import mycelium.state.AllStates
 import mycelium.state.ArchivedState
@@ -107,17 +108,17 @@ internal fun AssistantMenuItems(store: Store, state: AppState, assistant: Assist
 
     MenuItem(if (assistant.pinnedAt == null) "Pin" else "Unpin", onClick = { close(); store.act { store.patchAssistant(assistant, PatchAssistantRequest(pinned = assistant.pinnedAt == null)) } }, leading = MyIcon.Pin)
 
-    if (assistant.conversationId != null) {
-        MenuItem("Close session", onClick = { close(); store.act { store.api.closeSession(assistant.conversationId) } }, leading = MyIcon.Stop)
+    if (conversation != null && conversation.sessionOpenOn(state.nodes[conversation.nodeId])) {
+        MenuItem("Close session", onClick = { close(); store.act { store.api.closeSession(conversation.id) } }, leading = MyIcon.Stop)
     }
 
     if (conversation?.status == ConversationStatus.Failed) {
-        MenuItem("Retry", onClick = { close(); store.act { store.api.retryConversation(conversation.id) } }, leading = MyIcon.Working)
+        MenuItem("Retry", onClick = { close(); store.act { store.api.retryConversation(conversation.id) } }, leading = MyIcon.Refresh)
         MenuItem("Dismiss", onClick = { close(); store.dismissFailure(conversation) }, leading = MyIcon.Check)
     }
 
     if (assistant.conversationId != null) {
-        MenuItem("Clear", onClick = { close(); store.clearAssistant(assistant) }, leading = MyIcon.Refresh)
+        MenuItem("Clear", onClick = { close(); store.clearAssistant(assistant) }, leading = MyIcon.Eraser)
     }
 
     MenuItem("Settings", onClick = { close(); onSettings() }, leading = MyIcon.Sliders)

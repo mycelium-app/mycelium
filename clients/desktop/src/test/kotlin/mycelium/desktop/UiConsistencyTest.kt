@@ -78,7 +78,8 @@ class UiConsistencyTest {
                 path.endsWith("/experiments") -> EnabledExperiments
                 path.endsWith("/assistants") -> "[$AssistantWithThread]"
                 path.endsWith("/conversations") -> "[${thread(status)}]"
-                path.endsWith("/groups") || path.endsWith("/projects") || path.endsWith("/nodes") || path.endsWith("/queue") || path.endsWith("/model-providers") -> "[]"
+                path.endsWith("/nodes") -> """[{"id":"n1","name":"atlas","hostname":"atlas","os":"linux","arch":"x86_64","version":"0.1.0","address":"192.0.2.10","online":true,"draining":false,"agents":[],"logins":[],"sessions":["c1"]}]"""
+                path.endsWith("/groups") || path.endsWith("/projects") || path.endsWith("/queue") || path.endsWith("/model-providers") -> "[]"
                 path.endsWith("/events") -> if (status == "failed") FailureEvent else "[]"
                 else -> "{}"
             }

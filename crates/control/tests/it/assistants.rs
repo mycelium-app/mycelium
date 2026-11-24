@@ -699,7 +699,8 @@ async fn a_new_session_ends_the_earlier_one_mid_turn_and_takes_over_its_watches_
     let manager = sqlx::query_scalar::<_, Option<Uuid>>("select managed_by from conversations where id = $1").bind(owner_chat).fetch_one(&server.pool).await.unwrap();
     assert_ne!(second, first);
     assert_eq!((watchers, manager), (vec![second, second], Some(second)));
-    assert_ne!(server.conversation(first).await["status"], json!("working"));
+    link.send(NodeToControl::SessionClosed { conversation_id: first }).await;
+    common::eventually("the earlier session to stop working", || async { (server.conversation(first).await["status"] != json!("working")).then_some(()) }).await;
 
     common::call_tool(&server, &link.token, owner_chat, "send_to_conversation", json!({"conversation": first.to_string(), "message": "Oi is live", "reason": "Report the rollout"})).await;
     let target = sqlx::query_scalar::<_, Uuid>("select target_id from message_proposals where conversation_id = $1").bind(owner_chat).fetch_one(&server.pool).await.unwrap();

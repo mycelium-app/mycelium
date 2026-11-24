@@ -83,7 +83,8 @@ class SidebarPinsTest {
                 path.endsWith("/conversations") -> "[${conversations.joinToString(",")}]"
                 path.endsWith("/groups") -> GroupsJson
                 path.endsWith("/conversations/w1") -> conversations.first()
-                path.endsWith("/nodes") || path.endsWith("/events") -> "[]"
+                path.endsWith("/nodes") -> """[{"id":"n1","name":"atlas","hostname":"atlas","os":"linux","arch":"x86_64","version":"0.1.0","address":"192.0.2.10","online":true,"draining":false,"agents":[],"logins":[],"sessions":["w1"]}]"""
+                path.endsWith("/events") -> "[]"
                 else -> "{}"
             }
 

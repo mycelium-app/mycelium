@@ -6,6 +6,9 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.ui.text.style.TextOverflow
 import mycelium.api.ModelChoice
+import mycelium.state.sessionOpenOn
+import kotlinx.coroutines.delay
+import kotlin.time.Duration.Companion.seconds
 import mycelium.api.Routing
 import mycelium.state.appsLinkVisible
 import mycelium.state.ContinueModelPrefix
@@ -439,10 +442,20 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val thread = remember(state.events[id]) { threadBuilder.build(state.events[id].orEmpty()) }
     val agentWorking = turnIsOpen(state.events[id].orEmpty()) || (conversation.agentActive && conversation.status == ConversationStatus.Working)
     var stopping by remember(id) { mutableStateOf(false) }
+    var stopFailed by remember(id) { mutableStateOf(false) }
 
     LaunchedEffect(agentWorking) {
         if (!agentWorking) {
             stopping = false
+            stopFailed = false
+        }
+    }
+
+    LaunchedEffect(stopping) {
+        if (stopping) {
+            delay(StopWait)
+            stopping = false
+            stopFailed = true
         }
     }
 
@@ -794,6 +807,12 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         MyButton({ onOpenConversation(parentId) }, text = "Open the conversation it belongs to", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
                     }
                 } else {
+                    if (stopFailed) {
+                        ErrorBanner("The agent didn't stop. Close the session to end it.", onDismiss = { stopFailed = false }, actions = {
+                            MyButton({ stopFailed = false; store.closeSession(conversation) }, text = "Close session", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+                        })
+                    }
+
                     key(id, queueEditing?.queueId) {
                         Composer(
                             conversation = conversation,
@@ -1209,7 +1228,7 @@ private fun ConversationHeader(
                         MenuItem(if (terminalShown) "Hide terminal" else "Show terminal", onClick = { menuOpen = false; onTerminal() }, hint = "Ctrl+`", leading = MyIcon.Terminal)
                     }
 
-                    if (conversation.hasSession && !archived) {
+                    if (conversation.sessionOpenOn(node) && !archived) {
                         MenuItem("Close session", onClick = { menuOpen = false; onCloseSession() }, leading = MyIcon.Stop)
                     }
 
@@ -1472,3 +1491,5 @@ private fun InspectorSection(name: String, rows: List<Pair<String, String>>) {
 private const val SidePanelPreference = "side-panel"
 
 private const val SidePanelWidthPreference = "side-panel-width"
+
+private val StopWait = 15.seconds

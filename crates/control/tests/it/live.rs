@@ -1316,6 +1316,8 @@ async fn closing_a_working_conversation_streams_it_as_done() {
     conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Working).await;
 
     server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/close"))).await;
+    assert_eq!(link.next().await, ControlToNode::CloseSession { conversation_id: id });
+    link.send(NodeToControl::SessionClosed { conversation_id: id }).await;
 
     conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Done).await;
 }

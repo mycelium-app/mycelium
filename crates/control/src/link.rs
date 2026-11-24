@@ -218,6 +218,16 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
         }
         NodeToControl::TurnEnd { conversation_id, seq, stop_reason, usage } => turn_end(state, node_id, conversation_id, seq, stop_reason, usage).await,
         NodeToControl::SessionClosed { conversation_id } => {
+            let ended = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!("select {TURN_HAS_ENDED}"))).bind(conversation_id).fetch_one(&state.pool).await?;
+
+            if !ended && state.hub.has_session(node_id, conversation_id) {
+                return Ok(());
+            }
+
+            if !ended {
+                record(state, node_id, conversation_id, None, EventKind::TurnEnd, json!({"stop_reason": "cancelled"}), Some(ConversationStatus::Done)).await?;
+            }
+
             sqlx::query("update conversations set agent_active = false where id = $1 and node_id = $2 and agent_active").bind(conversation_id).bind(node_id).execute(&state.pool).await?;
 
             state.remove_session(node_id, conversation_id).await

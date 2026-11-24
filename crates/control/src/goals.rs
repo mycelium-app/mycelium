@@ -140,7 +140,7 @@ async fn read(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<Goal>
     .bind(conversation_id)
     .fetch_one(&state.pool)
     .await?;
-    let turn_active: bool = sqlx::query_scalar("select agent_active or exists(select 1 from events e where e.conversation_id = c.id and e.kind = 'user_message' and e.seq > coalesce((select max(seq) from events where conversation_id = c.id and kind = 'turn_end'),0)) from conversations c where c.id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+    let turn_active: bool = sqlx::query_scalar("select agent_active or exists(select 1 from events e where e.conversation_id = c.id and e.kind = 'user_message' and e.seq > coalesce((select max(seq) from events where conversation_id = c.id and kind in ('turn_end', 'error')),0)) from conversations c where c.id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
 
     let windows = if agent == crate::chats::CHAT_AGENT { Vec::new() } else { account_usage::windows_of(state, node_id, parse_enum(&agent)?, account.as_deref()).await? };
     let used = |name: &str| windows.iter().find(|window| window.name == name).map(|window| window.used_percent);

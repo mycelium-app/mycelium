@@ -272,6 +272,10 @@ impl SessionState {
         self.session_id.is_none() || self.history_loading || !self.queued_prompts.is_empty() || !self.permissions.is_empty() || self.pending.values().any(|pending| matches!(pending, Pending::Prompt))
     }
 
+    pub fn is_closing(&self) -> bool {
+        self.closing
+    }
+
     pub fn mark_closing(&mut self) {
         self.closing = true;
     }
@@ -595,8 +599,15 @@ impl SessionState {
         vec![Action::Emit(seq, message)]
     }
 
-    fn fail(&self, seq: i64, message: String) -> Vec<Action> {
-        self.emit(seq, NodeToControl::SessionFailed { conversation_id: self.conversation_id, seq, message })
+    fn fail(&mut self, seq: i64, message: String) -> Vec<Action> {
+        let mut actions = self.emit(seq, NodeToControl::SessionFailed { conversation_id: self.conversation_id, seq, message });
+
+        if !actions.is_empty() {
+            self.closing = true;
+            actions.push(Action::CloseKeeper);
+        }
+
+        actions
     }
 
     fn handle_incoming(&mut self, seq: i64, frame: Value) -> Vec<Action> {
@@ -1291,6 +1302,20 @@ mod tests {
         let actions = state.on_entry(6, Direction::In, json!({"jsonrpc": "2.0", "id": id, "result": {"stopReason": "cancelled"}}));
 
         assert_eq!(actions, [Action::Emit(6, NodeToControl::TurnEnd { conversation_id: conversation(), seq: 6, stop_reason: "cancelled".into(), usage: None })]);
+    }
+
+    #[test]
+    fn a_failed_prompt_reports_the_failure_and_closes_the_keeper_so_the_agent_does_not_linger() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        started(&mut state, json!({"sessionId": "s1"}));
+        let prompt = state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(3), text: "hi".into(), attachments: vec![] });
+        let id = sent_frames(&prompt)[0]["id"].clone();
+
+        let actions = state.on_entry(6, Direction::In, json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": "Authentication required"}}));
+
+        assert_eq!(actions, [Action::Emit(6, NodeToControl::SessionFailed { conversation_id: conversation(), seq: 6, message: "Authentication required".into() }), Action::CloseKeeper]);
+        assert!(state.is_closing());
+        assert!(state.on_keeper_lost().is_empty());
     }
 
     #[test]
