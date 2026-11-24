@@ -425,10 +425,6 @@ class AllScreensRenderTest {
         shell("projects", Route.Projects, open = null)
         shell("new-in-project", Route.NewIn("p1"), open = null)
         shell("issues", Route.Issues, open = null)
-        shell("nodes", Route.Nodes, open = null)
-        shell("node-page", Route.Node(Willow), open = null)
-        shell("node-resources", Route.Node(Willow), open = null, interact = { click(it, 393f, 84f) })
-        shell("node-ports", Route.Node(Willow), open = null, interact = { click(it, 459f, 84f) })
         shell("activity", Route.Activity, open = null)
         shell("settings", Route.Settings, open = null)
     }
@@ -442,7 +438,7 @@ class AllScreensRenderTest {
         shell("empty-artefacts", Route.Artifacts, extra = none, open = null)
         shell("empty-assistants", Route.Assistants, extra = none, open = null)
         shell("empty-projects", Route.Projects, extra = none, open = null)
-        shell("empty-nodes", Route.Nodes, extra = none, open = null)
+        snap("empty-nodes") { Surface { SettingsScreen(store(none, null), me, "https://mycelium.example.com", startOn = SettingsSection.Nodes, onSignOut = {}) } }
     }
 
     @Test
@@ -460,6 +456,8 @@ class AllScreensRenderTest {
         for (section in SettingsSection.entries) {
             snap("settings-${section.name.lowercase()}") { Surface { SettingsScreen(store, me, "https://mycelium.example.com", startOn = section, onSignOut = {}) } }
         }
+
+        snap("node-page") { Surface { SettingsScreen(store, me, "https://mycelium.example.com", startOn = SettingsSection.Nodes, startNode = Willow, onSignOut = {}) } }
     }
 
     @Test
@@ -487,7 +485,6 @@ class AllScreensRenderTest {
         shell("assistants", Route.Assistants, phone = true, open = null)
         shell("projects", Route.Projects, phone = true, open = null)
         shell("issues", Route.Issues, phone = true, open = null)
-        shell("nodes", Route.Nodes, phone = true, open = null)
         shell("activity", Route.Activity, phone = true, open = null)
         shell("wellness", Route.Wellness, phone = true, open = null)
         shell("sidebar-drawer", Route.Empty, phone = true, open = null, interact = { click(it, 28f, 28f) })

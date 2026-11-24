@@ -13,7 +13,6 @@ import mycelium.state.runsOnModel
 private fun elsewhereLabel(route: Route): String = when (route) {
     Route.New, is Route.NewIn -> "New conversation"
     Route.NewChat -> "New chat"
-    Route.Nodes, is Route.Node -> "Nodes"
     Route.Wellness -> "Wellness & Learning"
     Route.Projects -> "Projects"
     Route.Issues -> "Issues"

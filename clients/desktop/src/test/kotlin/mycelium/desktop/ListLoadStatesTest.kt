@@ -26,7 +26,7 @@ import mycelium.Platform
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
 import mycelium.ui.MyceliumTheme
-import mycelium.ui.NodesScreen
+import mycelium.ui.NodesSettings
 import mycelium.ui.SessionsSettings
 import org.junit.Rule
 
@@ -75,7 +75,7 @@ class ListLoadStatesTest {
     @Test
     fun aNodesListThatFailsToLoadSaysSoAndRetryLoadsIt() {
         val store = store()
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NodesScreen(store, state, ListPlatform) } }
+        rule.setContent { MyceliumTheme(true) { NodesSettings(store, ListPlatform, onOpenNode = {}) } }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Could not load nodes", substring = true).fetchSemanticsNodes().isNotEmpty() }
         assertEquals(0, rule.onAllNodesWithText("No nodes", substring = true).fetchSemanticsNodes().size)

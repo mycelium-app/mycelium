@@ -192,9 +192,8 @@ class ScreensRenderTest {
     }
 
     @Test
-    fun nodesNewAndArchiveRenderInBothThemes() {
+    fun newAndArchiveRenderInBothThemes() {
         for (dark in listOf(true, false)) {
-            assertTrue(render("nodes", dark, shell(Route.Nodes)).length() > 10_000)
             assertTrue(render("new", dark, shell(Route.New)).length() > 10_000)
             assertTrue(render("archive", dark, shell(Route.Archive)).length() > 10_000)
             assertTrue(render("settings", dark) { withAccents(dark) { shell(Route.Settings)() } }.length() > 10_000)
@@ -205,7 +204,6 @@ class ScreensRenderTest {
     fun phoneScreensRenderInBothThemes() {
         for (dark in listOf(true, false)) {
             assertTrue(renderAt("conversation", dark, true, content = shell(Route.Chat(ConversationId))).length() > 10_000)
-            assertTrue(renderAt("nodes", dark, true, content = shell(Route.Nodes)).length() > 10_000)
             assertTrue(renderAt("archive", dark, true, content = shell(Route.Archive)).length() > 10_000)
             assertTrue(renderAt("empty", dark, true, content = shell(Route.Empty)).length() > 5_000)
             assertTrue(renderAt("settings", dark, true) { withAccents(dark) { shell(Route.Settings)() } }.length() > 5_000)

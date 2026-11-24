@@ -47,6 +47,7 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
     Schedules("Schedules", MyIcon.Calendar, "Prompts that start conversations on a timetable"),
     Ides("IDEs", MyIcon.Code, "Where Open in IDE opens a folder"),
     Accounts("Providers", MyIcon.Person, "Agent harness accounts, usage and chat models"),
+    Nodes("Nodes", MyIcon.Server, "Nodes, their agents and versions"),
     Agents("Agents", MyIcon.ClaudeMark),
     Import("Import", MyIcon.Archive, "Past agent transcripts and Claude chats"),
     Groups("Groups", MyIcon.Group, "Instructions, folders and projects for each kind of work"),
@@ -62,7 +63,7 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
 
 internal val SettingsGroups = listOf(
     "General" to listOf(SettingsSection.Appearance, SettingsSection.TimeAndFocus, SettingsSection.Voice, SettingsSection.Experiments, SettingsSection.Ides),
-    "Agents and models" to listOf(SettingsSection.Accounts, SettingsSection.Agents, SettingsSection.Schedules, SettingsSection.Connections),
+    "Agents and models" to listOf(SettingsSection.Accounts, SettingsSection.Nodes, SettingsSection.Agents, SettingsSection.Schedules, SettingsSection.Connections),
     "Knowledge" to listOf(SettingsSection.Groups, SettingsSection.Instructions, SettingsSection.Memories, SettingsSection.Import, SettingsSection.Indexing),
     "Services" to listOf(SettingsSection.ChatTools, SettingsSection.Forges),
     "Your account" to listOf(SettingsSection.Sessions, SettingsSection.Account),
@@ -72,8 +73,9 @@ private class GroupLinks(val tab: String?, val openHours: (String) -> Unit, val 
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: SettingsSection? = null, startGroup: String? = null, startGroupTab: String? = null, startIntegration: IntegrationStart? = null, onSignOut: () -> Unit) {
+fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: SettingsSection? = null, startGroup: String? = null, startGroupTab: String? = null, startIntegration: IntegrationStart? = null, startNode: String? = null, onSignOut: () -> Unit) {
     var section by remember { mutableStateOf(startOn) }
+    var openNode by remember { mutableStateOf(startNode) }
     var openGroup by remember { mutableStateOf(startGroup) }
     var groupTab by remember { mutableStateOf(startGroupTab) }
     val touch = LocalTouch.current
@@ -82,6 +84,7 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
     val showGroup: ((String) -> Unit) = { id -> openGroup = id; groupTab = null; section = SettingsSection.Groups }
     val showGroupHours: (String) -> Unit = { id -> openGroup = id; groupTab = GroupHoursTab; section = SettingsSection.Groups }
     val showTimeAndFocus = { section = SettingsSection.TimeAndFocus }
+    val choose: (SettingsSection) -> Unit = { entry -> section = entry; openNode = null }
     val waitingProposals = waitingInstructionProposals(state)
     val opensIdes = LocalPlatform.current?.opensIdes == true
     val groups = SettingsGroups.map { (group, entries) -> group to entries.filter { it != SettingsSection.Ides || opensIdes } }
@@ -90,7 +93,13 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
         attempt { store.refreshInstructionProposals() }
     }
 
-    BackHandler(enabled = touch && opened != null) { section = null }
+    BackHandler(enabled = touch && opened != null) {
+        if (openNode != null) {
+            openNode = null
+        } else {
+            section = null
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Bar {
@@ -114,7 +123,7 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
                                 Modifier
                                     .fillMaxWidth()
                                     .heightIn(min = rowHeight())
-                                    .pressable({ section = entry }, role = Role.Button, shape = BlockShape)
+                                    .pressable({ choose(entry) }, role = Role.Button, shape = BlockShape)
                                     .padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S2),
                                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -139,7 +148,7 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
                 }
             } else {
                 CompositionLocalProvider(LocalOpenList provides null) {
-                    SettingsContent(opened, store, me, controlPlane, onSignOut, openGroup, { openGroup = it }, showGroup, GroupLinks(groupTab, showGroupHours, showTimeAndFocus), startIntegration, Modifier.weight(1f))
+                    SettingsContent(opened, store, me, controlPlane, onSignOut, openGroup, { openGroup = it }, showGroup, GroupLinks(groupTab, showGroupHours, showTimeAndFocus), startIntegration, openNode, { openNode = it }, Modifier.weight(1f))
                 }
             }
         } else {
@@ -153,7 +162,7 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
                                 Modifier
                                     .fillMaxWidth()
                                     .heightIn(min = rowHeight())
-                                    .pressable({ section = entry }, role = Role.Tab, selected = entry == (opened ?: SettingsSection.Appearance), shape = BlockShape)
+                                    .pressable({ choose(entry) }, role = Role.Tab, selected = entry == (opened ?: SettingsSection.Appearance), shape = BlockShape)
                                     .semantics { selected = entry == (opened ?: SettingsSection.Appearance) }
                                     .padding(horizontal = Tokens.Space.S2),
                                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
@@ -171,14 +180,27 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
                 }
 
                 VerticalHairline()
-                SettingsContent(opened ?: SettingsSection.Appearance, store, me, controlPlane, onSignOut, openGroup, { openGroup = it }, showGroup, GroupLinks(groupTab, showGroupHours, showTimeAndFocus), startIntegration, Modifier.weight(1f))
+                SettingsContent(opened ?: SettingsSection.Appearance, store, me, controlPlane, onSignOut, openGroup, { openGroup = it }, showGroup, GroupLinks(groupTab, showGroupHours, showTimeAndFocus), startIntegration, openNode, { openNode = it }, Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun SettingsContent(section: SettingsSection, store: Store, me: Me, controlPlane: String, onSignOut: () -> Unit, openGroup: String?, onOpenGroup: (String?) -> Unit, showGroup: ((String) -> Unit)?, links: GroupLinks, startIntegration: IntegrationStart?, modifier: Modifier) {
+private fun SettingsContent(section: SettingsSection, store: Store, me: Me, controlPlane: String, onSignOut: () -> Unit, openGroup: String?, onOpenGroup: (String?) -> Unit, showGroup: ((String) -> Unit)?, links: GroupLinks, startIntegration: IntegrationStart?, openNode: String?, onOpenNode: (String?) -> Unit, modifier: Modifier) {
+    val platform = LocalPlatform.current
+    val openConversation = LocalOpenConversation.current
+
+    if (section == SettingsSection.Nodes && openNode != null && platform != null) {
+        val state by store.state.collectAsState()
+
+        Box(modifier.fillMaxHeight()) {
+            NodePage(store, state, openNode, platform, onBack = { onOpenNode(null) }, onOpenConversation = { openConversation?.invoke(it) })
+        }
+
+        return
+    }
+
     if (section == SettingsSection.Schedules) {
         val state by store.state.collectAsState()
 
@@ -205,6 +227,7 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
                 ModelProvidersSettings(store, revealSpeech = links.tab == SpeechAnchor, addSpeechProvider = links.tab == AddSpeechProviderAnchor)
                 DecisionsSettings(store)
             }
+            SettingsSection.Nodes -> platform?.let { NodesSettings(store, it, onOpenNode) }
             SettingsSection.Agents -> AgentsSettings(store)
             SettingsSection.Import -> ImportSettings(store)
             SettingsSection.Groups -> GroupsSettings(store, openGroup, onOpenGroup, links.tab, links.openTimeAndFocus)

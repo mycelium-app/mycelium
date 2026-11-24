@@ -92,7 +92,7 @@ class ActivityTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
-        rule.setContent { MyceliumTheme(true) { Box(Modifier.width(width)) { Shell(store, ActivityPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Nodes) } } }
+        rule.setContent { MyceliumTheme(true) { Box(Modifier.width(width)) { Shell(store, ActivityPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.New) } } }
         rule.onNodeWithContentDescription("Activity").performClick()
         rule.waitForIdle()
     }
