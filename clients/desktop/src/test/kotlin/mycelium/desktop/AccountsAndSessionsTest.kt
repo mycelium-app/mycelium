@@ -67,7 +67,12 @@ private const val CodexMissingOnAtlasJson = """[
  "agents":[{"agent":"codex","available":false}],
  "logins":[]}]"""
 
-private const val SessionsJson = """[
+private const val VibeSignedOutJson = """[
+{"id":"n1","name":"orion","hostname":"orion","os":"linux","arch":"x86_64","version":"0.1.0","address":"10.0.0.13","online":true,"draining":false,
+ "agents":[{"agent":"vibe","version":"2.0.0","available":true}],
+ "logins":[{"agent":"vibe","account":"default","method":"browser","state":"signed_out"}]}]"""
+
+private const val SessionsJson ="""[
 {"id":"s1","kind":"browser","label":"Firefox on Linux","hostname":"","address":"100.64.4.18","last_used_at":"2026-10-23T10:00:00Z","current":true},
 {"id":"s2","kind":"client","label":"Desktop app","hostname":"willow","address":"100.64.4.18","last_used_at":"2026-10-23T09:00:00Z","current":false}]"""
 
@@ -168,6 +173,21 @@ class AccountsAndSessionsTest {
         rule.onNodeWithText("Sign in on orion").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/nodes/n3/logins") } }
+    }
+
+    @Test
+    fun signingASignedOutAccountInAgainSignsInThatAccountOnItsNode() {
+        val store = store(VibeSignedOutJson)
+        rule.setContent { MyceliumTheme(true) { AccountsSettings(store) } }
+
+        rule.onNodeWithContentDescription("More for default").performClick()
+        rule.onNodeWithText("Sign in again on orion").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Sign in Mistral Vibe").fetchSemanticsNodes().isNotEmpty() }
+        val started = requests.indexOfFirst { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/nodes/n1/logins") }
+        assertTrue(started >= 0)
+        assertTrue(bodies.last().contains("\"account\":\"default\""), bodies.last())
+        assertTrue(bodies.last().contains("\"agent\":\"vibe\""), bodies.last())
     }
 
     @Test

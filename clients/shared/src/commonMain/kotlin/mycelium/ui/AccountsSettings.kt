@@ -29,6 +29,7 @@ import mycelium.state.AgentAccount
 import mycelium.state.usageProjection
 import mycelium.state.windowName
 import mycelium.state.Store
+import mycelium.state.UnnamedAccount
 import mycelium.state.agentAccounts
 import mycelium.state.expiryDay
 import mycelium.state.instantOrNull
@@ -48,9 +49,9 @@ fun AccountsSettings(store: Store) {
     var prices by remember { mutableStateOf(emptyList<AccountPrice>()) }
     var pricing by remember { mutableStateOf<AgentAccount?>(null) }
     var addingReset by remember { mutableStateOf<AgentAccount?>(null) }
-    val startSignIn: (NodeSummary, String) -> Unit = { node, agent ->
+    val startSignIn: (NodeSummary, String, String) -> Unit = { node, agent, account ->
         store.act {
-            val started = store.api.startLogin(node.id, agent, loginMethodFor(agent), newAccountName())
+            val started = store.api.startLogin(node.id, agent, loginMethodFor(agent), account)
             signIn = LoginSession(started.loginId, agent)
         }
     }
@@ -75,7 +76,7 @@ fun AccountsSettings(store: Store) {
                     if (signInNodes.isNotEmpty()) {
                         RowMenu(agentName(agent)) { close ->
                             for (node in signInNodes) {
-                                MenuItem("Sign in on ${node.name}", onClick = { close(); startSignIn(node, agent) }, leading = nodeIcon(node))
+                                MenuItem("Sign in on ${node.name}", onClick = { close(); startSignIn(node, agent, newAccountName()) }, leading = nodeIcon(node))
                             }
                         }
                     }
@@ -129,7 +130,15 @@ fun AccountsSettings(store: Store) {
                                 }
 
                                 else -> TableCell.Slot {
+                                    val signedOutNodes = account.nodes.filter { it.state != LoginState.SignedIn }.mapNotNull { on -> signInNodes.firstOrNull { it.name == on.nodeName } }
+
                                     RowMenu(account.label) { close ->
+                                        if (account.label != UnnamedAccount) {
+                                            for (node in signedOutNodes) {
+                                                MenuItem("Sign in again on ${node.name}", onClick = { close(); startSignIn(node, agent, account.label) }, leading = nodeIcon(node))
+                                            }
+                                        }
+
                                         MenuItem("Set your price", onClick = { close(); pricing = account }, leading = MyIcon.Pencil)
 
                                         if (account.agent == "claude") {
