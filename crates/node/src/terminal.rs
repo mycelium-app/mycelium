@@ -117,16 +117,8 @@ impl Tmux {
     fn pane_exit(&self, terminal_id: Uuid) -> Option<i32> {
         let target = format!("{}:", session_target(terminal_id));
         let state = self.output(&["display-message", "-p", "-t", &target, "#{pane_dead} #{pane_dead_status} #{pane_dead_signal}"])?;
-        let mut fields = state.split_whitespace();
 
-        if fields.next()? != "1" {
-            return None;
-        }
-
-        let status = fields.next().and_then(|status| status.parse::<i32>().ok());
-        let signal = fields.next().and_then(|signal| signal.parse::<i32>().ok());
-
-        status.or(signal.map(|signal| 128 + signal)).or(Some(-1))
+        dead_pane_exit(&state)
     }
 
     fn history(&self, terminal_id: Uuid) -> Vec<u8> {
@@ -136,6 +128,19 @@ impl Tmux {
 
         captured.replace('\n', "\r\n").into_bytes()
     }
+}
+
+fn dead_pane_exit(state: &str) -> Option<i32> {
+    let mut fields = state.split(' ');
+
+    if fields.next()? != "1" {
+        return None;
+    }
+
+    let status = fields.next().and_then(|status| status.trim().parse::<i32>().ok());
+    let signal = fields.next().and_then(|signal| signal.trim().parse::<i32>().ok());
+
+    status.or(signal.map(|signal| 128 + signal))
 }
 
 struct TmuxSession {
@@ -779,6 +784,14 @@ mod tests {
         assert!(seen.contains("refused"), "{seen}");
         assert_eq!(exit_code, Some(1), "{seen:?}");
         end_tmux(&manager);
+    }
+
+    #[test]
+    fn a_dead_pane_has_an_exit_code_only_once_tmux_has_its_status_or_signal() {
+        assert_eq!(dead_pane_exit("0 "), None);
+        assert_eq!(dead_pane_exit("1  "), None);
+        assert_eq!(dead_pane_exit("1 7 "), Some(7));
+        assert_eq!(dead_pane_exit("1  9"), Some(137));
     }
 
     #[tokio::test]
