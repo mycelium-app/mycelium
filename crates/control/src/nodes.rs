@@ -200,6 +200,32 @@ pub async fn remove_login(State(state): State<AppState>, user: AuthUser, Path((i
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub async fn sign_out_login(State(state): State<AppState>, user: AuthUser, Path((id, agent, account)): Path<(Uuid, String, String)>) -> ApiResult<StatusCode> {
+    let parsed: AgentId = crate::store::parse_enum(&agent).map_err(|_| ApiError::not_found("That login"))?;
+    let found = sqlx::query_scalar::<_, bool>(
+        "select true from logins l join nodes n on n.id = l.node_id where l.node_id = $1 and n.created_by = $2 and n.revoked_at is null and l.agent = $3 and l.account = $4",
+    )
+    .bind(id)
+    .bind(user.id)
+    .bind(&agent)
+    .bind(&account)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    if found.is_none() {
+        return Err(ApiError::not_found("That login"));
+    }
+
+    if !state.hub.send(id, ControlToNode::SignOutLogin { agent: parsed, account: account.clone() }) {
+        return Err(node_offline());
+    }
+
+    sqlx::query("update logins set state = 'signed_out' where node_id = $1 and agent = $2 and account = $3").bind(id).bind(&agent).bind(&account).execute(&state.pool).await?;
+    publish_node(&state, id).await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[derive(Deserialize)]
 pub struct CreateDirectoryRequest {
     #[serde(default)]

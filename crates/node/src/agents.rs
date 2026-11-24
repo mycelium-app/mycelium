@@ -160,6 +160,25 @@ pub fn new_account(accounts_dir: &Path, agent: AgentId, label: &str) -> std::io:
     Ok(AccountHome { profile: Some(name.to_string()), dir })
 }
 
+pub fn sign_out(home: &Path, agent: AgentId, account: &AccountHome) -> std::io::Result<()> {
+    let removed = match (agent, &account.profile) {
+        (AgentId::Claude, None) => std::fs::remove_file(home.join(".claude").join(".credentials.json")),
+        (AgentId::Claude, Some(_)) => std::fs::remove_file(account.dir.join(".credentials.json")),
+        (AgentId::Codex, _) => std::fs::remove_file(account.dir.join("auth.json")),
+        (AgentId::Vibe, _) => {
+            let env = account.dir.join(".env");
+            let kept: Vec<String> = std::fs::read_to_string(&env)?.lines().filter(|line| !line.trim().starts_with("MISTRAL_API_KEY=")).map(str::to_string).collect();
+
+            std::fs::write(&env, kept.iter().map(|line| format!("{line}\n")).collect::<String>())
+        }
+    };
+
+    match removed {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
 pub fn account_env(agent: AgentId, account: &AccountHome) -> Vec<(String, String)> {
     if account.profile.is_none() {
         return Vec::new();
@@ -368,6 +387,38 @@ mod tests {
         assert_eq!(logins[0].account.as_deref(), Some("default"));
         assert_eq!(listed, vec![(Some("blank"), "browser", LoginState::SignedOut), (Some("fresh"), "browser", LoginState::SignedOut), (Some("work"), "browser", LoginState::SignedIn)]);
         assert!(!format!("{logins:?}").contains("placeholder-key"));
+    }
+
+    #[test]
+    fn signing_out_a_vibe_account_drops_its_key_and_keeps_its_other_settings() {
+        let home = tempfile::tempdir().unwrap();
+        let accounts = home.path().join("accounts");
+        write(&home.path().join(".vibe").join(".env"), "OTHER=1\nMISTRAL_API_KEY='placeholder-key'\n");
+        let account = find_account(home.path(), &accounts, AgentId::Vibe, "default").unwrap();
+
+        sign_out(home.path(), AgentId::Vibe, &account).unwrap();
+
+        let logins = login_state(home.path(), &accounts, &available(AgentId::Vibe), &no_usage());
+        assert_eq!((logins[0].account.as_deref(), logins[0].state), (Some("default"), LoginState::SignedOut));
+        assert_eq!(std::fs::read_to_string(home.path().join(".vibe").join(".env")).unwrap(), "OTHER=1\n");
+    }
+
+    #[test]
+    fn signing_out_a_claude_or_codex_account_removes_its_credentials_and_only_its_own() {
+        let home = tempfile::tempdir().unwrap();
+        let accounts = home.path().join("accounts");
+        write(&home.path().join(".claude.json"), r#"{"oauthAccount": {"emailAddress": "sam@example.com"}}"#);
+        write(&home.path().join(".claude").join(".credentials.json"), "{}");
+        write(&accounts.join("claude").join("work").join(".credentials.json"), "{}");
+        write(&accounts.join("codex").join("side").join("auth.json"), "{}");
+
+        sign_out(home.path(), AgentId::Claude, &find_account(home.path(), &accounts, AgentId::Claude, "sam@example.com").unwrap()).unwrap();
+        sign_out(home.path(), AgentId::Codex, &find_account(home.path(), &accounts, AgentId::Codex, "side").unwrap()).unwrap();
+        sign_out(home.path(), AgentId::Codex, &find_account(home.path(), &accounts, AgentId::Codex, "side").unwrap()).unwrap();
+
+        assert!(!home.path().join(".claude").join(".credentials.json").exists());
+        assert!(accounts.join("claude").join("work").join(".credentials.json").exists());
+        assert!(!accounts.join("codex").join("side").join("auth.json").exists());
     }
 
     #[test]

@@ -166,6 +166,7 @@ fn every_control_message_round_trips_under_its_tag() {
         (ControlToNode::LoginInput { login_id: id(), text: "x".into() }, "login_input"),
         (ControlToNode::StopLogin { login_id: id() }, "stop_login"),
         (ControlToNode::RemoveLogin { agent: AgentId::Claude, account: "account-1970".into() }, "remove_login"),
+        (ControlToNode::SignOutLogin { agent: AgentId::Vibe, account: "default".into() }, "sign_out_login"),
         (ControlToNode::StartTerminal { terminal_id: id(), conversation_id: id(), cwd: "/work".into(), cols: 80, rows: 24, command: Some("git push origin --delete feature/old-sync".into()) }, "start_terminal"),
         (ControlToNode::TerminalInput { terminal_id: id(), data: "bHM=".into() }, "terminal_input"),
         (ControlToNode::ResizeTerminal { terminal_id: id(), cols: 100, rows: 30 }, "resize_terminal"),

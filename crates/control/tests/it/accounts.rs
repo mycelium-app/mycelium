@@ -513,6 +513,36 @@ async fn removing_a_login_mycelium_made_tells_the_node_and_drops_it_from_the_lis
 }
 
 #[tokio::test]
+async fn signing_out_a_login_tells_the_node_and_shows_it_signed_out_at_once() {
+    let server = Server::start().await;
+    let mut link = node_with_accounts(&server, vec![login("sam@example.com", LoginState::SignedIn)]).await;
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/nodes/{}/logins/claude/sam@example.com/sign-out", link.id))).await;
+    assert_eq!(status, 204);
+
+    loop {
+        if let ControlToNode::SignOutLogin { agent, account } = link.next().await {
+            assert_eq!((agent, account.as_str()), (AgentId::Claude, "sam@example.com"));
+            break;
+        }
+    }
+
+    let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
+    assert_eq!(nodes[0]["logins"][0]["state"], "signed_out");
+}
+
+#[tokio::test]
+async fn another_users_login_cannot_be_signed_out() {
+    let server = Server::start().await;
+    let link = node_with_accounts(&server, vec![login("sam@example.com", LoginState::SignedIn)]).await;
+    let other = server.second_user("other@example.com").await;
+
+    let (status, _) = other.json(other.post(&format!("/api/v1/nodes/{}/logins/claude/sam@example.com/sign-out", link.id))).await;
+
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
 async fn the_agents_own_sign_in_cannot_be_removed() {
     let server = Server::start().await;
     let link = node_with_accounts(&server, vec![login("sam@example.com", LoginState::SignedIn)]).await;

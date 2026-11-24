@@ -556,6 +556,10 @@ pub enum ControlToNode {
         agent: AgentId,
         account: String,
     },
+    SignOutLogin {
+        agent: AgentId,
+        account: String,
+    },
     StartTerminal {
         terminal_id: Uuid,
         conversation_id: Uuid,

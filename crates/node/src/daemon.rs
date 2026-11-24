@@ -1,5 +1,5 @@
 use crate::acp::Command;
-use crate::agents::{account_env, account_homes, accounts_dir, detect_agents, find_account, pod_agents, login_command, login_state, new_account, resolve_program};
+use crate::agents::{account_env, account_homes, accounts_dir, detect_agents, find_account, pod_agents, login_command, login_state, new_account, resolve_program, sign_out};
 use crate::usage::{CODEX_USAGE_ENDPOINT, USAGE_ENDPOINT, USAGE_MIN_AGE, UsageCache, VIBE_BILLING_ENDPOINT};
 use crate::instructions::deliver;
 use crate::config::{NodeConfig, agent_command, codex_command, agent_env, config_path, with_developer_instructions};
@@ -359,6 +359,7 @@ impl Daemon {
             ControlToNode::LoginInput { login_id, text } => self.logins.input(login_id, &text),
             ControlToNode::StopLogin { login_id } => self.logins.stop(login_id),
             ControlToNode::RemoveLogin { agent, account } => self.remove_login(agent, &account),
+            ControlToNode::SignOutLogin { agent, account } => self.sign_out_login(agent, &account),
             ControlToNode::StartTerminal { terminal_id, conversation_id, cwd, cols, rows, command } => self.terminals.start(terminal_id, conversation_id, &cwd, cols, rows, command.as_deref()),
             ControlToNode::TerminalInput { terminal_id, data } => self.terminals.input(terminal_id, &data),
             ControlToNode::ResizeTerminal { terminal_id, cols, rows } => self.terminals.resize(terminal_id, cols, rows),
@@ -650,6 +651,19 @@ impl Daemon {
         if let Err(error) = std::fs::remove_dir_all(&account.dir) {
             tracing::warn!("could not remove the {} login {label}: {error}", agent.as_str());
         }
+    }
+
+    fn sign_out_login(&self, agent: AgentId, label: &str) {
+        let Some(account) = find_account(&self.options.home, &accounts_dir(&self.config.state_dir), agent, label) else {
+            return;
+        };
+
+        if let Err(error) = sign_out(&self.options.home, agent, &account) {
+            tracing::warn!("could not sign out the {} login {label}: {error}", agent.as_str());
+        }
+
+        let report = self.logins.report_state();
+        let _ = self.out.send(report());
     }
 
     fn start_session(&self, conversation_id: Uuid, agent: AgentId, cwd: &str, resume: Option<String>, fork: bool, account: Option<String>, instructions: Option<String>, reload: bool, secrets: Vec<(String, String)>, mcp_token: String) {
