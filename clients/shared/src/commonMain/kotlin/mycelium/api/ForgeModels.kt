@@ -86,9 +86,6 @@ data class PullRequestDiff(val diff: String)
 data class Issues(val issues: List<Issue> = emptyList(), val failures: List<RepositoryFailure> = emptyList())
 
 @Serializable
-data class StartWorkspaceRequest(val agent: String)
-
-@Serializable
 data class Repository(
     @SerialName("forge_id") val forgeId: String,
     val owner: String,

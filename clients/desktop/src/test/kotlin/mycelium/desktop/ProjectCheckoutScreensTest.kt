@@ -6,7 +6,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -41,13 +40,6 @@ private fun project(id: String, name: String, repository: String?, forge: String
 
 private val ProjectsJson = "[" + listOf(
     project("p1", "backups", "acme-org/backups", "f1", "g1", A to "/home/sam/projects/acme-org/backups", O to "/home/sam/projects/acme-org/backups"),
-    project("p2", "website", "acme-org/website", "f1", "g2", A to "/home/sam/website", O to "/home/sam/website", W to "/home/sam/website"),
-    project("p3", "ledger", "acme-org/ledger", "f2", "g2", A to "/home/sam/ledger"),
-    project("p4", "notes", null, null, null, W to "/home/sam/notes"),
-).joinToString(",") + "]"
-
-private val BackupsOnAtlasOnlyJson = "[" + listOf(
-    project("p1", "backups", "acme-org/backups", "f1", "g1", A to "/home/sam/projects/acme-org/backups"),
     project("p2", "website", "acme-org/website", "f1", "g2", A to "/home/sam/website", O to "/home/sam/website", W to "/home/sam/website"),
     project("p3", "ledger", "acme-org/ledger", "f2", "g2", A to "/home/sam/ledger"),
     project("p4", "notes", null, null, null, W to "/home/sam/notes"),
@@ -123,13 +115,6 @@ class ProjectCheckoutScreensTest {
     }
 
     @Test
-    fun projectsList() {
-        show(Route.Projects)
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("status-page").fetchSemanticsNodes().isNotEmpty() }
-        capture("5-7-projects")
-    }
-
-    @Test
     fun projectPageWithTheAddMenu() {
         show(Route.Project("p1"))
         rule.onNodeWithText("Add a checkout").performClick()
@@ -142,15 +127,6 @@ class ProjectCheckoutScreensTest {
         rule.onNodeWithContentDescription("More for the checkout on orion").performClick()
         rule.onNodeWithText("Remove checkout").performClick()
         capture("5-37-remove-checkout")
-    }
-
-    @Test
-    fun newProjectForARepositoryThatIsAlreadyAProject() {
-        show(Route.Projects, BackupsOnAtlasOnlyJson)
-        rule.onNodeWithText("New project").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("acme-org/backups").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("acme-org/backups").performClick()
-        capture("5-38-new-project-existing")
     }
 
     @Test

@@ -899,8 +899,6 @@ class MyceliumApi(
         call("/projects/$id/checkouts/$nodeId") { client.delete(it) { authorise() } }
     }
 
-    suspend fun worktrees(): List<Worktree> = call("/worktrees") { client.get(it) { authorise() } }.body()
-
     suspend fun existingWorktrees(projectId: String, nodeId: String? = null): List<ExistingWorktree> =
         call("/projects/$projectId/worktrees") { client.get(it) { authorise(); nodeId?.let { node -> parameter("node_id", node) } } }.body()
 
@@ -973,9 +971,6 @@ class MyceliumApi(
     suspend fun issues(query: String = ""): Issues =
         call("/issues") { client.get(it) { authorise(); if (query.isNotBlank()) parameter("q", query.trim()) } }.body()
 
-    suspend fun startWorkspace(projectId: String, number: Long, agent: String): Conversation =
-        call("/projects/$projectId/issues/$number/workspace") { client.post(it) { authorise(); json(StartWorkspaceRequest(agent)) } }.body()
-
     suspend fun forgeAvatar(forgeId: String, url: String): ByteArray =
         call("/forges/$forgeId/avatar") { client.get(it) { authorise(); parameter("url", url) } }.body()
 
@@ -987,9 +982,6 @@ class MyceliumApi(
 
     suspend fun pullRequestDiff(forgeId: String, repository: String, number: Long): PullRequestDiff =
         call("/forges/$forgeId/pulls/$number/diff") { client.get(it) { authorise(); parameter("repository", repository) } }.body()
-
-    suspend fun startPullRequestWorkspace(projectId: String, number: Long, agent: String): Conversation =
-        call("/projects/$projectId/pulls/$number/workspace") { client.post(it) { authorise(); json(StartWorkspaceRequest(agent)) } }.body()
 
     suspend fun imports(): List<ImportStatus> = call("/imports") { client.get(it) { authorise() } }.body()
 

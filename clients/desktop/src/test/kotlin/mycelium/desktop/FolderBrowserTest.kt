@@ -3,10 +3,7 @@ package mycelium.desktop
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.input.key.Key
@@ -26,13 +23,11 @@ import mycelium.api.Conversation
 import mycelium.api.MyceliumApi
 import mycelium.api.Repository
 import mycelium.state.Store
-import mycelium.ui.ExistingFolderDialog
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.NewConversationScreen
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 private const val NodeId = "aaaaaaaa-0000-0000-0000-000000000001"
 
@@ -98,71 +93,6 @@ class FolderBrowserTest {
     }
 
     private val backups = Repository("f1", "acme-org", "backups", "acme-org/backups")
-
-    @Test
-    fun browsing_from_use_an_existing_folder_fills_the_folder_and_sets_up_the_project() {
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ExistingFolderDialog(store, state, backups, onDismiss = {}) } }
-
-        rule.onNodeWithContentDescription("Browse folders on laptop").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("backups").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Git").assertExists()
-        rule.onNodeWithText("backups").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Up").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Choose this folder").performClick()
-        rule.onNodeWithText("Use folder").performClick()
-
-        rule.waitUntil(5_000) { posts.isNotEmpty() }
-        assertEquals("""{"node_id":"$NodeId","forge_id":"f1","repository":"acme-org/backups","path":"/work/backups"}""", posts.single().second)
-    }
-
-    private fun browseFromTheExistingFolderDialog(store: Store) {
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ExistingFolderDialog(store, state, backups, onDismiss = {}) } }
-
-        rule.onNodeWithContentDescription("Browse folders on laptop").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("notes").fetchSemanticsNodes().isNotEmpty() }
-    }
-
-    @Test
-    fun new_folder_offers_a_random_two_word_name_and_enter_creates_the_folder_on_the_node_and_opens_it() {
-        val store = store()
-        browseFromTheExistingFolderDialog(store)
-
-        rule.onNodeWithText("New folder").performClick()
-        val offered = rule.onNodeWithContentDescription("New folder name").fetchSemanticsNode().config[SemanticsProperties.EditableText].text
-        assertTrue(Regex("[a-z]+-[a-z]+").matches(offered), offered)
-        rule.onNodeWithContentDescription("New folder name").performTextReplacement("quiet-otter")
-        rule.onNodeWithContentDescription("New folder name").performKeyInput { pressKey(Key.Enter) }
-
-        rule.waitUntil(5_000) { "/work/quiet-otter" in listed }
-        assertEquals("""{"path":"/work","name":"quiet-otter"}""", posts.single().second)
-        assertEquals(0, rule.onAllNodesWithContentDescription("New folder name").fetchSemanticsNodes().size)
-    }
-
-    @Test
-    fun escape_cancels_the_new_folder_name_without_creating_anything() {
-        val store = store()
-        browseFromTheExistingFolderDialog(store)
-
-        rule.onNodeWithText("New folder").performClick()
-        rule.onNodeWithContentDescription("New folder name").performKeyInput { pressKey(Key.Escape) }
-
-        assertEquals(0, rule.onAllNodesWithContentDescription("New folder name").fetchSemanticsNodes().size)
-        assertEquals(emptyList(), posts)
-    }
-
-    @Test
-    fun a_name_the_node_refuses_is_shown_and_the_name_stays_for_editing() {
-        val store = store()
-        browseFromTheExistingFolderDialog(store)
-        refusal = "quiet-otter already exists in /work. Choose another name."
-
-        rule.onNodeWithText("New folder").performClick()
-        rule.onNodeWithContentDescription("New folder name").performKeyInput { pressKey(Key.Enter) }
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("quiet-otter already exists in /work. Choose another name.").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("New folder name").assertExists()
-    }
 
     @Test
     fun a_new_conversation_in_a_folder_can_be_started_from_a_browsed_folder() {

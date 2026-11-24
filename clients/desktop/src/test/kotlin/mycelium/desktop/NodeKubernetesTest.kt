@@ -31,7 +31,7 @@ import mycelium.state.Store
 import mycelium.ui.ExperimentsSettings
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.NodePage
-import mycelium.ui.NodesScreen
+import mycelium.ui.NodesSettings
 import mycelium.ui.VoiceSettings
 import org.junit.Rule
 import kotlin.test.Test
@@ -112,8 +112,8 @@ class NodeKubernetesTest {
 
     private fun showJoinDialog(experiments: String) {
         val store = store(experiments, LaptopNode)
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NodesScreen(store, state, KubernetesPlatform) } }
-        rule.onNodeWithContentDescription("Join a node").performClick()
+        rule.setContent { MyceliumTheme(true) { NodesSettings(store, KubernetesPlatform, onOpenNode = {}) } }
+        rule.onNodeWithText("Join a node").performClick()
         rule.waitForIdle()
     }
 
@@ -246,14 +246,14 @@ class NodeKubernetesTest {
     }
 
     @Test
-    fun theNodeListShowsEachOutpostAsItsOwnNodeWithItsNamespace() {
+    fun theNodeListShowsEachOutpostAsItsOwnKubernetesNode() {
         val first = Cluster.trim().removePrefix("[").removeSuffix("]")
         val second = first.replace("\"id\":\"k1\"", "\"id\":\"k2\"").replace("lab-cluster", "edge-cluster").replace("team-a", "team-b")
         val store = store("""{"kubernetes_nodes":true}""", "[$first,$second]")
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NodesScreen(store, state, KubernetesPlatform) } }
+        rule.setContent { MyceliumTheme(true) { NodesSettings(store, KubernetesPlatform, onOpenNode = {}) } }
         rule.waitForIdle()
 
-        for (text in listOf("lab-cluster", "edge-cluster", "team-a", "team-b")) {
+        for (text in listOf("lab-cluster", "edge-cluster")) {
             assertTrue(present(text), text)
         }
 

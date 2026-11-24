@@ -193,7 +193,6 @@ object Tokens {
         val ApproveColumn: Dp = 420.dp
         val Popover: Dp = 440.dp
         val LoginPopover: Dp = 360.dp
-        val NumberField: Dp = 72.dp
         val ActionColumn: Dp = 200.dp
         val Page: Dp = 640.dp
         val Dialog: Dp = 520.dp

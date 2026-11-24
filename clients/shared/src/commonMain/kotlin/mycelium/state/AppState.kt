@@ -27,7 +27,6 @@ import mycelium.api.CpuPoint
 import mycelium.api.NodeResources
 import mycelium.api.NodeSummary
 import mycelium.api.Project
-import mycelium.api.Repository
 import mycelium.api.Schedule
 import mycelium.api.ScheduleRun
 import mycelium.api.QueuedPrompt
@@ -60,7 +59,6 @@ data class AppState(
     val projects: Map<String, Project> = emptyMap(),
     val groups: Map<String, Group> = emptyMap(),
     val forges: List<mycelium.api.Forge>? = null,
-    val repositoryListing: mycelium.api.Repositories? = null,
     val workflows: Map<String, Workflow> = emptyMap(),
     val schedules: Map<String, Schedule> = emptyMap(),
     val assistants: Map<String, mycelium.api.Assistant> = emptyMap(),
@@ -294,19 +292,6 @@ private const val FeedLength = 30
 
 fun mergedFeed(arrived: List<mycelium.api.InboxPost>, held: List<mycelium.api.InboxPost>): List<mycelium.api.InboxPost> =
     (arrived + held).distinctBy { it.id }.sortedByDescending { it.createdAt }.take(FeedLength)
-
-fun projectsOfRepository(projects: Collection<Project>, repository: Repository): List<Project> =
-    projects.filter { it.forgeId == repository.forgeId && it.repository == repository.fullName }
-
-fun setUpRepositories(projects: Collection<Project>, listed: List<Repository>): List<Repository> =
-    projects.mapNotNull { project -> project.forgeId?.let { forgeId -> project.repository?.let { forgeId to it } } }.distinct().map { (forgeId, fullName) ->
-        listed.firstOrNull { it.forgeId == forgeId && it.fullName == fullName } ?: Repository(forgeId, fullName.substringBeforeLast('/'), fullName.substringAfterLast('/'), fullName)
-    }
-
-fun registeredFolders(projects: Collection<Project>): List<Project> = projects.filter { it.forgeId == null }.sortedBy { it.name }
-
-fun lastActivity(project: Project, conversations: Collection<Conversation>): String =
-    conversations.filter { it.projectId == project.id }.map { it.updatedAt }.maxByOrNull { instantOrNull(it) ?: Instant.DISTANT_PAST } ?: project.createdAt
 
 fun mergeEvents(existing: List<Event>, incoming: List<Event>): List<Event> {
     val appends = incoming.zipWithNext().all { (a, b) -> a.seq < b.seq } && (existing.isEmpty() || incoming.isEmpty() || existing.last().seq < incoming.first().seq)

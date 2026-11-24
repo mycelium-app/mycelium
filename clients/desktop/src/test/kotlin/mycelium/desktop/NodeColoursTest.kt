@@ -5,6 +5,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -67,7 +68,9 @@ class NodeColoursTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
-        rule.setContent { MyceliumTheme(true) { Shell(store, ColoursPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Nodes) } }
+        rule.setContent { MyceliumTheme(true) { Shell(store, ColoursPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Settings) } }
+        rule.onNodeWithText("Nodes").performClick()
+        rule.onNodeWithContentDescription("Open laptop").performClick()
     }
 
     @Test

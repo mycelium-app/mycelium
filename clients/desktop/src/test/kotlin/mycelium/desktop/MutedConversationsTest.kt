@@ -70,7 +70,7 @@ class MutedConversationsTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
-        rule.setContent { MyceliumTheme(true) { Shell(store, SidebarPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Nodes) } }
+        rule.setContent { MyceliumTheme(true) { Shell(store, SidebarPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.New) } }
     }
 
     private fun row(title: String, notRunning: Boolean): SemanticsMatcher {

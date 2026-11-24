@@ -554,13 +554,6 @@ class Store(
         mutableState.update { it.copy(projects = projects.associateBy { p -> p.id }) }
     }
 
-    suspend fun refreshRepositories(refresh: Boolean = false) {
-        val forges = api.forges()
-        val listing = api.repositories(refresh = refresh)
-
-        mutableState.update { it.copy(forges = forges, repositoryListing = listing) }
-    }
-
     suspend fun refreshGroups() {
         val groups = api.groups()
 

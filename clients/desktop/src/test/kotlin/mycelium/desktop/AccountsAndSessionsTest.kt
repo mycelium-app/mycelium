@@ -33,7 +33,6 @@ import mycelium.ui.AccountsSettings
 import mycelium.ui.Composer
 import mycelium.ui.ModelPickerControls
 import mycelium.ui.MyceliumTheme
-import mycelium.ui.NodesScreen
 import mycelium.ui.SessionsSettings
 import org.junit.Rule
 import kotlin.test.Test

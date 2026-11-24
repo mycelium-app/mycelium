@@ -137,14 +137,6 @@ private val BoardActivity = """{"range":"7d","totals":{"key":"all","name":"All",
 "projects":[{"key":"p2","name":"mycelium","turns":900,"reported_turns":900,"input_tokens":30000000,"output_tokens":11000000,"cache_read_tokens":30000000,"cost_usd":760.0},{"key":"p1","name":"acme-backups","turns":700,"reported_turns":700,"input_tokens":20000000,"output_tokens":8000000,"cache_read_tokens":20000000,"cost_usd":510.0},{"key":"p5","name":"midden","turns":400,"reported_turns":400,"input_tokens":10000000,"output_tokens":3000000,"cache_read_tokens":18000000,"cost_usd":330.0}],
 "nodes":[{"key":"$WillowId","name":"willow","turns":2800,"reported_turns":2800,"input_tokens":50000000,"output_tokens":21000000,"cache_read_tokens":50000000},{"key":"$AtlasNodeId","name":"atlas","turns":1400,"reported_turns":1400,"input_tokens":10000000,"output_tokens":1000000,"cache_read_tokens":50000000}]}"""
 
-private val BoardResources = """{"latest":{"at_ms":${Clock.System.now().toEpochMilliseconds()},"available":true,"cpu_percent":38.0,"cores":8,"load":[2.1,1.8,1.5],
-"memory_total_bytes":34359738368,"memory_available_bytes":11400000000,"swap_total_bytes":0,"swap_free_bytes":0,
-"disks":[{"mount":"/","total_bytes":512000000000,"free_bytes":13000000000}],
-"processes":[{"pid":10,"name":"gradle daemon","cpu_percent":212.0,"memory_bytes":3300000000,"agent":false,"stoppable":true},{"pid":11,"name":"claude","cpu_percent":14.0,"memory_bytes":670000000,"agent":true,"stoppable":true,"conversation_id":"$BackupsId"},{"pid":12,"name":"postgres","cpu_percent":3.0,"memory_bytes":440000000}],
-"ports":[{"port":5173,"address":"127.0.0.1","pid":13,"process":"vite"}],
-"docker":{"running":9,"reclaimable_bytes":21800000000,"containers":[${(1..14).joinToString(",") { """{"name":"service-$it","state":"${if (it <= 9) "running" else "exited"}"}""" }}]}},
-"history":[${(0..59).joinToString(",") { """{"at_ms":${Clock.System.now().toEpochMilliseconds() - (60 - it) * 10_000},"cpu_percent":${25 + (it * 7) % 30}.0}""" }}]}"""
-
 private val BoardIssues = """{"issues":[
 {"forge_id":"$GithubId","repository":"acme-org/acme-backups","number":412,"title":"Restore fails silently after a 503","url":"https://github.com/acme-org/acme-backups/issues/412","pull_requests":[]},
 {"forge_id":"$GithubId","repository":"acme-org/acme-backups","number":398,"title":"Move restore copy into shared strings","url":"https://github.com/acme-org/acme-backups/issues/398","pull_requests":[{"number":77,"label":"MR !77","url":"https://git.example/acme-org/acme-backups/-/merge_requests/77","state":"open"}]},
@@ -243,12 +235,9 @@ class BoardsRenderTest {
     }
 
     @Test
-    fun activityNodeProjectsIssues() {
+    fun activity() {
         val activity = mapOf("/activity" to BoardActivity)
         assertTrue(renderAt("board-activity-view", true, false, content = shell(Route.Activity, activity)).length() > 1_000)
-        assertTrue(renderAt("board-node-resources", true, false, interact = { click(it, 393f, 56f) }, content = shell(Route.Node(WillowId), mapOf("/watch" to BoardResources))).length() > 1_000)
-        assertTrue(renderAt("board-projects", true, false, content = shell(Route.Projects, board = true)).length() > 1_000)
-        assertTrue(renderAt("board-issues", true, false, content = shell(Route.Issues, board = true)).length() > 1_000)
     }
 
     @Test
@@ -305,7 +294,6 @@ class BoardsRenderTest {
                 MoveSheet(moveStore, moveStore.state.value, moveStore.state.value.conversations.getValue(BackupsId), {}, {})
             }
         }.length() > 1_000)
-        assertTrue(renderAt("board-new-project", true, false, interact = { click(it, 1377f, 20f); click(it, 548f, 368f) }, content = shell(Route.Projects, board = true)).length() > 1_000)
         val chats = store(emptyMap(), null)
         assertTrue(renderAt("board-chats-new", true, false) {
             androidx.compose.runtime.CompositionLocalProvider(mycelium.ui.LocalPlatform provides QuietPlatform) {
