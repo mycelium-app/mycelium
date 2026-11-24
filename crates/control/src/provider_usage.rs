@@ -163,11 +163,7 @@ async fn read_api_cost(
 }
 
 async fn fetch(http: &reqwest::Client, address: &str, key: &str) -> Option<OpenRouterSpend> {
-    let response = http
-        .get(address)
-        .bearer_auth(key)
-        .timeout(Duration::from_secs(5))
-        .send()
+    let response = crate::traces::send(http.get(address).bearer_auth(key).timeout(Duration::from_secs(5)))
         .await
         .ok()?;
     let body: KeyResponse = response.error_for_status().ok()?.json().await.ok()?;

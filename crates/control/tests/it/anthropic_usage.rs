@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 const API_KEY: &str = "sk-ant-api03-0123456789abcdefghij";
 const ADMIN_KEY: &str = "sk-ant-admin01-0123456789wxyz";
@@ -190,4 +191,22 @@ async fn a_key_refused_at_read_time_shows_refused_and_keeps_the_last_good_values
     assert_eq!(refused[0]["status"], "refused");
     assert_eq!(refused[0]["api_cost"], good[0]["api_cost"]);
     assert_eq!(refused[0]["read_at"], good[0]["read_at"]);
+}
+
+#[tokio::test]
+async fn a_usage_read_keeps_the_calls_to_anthropic_in_its_trace() {
+    let server = Server::start_with(|config| config.trace_kept_in_full = Duration::ZERO).await;
+    let (router, _) = fake_anthropic();
+    let base = serve(router).await;
+
+    add_provider(&server, &base, Some(ADMIN_KEY)).await;
+    provider_usage(&server).await;
+
+    let has_outside_call = |trace: &Value| trace["children"].as_array().is_some_and(|children| children.iter().any(|child| child["name"] == "external"));
+    let traces = crate::traces::traces_of(&server.user, "?name=/api/v1/model-provider-usage", |traces| traces.iter().any(has_outside_call)).await;
+    let paths: Vec<String> = traces.iter().flat_map(|trace| trace["children"].as_array().cloned().unwrap_or_default()).filter(|child| child["name"] == "external").filter_map(|child| child["fields"]["path"].as_str().map(str::to_string)).collect();
+
+    assert!(paths.iter().any(|path| path == "/v1/organizations/cost_report"), "{traces:?}");
+    assert!(paths.iter().any(|path| path == "/v1/organizations/usage_report/messages"), "{traces:?}");
+    assert!(!format!("{traces:?}").contains(ADMIN_KEY));
 }

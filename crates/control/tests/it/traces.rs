@@ -7,7 +7,7 @@ async fn traced() -> Server {
     Server::start_with(|config| config.trace_kept_in_full = Duration::ZERO).await
 }
 
-async fn traces_of(client: &Client, query: &str, until: impl Fn(&[Value]) -> bool) -> Vec<Value> {
+pub async fn traces_of(client: &Client, query: &str, until: impl Fn(&[Value]) -> bool) -> Vec<Value> {
     let mut traces = Vec::new();
 
     for _ in 0..100 {

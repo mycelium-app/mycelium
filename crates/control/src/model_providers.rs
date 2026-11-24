@@ -286,7 +286,7 @@ impl ProviderRow {
     pub(crate) async fn read_admin(&self, http: &reqwest::Client, key: &str, path: &str, query: &[(&str, String)]) -> Result<reqwest::Response, reqwest::Error> {
         let base = self.base_url.as_deref().unwrap_or(ANTHROPIC_URL);
 
-        http.get(format!("{base}/v1/organizations/{path}")).query(query).header("user-agent", "mycelium").header("anthropic-version", ANTHROPIC_VERSION).header("x-api-key", key).timeout(std::time::Duration::from_secs(10)).send().await
+        crate::traces::send(http.get(format!("{base}/v1/organizations/{path}")).query(query).header("user-agent", "mycelium").header("anthropic-version", ANTHROPIC_VERSION).header("x-api-key", key).timeout(std::time::Duration::from_secs(10))).await
     }
 
     async fn check_admin_key(&self, http: &reqwest::Client, key: &str) -> ApiResult<()> {
