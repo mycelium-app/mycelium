@@ -1,27 +1,19 @@
 package mycelium.desktop
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.hasContentDescription
-import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import io.ktor.client.engine.mock.MockEngine
@@ -37,13 +29,10 @@ import mycelium.ui.LocalGroupFilter
 import mycelium.api.Conversation
 import mycelium.api.MyceliumApi
 import mycelium.api.Project
-import mycelium.state.AppState
 import mycelium.state.Store
-import mycelium.ui.LocalTouch
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.NewConversationScreen
 import mycelium.ui.NewProjectDialog
-import mycelium.ui.ProjectsScreen
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -126,99 +115,6 @@ class ProjectsTest {
         runBlocking { store.refresh() }
 
         return store
-    }
-
-    @Test
-    fun thePageListsRepositoriesWithTheNodesTheyAreSetUpOnAndRegisteredFolders() {
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } }
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("immich").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("acme-backups").assertExists()
-        rule.onNodeWithText("acme-org").assertExists()
-        rule.onNodeWithContentDescription("Checkout on laptop").assertExists()
-        rule.onNodeWithText("laptop").assertExists()
-        rule.onNodeWithText("homelab").assertExists()
-        rule.onNodeWithContentDescription("Checkout on atlas").assertExists()
-    }
-
-    @Test
-    fun the_projects_tab_shows_the_last_repository_listing_before_the_forges_answer() {
-        val store = store()
-        runBlocking { store.refreshRepositories() }
-        repositoriesDelay = 60_000
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } }
-
-        rule.onNodeWithText("immich").assertExists()
-        rule.onNodeWithContentDescription("Checkout on laptop").assertExists()
-    }
-
-    @Test
-    fun newConversationOpensTheProjectSetUpForThatRepository() {
-        val store = store()
-        var opened: String? = null
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = { opened = it }) } }
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("immich").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("New conversation in acme-org/acme-backups").performClick()
-
-        assertEquals("p1", opened)
-    }
-
-    @Test
-    fun aRepositoryNotSetUpCanBeClonedFromANarrowScreen() {
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); Box(Modifier.width(360.dp)) { ProjectsScreen(store, state, onNewConversation = {}) } } }
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("immich").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Set up immich-app/immich on a node").performClick()
-        rule.onNodeWithText("Clone onto a node").performClick()
-        rule.onNodeWithText("atlas").performClick()
-
-        rule.waitUntil(5_000) { posts.isNotEmpty() }
-        assertEquals("""{"node_id":"$AtlasId","forge_id":"f1","repository":"immich-app/immich"}""", posts.single().second)
-    }
-
-    @Test
-    fun everyRowActionIsFullyInsideTheTableOnAPhone() {
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); Box(Modifier.width(360.dp).testTag("screen")) { CompositionLocalProvider(LocalTouch provides true) { ProjectsScreen(store, state, onNewConversation = {}) } } } }
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("immich").fetchSemanticsNodes().isNotEmpty() }
-
-        val density = rule.density.density
-        val screen = rule.onNodeWithTag("screen").fetchSemanticsNode().boundsInRoot
-        val actions = rule.onAllNodes(hasContentDescription("New conversation in", substring = true) or (hasContentDescription("Set up", substring = true) and hasContentDescription("Set up on ", substring = true).not())).fetchSemanticsNodes()
-
-        assertTrue(actions.size >= 3)
-
-        for (action in actions) {
-            val bounds = action.boundsInRoot
-            assertTrue(bounds.right <= screen.right - 16 * density, "${bounds.right} beyond ${screen.right}")
-            assertTrue(bounds.width >= 24 * density && bounds.height >= 24 * density, "$bounds smaller than 24dp")
-        }
-
-        rule.onNodeWithContentDescription("New conversation in acme-org/acme-backups").assertIsDisplayed()
-    }
-
-    @Test
-    fun withoutAnyForgeThePageSaysToConnectOneInSettings() {
-        forges = "[]"
-        repositories = """{"repositories":[],"organisations":[],"failures":[]}"""
-        projects = "[]"
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } }
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Settings, Forges", substring = true).fetchSemanticsNodes().isNotEmpty() }
-    }
-
-    @Test
-    fun aForgeThatFailedIsReportedWithItsMessage() {
-        repositories = """{"repositories":[],"organisations":[],"failures":[{"forge_id":"f1","message":"GitHub did not answer. Try again in a moment."}]}"""
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } }
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("GitHub did not answer. Try again in a moment.").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -410,18 +306,6 @@ class ProjectsTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Choose the repository to clone.").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Choose the repository to clone.").assertExists()
         assertEquals(0, posts.size)
-    }
-
-    @Test
-    fun refreshingRepositoriesOnTheProjectsPageAsksTheForgesAgain() {
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } }
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("immich").fetchSemanticsNodes().isNotEmpty() }
-        assertEquals(false, repositoryQueries.any { it.contains("refresh=true") })
-        rule.onNodeWithContentDescription("Refresh repositories").performClick()
-
-        rule.waitUntil(5_000) { repositoryQueries.any { it.contains("refresh=true") } }
     }
 
     @Test

@@ -32,6 +32,8 @@ import mycelium.state.checkedOutBranch
 
 private val ProjectPageMeasure = 960.dp
 
+private const val NoGroupName = "No group"
+
 @Composable
 fun ProjectPage(store: Store, state: AppState, projectId: String, onBack: () -> Unit, onNewConversation: (String) -> Unit) {
     val colors = MyTheme.colors

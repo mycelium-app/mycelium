@@ -21,7 +21,6 @@ import mycelium.api.MyceliumApi
 import mycelium.state.Store
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.ProjectPage
-import mycelium.ui.ProjectsScreen
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -85,26 +84,6 @@ class ProjectCheckoutsTest {
     private fun showPage(store: Store) {
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectPage(store, state, "p1", onBack = {}, onNewConversation = {}) } }
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Checkout on atlas").fetchSemanticsNodes().isNotEmpty() }
-    }
-
-    @Test
-    fun theListShowsOneRowForARepositoryOnTwoNodes() {
-        val store = store(TwoCheckouts)
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } }
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Checkout on orion").fetchSemanticsNodes().isNotEmpty() }
-        rule.onAllNodesWithContentDescription("New conversation in acme-org/backups").assertCountEquals(1)
-        rule.onNodeWithContentDescription("Checkout on atlas").assertExists()
-        rule.onNodeWithContentDescription("Checkout on orion").assertExists()
-    }
-
-    @Test
-    fun anOlderServersProjectWithoutCheckoutsStillShowsItsOneCheckout() {
-        val store = store(WithoutCheckouts)
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } }
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Checkout on atlas").fetchSemanticsNodes().isNotEmpty() }
-        rule.onAllNodesWithContentDescription("Checkout on orion").assertCountEquals(0)
     }
 
     @Test

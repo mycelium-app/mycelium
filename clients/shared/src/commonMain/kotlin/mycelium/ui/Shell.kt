@@ -173,11 +173,7 @@ sealed interface Route {
 
     data object Wellness : Route
 
-    data object Projects : Route
-
     data class Project(val id: String) : Route
-
-    data object Issues : Route
 
     data object Archive : Route
 
@@ -672,14 +668,12 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
                     Route.NewChat -> NewChatScreen(store, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenSettings = { onRoute(Route.Settings) }, onOpenNodes = { openNodes(null) })
                     is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId, onOpenNodes = { openNodes(null) })
                     Route.Wellness -> WellnessScreen(store, platform, onOpenAssistant = { onRoute(Route.Assistant(it)) }, onOpenConversation = { onRoute(Route.Chat(it)) })
-                    Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) }, onOpenProject = { onRoute(Route.Project(it)) })
-                    is Route.Project -> ProjectPage(store, state, route.id, onBack = { onRoute(Route.Projects) }, onNewConversation = { onRoute(Route.NewIn(it)) })
-                    Route.Issues -> IssuesScreen(store, state, onOpened = { onRoute(Route.Chat(it.id)) })
+                    is Route.Project -> ProjectPage(store, state, route.id, onBack = { onRoute(Route.Archive) }, onNewConversation = { onRoute(Route.NewIn(it)) })
                     Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
                     Route.Apps -> AppsScreen(store, state, platform, onOpenApp = { onRoute(Route.App(it)) }, onViewApp = { onRoute(Route.App(it, viewing = true)) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onNewConversation = { onRoute(Route.New) })
                     is Route.App -> AppPage(store, state, platform, route.uuid, route.tab, route.deployment, onBack = { onRoute(Route.Apps) }, onOpenConversation = { onRoute(Route.Chat(it)) }, startViewing = route.viewing, onOpenNodes = { openNodes(null) })
                     Route.Artifacts -> ArtifactsScreen(store, state, me, platform, onOpen = { onRoute(Route.Artefact(it)) })
-                    is Route.Artefact -> ArtefactFullView(store, state, platform, route.id, onBack = { onRoute(Route.Artifacts) }, onOpenNodes = { openNodes(null) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenProjects = { onRoute(Route.Projects) })
+                    is Route.Artefact -> ArtefactFullView(store, state, platform, route.id, onBack = { onRoute(Route.Artifacts) }, onOpenNodes = { openNodes(null) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenProjects = { onRoute(Route.Archive) })
                     Route.Assistants, Route.NewAssistant -> AssistantsScreen(store, state, onOpen = { onRoute(Route.Assistant(it.id)) }, onSettings = { onRoute(Route.AssistantSettings(it.id)) }, onNew = { onRoute(Route.NewAssistant) }, creating = route == Route.NewAssistant, onCloseNew = { onRoute(Route.Assistants) })
                     is Route.Assistant -> AssistantScreen(store, state, route.id, onOpenSettings = { onRoute(Route.AssistantSettings(route.id)) }, onManageActions = { onRoute(Route.AssistantSettings(route.id, AssistantSection.SchedulesAndActions)) }, onBack = { onRoute(Route.Assistants) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) })
                     is Route.AssistantSettings -> AssistantSettingsScreen(store, state, route.id, route.section, onDone = { onRoute(Route.Assistants) }, onBack = { onRoute(Route.Assistant(route.id)) })
@@ -708,8 +702,7 @@ internal fun screenTarget(path: String): Pair<Route, SettingsSection?>? {
         "nodes" -> Route.Settings to SettingsSection.Nodes
         "schedules" -> Route.Settings to SettingsSection.Schedules
         "wellness" -> Route.Wellness to null
-        "projects" -> Route.Projects to null
-        "issues" -> Route.Issues to null
+        "projects", "issues" -> Route.Archive to null
         "archive" -> Route.Archive to null
         "artifacts" -> Route.Artifacts to null
         "activity" -> Route.Activity to null
@@ -954,70 +947,61 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
 
         Hairline()
 
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val labelled = mode != WorkspacesMode || maxWidth >= FooterLabelsWidth
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = barHeight()).padding(horizontal = Tokens.Space.S1),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val appearance = LocalAppearance.current
 
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = barHeight()).padding(horizontal = Tokens.Space.S1),
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val appearance = LocalAppearance.current
-
-                if (mode == WorkspacesMode) {
-                    MyButton({ onRoute(Route.Projects) }, text = "Projects".takeIf { labelled }, icon = MyIcon.Folder, description = "Projects", muted = true, selected = route == Route.Projects || route is Route.Project)
-                    MyButton({ onRoute(Route.Issues) }, text = "Issues".takeIf { labelled }, icon = MyIcon.Issue, description = "Issues", muted = true, selected = route == Route.Issues)
+            Box(Modifier.weight(1f))
+            if (voice.privacy.voiceEnabled) {
+                val listening = voice.phase == VoicePhase.Listening
+                val wakeListening = voice.device.wakePhraseEnabled && platform.hearsWakePhrase
+                val name = when {
+                    listening -> "Send what was heard"
+                    voice.open -> "Close Voice"
+                    wakeListening -> "Talk to Voice, listening for ${wakePhraseName(voice.device.wakePhrase)}"
+                    else -> "Talk to Voice"
                 }
 
-                Box(Modifier.weight(1f))
-                if (voice.privacy.voiceEnabled) {
-                    val listening = voice.phase == VoicePhase.Listening
-                    val wakeListening = voice.device.wakePhraseEnabled && platform.hearsWakePhrase
-                    val name = when {
-                        listening -> "Send what was heard"
-                        voice.open -> "Close Voice"
-                        wakeListening -> "Talk to Voice, listening for ${wakePhraseName(voice.device.wakePhrase)}"
-                        else -> "Talk to Voice"
-                    }
+                val waiting = wakeListening && voice.waitingForWakePhrase && !voice.open
+                val tooltip = when {
+                    waiting -> "Talk to Voice, listening for \"${wakePhraseName(voice.device.wakePhrase)}\" on this device ($VoiceShortcutLabel)"
+                    voice.open && !listening -> name
+                    else -> "$name ($VoiceShortcutLabel)"
+                }
 
-                    val waiting = wakeListening && voice.waitingForWakePhrase && !voice.open
-                    val tooltip = when {
-                        waiting -> "Talk to Voice, listening for \"${wakePhraseName(voice.device.wakePhrase)}\" on this device ($VoiceShortcutLabel)"
-                        voice.open && !listening -> name
-                        else -> "$name ($VoiceShortcutLabel)"
-                    }
-
-                    Box {
-                        MyButton(
-                            {
-                                when {
-                                    listening -> store.voice.stopListening()
-                                    voice.open -> store.voice.close()
-                                    else -> {
-                                        usageOpen = false
-                                        platform.savePreference(UsageOpenPreference, false.toString())
-                                        store.voice.startListening()
-                                    }
+                Box {
+                    MyButton(
+                        {
+                            when {
+                                listening -> store.voice.stopListening()
+                                voice.open -> store.voice.close()
+                                else -> {
+                                    usageOpen = false
+                                    platform.savePreference(UsageOpenPreference, false.toString())
+                                    store.voice.startListening()
                                 }
-                            },
-                            icon = MyIcon.Microphone,
-                            description = name,
-                            muted = !listening,
-                            selected = voice.open,
-                            tooltip = tooltip,
-                        )
+                            }
+                        },
+                        icon = MyIcon.Microphone,
+                        description = name,
+                        muted = !listening,
+                        selected = voice.open,
+                        tooltip = tooltip,
+                    )
 
-                        if (waiting) {
-                            Box(Modifier.align(Alignment.TopEnd).padding(Tokens.Space.S1).size(Tokens.Space.S1_5).background(MyTheme.colors.statusDone, CircleShape))
-                        }
+                    if (waiting) {
+                        Box(Modifier.align(Alignment.TopEnd).padding(Tokens.Space.S1).size(Tokens.Space.S1_5).background(MyTheme.colors.statusDone, CircleShape))
                     }
                 }
-
-                MyButton({ usageOpen = !usageOpen; platform.savePreference(UsageOpenPreference, usageOpen.toString()); if (usageOpen) store.voice.close() }, icon = MyIcon.Gauge, description = "Usage", muted = true, selected = usageOpen || route == Route.UsageHistory)
-                MyButton(appearance.onToggleDark, icon = if (appearance.dark) MyIcon.Sun else MyIcon.Moon, description = if (appearance.dark) "Switch to light mode" else "Switch to dark mode", muted = true)
-                MyButton({ onRoute(Route.Activity) }, icon = MyIcon.Activity, description = "Activity", muted = true, selected = route == Route.Activity)
-                MyButton({ onRoute(Route.Settings) }, icon = MyIcon.Settings, description = "Settings", muted = true, selected = route == Route.Settings)
             }
+
+            MyButton({ usageOpen = !usageOpen; platform.savePreference(UsageOpenPreference, usageOpen.toString()); if (usageOpen) store.voice.close() }, icon = MyIcon.Gauge, description = "Usage", muted = true, selected = usageOpen || route == Route.UsageHistory)
+            MyButton(appearance.onToggleDark, icon = if (appearance.dark) MyIcon.Sun else MyIcon.Moon, description = if (appearance.dark) "Switch to light mode" else "Switch to dark mode", muted = true)
+            MyButton({ onRoute(Route.Activity) }, icon = MyIcon.Activity, description = "Activity", muted = true, selected = route == Route.Activity)
+            MyButton({ onRoute(Route.Settings) }, icon = MyIcon.Settings, description = "Settings", muted = true, selected = route == Route.Settings)
         }
     }
 }
@@ -1405,7 +1389,6 @@ private fun isSidebarToggle(event: KeyEvent): Boolean =
 
 private const val UsageOpenPreference = "usage-card-open"
 
-private val FooterLabelsWidth = 360.dp
 
 private const val GroupFilterPreference = "conversation-group-filter"
 

@@ -6,7 +6,6 @@ import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.Event
 import mycelium.api.Project
-import mycelium.api.Repository
 import mycelium.api.StreamMessage
 import mycelium.api.MyceliumJson
 import mycelium.api.parseStreamMessage
@@ -14,13 +13,10 @@ import mycelium.state.AppState
 import mycelium.state.TerminalChunkLimit
 import mycelium.state.agentVersion
 import mycelium.state.loginMethodName
-import mycelium.state.projectsOfRepository
 import mycelium.state.reduce
-import mycelium.state.registeredFolders
 import mycelium.state.relativeTime
 import mycelium.state.isWorktree
 import mycelium.state.sidebarSections
-import mycelium.state.setUpRepositories
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -359,46 +355,7 @@ class HistoryTest {
     }
 }
 
-private fun project(id: String, node: String, forge: String?, repository: String?, name: String = id) =
-    Project(id, node, name, "/p/$name", forge, repository, "2026-10-22T10:00:00Z")
-
 class ProjectJoinTest {
-    private val backups = Repository("f1", "acme-org", "acme-backups", "acme-org/acme-backups")
-
-    @Test
-    fun aRepositoryIsSetUpOnEveryNodeWhereAProjectMatchesItsForgeAndName() {
-        val projects = listOf(
-            project("a", "n1", "f1", "acme-org/acme-backups"),
-            project("b", "n2", "f1", "acme-org/acme-backups"),
-            project("c", "n1", "f2", "acme-org/acme-backups"),
-            project("d", "n1", "f1", "acme-org/other"),
-        )
-
-        assertEquals(listOf("a", "b"), projectsOfRepository(projects, backups).map { it.id })
-    }
-
-    @Test
-    fun aSetUpRepositoryIsListedOnceBeforeTheForgeAnswersAndTakesTheForgeDetailsOnceItHas() {
-        val projects = listOf(
-            project("a", "n1", "f1", "acme-org/acme-backups"),
-            project("b", "n2", "f1", "acme-org/acme-backups"),
-            project("c", "n1", null, null, "scratch"),
-        )
-
-        assertEquals(listOf(Repository("f1", "acme-org", "acme-backups", "acme-org/acme-backups")), setUpRepositories(projects, emptyList()))
-
-        val listed = backups.copy(updatedAt = "2026-10-25T09:00:00Z")
-
-        assertEquals(listOf(listed), setUpRepositories(projects, listOf(listed, Repository("f1", "acme-org", "other", "acme-org/other"))))
-    }
-
-    @Test
-    fun registeredFoldersAreTheProjectsWithoutAForgeSortedByName() {
-        val projects = listOf(project("a", "n1", "f1", "acme-org/acme-backups"), project("b", "n1", null, null, "zed"), project("c", "n2", null, null, "app"))
-
-        assertEquals(listOf("app", "zed"), registeredFolders(projects).map { it.name })
-    }
-
     private fun memoryMessage(id: String, text: String) =
         """{"type":"memory","id":"$id","text":"$text","scopes":["global"],"created_by":"laptop/Fix login","conversation_id":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
 

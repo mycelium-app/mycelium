@@ -91,13 +91,3 @@ data class CreateDirectoryRequest(val path: String, val name: String)
 
 @Serializable
 data class ExistingWorktree(val path: String, val branch: String? = null, val head: String = "")
-
-@Serializable
-data class Worktree(
-    val id: String,
-    @SerialName("project_id") val projectId: String,
-    val branch: String,
-    val path: String,
-    @SerialName("issue_number") val issueNumber: Long? = null,
-    @SerialName("created_at") val createdAt: String,
-)

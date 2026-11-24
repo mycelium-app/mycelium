@@ -38,21 +38,4 @@ class WorktreesApiTest {
 
         assertEquals("a branch named 'x' already exists", failure.message)
     }
-
-    @Test
-    fun worktreesDecodeWithAndWithoutAnIssue() = runTest {
-        val engine = MockEngine {
-            respond(
-                """[{"id":"w1","project_id":"p1","branch":"issue/398-restore","path":"/w/a","issue_number":398,"created_at":"2026-10-22T10:00:00Z"},
-                {"id":"w2","project_id":"p1","branch":"feature/x","path":"/w/b","issue_number":null,"created_at":"2026-10-22T10:00:00Z"}]""",
-                HttpStatusCode.OK,
-                Json,
-            )
-        }
-
-        val worktrees = MyceliumApi("https://mycelium.test", null, engine).worktrees()
-
-        assertEquals(listOf<Long?>(398, null), worktrees.map { it.issueNumber })
-        assertEquals("issue/398-restore", worktrees.first().branch)
-    }
 }
