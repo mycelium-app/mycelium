@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.34.58
+
+- While the agent works and nothing streams, the conversation ends with a thinking block: dots that hold still with reduced motion, Thinking and the seconds. Streamed thought shows live inside it, and when the turn moves on it collapses to Thought for Ns, which opens to show the thought.
+- On Settings, Nodes, a node with an agent update has Update agents. It updates each agent the way it was installed, with npm or uv, and shows each one's progress, Updated, or Failed with the reason.
+- A close the node never confirms ends after 15 seconds in "The agent didn't stop. Close the session to end it.", the same as Stop.
+
 ## v0.34.57
 
 - Settings, Accounts replaces Providers: one grid with a row per agent account and a column per node, each cell Signed in, Signed out or Expired with an inline Sign in, Add, or Not installed. A banner counts the sign-ins that need you, and Sign in to all runs each sign-in in turn. Selecting an account opens its page: where it is signed in, with Sign in, Sign out and Remove per node and Sign in on another node, its plan and price, usage with Usage history, limit resets, and Remove this account.
