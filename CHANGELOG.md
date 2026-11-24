@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.56
+
+- On Settings, Providers, an account's menu offers Sign in again on each node where that account is signed out or expired, and it signs that same account back in. Sign in on a node in the agent's menu still adds a new account.
+- A conversation that stops because its account needs signing in again, such as a Claude login that reached its time limit, shows Sign in on its error instead of Retry. It opens the sign-in for that account on that node.
+
 ## v0.34.55
 
 - Mistral Vibe is a third agent beside Claude Code and Codex. A node with `vibe-acp` on its PATH (or `MYCELIUM_VIBE_ACP`) reports it, and conversations, assistants, subagents, workflows and Any model routing can run on it. It shows as Mistral Vibe with its own mark wherever agents are listed.
