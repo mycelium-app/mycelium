@@ -1257,7 +1257,7 @@ pub async fn avatar(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     let api = ForgeApi::from_row(&forge)?;
     let request = state.http.get(wanted).timeout(FORGE_TIMEOUT).header("user-agent", "mycelium");
     let request = if on_forge { api.authorised(request) } else { request };
-    let response = request.send().await.map_err(|_| ApiError::not_found("That avatar"))?;
+    let response = crate::traces::send(request).await.map_err(|_| ApiError::not_found("That avatar"))?;
     let media_type = response.headers().get("content-type").and_then(|value| value.to_str().ok()).unwrap_or_default().to_string();
 
     if !response.status().is_success() || !media_type.starts_with("image/") || media_type.starts_with("image/svg") {

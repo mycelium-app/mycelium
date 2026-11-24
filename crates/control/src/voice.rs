@@ -171,7 +171,7 @@ pub async fn speak(State(state): State<AppState>, user: AuthUser, Json(request):
     let voice = request.voice.as_deref().map(str::trim).filter(|voice| !voice.is_empty()).unwrap_or(DEFAULT_VOICE).to_string();
     let body = json!({"model": model, "input": text, "voice": voice, "speed": speed_of(request.speed.as_deref()), "response_format": "wav"});
     let sent = provider.authorised(state.http.post(format!("{}/audio/speech", provider.address()?)).timeout(SPEECH_TIMEOUT).json(&body))?;
-    let Ok(response) = sent.send().await else {
+    let Ok(response) = crate::traces::send(sent).await else {
         return Err(speech_failed());
     };
 

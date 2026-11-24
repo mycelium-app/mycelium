@@ -100,7 +100,7 @@ fn signed(http: &reqwest::Client, credentials: &Credentials, method: reqwest::Me
 
 async fn fetch(builder: reqwest::RequestBuilder) -> Result<(reqwest::StatusCode, Answer), String> {
     let unreachable = || "Mycelium could not reach Paperless-ngx. Check the Paperless-ngx address and that the server is running, then try again.".to_string();
-    let response = builder.send().await.map_err(|_| unreachable())?;
+    let response = crate::traces::send(builder).await.map_err(|_| unreachable())?;
     let status = response.status();
     let json = response.headers().get("content-type").and_then(|value| value.to_str().ok()).is_some_and(|kind| kind.contains("json"));
     let bytes = response.bytes().await.map_err(|_| unreachable())?;

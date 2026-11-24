@@ -156,7 +156,7 @@ struct Tokens {
 }
 
 async fn exchange(builder: reqwest::RequestBuilder) -> Option<Tokens> {
-    let response = builder.send().await.ok()?;
+    let response = crate::traces::send(builder).await.ok()?;
 
     if !response.status().is_success() {
         return None;
@@ -208,7 +208,7 @@ async fn send_page(builder: reqwest::RequestBuilder) -> Result<(reqwest::StatusC
     let mut retries = 0;
     let response = loop {
         let attempt = builder.try_clone().ok_or_else(unreachable)?;
-        let response = attempt.send().await.map_err(|_| unreachable())?;
+        let response = crate::traces::send(attempt).await.map_err(|_| unreachable())?;
 
         if response.status() != reqwest::StatusCode::TOO_MANY_REQUESTS || retries == MOST_RATE_LIMIT_RETRIES {
             break response;

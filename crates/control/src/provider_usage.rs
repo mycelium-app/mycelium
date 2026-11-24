@@ -313,7 +313,7 @@ mod tests {
             .await
             .unwrap()
         });
-        let http = reqwest::Client::new();
+        let http = crate::outbound::client().unwrap();
         let spend = fetch(&http, &address, "test-key").await.unwrap();
         assert_eq!(spend.total, 12.3);
         assert_eq!(spend.daily, Some(0.4));

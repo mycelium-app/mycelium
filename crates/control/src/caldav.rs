@@ -152,7 +152,7 @@ async fn send_once(http: &reqwest::Client, credentials: &Credentials, method: &r
             builder = builder.body(body.clone());
         }
 
-        let response = builder.send().await.map_err(|error| Failure::Unreachable(error.without_url().to_string()))?;
+        let response = crate::traces::send(builder).await.map_err(|error| Failure::Unreachable(error.without_url().to_string()))?;
         let location = response.headers().get("location").and_then(|value| value.to_str().ok()).and_then(|location| target.join(location).ok());
 
         match location {

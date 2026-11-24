@@ -91,7 +91,7 @@ pub async fn list_models(state: &AppState, base_url: &str, key: Option<&str>) ->
         request = request.bearer_auth(key);
     }
 
-    let response = request.send().await.map_err(|_| ApiError::bad_request("decision_provider_failed", "Mycelium could not reach that address. Check it and that the server is running."))?;
+    let response = crate::traces::send(request).await.map_err(|_| ApiError::bad_request("decision_provider_failed", "Mycelium could not reach that address. Check it and that the server is running."))?;
     let status = response.status();
 
     if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
@@ -302,7 +302,7 @@ pub async fn ask(state: &AppState, base_url: &str, key: Option<&str>, model: &st
         request = request.bearer_auth(key);
     }
 
-    let Ok(response) = request.send().await else {
+    let Ok(response) = crate::traces::send(request).await else {
         return Err("The decisions server could not be reached. Ask the person to check it is running.".to_string());
     };
     let status = response.status();

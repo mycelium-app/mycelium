@@ -258,7 +258,7 @@ fn request(http: &reqwest::Client, credentials: &Credentials, method: reqwest::M
 
 async fn send(builder: reqwest::RequestBuilder, address: &str) -> Result<Value, Failure> {
     let host = host_of(address);
-    let response = builder.send().await.map_err(|_| Failure::Unreachable(format!("Could not reach {host}. Check the address and that Tandoor is running.")))?;
+    let response = crate::traces::send(builder).await.map_err(|_| Failure::Unreachable(format!("Could not reach {host}. Check the address and that Tandoor is running.")))?;
     let status = response.status();
     let body: Value = response.json().await.unwrap_or(Value::Null);
 

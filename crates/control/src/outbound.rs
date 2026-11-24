@@ -226,7 +226,7 @@ pub async fn get_following_redirects<Refusal>(http: &reqwest::Client, address: &
             chain.push(parsed);
         }
 
-        let response = http.get(&target).send().await.map_err(Stopped::Request)?;
+        let response = crate::traces::send(http.get(&target)).await.map_err(Stopped::Request)?;
         let next = response.headers().get(reqwest::header::LOCATION).and_then(|value| value.to_str().ok()).and_then(|location| response.url().join(location).ok());
 
         match next {
@@ -266,14 +266,14 @@ mod tests {
 
     #[tokio::test]
     async fn the_client_refuses_a_metadata_address_written_as_an_ip() {
-        let error = client().unwrap().get("http://169.254.169.254/latest/meta-data/").send().await.unwrap_err();
+        let error = crate::traces::send(client().unwrap().get("http://169.254.169.254/latest/meta-data/")).await.unwrap_err();
 
         assert!(format!("{error:?}").contains("metadata"), "{error:?}");
     }
 
     #[tokio::test]
     async fn the_client_refuses_a_link_local_ipv6_address() {
-        let error = client().unwrap().get("http://[fe80::1]/").send().await.unwrap_err();
+        let error = crate::traces::send(client().unwrap().get("http://[fe80::1]/")).await.unwrap_err();
 
         assert!(format!("{error:?}").contains("metadata"), "{error:?}");
     }
@@ -293,7 +293,7 @@ mod tests {
             stream.write_all(b"HTTP/1.1 307 Temporary Redirect\r\nlocation: http://169.254.169.254/\r\ncontent-length: 0\r\n\r\n").await.unwrap();
         });
 
-        let response = client().unwrap().get(format!("http://127.0.0.1:{port}/")).send().await.unwrap();
+        let response = crate::traces::send(client().unwrap().get(format!("http://127.0.0.1:{port}/"))).await.unwrap();
 
         assert_eq!(response.status().as_u16(), 307);
     }
@@ -328,7 +328,7 @@ mod tests {
         let client = public_client(&PublicFetchRouting::default()).unwrap();
 
         for address in ["https://127.0.0.1/", "https://localhost/", "https://[::1]/"] {
-            let error = client.get(address).send().await.unwrap_err();
+            let error = crate::traces::send(client.get(address)).await.unwrap_err();
 
             assert!(was_refused(&error), "{address}: {error:?}");
         }
@@ -336,7 +336,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_public_client_refuses_plain_http() {
-        let error = public_client(&PublicFetchRouting::default()).unwrap().get("http://example.com/").send().await.unwrap_err();
+        let error = crate::traces::send(public_client(&PublicFetchRouting::default()).unwrap().get("http://example.com/")).await.unwrap_err();
 
         assert!(error.is_builder() || error.to_string().contains("https"), "{error:?}");
     }

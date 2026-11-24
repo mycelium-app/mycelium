@@ -49,7 +49,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, body: Bytes) 
         state.http.post(address).multipart(reqwest::multipart::Form::new().part("file", file).text("model", model))
     };
     let request = provider.authorised(request.timeout(TRANSCRIPTION_TIMEOUT))?;
-    let Ok(response) = request.send().await else {
+    let Ok(response) = crate::traces::send(request).await else {
         return Err(failed());
     };
 

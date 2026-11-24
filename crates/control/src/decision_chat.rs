@@ -175,7 +175,7 @@ fn request_for(model: &str, prompt: &Prompt, with_logprobs: bool) -> Value {
 async fn complete(state: &AppState, provider: &ProviderRow, body: &Value) -> Result<Result<Value, u16>, String> {
     let address = provider.address().map_err(|_| "The chat provider has no address Mycelium can ask.".to_string())?;
     let request = provider.authorised(state.http.post(format!("{address}/chat/completions")).timeout(REQUEST_TIMEOUT).json(body)).map_err(|_| "The chat provider could not be asked.".to_string())?;
-    let Ok(response) = request.send().await else {
+    let Ok(response) = crate::traces::send(request).await else {
         return Err("The chat provider could not be reached. Ask the person to check it is running.".to_string());
     };
     let status = response.status();

@@ -112,8 +112,7 @@ async fn token_request(state: &AppState, endpoint: &str, client: &ClientCredenti
         request = request.basic_auth(&client.id, Some(secret));
     }
 
-    let response = request
-        .send()
+    let response = crate::traces::send(request)
         .await
         .map_err(|_| "it could not be reached".to_string())?;
     let status = response.status();
@@ -135,7 +134,7 @@ pub async fn refresh(state: &AppState, oauth: &Value, refresh_token: &str) -> Re
 }
 
 async fn get_json(state: &AppState, url: &str) -> Option<Value> {
-    let response = state.http.get(url).timeout(DISCOVERY_TIMEOUT).header("accept", "application/json").send().await.ok()?;
+    let response = crate::traces::send(state.http.get(url).timeout(DISCOVERY_TIMEOUT).header("accept", "application/json")).await.ok()?;
 
     if !response.status().is_success() {
         return None;
@@ -258,7 +257,7 @@ async fn authorisation_server_metadata(state: &AppState, issuer: &str) -> Option
 
 pub(crate) async fn discover(state: &AppState, mcp_url: &url::Url) -> Result<Discovered, &'static str> {
     let initialize = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "mycelium", "version": "1"}}});
-    let response = state.http.post(mcp_url.as_str()).timeout(DISCOVERY_TIMEOUT).header("accept", "application/json, text/event-stream").json(&initialize).send().await.ok();
+    let response = crate::traces::send(state.http.post(mcp_url.as_str()).timeout(DISCOVERY_TIMEOUT).header("accept", "application/json, text/event-stream").json(&initialize)).await.ok();
     let rejected = response.as_ref().is_some_and(|response| response.status() == StatusCode::UNAUTHORIZED);
     let challenge = response.as_ref().and_then(|response| challenge_of(response.headers())).unwrap_or_default();
     let mut root = mcp_url.clone();
@@ -353,7 +352,7 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Json(request):
         (None, false, None) => return Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "client_id_required", format!("Enter the client ID from {host}"))),
         (None, false, Some(registration_endpoint)) => {
             let registration = json!({"client_name": "Mycelium", "redirect_uris": [redirect], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"]});
-            let registered = state.http.post(registration_endpoint).timeout(DISCOVERY_TIMEOUT).json(&registration).send().await.map_err(|_| unsupported())?;
+            let registered = crate::traces::send(state.http.post(registration_endpoint).timeout(DISCOVERY_TIMEOUT).json(&registration)).await.map_err(|_| unsupported())?;
 
             if !registered.status().is_success() {
                 return Err(unsupported());

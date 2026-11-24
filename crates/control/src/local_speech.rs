@@ -163,7 +163,7 @@ fn track(dir: &Path, attempt: Uuid, update: impl FnOnce(&mut Download)) -> Resul
 
 async fn fetch_model(state: &AppState, model_id: &str, dir: &Path, partial: &Path, attempt: Uuid) -> Result<(), String> {
     let hub = &state.config.huggingface_url;
-    let listing = state.http.get(format!("{hub}/api/models/{model_id}?blobs=true")).header("user-agent", "mycelium").timeout(LISTING_TIMEOUT).send().await.map_err(|_| unreachable())?;
+    let listing = crate::traces::send(state.http.get(format!("{hub}/api/models/{model_id}?blobs=true")).header("user-agent", "mycelium").timeout(LISTING_TIMEOUT)).await.map_err(|_| unreachable())?;
 
     if listing.status() == reqwest::StatusCode::NOT_FOUND || listing.status() == reqwest::StatusCode::UNAUTHORIZED {
         return Err(not_found(model_id));
@@ -189,7 +189,7 @@ async fn fetch_model(state: &AppState, model_id: &str, dir: &Path, partial: &Pat
     tokio::fs::create_dir_all(partial).await.map_err(|error| format!("The server could not save the model: {error}."))?;
 
     for (name, _) in &files {
-        let mut response = state.http.get(format!("{hub}/{model_id}/resolve/main/{name}")).header("user-agent", "mycelium").timeout(FILE_TIMEOUT).send().await.map_err(|_| unreachable())?;
+        let mut response = crate::traces::send(state.http.get(format!("{hub}/{model_id}/resolve/main/{name}")).header("user-agent", "mycelium").timeout(FILE_TIMEOUT)).await.map_err(|_| unreachable())?;
 
         if !response.status().is_success() {
             return Err(format!("Hugging Face would not send {name} of {model_id}. Try again in a moment."));
@@ -306,7 +306,7 @@ pub async fn transcribe(state: &AppState, model_id: &str, audio: Vec<u8>) -> Api
         return Err(ApiError::conflict("local_speech_unavailable", "Local speech to text needs the speech runner beside the server. Set MYCELIUM_LOCAL_SPEECH_URL, or choose a provider in Settings, Voice."));
     };
     let folder = model_id.replace('/', "--");
-    let sent = state.http.post(format!("{runner}/transcribe")).query(&[("model", folder.as_str())]).header("content-type", "audio/wav").timeout(TRANSCRIPTION_TIMEOUT).body(audio).send().await;
+    let sent = crate::traces::send(state.http.post(format!("{runner}/transcribe")).query(&[("model", folder.as_str())]).header("content-type", "audio/wav").timeout(TRANSCRIPTION_TIMEOUT).body(audio)).await;
     let Ok(response) = sent else {
         return Err(runner_failed());
     };

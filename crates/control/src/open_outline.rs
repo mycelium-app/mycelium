@@ -47,7 +47,7 @@ pub async fn open(state: &AppState, owner: Uuid, conversation_id: Uuid, group: O
         return Ok(Err(format!("{} does not offer API access.", server.name)));
     };
     let credential = bearer(state, server).await?.unwrap_or_default();
-    let looked_up = state.http.post(format!("{base}documents.info")).timeout(LOOKUP_TIMEOUT).bearer_auth(credential).json(&json!({"id": document_id(document)})).send().await;
+    let looked_up = crate::traces::send(state.http.post(format!("{base}documents.info")).timeout(LOOKUP_TIMEOUT).bearer_auth(credential).json(&json!({"id": document_id(document)}))).await;
     let response = match looked_up {
         Ok(response) if response.status().is_success() => response,
         Ok(_) => return Ok(Err(format!("{} has no document {document}. Give a document's id, urlId or address.", server.name))),

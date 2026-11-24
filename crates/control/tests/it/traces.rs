@@ -113,3 +113,27 @@ async fn traces_older_than_two_days_are_swept() {
 
     assert_eq!(left, ["GET /fresh"]);
 }
+
+#[test]
+fn every_outside_call_goes_through_the_traced_sender_on_the_shared_client() {
+    fn sources(folder: &std::path::Path, found: &mut Vec<(String, String)>) {
+        for entry in std::fs::read_dir(folder).unwrap().map(Result::unwrap) {
+            let path = entry.path();
+
+            if path.is_dir() {
+                sources(&path, found);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                found.push((path.display().to_string(), std::fs::read_to_string(&path).unwrap()));
+            }
+        }
+    }
+
+    let mut found = Vec::new();
+    sources(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut found);
+    let untraced: Vec<&String> = found.iter().filter(|(path, text)| !path.ends_with("src/traces.rs") && text.contains(".send()")).map(|(path, _)| path).collect();
+    let own_clients: Vec<&String> = found.iter().filter(|(path, text)| !path.ends_with("src/outbound.rs") && (text.contains("reqwest::Client::new") || text.contains("reqwest::Client::builder"))).map(|(path, _)| path).collect();
+
+    assert!(found.len() > 100, "{}", found.len());
+    assert!(untraced.is_empty(), "send outside calls with crate::traces::send: {untraced:?}");
+    assert!(own_clients.is_empty(), "use state.http or crate::outbound::client(): {own_clients:?}");
+}

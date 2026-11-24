@@ -147,7 +147,7 @@ async fn usd_per_unit(state: &AppState, currency: &str, today: NaiveDate) -> Opt
 
 async fn fetch_rate(state: &AppState, currency: &str) -> Option<f64> {
     let url = format!("{}/v1/latest?base={currency}&symbols=USD", state.config.exchange_rates_url.trim_end_matches('/'));
-    let response = state.http.get(url).timeout(RATE_TIMEOUT).send().await.ok()?;
+    let response = crate::traces::send(state.http.get(url).timeout(RATE_TIMEOUT)).await.ok()?;
 
     if !response.status().is_success() {
         return None;

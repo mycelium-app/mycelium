@@ -125,7 +125,7 @@ async fn day_payload(state: &AppState, puzzle: &str, day: NaiveDate) -> ApiResul
     }
 
     let address = format!("{}/svc/{puzzle}/v2/{day}.json", state.config.nyt_games_url.trim_end_matches('/'));
-    let response = state.http.get(&address).send().await.map_err(|cause| {
+    let response = crate::traces::send(state.http.get(&address)).await.map_err(|cause| {
         tracing::warn!("could not fetch the {puzzle} puzzle for {day}: {cause}");
 
         unavailable()

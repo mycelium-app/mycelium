@@ -110,7 +110,7 @@ async fn search(http: &reqwest::Client, credentials: &Credentials, query: &str, 
     };
     let host = host_of(&credentials.address);
     let unreachable = || Failure::Unreachable(format!("Mycelium could not reach {host}. Check the address and that {product} is running."));
-    let response = request.timeout(TIMEOUT).send().await.map_err(|_| unreachable())?;
+    let response = crate::traces::send(request.timeout(TIMEOUT)).await.map_err(|_| unreachable())?;
     let status = response.status();
 
     match (provider, status.as_u16()) {

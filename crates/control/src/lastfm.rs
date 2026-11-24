@@ -92,7 +92,7 @@ async fn send(http: &reqwest::Client, credentials: &Credentials, method: &str, e
         false => http.get(&credentials.address).query(&parameters),
     };
     let unreachable = || ("Mycelium could not reach Last.fm. Try again in a moment.".to_string(), 0);
-    let response = builder.timeout(TIMEOUT).send().await.map_err(|_| unreachable())?;
+    let response = crate::traces::send(builder.timeout(TIMEOUT)).await.map_err(|_| unreachable())?;
     let body: Value = response.json().await.map_err(|_| unreachable())?;
 
     match body["error"].as_i64() {

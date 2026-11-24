@@ -86,7 +86,6 @@ pub async fn panel_data(State(state): State<AppState>, user: AuthUser, Path((id,
     let end = chrono::Utc::now().timestamp();
     let start = end - seconds;
     let step = (seconds / POINTS_PER_SERIES).max(15);
-    let client = reqwest::Client::builder().timeout(QUERY_TIMEOUT).build().map_err(ApiError::internal)?;
     let mut series = Vec::new();
 
     for target in panel["targets"].as_array().into_iter().flatten() {
@@ -94,10 +93,7 @@ pub async fn panel_data(State(state): State<AppState>, user: AuthUser, Path((id,
             continue;
         };
         let url = format!("{}/api/v1/query_range", base.trim_end_matches('/'));
-        let response = client
-            .get(url)
-            .query(&[("query", expression.to_string()), ("start", start.to_string()), ("end", end.to_string()), ("step", step.to_string())])
-            .send()
+        let response = crate::traces::send(state.http.get(url).timeout(QUERY_TIMEOUT).query(&[("query", expression.to_string()), ("start", start.to_string()), ("end", end.to_string()), ("step", step.to_string())]))
             .await
             .map_err(|_| ApiError::new(StatusCode::BAD_GATEWAY, "datasource_unreachable", "The data source did not answer. Check that Prometheus is running, then refresh."))?;
         let body: Value = response.json().await.map_err(|_| ApiError::new(StatusCode::BAD_GATEWAY, "datasource_invalid", "The data source answered with something that is not Prometheus JSON."))?;

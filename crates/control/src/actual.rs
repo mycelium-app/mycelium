@@ -73,7 +73,7 @@ fn request(http: &reqwest::Client, credentials: &Credentials, method: reqwest::M
 }
 
 async fn send(builder: reqwest::RequestBuilder) -> Result<Value, String> {
-    let response = builder.send().await.map_err(|_| "Mycelium could not reach the Actual HTTP API. Check its address and that it is running, then try again.".to_string())?;
+    let response = crate::traces::send(builder).await.map_err(|_| "Mycelium could not reach the Actual HTTP API. Check its address and that it is running, then try again.".to_string())?;
     let status = response.status();
     let body: Value = response.json().await.unwrap_or(Value::Null);
 

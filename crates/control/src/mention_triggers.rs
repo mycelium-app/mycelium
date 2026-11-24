@@ -208,7 +208,7 @@ async fn listen_discord(state: &AppState, row: &ServerRow) -> Result<(), String>
 
 async fn discord_gateway(http: &reqwest::Client, credentials: &Credentials) -> Result<String, String> {
     let base = credentials.address.trim_end_matches('/');
-    let response = http.get(format!("{base}/gateway/bot")).header("authorization", format!("Bot {}", credentials.secret)).send().await.map_err(|_| "Mycelium could not reach Discord.".to_string())?;
+    let response = crate::traces::send(http.get(format!("{base}/gateway/bot")).header("authorization", format!("Bot {}", credentials.secret))).await.map_err(|_| "Mycelium could not reach Discord.".to_string())?;
     let body: Value = response.json().await.map_err(|_| "Discord did not say where its gateway is.".to_string())?;
 
     body["url"].as_str().map(|url| url.trim_end_matches('/').to_string()).ok_or_else(|| "Discord did not say where its gateway is.".to_string())

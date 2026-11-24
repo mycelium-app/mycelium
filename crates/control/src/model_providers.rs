@@ -324,7 +324,7 @@ impl ProviderRow {
 
         for listing in self.model_listings()? {
             let request = self.authorised(http.get(listing).timeout(LISTING_TIMEOUT))?;
-            let Ok(response) = request.send().await else {
+            let Ok(response) = crate::traces::send(request).await else {
                 return Ok(Err(ProviderError::Unreachable));
             };
             let status = response.status();
@@ -419,7 +419,7 @@ impl ProviderRow {
             ModelProviderKind::Anthropic => "messages",
         };
         let request = self.authorised(http.post(format!("{}/{path}", self.address()?)).timeout(REPLY_TIMEOUT).json(&body))?;
-        let Ok(response) = request.send().await else {
+        let Ok(response) = crate::traces::send(request).await else {
             return Ok(Err(ProviderError::Unreachable));
         };
         let status = response.status();
