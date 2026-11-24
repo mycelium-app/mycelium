@@ -179,6 +179,32 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
                     },
                 )
             }
+
+            val ungrouped = state.projects.values.filter { it.groupId == null && it.archivedAt == null }.sortedBy { it.name }
+
+            if (ungrouped.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                    Label("Projects not in a group", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+
+                    Table(
+                        listOf(Col("Project", 140.dp, weight = 1f), Col("Checkouts", 160.dp, preferred = 260.dp), ActionColumn),
+                        ungrouped.size,
+                        { row, column ->
+                            val project = ungrouped[row]
+
+                            when (column) {
+                                0 -> TableCell.Text(project.name)
+                                1 -> TableCell.Text(project.checkouts.map { it.nodeId }.ifEmpty { listOf(project.nodeId) }.distinct().mapNotNull { state.nodes[it]?.name }.joinToString(", "), color = colors.textMuted)
+                                else -> TableCell.Slot { Icon(MyIcon.ChevronRight, colors.textFaint, Tokens.Size.IconSm) }
+                            }
+                        },
+                        onRow = { row -> store.openScreen("project/${ungrouped[row].id}") },
+                        rowDescription = { row -> "Open ${ungrouped[row].name}" },
+                    )
+
+                    Label("Open a project to choose its group.", style = Tokens.Type.Meta, color = colors.textMuted)
+                }
+            }
         } else {
             var tab by remember(open.id) { mutableStateOf(startTab?.takeIf { it in GroupTabs } ?: GroupTabs.first()) }
 
@@ -233,10 +259,10 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
             if (tab == GroupTabs[2]) {
                 Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                     Label("Projects in ${open.name}", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                    Label("Set a project's group from Projects.", style = Tokens.Type.Meta, color = colors.textMuted)
+                    Label("Select a project for its checkouts, group and test command.", style = Tokens.Type.Meta, color = colors.textMuted)
 
                     for (project in state.projects.values.filter { it.groupId == open.id }.sortedBy { it.name }) {
-                        Row(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().heightIn(min = rowHeight()).pressable({ store.openScreen("project/${project.id}") }, role = Role.Button, shape = BlockShape, description = "Open ${project.name}").padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
                             Label(project.name, Modifier.weight(1f), maxLines = 1)
                             Label(state.nodes[project.nodeId]?.name.orEmpty(), color = colors.textMuted, maxLines = 1)
                         }
@@ -344,3 +370,4 @@ private fun GroupDialog(title: String, nameLabel: String, name: String, onName: 
         }
     }
 }
+

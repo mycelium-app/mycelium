@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -147,9 +148,9 @@ class AgentsAndPriceTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { AccountsSettings(store) } }
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for sam@example.com").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("More for sam@example.com").performClick()
-        rule.onNodeWithText("Set your price").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("sam@example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onAllNodesWithText("sam@example.com").onFirst().performClick()
+        rule.onNodeWithContentDescription("Change the price of sam@example.com").performClick()
         rule.onNodeWithContentDescription("Amount").performTextInput("1.800,00")
         rule.onNodeWithText("Save").performClick()
 
@@ -163,9 +164,9 @@ class AgentsAndPriceTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { AccountsSettings(store) } }
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for sam@example.com").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("More for sam@example.com").performClick()
-        rule.onNodeWithText("Set your price").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("sam@example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onAllNodesWithText("sam@example.com").onFirst().performClick()
+        rule.onNodeWithContentDescription("Change the price of sam@example.com").performClick()
         rule.onNodeWithContentDescription("Amount").performTextInput("1,800")
         rule.onNodeWithText("Yearly").performClick()
         rule.onNodeWithText("Save").performClick()
@@ -179,9 +180,9 @@ class AgentsAndPriceTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { AccountsSettings(store) } }
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for sam@example.com").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("More for sam@example.com").performClick()
-        rule.onNodeWithText("Set your price").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("sam@example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onAllNodesWithText("sam@example.com").onFirst().performClick()
+        rule.onNodeWithContentDescription("Change the price of sam@example.com").performClick()
         rule.onNodeWithText("Use the list price").performClick()
 
         waitFor("PUT /api/v1/account-prices")

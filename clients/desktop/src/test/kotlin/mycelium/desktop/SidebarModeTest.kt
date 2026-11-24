@@ -47,27 +47,6 @@ class SidebarModeTest {
     val scopes = TestScopes()
 
     @Test
-    fun nodesProjectsAndIssuesShowOnlyAlongsideWorkspaces() {
-        val engine = MockEngine { request ->
-            val body = if (request.url.encodedPath.endsWith("/nodes") || request.url.encodedPath.endsWith("/conversations")) "[]" else "{}"
-
-            respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
-        }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
-        runBlocking { store.refresh() }
-        rule.setContent { MyceliumTheme(true) { Shell(store, ModePlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}) } }
-
-        rule.onNodeWithContentDescription("Projects").assertExists()
-        rule.onAllNodesWithContentDescription("Nodes").onFirst().assertExists()
-        rule.onNodeWithText("Chats").performClick()
-        rule.onAllNodesWithContentDescription("Projects").assertCountEquals(0)
-        rule.onAllNodesWithContentDescription("Issues").assertCountEquals(0)
-        rule.onAllNodesWithContentDescription("Nodes").assertCountEquals(0)
-        rule.onNodeWithText("Workspaces").performClick()
-        rule.onNodeWithContentDescription("Issues").assertExists()
-    }
-
-    @Test
     fun switchingModesReopensWhatWasLastOpenInEach() {
         val conversation = """{"id":"w1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Fix the build","status":"review",
 "acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}"""

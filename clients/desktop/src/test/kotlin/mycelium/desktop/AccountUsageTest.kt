@@ -4,6 +4,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithText
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -68,6 +70,9 @@ class AccountUsageTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { CompositionLocalProvider(LocalPlatform provides ZonedPlatform) { AccountsSettings(store) } } }
 
+        rule.onNodeWithText("82% · 31%").assertExists()
+        rule.onAllNodesWithText("sam@example.com").onFirst().performClick()
+
         rule.onNodeWithContentDescription("5-hour window 82% used").assertExists()
         rule.onNodeWithText("82% used").assertExists()
         rule.onNodeWithText("At this rate, runs out about 1 Jan 19:40, resets 1 Jan 23:30").assertExists()
@@ -80,6 +85,10 @@ class AccountUsageTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { AccountsSettings(store) } }
 
-        assertEquals(2, rule.onAllNodesWithText("Usage unknown").fetchSemanticsNodes().size)
+        assertEquals(2, rule.onAllNodesWithText("Unknown").fetchSemanticsNodes().size)
+
+        rule.onNodeWithText("work@acme.example").performClick()
+
+        rule.onNodeWithText("Usage unknown").assertExists()
     }
 }

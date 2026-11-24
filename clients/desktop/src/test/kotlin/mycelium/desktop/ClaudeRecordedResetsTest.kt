@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import io.ktor.client.engine.mock.respond
@@ -83,8 +84,8 @@ class ClaudeRecordedResetsTest {
 
     private fun openAddReset() {
         rule.setContent { MyceliumTheme(true) { AccountsSettings(store()) } }
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for sam@example.com").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("More for sam@example.com").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("sam@example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onAllNodesWithText("sam@example.com").onFirst().performClick()
         rule.onNodeWithText("Add a reset").performClick()
     }
 
@@ -136,6 +137,8 @@ class ClaudeRecordedResetsTest {
     fun theProvidersPageListsRecordedResetsAndRemoveDeletesOne() {
         val store = store()
         rule.setContent { MyceliumTheme(true) { Box(Modifier.background(MyTheme.colors.bgPanel)) { AccountsSettings(store) } } }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("sam@example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onAllNodesWithText("sam@example.com").onFirst().performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Limit resets").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Expires 13 Nov").assertIsDisplayed()
@@ -148,10 +151,10 @@ class ClaudeRecordedResetsTest {
     @Test
     fun onlyClaudeAccountsOfferToAddAReset() {
         rule.setContent { MyceliumTheme(true) { AccountsSettings(store()) } }
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for alex@example.org").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("More for alex@example.org").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("alex@example.org").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("alex@example.org").performClick()
 
-        rule.onNodeWithText("Set your price").assertIsDisplayed()
+        rule.onNodeWithText("Change price").assertIsDisplayed()
         rule.onAllNodesWithText("Add a reset").assertCountEquals(0)
     }
 

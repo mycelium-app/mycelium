@@ -52,6 +52,7 @@ class ProjectsAndIssuesRedirectTest {
             val body = when {
                 path.endsWith("/nodes") -> AtlasJson
                 path.endsWith("/conversations") -> "[]"
+                path.endsWith("/projects") -> """[{"id":"p1","node_id":"n1","name":"ledger","path":"/work/ledger","created_at":"2026-10-22T10:00:00Z"}]"""
                 else -> "{}"
             }
 
@@ -82,6 +83,16 @@ class ProjectsAndIssuesRedirectTest {
     @Test
     fun theOldIssuesAddressOpensHistory() {
         opensHistory("issues")
+    }
+
+    @Test
+    fun aProjectAddressOpensThatProjectsPage() {
+        val store = showShell(Route.Inbox)
+
+        rule.runOnIdle { store.openScreen("project/p1") }
+        rule.waitForIdle()
+
+        rule.onNodeWithText("Test command").assertExists()
     }
 
     @Test

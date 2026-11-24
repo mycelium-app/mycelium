@@ -36,6 +36,7 @@ import mycelium.ui.SettingsSection
 import mycelium.ui.verticalScrollWithBar
 import org.junit.Rule
 import kotlin.test.Test
+import kotlinx.coroutines.launch
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -47,7 +48,7 @@ private const val WorkGroup = """{"id":"g2","name":"work","folders":[],"created_
 
 private const val HomelabGroup = """{"id":"g3","name":"homelab","folders":[],"created_at":"2026-10-22T10:00:00Z"}"""
 
-private const val GroupProjects = """[{"id":"p1","node_id":"n1","name":"mycelium","path":"/p/mycelium","group_id":"g1","created_at":"2026-10-22T10:00:00Z"}]"""
+private const val GroupProjects = """[{"id":"p1","node_id":"n1","name":"mycelium","path":"/p/mycelium","group_id":"g1","created_at":"2026-10-22T10:00:00Z"},{"id":"p2","node_id":"n1","name":"ledger","path":"/p/ledger","created_at":"2026-10-22T10:00:00Z"}]"""
 
 private const val GroupLayer = """{"layer":"g1","name":"slop","path":null,"text":"Use British English.","version":null}"""
 
@@ -102,10 +103,12 @@ class GroupsSettingsTest {
         return store
     }
 
-    private fun show(groups: String = "$SlopGroup,$WorkGroup") {
+    private fun show(groups: String = "$SlopGroup,$WorkGroup"): Store {
         val store = store(groups)
         rule.setContent { MyceliumTheme(true) { var open by remember { mutableStateOf<String?>(null) }; Box(Modifier.verticalScrollWithBar()) { GroupsSettings(store, open, { open = it }) } } }
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Groups").fetchSemanticsNodes().isNotEmpty() }
+
+        return store
     }
 
     private fun open(name: String) {
@@ -237,6 +240,37 @@ class GroupsSettingsTest {
         rule.onNodeWithText("mycelium").assertExists()
         assertEquals(0, rule.onAllNodesWithText("Remove from slop").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithContentDescription("More for project mycelium in slop").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun projectsNotInAGroupAreListedBelowTheGroupsAndOpenTheirPage() {
+        val store = show()
+        val opened = mutableListOf<String>()
+        val watching = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined).launch { store.screenRequests.collect { opened += it } }
+
+        rule.onNodeWithText("Projects not in a group").assertExists()
+        rule.onNodeWithText("Open a project to choose its group.").assertExists()
+        assertEquals(0, rule.onAllNodesWithContentDescription("Open mycelium").fetchSemanticsNodes().size)
+        rule.onNodeWithContentDescription("Open ledger").performClick()
+        rule.waitUntil(5_000) { opened.isNotEmpty() }
+        watching.cancel()
+
+        assertEquals(listOf("project/p2"), opened)
+    }
+
+    @Test
+    fun selectingAProjectInItsGroupOpensTheProjectPage() {
+        val store = show()
+        open("slop")
+        tab("Projects")
+        val opened = mutableListOf<String>()
+        val watching = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined).launch { store.screenRequests.collect { opened += it } }
+
+        rule.onNodeWithContentDescription("Open mycelium").performClick()
+        rule.waitUntil(5_000) { opened.isNotEmpty() }
+        watching.cancel()
+
+        assertEquals(listOf("project/p1"), opened)
     }
 
     @Test

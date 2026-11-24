@@ -133,6 +133,7 @@ import mycelium.state.groupChoiceOf
 import mycelium.state.groupScope
 import mycelium.state.hoursNotice
 import mycelium.state.hasSession
+import mycelium.state.sessionOpenOn
 import mycelium.state.hasWorkspace
 import mycelium.state.isLaptop
 import mycelium.state.readOnly
@@ -705,6 +706,7 @@ internal fun screenTarget(path: String): Pair<Route, SettingsSection?>? {
         "chat" -> argument?.let { Route.Chat(it) to null }
         "assistant" -> argument?.let { Route.Assistant(it) to null }
         "assistants" -> Route.Assistants to null
+        "project" -> argument?.let { Route.Project(it) to null }
         "inbox" -> Route.Inbox to null
         "new" -> Route.New to null
         "nodes" -> Route.Settings to SettingsSection.Nodes
@@ -1342,7 +1344,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                 MenuItem("Open in new window", onClick = { close(); platform.openChatWindow(row.id) }, leading = MyIcon.PopOut)
             }
 
-            if (row.hasSession) {
+            if (row.sessionOpenOn(node)) {
                 MenuItem("Close session", onClick = { close(); onCloseSession() }, leading = MyIcon.Stop)
             }
 
