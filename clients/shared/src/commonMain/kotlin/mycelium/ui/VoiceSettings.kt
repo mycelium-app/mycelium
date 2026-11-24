@@ -343,7 +343,7 @@ fun VoiceSettings(store: Store, platform: Platform?) {
                     if (openAiCompatible.isNotEmpty()) {
                         Row { MyButton({ changing = "text_to_speech" }, text = "Choose a model", description = "Choose a text-to-speech model from your providers", size = ButtonSize.Sm, muted = true) }
                     } else {
-                        Row { MyButton({ store.openScreen("settings/providers/$AddSpeechProviderAnchor") }, text = "Add a provider", icon = MyIcon.Plus, description = "Add a provider for text to speech", variant = ButtonVariant.Outline, size = ButtonSize.Sm) }
+                        Row { MyButton({ store.openScreen("settings/chat-models/$AddSpeechProviderAnchor") }, text = "Add a provider", icon = MyIcon.Plus, description = "Add a provider for text to speech", variant = ButtonVariant.Outline, size = ButtonSize.Sm) }
                     }
                 } else {
                     SettingRow("Model", narrow, {
@@ -415,7 +415,7 @@ fun VoiceSettings(store: Store, platform: Platform?) {
     uses.firstOrNull { it.id == changing }?.let { use ->
         SpeechModelDialog(store, use, openAiCompatible, local, { changing = null }) {
             changing = null
-            store.openScreen("settings/providers/$AddSpeechProviderAnchor")
+            store.openScreen("settings/chat-models/$AddSpeechProviderAnchor")
         }
     }
 }

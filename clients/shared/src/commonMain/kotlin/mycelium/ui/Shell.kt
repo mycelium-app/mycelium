@@ -696,7 +696,15 @@ internal fun screenTarget(path: String): Pair<Route, SettingsSection?>? {
     val argument = parts.getOrNull(1)
 
     return when (parts[0]) {
-        "settings" -> Route.Settings to argument?.let { key -> SettingsSection.entries.firstOrNull { settingsKey(it) == if (key == "privacy") "voice" else key } }
+        "settings" -> {
+            val key = when (argument) {
+                "privacy" -> "voice"
+                "providers" -> if (parts.getOrNull(2) in setOf(SpeechAnchor, AddSpeechProviderAnchor)) "chat-models" else "accounts"
+                else -> argument
+            }
+
+            Route.Settings to key?.let { SettingsSection.entries.firstOrNull { section -> settingsKey(section) == it } }
+        }
         "chat" -> argument?.let { Route.Chat(it) to null }
         "assistant" -> argument?.let { Route.Assistant(it) to null }
         "assistants" -> Route.Assistants to null
