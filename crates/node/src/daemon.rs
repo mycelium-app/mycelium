@@ -1,5 +1,6 @@
 use crate::acp::Command;
-use crate::agents::{account_env, account_homes, accounts_dir, detect_agents, find_account, pod_agents, login_command, login_state, new_account, resolve_program, sign_out};
+use crate::agents::{account_env, account_homes, accounts_dir, detect_agents, find_account, pod_agents, login_command, login_state, new_account, resolve_program, sign_out, update_command};
+use crate::login::run_streamed;
 use crate::usage::{CODEX_USAGE_ENDPOINT, USAGE_ENDPOINT, USAGE_MIN_AGE, UsageCache, VIBE_BILLING_ENDPOINT};
 use crate::instructions::deliver;
 use crate::config::{NodeConfig, agent_command, codex_command, agent_env, config_path, with_developer_instructions};
@@ -97,6 +98,7 @@ pub struct Daemon {
     sessions: Mutex<HashMap<Uuid, SessionHandle>>,
     launched_secrets: Mutex<HashMap<Uuid, Vec<(String, String)>>>,
     logins: LoginManager,
+    agent_updates: crate::login::Running,
     usage: Arc<UsageCache>,
     terminals: TerminalManager,
     environments: EnvironmentManager,
@@ -128,6 +130,7 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
 
     let daemon = Arc::new(Daemon {
         logins: LoginManager::new(out.clone(), login_report),
+        agent_updates: Default::default(),
         usage,
         terminals: TerminalManager::new(out.clone(), user_shell(), Some(&config.state_dir.join("tmux"))),
         environments: EnvironmentManager::new(out.clone(), std::env::var_os("PATH").unwrap_or_default()),
@@ -360,6 +363,7 @@ impl Daemon {
             ControlToNode::StopLogin { login_id } => self.logins.stop(login_id),
             ControlToNode::RemoveLogin { agent, account } => self.remove_login(agent, &account),
             ControlToNode::SignOutLogin { agent, account } => self.sign_out_login(agent, &account),
+            ControlToNode::UpdateAgent { update_id, agent, version } => self.update_agent(update_id, agent, &version),
             ControlToNode::StartTerminal { terminal_id, conversation_id, cwd, cols, rows, command } => self.terminals.start(terminal_id, conversation_id, &cwd, cols, rows, command.as_deref()),
             ControlToNode::TerminalInput { terminal_id, data } => self.terminals.input(terminal_id, &data),
             ControlToNode::ResizeTerminal { terminal_id, cols, rows } => self.terminals.resize(terminal_id, cols, rows),
@@ -661,6 +665,53 @@ impl Daemon {
 
         if let Err(error) = std::fs::remove_dir_all(&account.dir) {
             tracing::warn!("could not remove the {} login {label}: {error}", agent.as_str());
+        }
+    }
+
+    fn update_agent(&self, update_id: Uuid, agent: AgentId, version: &str) {
+        let out = self.out.clone();
+        let refuse = |message: String| {
+            let _ = out.send(NodeToControl::AgentUpdateOutput { update_id, data: format!("{message}\r\n") });
+            let _ = out.send(NodeToControl::AgentUpdateFinished { update_id, ok: false });
+        };
+
+        if self.pods.is_some() {
+            return refuse(format!("{} runs in this node's agent image, so it updates with the image.", agent.display_name()));
+        }
+
+        let installed = (self.options.agent_commands)(agent).first().and_then(|program| resolve_program(program));
+        let Some(installed) = installed else {
+            return refuse(format!("{} is not installed on this node.", agent.display_name()));
+        };
+        let command = match update_command(agent, version, &installed) {
+            Ok(command) => command,
+            Err(message) => return refuse(message),
+        };
+
+        let output = self.out.clone();
+        let finished = self.out.clone();
+        let commands = self.options.agent_commands.clone();
+        let runtime = tokio::runtime::Handle::current();
+        let started = run_streamed(
+            &self.agent_updates,
+            update_id,
+            &command,
+            &[],
+            move |data| {
+                let _ = output.send(NodeToControl::AgentUpdateOutput { update_id, data });
+            },
+            move |ok| {
+                let _ = finished.send(NodeToControl::AgentUpdateFinished { update_id, ok });
+
+                runtime.spawn(async move {
+                    let agents = detect_agents(|agent| commands(agent)).await;
+                    let _ = finished.send(NodeToControl::Agents { agents });
+                });
+            },
+        );
+
+        if let Err(error) = started {
+            refuse(format!("{error:#}"));
         }
     }
 

@@ -3,7 +3,11 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
-use crate::common::{Server, eventually, serve};
+use crate::common::{Server, eventually, next_matching, serve};
+use mycelium_proto::conversation::{AgentId, AgentInfo};
+use mycelium_proto::link::{ControlToNode, NodeToControl};
+use mycelium_proto::stream::StreamMessage;
+use uuid::Uuid;
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -125,4 +129,50 @@ async fn a_newer_release_published_later_is_streamed_to_clients() {
         .await;
 
     assert_eq!(node.update_available.as_deref(), Some("v0.2.0"));
+}
+
+#[tokio::test]
+async fn updating_an_agent_sends_the_offered_version_to_its_node_and_streams_the_progress_to_its_owner() {
+    let (_, base) = publisher("v0.1.16", "2.2.0").await;
+    let server = server_checking(&base, Duration::from_secs(3600)).await;
+    let mut link = server.online_node("atlas").await;
+    eventually("the agent update", || async { first_node(&server).await["agents"][0]["update_available"].is_string().then_some(()) }).await;
+    let mut stream = server.user.stream().await;
+
+    let (status, started) = server.user.json(server.user.post(&format!("/api/v1/nodes/{}/agents/claude/update", link.id))).await;
+    assert_eq!(status, 200);
+    let update_id: Uuid = started["update_id"].as_str().unwrap().parse().unwrap();
+
+    let version = next_matching(&mut link, |message| match message {
+        ControlToNode::UpdateAgent { update_id: sent, agent: AgentId::Claude, version } if *sent == update_id => Some(version.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(version, "2.2.0");
+
+    link.send(NodeToControl::AgentUpdateOutput { update_id, data: "added 1 package".into() }).await;
+    link.send(NodeToControl::AgentUpdateFinished { update_id, ok: true }).await;
+    link.send(NodeToControl::Agents { agents: vec![AgentInfo { agent: AgentId::Claude, version: Some("2.2.0".into()), available: true, update_available: None }] }).await;
+
+    let mut streamed = Vec::new();
+    while streamed.len() < 2 {
+        match stream.next().await {
+            StreamMessage::AgentUpdateOutput { update_id: id, data } if id == update_id => streamed.push(data),
+            StreamMessage::AgentUpdateFinished { update_id: id, ok } if id == update_id => streamed.push(format!("finished {ok}")),
+            _ => {}
+        }
+    }
+    assert_eq!(streamed, ["added 1 package", "finished true"]);
+    eventually("the updated version", || async { first_node(&server).await["agents"][0]["update_available"].is_null().then_some(()) }).await;
+}
+
+#[tokio::test]
+async fn an_agent_that_is_already_up_to_date_is_not_updated() {
+    let (_, base) = publisher("v0.1.16", "2.1.308").await;
+    let server = server_checking(&base, Duration::from_secs(3600)).await;
+    let link = server.online_node("atlas").await;
+
+    let (status, refused) = server.user.json(server.user.post(&format!("/api/v1/nodes/{}/agents/claude/update", link.id))).await;
+
+    assert_eq!((status, refused["error"].as_str()), (409, Some("agent_current")));
 }

@@ -26,6 +26,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import mycelium.Platform
 import mycelium.api.NodeSummary
+import mycelium.state.ColumnAlign
 import mycelium.state.Store
 import mycelium.state.agentName
 import mycelium.state.agentVersion
@@ -99,6 +100,7 @@ fun NodesSettings(store: Store, platform: Platform, onOpenNode: (String) -> Unit
     val loadFailures by store.loadFailures.collectAsState()
     val load = { store.load(NodesList) { store.refreshNodes() } }
     var joinOpen by remember { mutableStateOf(false) }
+    var updating by remember { mutableStateOf<NodeSummary?>(null) }
     val nodes = state.nodes.values.sortedWith(compareByDescending<NodeSummary> { it.online }.thenBy { it.name })
 
     LaunchedEffect(Unit) {
@@ -124,7 +126,7 @@ fun NodesSettings(store: Store, platform: Platform, onOpenNode: (String) -> Unit
             Label("No nodes. Choose Join a node to connect the first one.", color = colors.textMuted)
         } else {
             Table(
-                listOf(Col("Node", 120.dp, weight = 1f), Col("State", 72.dp), Col("Mycelium", 88.dp)) + HarnessAgents.map { Col(agentName(it), 104.dp) },
+                listOf(Col("Node", 120.dp, weight = 1f), Col("State", 72.dp), Col("Mycelium", 88.dp)) + HarnessAgents.map { Col(agentName(it), 104.dp) } + Col("", 120.dp, align = ColumnAlign.End),
                 nodes.size,
                 { row, column ->
                     val node = nodes[row]
@@ -149,6 +151,14 @@ fun NodesSettings(store: Store, platform: Platform, onOpenNode: (String) -> Unit
 
                         2 -> versionCell(node.version, node.updateAvailable)
 
+                        3 + HarnessAgents.size -> if (node.online && node.agents.any { it.available && it.updateAvailable != null }) {
+                            TableCell.Slot("Update agents") {
+                                MyButton({ updating = node }, text = "Update agents", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Update the agents on ${node.name}")
+                            }
+                        } else {
+                            TableCell.Text("")
+                        }
+
                         else -> {
                             val agent = node.agents.firstOrNull { it.agent == HarnessAgents[column - 3] && it.available }
 
@@ -166,6 +176,60 @@ fun NodesSettings(store: Store, platform: Platform, onOpenNode: (String) -> Unit
         }
 
         Label("Sign-ins live in Accounts. Select a node for its agents, resources and ports.", style = Tokens.Type.Meta, color = colors.textMuted)
+    }
+
+    updating?.let { node -> AgentUpdatesDialog(store, node, onClose = { updating = null }) }
+}
+
+@Composable
+private fun AgentUpdatesDialog(store: Store, node: NodeSummary, onClose: () -> Unit) {
+    val colors = MyTheme.colors
+    val state by store.state.collectAsState()
+    val updates = remember(node.id) { node.agents.filter { it.available && it.updateAvailable != null } }
+    var started by remember(node.id) { mutableStateOf(emptyMap<String, String>()) }
+    var refused by remember(node.id) { mutableStateOf(emptyMap<String, String>()) }
+
+    LaunchedEffect(node.id) {
+        for (agent in updates) {
+            try {
+                started = started + (agent.agent to store.api.updateAgent(node.id, agent.agent).updateId)
+            } catch (failure: Exception) {
+                refused = refused + (agent.agent to (failure.message ?: "The update could not start."))
+            }
+        }
+    }
+
+    Dialog(onDismiss = onClose) {
+        Label("Update agents on ${node.name}", Modifier.semantics { heading() }, Tokens.Type.Title)
+
+        for (agent in updates) {
+            val updateId = started[agent.agent]
+            val finished = updateId?.let { state.finishedAgentUpdates[it] }
+            val output = updateId?.let { state.agentUpdateOutput[it] }.orEmpty()
+            val lastLine = withoutTerminalCodes(output).lines().lastOrNull { it.isNotBlank() }?.trim()
+
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                    Label("${agentName(agent.agent)} ${agentVersion(agent.version)} to ${agent.updateAvailable}", Modifier.weight(1f))
+
+                    when {
+                        refused[agent.agent] != null || finished == false -> StatusMark("Failed", Tone.Failed, MyIcon.Failed)
+                        finished == true -> StatusMark("Updated", Tone.Done, MyIcon.Check)
+                        else -> StatusMark("Updating", Tone.Working, MyIcon.Working)
+                    }
+                }
+
+                val detail = refused[agent.agent] ?: lastLine
+
+                if (detail != null && finished != true) {
+                    Label(detail, style = Tokens.Type.Meta, color = if (finished == false || refused[agent.agent] != null) colors.statusFailed else colors.textMuted)
+                }
+            }
+        }
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            MyButton(onClose, text = "Close", muted = true)
+        }
     }
 }
 

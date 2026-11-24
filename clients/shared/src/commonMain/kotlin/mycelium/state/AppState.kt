@@ -97,6 +97,8 @@ data class AppState(
     val walkthroughs: Map<String, Walkthrough> = emptyMap(),
     val loginOutput: Map<String, String> = emptyMap(),
     val finishedLogins: Map<String, Boolean> = emptyMap(),
+    val agentUpdateOutput: Map<String, String> = emptyMap(),
+    val finishedAgentUpdates: Map<String, Boolean> = emptyMap(),
     val terminalOutput: Map<String, TerminalFeed> = emptyMap(),
     val exitedTerminals: Set<String> = emptySet(),
     val terminalExitCodes: Map<String, Int> = emptyMap(),
@@ -258,6 +260,12 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 
     is StreamMessage.LoginFinished ->
         state.copy(finishedLogins = state.finishedLogins + (message.loginId to message.ok))
+
+    is StreamMessage.AgentUpdateOutput ->
+        state.copy(agentUpdateOutput = state.agentUpdateOutput + (message.updateId to state.agentUpdateOutput[message.updateId].orEmpty() + message.data))
+
+    is StreamMessage.AgentUpdateFinished ->
+        state.copy(finishedAgentUpdates = state.finishedAgentUpdates + (message.updateId to message.ok))
 
     is StreamMessage.TerminalOutput ->
         state.copy(terminalOutput = state.terminalOutput + (message.terminalId to (state.terminalOutput[message.terminalId] ?: TerminalFeed()).with(message.data, message.offset)))

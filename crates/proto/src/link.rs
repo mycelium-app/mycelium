@@ -92,6 +92,17 @@ pub enum NodeToControl {
         login_id: Uuid,
         ok: bool,
     },
+    AgentUpdateOutput {
+        update_id: Uuid,
+        data: String,
+    },
+    AgentUpdateFinished {
+        update_id: Uuid,
+        ok: bool,
+    },
+    Agents {
+        agents: Vec<AgentInfo>,
+    },
     TerminalOutput {
         terminal_id: Uuid,
         data: String,
@@ -559,6 +570,11 @@ pub enum ControlToNode {
     SignOutLogin {
         agent: AgentId,
         account: String,
+    },
+    UpdateAgent {
+        update_id: Uuid,
+        agent: AgentId,
+        version: String,
     },
     StartTerminal {
         terminal_id: Uuid,

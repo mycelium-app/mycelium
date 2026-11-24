@@ -235,6 +235,26 @@ pub fn vibe_key(dir: &Path, default: bool) -> Option<String> {
     stored.or_else(|| default.then(|| std::env::var("MISTRAL_API_KEY").ok()).flatten().filter(|key| !key.is_empty()))
 }
 
+pub fn update_command(agent: AgentId, version: &str, installed: &Path) -> Result<Vec<String>, String> {
+    let name = agent.display_name();
+    let real = std::fs::canonicalize(installed).unwrap_or_else(|_| installed.to_path_buf());
+    let path = real.to_string_lossy();
+
+    if path.starts_with("/nix/store/") {
+        return Err(format!("{name} on this node comes from Nix, so Mycelium cannot update it. Update it in the node's Nix configuration."));
+    }
+
+    if let Some(package) = path.split("/node_modules/").nth(1).map(|rest| rest.split('/').take(if rest.starts_with('@') { 2 } else { 1 }).collect::<Vec<_>>().join("/")) {
+        return Ok(vec!["npm".to_string(), "install".to_string(), "--global".to_string(), format!("{package}@{version}")]);
+    }
+
+    if let Some(tool) = path.split("/uv/tools/").nth(1).and_then(|rest| rest.split('/').next()) {
+        return Ok(vec!["uv".to_string(), "tool".to_string(), "upgrade".to_string(), tool.to_string()]);
+    }
+
+    Err(format!("Mycelium cannot tell how {name} was installed at {}. Update it there.", installed.display()))
+}
+
 pub fn login_command(agent: AgentId, method: &str) -> Option<Vec<String>> {
     if (agent, method) == (AgentId::Vibe, "browser") {
         let node = std::env::current_exe().ok()?;
@@ -355,6 +375,40 @@ mod tests {
     fn write(path: &Path, text: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn an_agent_installed_with_npm_updates_its_package_to_the_version_offered() {
+        let prefix = tempfile::tempdir().unwrap();
+        let script = prefix.path().join("lib/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js");
+        write(&script, "");
+        std::fs::create_dir_all(prefix.path().join("bin")).unwrap();
+        std::os::unix::fs::symlink(&script, prefix.path().join("bin/claude-agent-acp")).unwrap();
+
+        let command = update_command(AgentId::Claude, "0.108.1", &prefix.path().join("bin/claude-agent-acp")).unwrap();
+
+        assert_eq!(command, ["npm", "install", "--global", "@agentclientprotocol/claude-agent-acp@0.108.1"]);
+    }
+
+    #[test]
+    fn an_agent_installed_as_a_uv_tool_is_upgraded_with_uv() {
+        let home = tempfile::tempdir().unwrap();
+        let program = home.path().join(".local/share/uv/tools/mistral-vibe/bin/vibe-acp");
+        write(&program, "");
+
+        assert_eq!(update_command(AgentId::Vibe, "2.1.0", &program).unwrap(), ["uv", "tool", "upgrade", "mistral-vibe"]);
+    }
+
+    #[test]
+    fn an_agent_installed_some_other_way_is_refused_with_where_to_update_it() {
+        let home = tempfile::tempdir().unwrap();
+        let program = home.path().join("bin/codex-acp");
+        write(&program, "");
+
+        let refused = update_command(AgentId::Codex, "2.7.0", &program).unwrap_err();
+
+        assert!(refused.starts_with("Mycelium cannot tell how Codex was installed at "), "{refused}");
+        assert!(update_command(AgentId::Codex, "2.7.0", Path::new("/nix/store/abc-codex-acp/bin/codex-acp")).unwrap_err().contains("comes from Nix"));
     }
 
     #[test]

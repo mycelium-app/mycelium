@@ -92,6 +92,10 @@ sealed interface StreamMessage {
 
     data class LoginFinished(val loginId: String, val ok: Boolean) : StreamMessage
 
+    data class AgentUpdateOutput(val updateId: String, val data: String) : StreamMessage
+
+    data class AgentUpdateFinished(val updateId: String, val ok: Boolean) : StreamMessage
+
     data class TerminalOutput(val terminalId: String, val data: String, val offset: Long? = null) : StreamMessage
 
     data class TerminalExited(val terminalId: String, val exitCode: Int? = null) : StreamMessage
@@ -171,6 +175,11 @@ fun parseStreamMessage(text: String): StreamMessage? {
         "login_output" -> StreamMessage.LoginOutput(element.requireString("login_id"), element.requireString("data"))
         "login_finished" -> StreamMessage.LoginFinished(
             loginId = element.requireString("login_id"),
+            ok = (element["ok"] as? JsonPrimitive)?.contentOrNull == "true",
+        )
+        "agent_update_output" -> StreamMessage.AgentUpdateOutput(element.requireString("update_id"), element.requireString("data"))
+        "agent_update_finished" -> StreamMessage.AgentUpdateFinished(
+            updateId = element.requireString("update_id"),
             ok = (element["ok"] as? JsonPrimitive)?.contentOrNull == "true",
         )
         "terminal_output" -> StreamMessage.TerminalOutput(element.requireString("terminal_id"), element.requireString("data"), (element["offset"] as? JsonPrimitive)?.longOrNull)

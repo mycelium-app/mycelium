@@ -5,7 +5,7 @@ use crate::store::{node_summaries, publish_node};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{DrainRequest, LoginInputRequest, NodeResources, NodeSummary, NODE_COLOURS, NODE_ICONS, StartLoginRequest, UpdateNodeRequest, StartLoginResponse};
+use mycelium_proto::api::{DrainRequest, LoginInputRequest, NodeResources, NodeSummary, NODE_COLOURS, NODE_ICONS, StartLoginRequest, UpdateNodeRequest, StartAgentUpdateResponse, StartLoginResponse};
 use mycelium_proto::conversation::AgentId;
 use mycelium_proto::link::{ControlToNode, GitCommand};
 use serde::Deserialize;
@@ -151,6 +151,34 @@ pub async fn start_login(State(state): State<AppState>, user: AuthUser, Path(id)
     }
 
     Ok(Json(StartLoginResponse { login_id }))
+}
+
+pub async fn update_agent(State(state): State<AppState>, user: AuthUser, Path((id, agent)): Path<(Uuid, String)>) -> ApiResult<Json<StartAgentUpdateResponse>> {
+    let parsed: AgentId = crate::store::parse_enum(&agent).map_err(|_| ApiError::not_found("That agent"))?;
+    let installed = sqlx::query_scalar::<_, Option<String>>(
+        "select a.version from agents a join nodes n on n.id = a.node_id where a.node_id = $1 and n.created_by = $2 and n.revoked_at is null and a.agent = $3 and a.available",
+    )
+    .bind(id)
+    .bind(user.id)
+    .bind(&agent)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::not_found("That agent"))?;
+
+    let Some(version) = installed.as_deref().and_then(|installed| crate::versions::newer(installed, state.latest.get(&agent))) else {
+        return Err(ApiError::conflict("agent_current", "This agent is already up to date on this node."));
+    };
+
+    let update_id = Uuid::new_v4();
+    state.hub.track_agent_update(update_id, id, user.id);
+
+    if !state.hub.send(id, ControlToNode::UpdateAgent { update_id, agent: parsed, version }) {
+        state.hub.finish_agent_update(update_id);
+
+        return Err(node_offline());
+    }
+
+    Ok(Json(StartAgentUpdateResponse { update_id }))
 }
 
 pub async fn login_input(State(state): State<AppState>, user: AuthUser, Path(login_id): Path<Uuid>, Json(request): Json<LoginInputRequest>) -> ApiResult<StatusCode> {

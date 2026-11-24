@@ -324,6 +324,22 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
         }
         NodeToControl::Logins { logins } => store_logins(state, node_id, logins).await,
         NodeToControl::NodeStatus { kubernetes } => store_node_status(state, node_id, kubernetes).await,
+        NodeToControl::AgentUpdateOutput { update_id, data } => {
+            if let Some(owner) = state.hub.agent_update_owner(update_id).filter(|owner| owner.node_id == node_id) {
+                state.publish(Some(owner.user_id), StreamMessage::AgentUpdateOutput { update_id, data });
+            }
+
+            Ok(())
+        }
+        NodeToControl::AgentUpdateFinished { update_id, ok } => {
+            if let Some(owner) = state.hub.agent_update_owner(update_id).filter(|owner| owner.node_id == node_id) {
+                state.hub.finish_agent_update(update_id);
+                state.publish(Some(owner.user_id), StreamMessage::AgentUpdateFinished { update_id, ok });
+            }
+
+            Ok(())
+        }
+        NodeToControl::Agents { agents } => replace_agents(state, node_id, &agents).await,
         NodeToControl::LoginOutput { login_id, data } => {
             if let Some(owner) = state.hub.login_owner(login_id).filter(|owner| owner.node_id == node_id) {
                 state.publish(Some(owner.user_id), StreamMessage::LoginOutput { login_id, data });
@@ -605,6 +621,30 @@ async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid
     Ok(())
 }
 
+async fn store_agents(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, node_id: Uuid, agents: &[AgentInfo]) -> ApiResult<()> {
+    sqlx::query("delete from agents where node_id = $1").bind(node_id).execute(&mut **tx).await?;
+
+    for agent in agents {
+        sqlx::query("insert into agents (node_id, agent, version, available) values ($1, $2, $3, $4)")
+            .bind(node_id)
+            .bind(enum_text(&agent.agent))
+            .bind(&agent.version)
+            .bind(agent.available)
+            .execute(&mut **tx)
+            .await?;
+    }
+
+    Ok(())
+}
+
+async fn replace_agents(state: &AppState, node_id: Uuid, agents: &[AgentInfo]) -> ApiResult<()> {
+    let mut tx = state.pool.begin().await?;
+    store_agents(&mut tx, node_id, agents).await?;
+    tx.commit().await?;
+
+    publish_node(state, node_id).await
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: String, os: String, arch: String, agents: Vec<AgentInfo>, sessions: Vec<SessionPosition>, kubernetes: Option<KubernetesNode>) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
@@ -617,18 +657,7 @@ async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: Strin
         .bind(kubernetes.map(sqlx::types::Json))
         .execute(&mut *tx)
         .await?;
-    sqlx::query("delete from agents where node_id = $1").bind(node_id).execute(&mut *tx).await?;
-
-    for agent in &agents {
-        sqlx::query("insert into agents (node_id, agent, version, available) values ($1, $2, $3, $4)")
-            .bind(node_id)
-            .bind(enum_text(&agent.agent))
-            .bind(&agent.version)
-            .bind(agent.available)
-            .execute(&mut *tx)
-            .await?;
-    }
-
+    store_agents(&mut tx, node_id, &agents).await?;
     tx.commit().await?;
 
     let live: HashSet<Uuid> = sessions.iter().filter(|session| session.live).map(|session| session.conversation_id).collect();

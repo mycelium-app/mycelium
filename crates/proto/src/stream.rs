@@ -79,6 +79,14 @@ pub enum StreamMessage {
         login_id: Uuid,
         ok: bool,
     },
+    AgentUpdateOutput {
+        update_id: Uuid,
+        data: String,
+    },
+    AgentUpdateFinished {
+        update_id: Uuid,
+        ok: bool,
+    },
     TerminalOutput {
         terminal_id: Uuid,
         data: String,

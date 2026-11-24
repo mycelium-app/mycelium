@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 type StateReport = Arc<dyn Fn() -> NodeToControl + Send + Sync>;
 
-struct LoginProcess {
+pub struct LoginProcess {
     writer: Box<dyn Write + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
 }
@@ -19,7 +19,7 @@ struct LoginProcess {
 pub struct LoginManager {
     out: mpsc::UnboundedSender<NodeToControl>,
     report_state: StateReport,
-    running: Arc<Mutex<HashMap<Uuid, LoginProcess>>>,
+    running: Running,
 }
 
 impl LoginManager {
@@ -65,61 +65,80 @@ impl LoginManager {
     }
 
     fn try_start(&self, login_id: Uuid, command: &[String], env: &[(String, String)], discard_on_failure: Option<PathBuf>) -> Result<()> {
-        let Some((program, args)) = command.split_first() else {
-            anyhow::bail!("This agent has no sign-in command.");
-        };
+        let output = self.out.clone();
+        let finished = self.out.clone();
+        let report_state = self.report_state.clone();
 
-        let pair = native_pty_system().openpty(PtySize { rows: 24, cols: 100, pixel_width: 0, pixel_height: 0 }).context("open a terminal for the sign-in")?;
-        let mut builder = CommandBuilder::new(program);
-        builder.args(args);
+        run_streamed(
+            &self.running,
+            login_id,
+            command,
+            env,
+            move |data| {
+                let _ = output.send(NodeToControl::LoginOutput { login_id, data });
+            },
+            move |ok| {
+                if !ok {
+                    discard(discard_on_failure);
+                }
 
-        for (name, value) in env {
-            builder.env(name, value);
+                let _ = finished.send(NodeToControl::LoginFinished { login_id, ok });
+                let _ = finished.send(report_state());
+            },
+        )
+    }
+}
+
+pub type Running = Arc<Mutex<HashMap<Uuid, LoginProcess>>>;
+
+pub fn run_streamed(running: &Running, id: Uuid, command: &[String], env: &[(String, String)], on_output: impl Fn(String) + Send + 'static, on_finished: impl FnOnce(bool) + Send + 'static) -> Result<()> {
+    let Some((program, args)) = command.split_first() else {
+        anyhow::bail!("There is no command to run.");
+    };
+
+    let pair = native_pty_system().openpty(PtySize { rows: 24, cols: 100, pixel_width: 0, pixel_height: 0 }).context("open a terminal for the command")?;
+    let mut builder = CommandBuilder::new(program);
+    builder.args(args);
+
+    for (name, value) in env {
+        builder.env(name, value);
+    }
+
+    let mut child = pair.slave.spawn_command(builder).with_context(|| format!("Could not start {program}. Check that it is installed on this node."))?;
+    drop(pair.slave);
+
+    let mut reader = pair.master.try_clone_reader()?;
+    let writer = pair.master.take_writer()?;
+    let killer = child.clone_killer();
+    running.lock().map_err(|_| anyhow::anyhow!("process table poisoned"))?.insert(id, LoginProcess { writer, killer });
+
+    let running = running.clone();
+    std::thread::spawn(move || {
+        let _master = pair.master;
+        let mut buffer = [0u8; 4096];
+        let mut carry: Vec<u8> = Vec::new();
+
+        while let Ok(read) = reader.read(&mut buffer) {
+            if read == 0 {
+                break;
+            }
+
+            carry.extend_from_slice(&buffer[..read]);
+            let data = take_valid_utf8(&mut carry);
+            if !data.is_empty() {
+                on_output(data);
+            }
         }
 
-        let mut child = pair.slave.spawn_command(builder).with_context(|| format!("Could not start {program}. Check that it is installed on this node."))?;
-        drop(pair.slave);
+        let ok = child.wait().map(|status| status.success()).unwrap_or(false);
+        if let Ok(mut running) = running.lock() {
+            running.remove(&id);
+        }
 
-        let mut reader = pair.master.try_clone_reader()?;
-        let writer = pair.master.take_writer()?;
-        let killer = child.clone_killer();
-        self.running.lock().map_err(|_| anyhow::anyhow!("login table poisoned"))?.insert(login_id, LoginProcess { writer, killer });
+        on_finished(ok);
+    });
 
-        let out = self.out.clone();
-        let running = self.running.clone();
-        let report_state = self.report_state.clone();
-        std::thread::spawn(move || {
-            let _master = pair.master;
-            let mut buffer = [0u8; 4096];
-            let mut carry: Vec<u8> = Vec::new();
-
-            while let Ok(read) = reader.read(&mut buffer) {
-                if read == 0 {
-                    break;
-                }
-
-                carry.extend_from_slice(&buffer[..read]);
-                let data = take_valid_utf8(&mut carry);
-                if !data.is_empty() {
-                    let _ = out.send(NodeToControl::LoginOutput { login_id, data });
-                }
-            }
-
-            let ok = child.wait().map(|status| status.success()).unwrap_or(false);
-            if let Ok(mut running) = running.lock() {
-                running.remove(&login_id);
-            }
-
-            if !ok {
-                discard(discard_on_failure);
-            }
-
-            let _ = out.send(NodeToControl::LoginFinished { login_id, ok });
-            let _ = out.send(report_state());
-        });
-
-        Ok(())
-    }
+    Ok(())
 }
 
 fn discard(dir: Option<PathBuf>) {

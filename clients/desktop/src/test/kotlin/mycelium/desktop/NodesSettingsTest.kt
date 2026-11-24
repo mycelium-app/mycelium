@@ -23,6 +23,8 @@ import mycelium.ui.MyceliumTheme
 import mycelium.ui.NodesSettings
 import mycelium.ui.Route
 import mycelium.ui.Shell
+import mycelium.api.StreamMessage
+import androidx.compose.ui.test.performScrollTo
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -59,10 +61,21 @@ class NodesSettingsTest {
     @get:Rule
     val scopes = TestScopes()
 
+    private val updates = java.util.concurrent.CopyOnWriteArrayList<String>()
+    private var updateRefusal: String? = null
+
     private fun store(nodes: String = NodesJson): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
+
+            if (request.method == HttpMethod.Post && path.endsWith("/update")) {
+                updates += path
+                val refusal = updateRefusal
+
+                return@MockEngine if (refusal == null) respond("""{"update_id":"u1"}""", HttpStatusCode.OK, json) else respond("""{"error":"agent_update_refused","message":"$refusal"}""", HttpStatusCode.Conflict, json)
+            }
+
             val body = when {
                 request.method == HttpMethod.Post && path.endsWith("/watch") -> """{"history":[]}"""
                 path.endsWith("/nodes") -> nodes
@@ -78,10 +91,12 @@ class NodesSettingsTest {
         return store
     }
 
-    private fun showPage(nodes: String = NodesJson, onOpenNode: (String) -> Unit = {}) {
+    private fun showPage(nodes: String = NodesJson, onOpenNode: (String) -> Unit = {}): Store {
         val store = store(nodes)
         rule.setContent { MyceliumTheme(true) { NodesSettings(store, NodesSettingsPlatform, onOpenNode) } }
         rule.waitForIdle()
+
+        return store
     }
 
     private fun showShell(route: Route = Route.Inbox): Store {
@@ -179,5 +194,55 @@ class NodesSettingsTest {
 
         assertEquals(0, rule.onAllNodesWithContentDescription("Nodes").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithText("Nodes").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun updateAgentsShowsOnlyOnAnOnlineNodeWithAnUpdateAndStreamsItsProgress() {
+        val store = showPage()
+
+        assertEquals(1, rule.onAllNodesWithText("Update agents").fetchSemanticsNodes().size)
+        rule.onNodeWithContentDescription("Update the agents on atlas").performScrollTo().performClick()
+
+        rule.waitUntil(5_000) { updates.isNotEmpty() }
+        assertEquals(listOf("/api/v1/nodes/n1/agents/claude/update"), updates)
+        rule.onNodeWithText("Updating").assertExists()
+
+        rule.runOnIdle { store.receive(StreamMessage.AgentUpdateOutput("u1", "added 1 package in 3s\r\n")) }
+        rule.onNodeWithText("added 1 package in 3s").assertExists()
+
+        rule.runOnIdle { store.receive(StreamMessage.AgentUpdateFinished("u1", true)) }
+        rule.onNodeWithText("Updated").assertExists()
+    }
+
+    @Test
+    fun anUpdateThatFailsSaysSoWithItsLastLine() {
+        val store = showPage()
+        rule.onNodeWithContentDescription("Update the agents on atlas").performScrollTo().performClick()
+        rule.waitUntil(5_000) { updates.isNotEmpty() }
+
+        rule.runOnIdle {
+            store.receive(StreamMessage.AgentUpdateOutput("u1", "npm error code EACCES\r\n"))
+            store.receive(StreamMessage.AgentUpdateFinished("u1", false))
+        }
+
+        rule.onNodeWithText("Failed").assertExists()
+        rule.onNodeWithText("npm error code EACCES").assertExists()
+    }
+
+    @Test
+    fun anUpdateTheNodeRefusesShowsTheReason() {
+        updateRefusal = "Claude Code on this node comes from Nix, so Mycelium cannot update it."
+        showPage()
+        rule.onNodeWithContentDescription("Update the agents on atlas").performScrollTo().performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Failed").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Claude Code on this node comes from Nix, so Mycelium cannot update it.", substring = true).assertExists()
+    }
+
+    @Test
+    fun aNodeWithEverythingUpToDateOffersNoUpdate() {
+        showPage(UpToDateJson)
+
+        assertEquals(0, rule.onAllNodesWithText("Update agents").fetchSemanticsNodes().size)
     }
 }

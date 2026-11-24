@@ -262,6 +262,9 @@ class MyceliumApi(
         call("/logins/$loginId") { client.delete(it) { authorise() } }
     }
 
+    suspend fun updateAgent(nodeId: String, agent: String): StartAgentUpdateResponse =
+        call("/nodes/$nodeId/agents/$agent/update") { client.post(it) { authorise() } }.body()
+
     suspend fun signOutLogin(nodeId: String, agent: String, account: String) {
         call("/nodes/$nodeId/logins/$agent/${account.encodeURLPathPart()}/sign-out") { client.post(it) { authorise() } }
     }

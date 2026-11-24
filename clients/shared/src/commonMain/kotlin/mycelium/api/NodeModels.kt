@@ -193,6 +193,9 @@ data class StartLoginRequest(val agent: String, val method: String, val account:
 data class StartLoginResponse(@SerialName("login_id") val loginId: String)
 
 @Serializable
+data class StartAgentUpdateResponse(@SerialName("update_id") val updateId: String)
+
+@Serializable
 data class LoginInputRequest(val text: String)
 
 @Serializable

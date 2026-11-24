@@ -247,6 +247,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/nodes/{id}/watch", post(nodes::watch))
         .route("/api/v1/nodes/{id}/processes/{pid}/stop", post(nodes::stop_process))
         .route("/api/v1/nodes/{id}/logins", post(nodes::start_login))
+        .route("/api/v1/nodes/{id}/agents/{agent}/update", post(nodes::update_agent))
         .route("/api/v1/nodes/{id}/logins/{agent}/{account}", delete(nodes::remove_login))
         .route("/api/v1/nodes/{id}/logins/{agent}/{account}/sign-out", post(nodes::sign_out_login))
         .route("/api/v1/logins/{login_id}/input", post(nodes::login_input))

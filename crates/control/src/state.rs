@@ -243,6 +243,7 @@ node_answers! {
 pub struct Hub {
     nodes: Mutex<HashMap<Uuid, NodeConnection>>,
     logins: Mutex<HashMap<Uuid, LoginOwner>>,
+    agent_updates: Mutex<HashMap<Uuid, LoginOwner>>,
     terminals: Mutex<HashMap<Uuid, TerminalSession>>,
     send_now: Mutex<HashMap<Uuid, Uuid>>,
     stale_secrets: Mutex<HashSet<Uuid>>,
@@ -699,6 +700,22 @@ impl Hub {
     pub fn finish_login(&self, login_id: Uuid) {
         if let Ok(mut logins) = self.logins.lock() {
             logins.remove(&login_id);
+        }
+    }
+
+    pub fn track_agent_update(&self, update_id: Uuid, node_id: Uuid, user_id: Uuid) {
+        if let Ok(mut updates) = self.agent_updates.lock() {
+            updates.insert(update_id, LoginOwner { node_id, user_id });
+        }
+    }
+
+    pub fn agent_update_owner(&self, update_id: Uuid) -> Option<LoginOwner> {
+        self.agent_updates.lock().ok().and_then(|updates| updates.get(&update_id).copied())
+    }
+
+    pub fn finish_agent_update(&self, update_id: Uuid) {
+        if let Ok(mut updates) = self.agent_updates.lock() {
+            updates.remove(&update_id);
         }
     }
 

@@ -230,6 +230,11 @@ pub struct StartLoginResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StartAgentUpdateResponse {
+    pub update_id: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LoginInputRequest {
     pub text: String,
 }
