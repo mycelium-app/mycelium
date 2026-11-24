@@ -98,26 +98,12 @@ async fn answer(lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
     fn fake_codex(dir: &Path, rate_limits: &str, consume: &str) -> String {
-        let script = dir.join("codex");
-        let body = format!(
-            r#"#!/bin/sh
-while IFS= read -r line; do
-  printf '%s\n' "$line" >> "$CODEX_HOME/seen"
-  case "$line" in
-    *'"method":"initialize"'*) echo '{{"id":1,"result":{{}}}}';;
-    *'"method":"account/rateLimits/read"'*) echo '{rate_limits}';;
-    *'"method":"account/rateLimitResetCredit/consume"'*) echo '{consume}';;
-  esac
-done
-"#
-        );
-        std::fs::write(&script, body).unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(dir.join("rate-limits.json"), rate_limits).unwrap();
+        std::fs::write(dir.join("consume.json"), consume).unwrap();
 
-        script.display().to_string()
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/fake-codex").to_string()
     }
 
     #[tokio::test]

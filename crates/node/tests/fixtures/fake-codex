@@ -1,0 +1,9 @@
+#!/bin/sh
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$CODEX_HOME/seen"
+  case "$line" in
+    *'"method":"initialize"'*) echo '{"id":1,"result":{}}';;
+    *'"method":"account/rateLimits/read"'*) cat "$CODEX_HOME/rate-limits.json"; echo;;
+    *'"method":"account/rateLimitResetCredit/consume"'*) cat "$CODEX_HOME/consume.json"; echo;;
+  esac
+done

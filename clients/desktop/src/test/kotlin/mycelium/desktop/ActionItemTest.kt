@@ -17,8 +17,9 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import java.awt.Toolkit
-import java.awt.datatransfer.DataFlavor
+import androidx.compose.ui.platform.ClipboardManager
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import kotlin.io.encoding.Base64
 import kotlinx.coroutines.runBlocking
 import mycelium.api.Conversation
@@ -51,6 +52,16 @@ internal fun commandConversation(item: String?) =
 "acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:05:00Z","archived_at":null,"action_items":[${item.orEmpty()}]}"""
 
 class ActionItemTest {
+    private val clipboard = object : ClipboardManager {
+        private var held: AnnotatedString? = null
+
+        override fun getText(): AnnotatedString? = held
+
+        override fun setText(annotatedString: AnnotatedString) {
+            held = annotatedString
+        }
+    }
+
     @get:Rule
     val rule = createComposeRule()
 
@@ -81,7 +92,7 @@ class ActionItemTest {
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
 
         runBlocking { store.refresh() }
-        rule.setContent { CompositionLocalProvider(LocalTouch provides phone) { MyceliumTheme(true) { Shell(store, AppsPlatform(), Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Inbox) } } }
+        rule.setContent { CompositionLocalProvider(LocalTouch provides phone, LocalClipboardManager provides clipboard) { MyceliumTheme(true) { Shell(store, AppsPlatform(), Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Inbox) } } }
         rule.waitUntil(5_000) { rule.onAllNodesWithText(ItemText).fetchSemanticsNodes().isNotEmpty() }
 
         return store
@@ -113,7 +124,7 @@ class ActionItemTest {
         rule.onNodeWithContentDescription("Copy the command").performClick()
         rule.waitForIdle()
 
-        assertEquals(ItemCommand, Toolkit.getDefaultToolkit().systemClipboard.getData(DataFlavor.stringFlavor))
+        assertEquals(ItemCommand, clipboard.getText()?.text)
     }
 
     @Test
