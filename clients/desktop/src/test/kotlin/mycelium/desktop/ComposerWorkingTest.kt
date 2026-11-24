@@ -123,6 +123,19 @@ class ComposerWorkingTest {
     }
 
     @Test
+    fun aCloseTheNodeNeverConfirmsEndsInTheSameFailureInsteadOfKeepingStop() {
+        show(conversation("done", agentActive = true), RunningTurn)
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Stopping").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.mainClock.advanceTimeBy(16_000)
+        rule.waitForIdle()
+
+        assertEquals(0, rule.onAllNodesWithText("Stopping").fetchSemanticsNodes().size)
+        rule.onNodeWithContentDescription("Error: The agent didn't stop. Close the session to end it.").assertExists()
+    }
+
+    @Test
     fun aTurnThatEndedInAnErrorDoesNotOfferStop() {
         show(conversation("failed", agentActive = false), FailedTurn)
 

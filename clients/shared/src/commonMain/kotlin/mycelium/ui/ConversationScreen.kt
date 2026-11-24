@@ -443,6 +443,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val agentWorking = turnIsOpen(state.events[id].orEmpty()) || (conversation.agentActive && conversation.status == ConversationStatus.Working)
     var stopping by remember(id) { mutableStateOf(false) }
     var stopFailed by remember(id) { mutableStateOf(false) }
+    val closing = turnIsOpen(state.events[id].orEmpty()) && conversation.status != ConversationStatus.Working && conversation.status != ConversationStatus.Input
 
     LaunchedEffect(agentWorking) {
         if (!agentWorking) {
@@ -451,8 +452,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
-    LaunchedEffect(stopping) {
-        if (stopping) {
+    LaunchedEffect(stopping || closing) {
+        if (stopping || closing) {
             delay(StopWait)
             stopping = false
             stopFailed = true
@@ -820,7 +821,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             conversation = conversation,
                             usage = { ConversationUsageBar(api, id, state.events[id].orEmpty().count { it.kind == mycelium.api.EventKinds.TurnEnd }) },
                             working = agentWorking,
-                            stopping = stopping,
+                            stopping = (stopping || closing) && !stopFailed,
                             queue = shownQueue.map { if (it.id == queueEditing?.queueId) it.copy(editing = true) else it },
                             sending = sending.drop(delivering.size),
                             onSend = ::send,
