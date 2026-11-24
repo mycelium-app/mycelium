@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.34.57
+
+- Settings, Accounts replaces Providers: one grid with a row per agent account and a column per node, each cell Signed in, Signed out or Expired with an inline Sign in, Add, or Not installed. A banner counts the sign-ins that need you, and Sign in to all runs each sign-in in turn. Selecting an account opens its page: where it is signed in, with Sign in, Sign out and Remove per node and Sign in on another node, its plan and price, usage with Usage history, limit resets, and Remove this account.
+- Any agent account can be signed out on a node, including the agent's own sign-in, so Mistral Vibe is signed in, out and removed like Claude Code and Codex.
+- Settings, Chat models holds the chat, speech and decisions providers, and Settings, Nodes is a table of each node's state and its Mycelium and agent versions, with updates shown as old to new. A node opens its page inside Settings.
+- The Nodes, Projects and Issues pages are gone: their old addresses open Settings, Nodes or History. A project opens from its group's Projects tab, or from Projects not in a group on Settings, Groups.
+- Stop never spins forever: once the node confirms, the turn ends, and when the agent does not stop within 15 seconds the conversation says "The agent didn't stop. Close the session to end it." with Close session.
+- Closing a session ends the agent's processes, leaves the working state once the node confirms they exited, and dismisses a failed conversation. Close session shows only while a session is open, and a session that fails ends its agent instead of leaving it running.
+- In an assistant's menu, Retry uses the refresh icon and Clear an eraser.
+- A conversation's usage no longer scans its whole history for the latest context figure, and adding to the search index no longer waits behind a pending list merge.
+
 ## v0.34.56
 
 - On Settings, Providers, an account's menu offers Sign in again on each node where that account is signed out or expired, and it signs that same account back in. Sign in on a node in the agent's menu still adds a new account.
