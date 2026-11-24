@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.59
+
+- A command run in a terminal reports its exit code once tmux has recorded it, instead of -1, and a command ended by a signal reports 128 plus the signal.
+- Traces of the Usage card's provider readings show the calls to OpenRouter and Anthropic, with their host, path and status.
+
 ## v0.34.58
 
 - While the agent works and nothing streams, the conversation ends with a thinking block: dots that hold still with reduced motion, Thinking and the seconds. Streamed thought shows live inside it, and when the turn moves on it collapses to Thought for Ns, which opens to show the thought.
