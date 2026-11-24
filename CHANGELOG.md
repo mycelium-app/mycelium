@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.60
+
+- Traces show every call the control plane makes to an outside service, such as forges, integrations, chat and speech providers, and Prometheus, with its host, path and status.
+
 ## v0.34.59
 
 - A command run in a terminal reports its exit code once tmux has recorded it, instead of -1, and a command ended by a signal reports 128 plus the signal.
