@@ -119,6 +119,21 @@ import mycelium.api.Attachment
 import mycelium.api.WorkflowKinds
 import mycelium.api.WorkflowStatuses
 import mycelium.state.ThreadImage
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.liveRegion
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
+import kotlinx.coroutines.delay
+import mycelium.state.instantOrNull
 
 private const val ShortOutputLimit = 40
 private const val OlderLoadThreshold = 5
@@ -142,6 +157,8 @@ fun ThreadView(
     loadingOlder: Boolean = false,
     onLoadOlder: () -> Unit = {},
     waitingForAnswer: Boolean = false,
+    working: Boolean = false,
+    lastActivityAt: String? = null,
 ) {
     val state = rememberLazyListState()
     val loadOlder by rememberUpdatedState(onLoadOlder)
@@ -232,6 +249,15 @@ fun ThreadView(
                         }
                     }
 
+                    val last = items.lastOrNull()
+                    val toolRunning = last is ThreadItem.ToolCall && (last.status == ToolStatus.Pending || last.status == ToolStatus.Running)
+
+                    if (working && !waitingForAnswer && !toolRunning && !(last is ThreadItem.Thought && !last.finished)) {
+                        item(key = "thinking") {
+                            QuietThinking(lastActivityAt)
+                        }
+                    }
+
                     if (workflowCards.isNotEmpty()) {
                         item(key = "mycelium-workflows") {
                             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
@@ -265,7 +291,7 @@ fun ThreadView(
                             )
                         } else {
                             CompositionLocalProvider(LocalImageJump provides jumpToImage, LocalImageGallery provides gallery, LocalShownImages provides shownImages, LocalPinnedKeys provides pinnedKeys) {
-                                ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) onSignIn else null, if (index == lastFailure) onDismissFailure else null, if (index == lastFailure) limitActions else null, agent, runsOnModel)
+                                ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) onSignIn else null, if (index == lastFailure) onDismissFailure else null, if (index == lastFailure) limitActions else null, agent, runsOnModel, working && index == items.lastIndex)
                             }
                         }
                     }
@@ -308,12 +334,12 @@ fun ThreadView(
 val LocalReadAloud = compositionLocalOf<((String) -> Unit)?> { null }
 
 @Composable
-private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?, onSignIn: (() -> Unit)?, onDismissFailure: (() -> Unit)?, limitActions: LimitActions?, agent: String, runsOnModel: Boolean) {
+private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?, onSignIn: (() -> Unit)?, onDismissFailure: (() -> Unit)?, limitActions: LimitActions?, agent: String, runsOnModel: Boolean, thinkingLive: Boolean) {
     when (item) {
         is ThreadItem.UserMessage -> UserMessage(item.text, item.files, item.images, item.goalSentAt, item.goalNudge, item.goalWhy, item.spoken, item.spokenAt, agent)
         is ThreadItem.GoalReport -> GoalReportBlock(item, agent)
         is ThreadItem.AgentMessage -> AgentMessage(item.text)
-        is ThreadItem.Thought -> Thought(item)
+        is ThreadItem.Thought -> if (item.finished || !thinkingLive) ThoughtSummary(item) else ThinkingBlock(item.text, item.startedAt)
         is ThreadItem.ToolCall -> Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             if (toolLabel(item.kind, item.title) != "workflow" || item.status == ToolStatus.Failed) {
                 ToolCall(item, chat = runsOnModel)
@@ -483,31 +509,112 @@ private fun PastedMessageBlock(pasted: PastedSegment.Pasted) {
 }
 
 @Composable
-private fun Thought(item: ThreadItem.Thought) {
+private fun QuietThinking(lastActivityAt: String?) {
+    val since = lastActivityAt?.let(::instantOrNull)
+    val now = tickingNow()
+
+    if (since == null || now - since >= StreamQuiet) {
+        ThinkingBlock(null, lastActivityAt)
+    }
+}
+
+@Composable
+private fun ThinkingBlock(text: String?, startedAt: String?) {
     val colors = MyTheme.colors
-    var expanded by remember(item.key, item.finished) { mutableStateOf(!item.finished) }
+    val started = remember(startedAt) { startedAt?.let(::instantOrNull) ?: Clock.System.now() }
+    val seconds = (tickingNow() - started).inWholeSeconds.coerceAtLeast(0)
 
-    Column(Modifier.fillMaxWidth()) {
-        MyButton(
-            { expanded = !expanded },
-            text = if (item.finished) "Thought" else "Thinking",
-            icon = if (item.finished) null else MyIcon.Working,
-            trailingIcon = if (expanded) MyIcon.ChevronDown else MyIcon.ChevronRight,
-            description = if (expanded) "Hide the agent's thinking" else "Show the agent's thinking",
-            size = ButtonSize.Sm,
-            muted = true,
-        )
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite; contentDescription = "Thinking, ${elapsedText(seconds)}" }) {
+        Box(Modifier.fillMaxHeight().width(Tokens.Size.FocusRing).background(colors.borderControl))
 
-        if (expanded) {
-            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(start = Tokens.Space.S2)) {
-                Box(Modifier.fillMaxHeight().width(Tokens.Size.FocusRing).background(colors.border))
-                Box(Modifier.padding(start = Tokens.Space.S3)) {
-                    BasicText(inlineText(item.text.trim(), colors.textMuted), style = Tokens.Type.Prose.themed())
-                }
+        Column(Modifier.padding(start = Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                ThinkingDots()
+                Label("Thinking", style = Tokens.Type.UiStrong)
+                Label(elapsedText(seconds), style = Tokens.Type.Meta, color = colors.textMuted)
+            }
+
+            if (!text.isNullOrBlank()) {
+                BasicText(inlineText(text.trim(), colors.textMuted), style = Tokens.Type.Prose.themed())
             }
         }
     }
 }
+
+@Composable
+private fun ThoughtSummary(item: ThreadItem.Thought) {
+    val colors = MyTheme.colors
+    var expanded by remember(item.key) { mutableStateOf(false) }
+    val seconds = thoughtSeconds(item)
+    val title = if (seconds == null) "Thought" else "Thought for ${elapsedText(seconds)}"
+
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+        Box(Modifier.fillMaxHeight().width(Tokens.Size.FocusRing).background(colors.borderControl))
+
+        Column(Modifier.padding(start = Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+            MyButton(
+                { expanded = !expanded },
+                text = title,
+                trailingIcon = if (expanded) MyIcon.ChevronDown else MyIcon.ChevronRight,
+                description = if (expanded) "Hide the agent's thinking" else "Show the agent's thinking",
+                size = ButtonSize.Sm,
+                muted = true,
+            )
+
+            if (expanded) {
+                BasicText(inlineText(item.text.trim(), colors.textMuted), style = Tokens.Type.Prose.themed())
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThinkingDots() {
+    val colors = MyTheme.colors
+    val phase = if (LocalReducedMotion.current) {
+        0f
+    } else {
+        val moving by rememberInfiniteTransition().animateFloat(0f, 3f, infiniteRepeatable(tween(DotsMillis, easing = LinearEasing), RepeatMode.Restart))
+
+        moving
+    }
+
+    Row(Modifier.clearAndSetSemantics {}, horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+        for (dot in 0..2) {
+            val lit = ((dot - phase) % 3f + 3f) % 3f
+            val opacity = if (LocalReducedMotion.current) 1f - dot * 0.35f else 1f - lit * 0.35f
+
+            Box(Modifier.size(5.dp).alpha(opacity).background(colors.textMuted, CircleShape))
+        }
+    }
+}
+
+@Composable
+private fun tickingNow(): Instant {
+    var now by remember { mutableStateOf(Clock.System.now()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(TickMillis)
+            now = Clock.System.now()
+        }
+    }
+
+    return now
+}
+
+private fun thoughtSeconds(item: ThreadItem.Thought): Long? {
+    val started = item.startedAt?.let(::instantOrNull) ?: return null
+    val last = item.lastAt?.let(::instantOrNull) ?: return null
+
+    return (last - started).inWholeSeconds.coerceAtLeast(1)
+}
+
+private fun elapsedText(seconds: Long): String = if (seconds < 60) "${seconds}s" else "${seconds / 60}m ${seconds % 60}s"
+
+private val StreamQuiet = 2.seconds
+private const val TickMillis = 1_000L
+private const val DotsMillis = 1_200
 
 @Composable
 private fun AgentMessage(text: String) {

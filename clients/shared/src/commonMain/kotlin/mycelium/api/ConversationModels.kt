@@ -249,6 +249,7 @@ data class Event(
     val seq: Long,
     val kind: String,
     val payload: JsonElement = JsonObject(emptyMap()),
+    @SerialName("created_at") val createdAt: String? = null,
 )
 
 @Serializable

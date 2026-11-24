@@ -131,7 +131,7 @@ sealed interface ThreadItem {
 
     data class AgentMessage(override val key: String, val text: String) : ThreadItem
 
-    data class Thought(override val key: String, val text: String, val finished: Boolean = false) : ThreadItem
+    data class Thought(override val key: String, val text: String, val finished: Boolean = false, val startedAt: String? = null, val lastAt: String? = null) : ThreadItem
 
     data class ToolCall(
         override val key: String,
@@ -295,7 +295,7 @@ class ThreadBuilder {
 
         when (event.kind) {
             EventKinds.UserMessage -> items += userMessageFrom(key, payload)
-            EventKinds.AcpUpdate -> applyUpdate(items, key, payload)
+            EventKinds.AcpUpdate -> applyUpdate(items, key, payload, event.createdAt)
             EventKinds.PermissionRequest -> requestPermission(items, permissionFrom(key, payload))
             EventKinds.PermissionResolved -> resolvePermission(items, payload.string("request_id"))
             EventKinds.ReviewRequest -> items += ThreadItem.ResponseEdit(key, payload.string("request_id") ?: key, payload.string("server").orEmpty(), payload.string("account"), payload.string("tool").orEmpty())
@@ -392,12 +392,12 @@ fun suggestedReplies(answer: String): List<String> {
     return emptyList()
 }
 
-private fun applyUpdate(items: MutableList<ThreadItem>, key: String, payload: JsonObject) {
+private fun applyUpdate(items: MutableList<ThreadItem>, key: String, payload: JsonObject, at: String?) {
     val update = payload["update"] as? JsonObject ?: return
 
     when (update.string("sessionUpdate")) {
         "agent_message_chunk" -> appendAgentText(items, key, update.contentText())
-        "agent_thought_chunk" -> appendThought(items, key, update.contentText())
+        "agent_thought_chunk" -> appendThought(items, key, update.contentText(), at)
         "user_message_chunk" -> Unit
         "tool_call" -> {
             val call = toolCallFrom(key, update)
@@ -409,15 +409,15 @@ private fun applyUpdate(items: MutableList<ThreadItem>, key: String, payload: Js
     }
 }
 
-private fun appendThought(items: MutableList<ThreadItem>, key: String, text: String) {
+private fun appendThought(items: MutableList<ThreadItem>, key: String, text: String, at: String?) {
     val last = items.lastOrNull()
 
     if (last is ThreadItem.Thought) {
-        items[items.lastIndex] = last.copy(text = last.text + text)
+        items[items.lastIndex] = last.copy(text = last.text + text, lastAt = at ?: last.lastAt)
         return
     }
 
-    items += ThreadItem.Thought(key, text)
+    items += ThreadItem.Thought(key, text, startedAt = at, lastAt = at)
 }
 
 private fun appendAgentText(items: MutableList<ThreadItem>, key: String, text: String) {
