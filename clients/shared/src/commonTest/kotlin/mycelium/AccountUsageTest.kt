@@ -46,7 +46,7 @@ class AccountUsageTest {
         val accounts = agentAccounts(listOf(node("n2", "nas", newer), node("n1", "laptop", older)))
 
         assertEquals(1, accounts.size)
-        assertEquals(listOf(AccountOnNode("laptop", LoginState.SignedIn), AccountOnNode("nas", LoginState.Expired)), accounts.single().nodes)
+        assertEquals(listOf("laptop" to LoginState.SignedIn, "nas" to LoginState.Expired), accounts.single().nodes.map { it.nodeName to it.state })
         assertEquals(40.0, accounts.single().windows.single().usedPercent)
         assertEquals("2026-10-23T12:00:00Z", accounts.single().usageReadAt)
     }

@@ -24,7 +24,7 @@ const val UnnamedAccount = "Account name not reported"
 
 fun accountShortName(account: String): String = account.substringAfter('@')
 
-data class AccountOnNode(val nodeName: String, val state: LoginState)
+data class AccountOnNode(val nodeName: String, val state: LoginState, val nodeId: String = "", val method: String = "", val managed: Boolean = false)
 
 data class AgentAccount(val agent: String, val label: String, val method: String, val nodes: List<AccountOnNode>, val windows: List<UsageWindow> = emptyList(), val usageReadAt: String? = null, val resetCredits: ResetCredits? = null, val plan: String? = null, val usageNote: String? = null)
 
@@ -49,7 +49,7 @@ fun agentAccounts(nodes: Collection<NodeSummary>): List<AgentAccount> {
         val freshest = entries.map { it.second }.filter { it.windows.isNotEmpty() }.maxByOrNull { it.usageReadAt.orEmpty() }
         val described = entries.map { it.second }.filter { it.plan != null || it.usageNote != null }.maxByOrNull { it.usageReadAt.orEmpty() }
 
-        AgentAccount(key.first, entries.first().second.account?.trim()?.ifBlank { null } ?: UnnamedAccount, entries.first().second.method, entries.map { (node, login) -> AccountOnNode(node.name, login.state) }, freshest?.windows.orEmpty(), freshest?.usageReadAt, freshest?.resetCredits, described?.plan, described?.usageNote)
+        AgentAccount(key.first, entries.first().second.account?.trim()?.ifBlank { null } ?: UnnamedAccount, entries.first().second.method, entries.map { (node, login) -> AccountOnNode(node.name, login.state, node.id, login.method, login.managed) }, freshest?.windows.orEmpty(), freshest?.usageReadAt, freshest?.resetCredits, described?.plan, described?.usageNote)
     }.sortedWith(compareBy({ AgentOrder.indexOf(it.agent).let { index -> if (index < 0) AgentOrder.size else index } }, { it.label }))
 }
 
