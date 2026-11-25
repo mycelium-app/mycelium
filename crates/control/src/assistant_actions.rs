@@ -210,9 +210,10 @@ fn name_taken(name: &str) -> ApiError {
 }
 
 async fn validate_place(state: &AppState, owner: Uuid, node_id: Option<Uuid>) -> ApiResult<()> {
-    let preferences = mycelium_proto::api::AssistantPreferences { nodes: node_id.into_iter().collect(), ..Default::default() };
-
-    assistants::validate_preferences(state, owner, &preferences).await
+    match node_id {
+        Some(node_id) => assistants::validate_node(state, owner, node_id).await,
+        None => Ok(()),
+    }
 }
 
 pub fn expand(action: &AssistantAction, values: &BTreeMap<String, String>, zone: Tz, now: DateTime<Utc>) -> ApiResult<String> {

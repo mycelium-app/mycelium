@@ -3,6 +3,7 @@ use axum::Router;
 use axum::routing::get;
 use base64::Engine;
 use crate::common::{NodeLink, Server, eventually, next_matching, serve};
+use crate::continue_elsewhere;
 use mycelium_proto::link::{ControlToNode, FolderFile, GitCommand, ListeningPort, NodeToControl, ProcessUsage, ResourceSample};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -219,14 +220,16 @@ async fn answer_read_folder(link: &mut NodeLink, files: Vec<FolderFile>) {
 async fn start_assistant(source_version: &str) -> (Moving, String) {
     let server = Server::start().await;
     let mut source = server.online_node_as("laptop", source_version).await;
-    let target = server.online_node_as("build", ASSISTANT_NODE_VERSION).await;
-    let (status, assistant) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "War room", "instructions": "Run the war room.", "preferences": {"models": [{"agent": "claude"}], "nodes": [source.id]}}))).await;
+    let mut target = server.online_node_as("build", ASSISTANT_NODE_VERSION).await;
+    continue_elsewhere::allow_any_model_on(&server, &mut source).await;
+    continue_elsewhere::report_accounts(&server, &mut target, vec![continue_elsewhere::with_usage("sam@example.com", 80)]).await;
+    let (status, assistant) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "War room", "instructions": "Run the war room."}))).await;
     assert_eq!(status, 201, "{assistant}");
     let id = assistant["id"].as_str().unwrap().to_string();
     server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/files/notes/old.md")).body("old")).await;
     let (status, saved) = server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/secrets/GITHUB_TOKEN")).json(&json!({"value": TOKEN}))).await;
     assert_eq!(status, 200, "{saved}");
-    let (status, started) = server.user.json(server.user.post(&format!("/api/v1/assistants/{id}/prompt")).json(&json!({"text": "Open the war room"}))).await;
+    let (status, started) = server.user.json(server.user.post(&format!("/api/v1/assistants/{id}/prompt")).json(&json!({"text": "Open the war room", "model": {"agent": "claude"}, "node_id": source.id}))).await;
     assert_eq!(status, 200, "{started}");
     let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
 

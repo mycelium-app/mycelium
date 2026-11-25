@@ -100,22 +100,6 @@ async fn entries_of(state: &AppState, owner: Uuid, routing: Routing) -> ApiResul
     }
 }
 
-pub async fn expand_any_model(state: &AppState, owner: Uuid, models: Vec<ModelChoice>) -> ApiResult<Vec<ModelChoice>> {
-    if !models.iter().any(|choice| choice.any_model) {
-        return Ok(models);
-    }
-
-    let listed = agent_settings::read(state, owner).await?.any_model;
-
-    Ok(models.into_iter().flat_map(|choice| if choice.any_model { listed.clone() } else { vec![choice] }).collect())
-}
-
-pub async fn best_account(state: &AppState, owner: Uuid, node_id: Uuid, agent: AgentId) -> ApiResult<Option<String>> {
-    let found = candidates(state, owner, agent, Some(node_id)).await?;
-
-    Ok(best(&found).map(|candidate| candidate.account.clone()))
-}
-
 pub struct Start {
     pub agent: AgentId,
     pub account: String,

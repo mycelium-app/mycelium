@@ -3,6 +3,7 @@ use axum::Router;
 use axum::extract::State;
 use axum::routing::get;
 use crate::common::{NodeLink, Server, serve};
+use crate::continue_elsewhere;
 use futures_util::{SinkExt, StreamExt};
 use mycelium_proto::link::ControlToNode;
 use serde_json::{Value, json};
@@ -69,11 +70,12 @@ async fn fake_discord(messages: Vec<Value>) -> (String, Arc<Gateway>) {
 
 async fn trigger_setup(messages: Vec<Value>, senders: Vec<&str>) -> (Server, NodeLink, Arc<Gateway>) {
     let server = Server::start_with(|config| config.scheduler_tick = Duration::from_millis(50)).await;
-    let link = server.online_node("laptop").await;
+    let mut link = server.online_node("laptop").await;
+    continue_elsewhere::allow_any_model_on(&server, &mut link).await;
     let (base, gateway) = fake_discord(messages).await;
     let (status, integration) = server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Discord", "kind": "discord", "url": base, "account": "Sam", "bearer_token": TOKEN}))).await;
     assert_eq!(status, 201, "{integration}");
-    let (status, assistant) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "Garden helper", "instructions": "Be brief.", "preferences": {"models": [{"agent": "claude"}], "nodes": [link.id]}}))).await;
+    let (status, assistant) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "Garden helper", "instructions": "Be brief."}))).await;
     assert_eq!(status, 201, "{assistant}");
     let (status, trigger) = server.user.json(server.user.post("/api/v1/mention-triggers").json(&json!({"server_id": integration["id"], "assistant_id": assistant["id"], "senders": senders}))).await;
     assert_eq!(status, 201, "{trigger}");
@@ -109,8 +111,7 @@ async fn a_mention_from_an_allowed_sender_reaches_the_assistant_with_its_channel
 #[tokio::test]
 async fn a_stoat_integration_signed_in_as_a_person_cannot_take_a_trigger() {
     let server = Server::start().await;
-    let link = server.online_node("laptop").await;
-    let (status, assistant) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "Garden helper", "instructions": "Be brief.", "preferences": {"models": [{"agent": "claude"}], "nodes": [link.id]}}))).await;
+    let (status, assistant) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "Garden helper", "instructions": "Be brief."}))).await;
     assert_eq!(status, 201, "{assistant}");
     let integration: uuid::Uuid = sqlx::query_scalar("insert into chat_tool_servers (owner, name, tool_prefix, kind, url, settings) values ((select id from users limit 1), 'Stoat', 'stoat', 'stoat', 'https://stoat.example.test', '{\"token_kind\": \"user\"}') returning id").fetch_one(&server.pool).await.unwrap();
 

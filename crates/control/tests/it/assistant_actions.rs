@@ -1,5 +1,6 @@
 use crate::common;
 use crate::common::{Client, NodeLink, Server};
+use crate::continue_elsewhere;
 use mycelium_proto::link::ControlToNode;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -14,8 +15,10 @@ async fn next_matching<T>(link: &mut NodeLink, pick: impl Fn(&ControlToNode) -> 
     }
 }
 
-async fn assistant_on(server: &Server, link: &NodeLink) -> String {
-    let (status, assistant) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "Stand-up", "instructions": "Be brief.", "preferences": {"models": [{"agent": "claude"}], "nodes": [link.id]}}))).await;
+async fn assistant_on(server: &Server, link: &mut NodeLink) -> String {
+    continue_elsewhere::allow_any_model_on(server, link).await;
+
+    let (status, assistant) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "Stand-up", "instructions": "Be brief."}))).await;
     assert_eq!(status, 201, "{assistant}");
 
     assistant["id"].as_str().unwrap().to_string()
@@ -55,8 +58,8 @@ async fn first_prompt(link: &mut NodeLink) -> (Uuid, String) {
 #[tokio::test]
 async fn an_action_is_created_listed_edited_and_deleted_per_assistant() {
     let server = Server::start().await;
-    let link = server.online_node("laptop").await;
-    let assistant = assistant_on(&server, &link).await;
+    let mut link = server.online_node("laptop").await;
+    let assistant = assistant_on(&server, &mut link).await;
 
     let (status, created) = save_action(&server.user, &assistant, summary_action()).await;
     assert_eq!((status, created["pinned"].clone(), created["inputs"][2]["default"].clone()), (201, json!(true), json!("bullets")), "{created}");
@@ -80,8 +83,8 @@ async fn an_action_is_created_listed_edited_and_deleted_per_assistant() {
 #[tokio::test]
 async fn an_action_with_a_bad_input_is_refused_and_stores_nothing() {
     let server = Server::start().await;
-    let link = server.online_node("laptop").await;
-    let assistant = assistant_on(&server, &link).await;
+    let mut link = server.online_node("laptop").await;
+    let assistant = assistant_on(&server, &mut link).await;
 
     for (inputs, error) in [
         (json!([{"name": "has space", "kind": "text"}]), "input_name_invalid"),
@@ -103,7 +106,7 @@ async fn an_action_with_a_bad_input_is_refused_and_stores_nothing() {
 async fn running_an_action_sends_the_expanded_prompt_to_the_assistant() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
-    let assistant = assistant_on(&server, &link).await;
+    let assistant = assistant_on(&server, &mut link).await;
     let (_, created) = save_action(&server.user, &assistant, summary_action()).await;
     let id = created["id"].as_str().unwrap();
 
@@ -119,7 +122,7 @@ async fn running_an_action_sends_the_expanded_prompt_to_the_assistant() {
 async fn an_action_saved_with_a_model_still_runs_on_the_assistants_own_settings() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
-    let assistant = assistant_on(&server, &link).await;
+    let assistant = assistant_on(&server, &mut link).await;
     let mut body = summary_action();
     body["model"] = json!({"agent": "codex", "model": "gpt-5.5"});
     let (status, created) = save_action(&server.user, &assistant, body).await;
@@ -139,8 +142,8 @@ async fn an_action_saved_with_a_model_still_runs_on_the_assistants_own_settings(
 #[tokio::test]
 async fn running_an_action_without_a_required_input_or_with_a_bad_choice_says_what_to_fix() {
     let server = Server::start().await;
-    let link = server.online_node("laptop").await;
-    let assistant = assistant_on(&server, &link).await;
+    let mut link = server.online_node("laptop").await;
+    let assistant = assistant_on(&server, &mut link).await;
     let (_, created) = save_action(&server.user, &assistant, summary_action()).await;
     let path = format!("/api/v1/assistants/{assistant}/actions/{}/run", created["id"].as_str().unwrap());
 
@@ -156,7 +159,7 @@ async fn running_an_action_without_a_required_input_or_with_a_bad_choice_says_wh
 async fn a_schedule_can_run_an_action_with_fixed_inputs() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
-    let assistant = assistant_on(&server, &link).await;
+    let assistant = assistant_on(&server, &mut link).await;
     let (_, created) = save_action(&server.user, &assistant, summary_action()).await;
 
     let (status, schedule) = server.user.json(server.user.post("/api/v1/schedules").json(&json!({"assistant_id": assistant, "action_id": created["id"], "action_inputs": {"meeting": "stand-up", "date": "2026-10-27"}, "prompt": "Summarise a meeting", "cron": "0 9 * * 1-5", "each_run": "same"}))).await;
@@ -172,8 +175,8 @@ async fn a_schedule_can_run_an_action_with_fixed_inputs() {
 #[tokio::test]
 async fn a_schedule_for_an_action_with_a_missing_input_is_refused() {
     let server = Server::start().await;
-    let link = server.online_node("laptop").await;
-    let assistant = assistant_on(&server, &link).await;
+    let mut link = server.online_node("laptop").await;
+    let assistant = assistant_on(&server, &mut link).await;
     let (_, created) = save_action(&server.user, &assistant, summary_action()).await;
 
     let (status, body) = server.user.json(server.user.post("/api/v1/schedules").json(&json!({"assistant_id": assistant, "action_id": created["id"], "prompt": "Summarise", "cron": "0 9 * * 1-5", "each_run": "same"}))).await;
@@ -191,7 +194,7 @@ async fn propose(server: &Server, link: &mut NodeLink, conversation: Uuid, argum
 async fn a_proposed_action_waits_for_approval_and_can_be_edited_or_declined() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
-    let assistant = assistant_on(&server, &link).await;
+    let assistant = assistant_on(&server, &mut link).await;
     server.user.json(server.user.post(&format!("/api/v1/assistants/{assistant}/prompt")).json(&json!({"text": "Hello"}))).await;
     let (conversation, _) = first_prompt(&mut link).await;
 
@@ -220,7 +223,7 @@ async fn a_proposed_action_waits_for_approval_and_can_be_edited_or_declined() {
 async fn editing_an_action_keeps_its_id_so_its_schedule_runs_the_new_prompt() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
-    let assistant = assistant_on(&server, &link).await;
+    let assistant = assistant_on(&server, &mut link).await;
     let (_, created) = save_action(&server.user, &assistant, summary_action()).await;
     let id = created["id"].as_str().unwrap();
     let (_, schedule) = server.user.json(server.user.post("/api/v1/schedules").json(&json!({"assistant_id": assistant, "action_id": id, "action_inputs": {"meeting": "stand-up", "date": "2026-10-27"}, "prompt": "Summarise a meeting", "cron": "0 9 * * 1-5", "each_run": "same"}))).await;
@@ -240,7 +243,7 @@ async fn editing_an_action_keeps_its_id_so_its_schedule_runs_the_new_prompt() {
 async fn a_proposed_change_to_an_action_applies_in_place_only_when_approved() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
-    let assistant = assistant_on(&server, &link).await;
+    let assistant = assistant_on(&server, &mut link).await;
     server.user.json(server.user.post(&format!("/api/v1/assistants/{assistant}/prompt")).json(&json!({"text": "Hello"}))).await;
     let (conversation, _) = first_prompt(&mut link).await;
     let (_, created) = save_action(&server.user, &assistant, json!({"name": "File this note", "prompt": "File {note}", "inputs": [{"name": "note", "kind": "text"}]})).await;
@@ -278,7 +281,7 @@ async fn a_proposed_change_to_an_action_applies_in_place_only_when_approved() {
 async fn a_change_to_an_unknown_action_lists_the_actions_and_a_taken_name_gives_its_id() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
-    let assistant = assistant_on(&server, &link).await;
+    let assistant = assistant_on(&server, &mut link).await;
     server.user.json(server.user.post(&format!("/api/v1/assistants/{assistant}/prompt")).json(&json!({"text": "Hello"}))).await;
     let (conversation, _) = first_prompt(&mut link).await;
     let (_, created) = save_action(&server.user, &assistant, json!({"name": "Digest", "prompt": "Digest"})).await;
@@ -295,7 +298,7 @@ async fn a_change_to_an_unknown_action_lists_the_actions_and_a_taken_name_gives_
 async fn a_pinned_proposal_is_pinned_once_approved() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
-    let assistant = assistant_on(&server, &link).await;
+    let assistant = assistant_on(&server, &mut link).await;
     server.user.json(server.user.post(&format!("/api/v1/assistants/{assistant}/prompt")).json(&json!({"text": "Hello"}))).await;
     let (conversation, _) = first_prompt(&mut link).await;
 
@@ -319,7 +322,7 @@ async fn an_action_cannot_be_proposed_outside_an_assistant_or_with_a_taken_name(
     let refused = propose(&server, &mut link, plain.id, json!({"name": "Anything", "prompt": "Do it"})).await;
     assert_eq!(refused["isError"], true, "{refused}");
 
-    let assistant = assistant_on(&server, &link).await;
+    let assistant = assistant_on(&server, &mut link).await;
     server.user.json(server.user.post(&format!("/api/v1/assistants/{assistant}/prompt")).json(&json!({"text": "Hello"}))).await;
     let (conversation, _) = first_prompt(&mut link).await;
     save_action(&server.user, &assistant, json!({"name": "Digest", "prompt": "Digest"})).await;
@@ -345,7 +348,7 @@ async fn an_agent_lists_assistants_and_a_creation_waits_for_approval() {
     let conversation = server.create_conversation(link.id, None).await;
     link.expect_start_session().await;
     link.start_session(conversation.id, "acp-1").await;
-    let assistant = assistant_on(&server, &link).await;
+    let assistant = assistant_on(&server, &mut link).await;
 
     let listed = tool(&server, &link, conversation.id, "assistant_list", json!({})).await;
     assert!(text_of(&listed).contains(&assistant) && text_of(&listed).contains("Stand-up"), "{listed}");
@@ -372,7 +375,7 @@ async fn a_declined_creation_makes_no_assistant_and_a_taken_name_is_refused_up_f
     let conversation = server.create_conversation(link.id, None).await;
     link.expect_start_session().await;
     link.start_session(conversation.id, "acp-1").await;
-    assistant_on(&server, &link).await;
+    assistant_on(&server, &mut link).await;
 
     let taken = tool(&server, &link, conversation.id, "assistant_create", json!({"name": "Stand-up", "instructions": "x"})).await;
     assert_eq!(taken["isError"], true, "{taken}");
@@ -394,7 +397,7 @@ async fn updating_settings_applies_at_once_and_can_be_undone_while_instructions_
     let conversation = server.create_conversation(link.id, None).await;
     link.expect_start_session().await;
     link.start_session(conversation.id, "acp-1").await;
-    let assistant = assistant_on(&server, &link).await;
+    let assistant = assistant_on(&server, &mut link).await;
 
     let updated = tool(&server, &link, conversation.id, "assistant_update", json!({"id": assistant, "description": "Daily stand-up notes", "instructions": "Be very brief.", "reason": "Shorter answers"})).await;
     assert_ne!(updated["isError"], true, "{updated}");
@@ -427,7 +430,7 @@ async fn updating_with_a_bad_id_or_nothing_to_change_says_so() {
     let conversation = server.create_conversation(link.id, None).await;
     link.expect_start_session().await;
     link.start_session(conversation.id, "acp-1").await;
-    let assistant = assistant_on(&server, &link).await;
+    let assistant = assistant_on(&server, &mut link).await;
 
     let unknown = tool(&server, &link, conversation.id, "assistant_update", json!({"id": Uuid::new_v4(), "description": "x"})).await;
     let empty = tool(&server, &link, conversation.id, "assistant_update", json!({"id": assistant})).await;
@@ -438,8 +441,8 @@ async fn updating_with_a_bad_id_or_nothing_to_change_says_so() {
 #[tokio::test]
 async fn a_scoped_token_with_assistants_reads_and_creates_but_instruction_changes_become_proposals() {
     let server = Server::start().await;
-    let link = server.online_node("laptop").await;
-    let assistant = assistant_on(&server, &link).await;
+    let mut link = server.online_node("laptop").await;
+    let assistant = assistant_on(&server, &mut link).await;
     let secret = Uuid::new_v4().to_string();
     sqlx::query("insert into client_tokens (user_id, label, token_hash, scopes) values ((select id from users limit 1), 'Test', $1, $2)").bind(common::hash(&secret)).bind(vec!["assistants".to_string()]).execute(&server.pool).await.unwrap();
     let scoped = server.anonymous();
@@ -459,8 +462,8 @@ async fn a_scoped_token_with_assistants_reads_and_creates_but_instruction_change
 #[tokio::test]
 async fn an_assistant_schedule_needs_no_node() {
     let server = Server::start().await;
-    let link = server.online_node("laptop").await;
-    let assistant = assistant_on(&server, &link).await;
+    let mut link = server.online_node("laptop").await;
+    let assistant = assistant_on(&server, &mut link).await;
 
     let (status, schedule) = server.user.json(server.user.post("/api/v1/schedules").json(&json!({"assistant_id": assistant, "prompt": "Wake up", "cron": "0 9 * * *", "each_run": "same"}))).await;
     let (_, held) = server.user.json(server.user.get(&format!("/api/v1/assistants/{assistant}"))).await;

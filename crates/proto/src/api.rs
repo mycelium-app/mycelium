@@ -403,6 +403,10 @@ pub struct PromptRequest {
     pub spoken: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<ModelChoice>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2553,35 +2557,15 @@ pub struct ModelChoice {
     pub any_model: bool,
 }
 
-fn chat_first_by_default() -> bool {
-    true
-}
 
-fn fall_back_by_default() -> Vec<String> {
-    vec!["usage_limit".into(), "signed_out".into(), "offline".into()]
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct AssistantPreferences {
-    #[serde(default)]
-    pub models: Vec<ModelChoice>,
-    #[serde(default)]
-    pub nodes: Vec<Uuid>,
-    #[serde(default = "chat_first_by_default")]
-    pub chat_first: bool,
-    #[serde(default = "fall_back_by_default")]
-    pub fall_back_on: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speech_speed: Option<String>,
 }
 
-impl Default for AssistantPreferences {
-    fn default() -> Self {
-        AssistantPreferences { models: Vec::new(), nodes: Vec::new(), chat_first: true, fall_back_on: fall_back_by_default(), voice_name: None, speech_speed: None }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssistantSecret {
@@ -2630,8 +2614,6 @@ pub struct Assistant {
     pub archived_at: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub next_choice: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secrets: Vec<AssistantSecret>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2788,8 +2770,6 @@ pub struct AssistantChange {
     pub group_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preferences: Option<AssistantPreferences>,
     pub state: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

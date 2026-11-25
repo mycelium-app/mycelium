@@ -7,13 +7,13 @@ use crate::prompts;
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Path, State};
-use mycelium_proto::api::{AssistantChange, AssistantPreferences, CreateAssistantRequest, ModelChoice};
+use mycelium_proto::api::{AssistantChange, CreateAssistantRequest};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::Value;
 use sqlx::types::Json as Jsonb;
 use uuid::Uuid;
 
-const CHANGE_COLUMNS: &str = "id, conversation_id, kind, assistant_id, name, description, group_id, instructions, preferences, state, created_at, decided_at";
+const CHANGE_COLUMNS: &str = "id, conversation_id, kind, assistant_id, name, description, group_id, instructions, state, created_at, decided_at";
 
 #[derive(sqlx::FromRow)]
 struct ChangeRow {
@@ -25,7 +25,6 @@ struct ChangeRow {
     description: Option<String>,
     group_id: Option<Uuid>,
     instructions: Option<String>,
-    preferences: Option<Jsonb<AssistantPreferences>>,
     state: String,
     created_at: chrono::DateTime<chrono::Utc>,
     decided_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -42,7 +41,6 @@ impl ChangeRow {
             description: self.description,
             group_id: self.group_id,
             instructions: self.instructions,
-            preferences: self.preferences.map(|preferences| preferences.0),
             state: self.state,
             created_at: self.created_at,
             decided_at: self.decided_at,
@@ -148,26 +146,6 @@ pub async fn update_from_agent(state: &AppState, owner: Uuid, conversation_id: O
     let Ok(assistant) = assistants::find_owned(state, id, owner).await else {
         return Ok(Err("Nothing was changed. The person has no assistant with that id.".to_string()));
     };
-    let mut preferences = assistant.preferences.clone();
-
-    if let Some(models) = arguments.get("models") {
-        match serde_json::from_value::<Vec<ModelChoice>>(models.clone()) {
-            Ok(models) => preferences.models = models,
-            Err(_) => return Ok(Err("Nothing was changed. Each model needs an agent (claude, codex or vibe) or a provider_id with a model, and optionally an account.".to_string())),
-        }
-    }
-
-    if let Some(nodes) = arguments.get("nodes") {
-        match serde_json::from_value::<Vec<Uuid>>(nodes.clone()) {
-            Ok(nodes) => preferences.nodes = nodes,
-            Err(_) => return Ok(Err("Nothing was changed. nodes is a list of node ids.".to_string())),
-        }
-    }
-
-    if let Err(error) = assistants::validate_preferences(state, owner, &preferences).await {
-        return Ok(Err(format!("Nothing was changed. {}", error.message())));
-    }
-
     let description = text("description").map(str::to_string);
     let group_id = match text("group").filter(|given| !given.is_empty()) {
         Some(given) => match group_named(state, owner, given).await? {
@@ -177,30 +155,29 @@ pub async fn update_from_agent(state: &AppState, owner: Uuid, conversation_id: O
         None => None,
     };
     let instructions = arguments.get("instructions").and_then(Value::as_str);
-    let settings_given = description.is_some() || group_id.is_some() || arguments.get("models").is_some() || arguments.get("nodes").is_some();
+    let settings_given = description.is_some() || group_id.is_some();
 
     if !settings_given && instructions.is_none() {
-        return Ok(Err("Nothing was changed. Give at least one of description, group, models, nodes or instructions.".to_string()));
+        return Ok(Err("Nothing was changed. Give at least one of description, group or instructions.".to_string()));
     }
 
     let mut said: Vec<String> = Vec::new();
 
     if settings_given {
-        let before = serde_json::json!({"description": assistant.description, "group_id": assistant.group_id, "preferences": assistant.preferences});
+        let before = serde_json::json!({"description": assistant.description, "group_id": assistant.group_id});
 
         sqlx::query(
-            "update assistants set description = case when $3::text is null then description else nullif($3, '') end, group_id = coalesce($4, group_id), preferences = $5, updated_at = now() where id = $1 and owner = $2",
+            "update assistants set description = case when $3::text is null then description else nullif($3, '') end, group_id = coalesce($4, group_id), updated_at = now() where id = $1 and owner = $2",
         )
         .bind(id)
         .bind(owner)
         .bind(description.as_deref())
         .bind(group_id)
-        .bind(Jsonb(&preferences))
         .execute(&state.pool)
         .await?;
 
         let row = sqlx::query_as::<_, ChangeRow>(sqlx::AssertSqlSafe(format!(
-            "insert into assistant_changes (owner, conversation_id, kind, assistant_id, name, description, group_id, preferences, before, state, decided_at) values ($1, $2, 'update', $3, $4, $5, $6, $7, $8, 'applied', now()) returning {CHANGE_COLUMNS}",
+            "insert into assistant_changes (owner, conversation_id, kind, assistant_id, name, description, group_id, before, state, decided_at) values ($1, $2, 'update', $3, $4, $5, $6, $7, 'applied', now()) returning {CHANGE_COLUMNS}",
         )))
         .bind(owner)
         .bind(conversation_id)
@@ -208,7 +185,6 @@ pub async fn update_from_agent(state: &AppState, owner: Uuid, conversation_id: O
         .bind(&assistant.name)
         .bind(description.as_deref())
         .bind(group_id)
-        .bind(Jsonb(&preferences))
         .bind(Jsonb(before))
         .fetch_one(&state.pool)
         .await?;
@@ -279,14 +255,12 @@ pub async fn undo(State(state): State<AppState>, user: AuthUser, Path(id): Path<
     let assistant_id = found.assistant_id.ok_or_else(|| ApiError::not_found("That assistant"))?;
     let description = before.get("description").and_then(Value::as_str).map(str::to_string);
     let group_id = before.get("group_id").and_then(Value::as_str).and_then(|given| given.parse::<Uuid>().ok());
-    let preferences: AssistantPreferences = serde_json::from_value(before.get("preferences").cloned().unwrap_or(Value::Null)).unwrap_or_default();
 
-    sqlx::query("update assistants set description = $3, group_id = $4, preferences = $5, updated_at = now() where id = $1 and owner = $2")
+    sqlx::query("update assistants set description = $3, group_id = $4, updated_at = now() where id = $1 and owner = $2")
         .bind(assistant_id)
         .bind(user.id)
         .bind(description)
         .bind(group_id)
-        .bind(Jsonb(&preferences))
         .execute(&state.pool)
         .await?;
 

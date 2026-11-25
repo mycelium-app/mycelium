@@ -8,7 +8,8 @@ use crate::error::{ApiError, ApiResult};
 use crate::groups;
 use crate::prompts;
 use crate::state::{AppState, FolderAnswer};
-use crate::store::{self, ConversationRow, TURN_HAS_ENDED, enum_text, parse_enum};
+use crate::store::{self, enum_text};
+use mycelium_proto::routing::{ANY_NODE, Routing};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::body::Bytes;
@@ -34,8 +35,6 @@ const FOLDER_ROOT: &str = ".mycelium-assistants";
 const FOLDER_CHUNK_BYTES: usize = 1024 * 1024;
 const FOLDER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const SECRET_NAME_LIMIT: usize = 100;
-const MODEL_ERROR_MINUTES: i64 = 10;
-const FALL_BACK_CONDITIONS: [&str; 4] = ["usage_limit", "signed_out", "offline", "model_error"];
 const ASSISTANT_COLUMNS: &str = "a.id, a.name, a.description, a.group_id, a.preferences, a.builtin_key, a.conversation_id, a.backup, a.pinned_at, a.archived_at, a.icon, a.colour, a.avatar_sha256, a.created_at,
     c.status as current_status,
     (select max(updated_at) from conversations where assistant_id = a.id) as last_active_at,
@@ -94,7 +93,6 @@ impl AssistantRow {
             pinned_at: self.pinned_at,
             archived_at: self.archived_at,
             instructions: None,
-            next_choice: None,
             secrets: Vec::new(),
             backup: self.backup.map(|backup| backup.0),
             wakes: self.wake_cron.as_deref().map(|crons| crons.split('|').map(crate::schedules::describe_cron).collect::<Vec<_>>().join(", ")),
@@ -218,36 +216,11 @@ fn name_taken(name: &str) -> ApiError {
     ApiError::conflict("name_taken", format!("You already have an assistant called {name}. Choose another name."))
 }
 
-pub async fn validate_preferences(state: &AppState, owner: Uuid, preferences: &AssistantPreferences) -> ApiResult<()> {
-    for choice in &preferences.models {
-        match (choice.agent, choice.provider_id) {
-            (None, None) if choice.any_model => {}
-            (Some(_), None) => {}
-            (None, Some(provider_id)) => {
-                let exists = sqlx::query_scalar::<_, bool>("select exists (select 1 from model_providers where id = $1 and owner = $2)").bind(provider_id).bind(owner).fetch_one(&state.pool).await?;
+pub async fn validate_node(state: &AppState, owner: Uuid, node_id: Uuid) -> ApiResult<()> {
+    let exists = sqlx::query_scalar::<_, bool>("select exists (select 1 from nodes where id = $1 and created_by = $2 and revoked_at is null)").bind(node_id).bind(owner).fetch_one(&state.pool).await?;
 
-                if !exists {
-                    return Err(ApiError::bad_request("provider_unknown", "That model provider is not one of yours. Choose a model for this assistant."));
-                }
-
-                if choice.model.as_deref().is_none_or(|model| model.trim().is_empty()) {
-                    return Err(ApiError::bad_request("model_required", "Choose a model for this assistant"));
-                }
-            }
-            _ => return Err(ApiError::bad_request("model_required", "Choose a model for this assistant")),
-        }
-    }
-
-    for node_id in &preferences.nodes {
-        let exists = sqlx::query_scalar::<_, bool>("select exists (select 1 from nodes where id = $1 and created_by = $2 and revoked_at is null)").bind(node_id).bind(owner).fetch_one(&state.pool).await?;
-
-        if !exists {
-            return Err(ApiError::bad_request("node_unknown", "That node is not one of yours"));
-        }
-    }
-
-    if let Some(unknown) = preferences.fall_back_on.iter().find(|condition| !FALL_BACK_CONDITIONS.contains(&condition.as_str())) {
-        return Err(ApiError::bad_request("fall_back_invalid", format!("{unknown} is not a reason to move to the next choice.")));
+    if !exists {
+        return Err(ApiError::bad_request("node_unknown", "That node is not one of yours"));
     }
 
     Ok(())
@@ -261,20 +234,14 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 
 pub async fn create_for(state: &AppState, owner: Uuid, request: CreateAssistantRequest) -> ApiResult<Assistant> {
     let name = valid_name(&request.name)?;
-    let mut preferences = request.preferences.unwrap_or_default();
+    let preferences = request.preferences.unwrap_or_default();
     let instructions = request.instructions.unwrap_or_default();
-
-    if preferences.models.is_empty() {
-        preferences.models = vec![ModelChoice { agent: None, provider_id: None, model: None, account: None, any_model: true }];
-    }
 
     check_file_size(INSTRUCTIONS_PATH, instructions.as_bytes())?;
 
     if let Some(group_id) = request.group_id {
         groups::find_owned(state, group_id, owner).await?;
     }
-
-    validate_preferences(state, owner, &preferences).await?;
 
     let description = request.description.as_deref().map(str::trim).filter(|text| !text.is_empty());
     let inserted = sqlx::query_scalar::<_, Uuid>("insert into assistants (owner, name, description, group_id, preferences) values ($1, $2, $3, $4, $5) returning id")
@@ -328,7 +295,6 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<U
     let mut assistant = find_owned(&state, id, user.id).await?;
 
     assistant.instructions = Some(instructions_of(&state, id).await?);
-    assistant.next_choice = next_choice_label(&state, user.id, &assistant).await?;
 
     Ok(Json(assistant))
 }
@@ -338,7 +304,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
 
     if current.builtin_key.is_some() {
         if request.name.as_deref().is_some_and(|name| name.trim() != current.name) {
-            return Err(ApiError::conflict("assistant_built_in", format!("{} is built in, so it cannot be renamed. Change its models, nodes or actions instead.", current.name)));
+            return Err(ApiError::conflict("assistant_built_in", format!("{} is built in, so it cannot be renamed. Change its instructions or actions instead.", current.name)));
         }
 
         if request.archived == Some(true) {
@@ -350,10 +316,6 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
 
     if let Some(group_id) = request.group_id {
         groups::find_owned(&state, group_id, user.id).await?;
-    }
-
-    if let Some(preferences) = &request.preferences {
-        validate_preferences(&state, user.id, preferences).await?;
     }
 
     let icon = request.icon.as_deref().map(str::trim).filter(|icon| !icon.is_empty());
@@ -485,57 +447,37 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
         }
         Some(row) if chats::is_chat(&row) => chats::send(state, owner, row.id, text, request.attachments).await?,
         Some(row) => {
-            let turn_ended = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!("select {TURN_HAS_ENDED}"))).bind(row.id).fetch_one(&state.pool).await?;
-
-            if turn_ended && let Some(reason) = unavailable_reason(state, &row).await? {
-                fall_back(state, owner, row.id, reason, None).await;
-            }
-
             prompts::send(state, owner, row.id, request.clone()).await?;
 
             store::find_owned(&state.pool, row.id, owner).await?.to_proto()?
         }
         None => {
-            let mut preferences = assistant.preferences.clone();
+            let chosen = overrides.model.clone().or(request.model.clone());
+            let node_id = overrides.node_id.or(request.node_id).unwrap_or(ANY_NODE);
 
-            if let Some(model) = &overrides.model {
-                preferences.models = vec![model.clone()];
-            }
-
-            if let Some(node_id) = overrides.node_id {
-                preferences.nodes = vec![node_id];
-            }
-
-            preferences.models = crate::routing::expand_any_model(state, owner, std::mem::take(&mut preferences.models)).await?;
-
-            if preferences.models.is_empty() {
-                return Err(ApiError::bad_request("model_required", "Choose a model for this assistant in its settings, then send your message again."));
-            }
-
-            let facts = facts_of(state, owner, id).await?;
-            let Some(choice) = choose(&preferences, &facts, false) else {
-                return Err(ApiError::conflict("no_choice_available", "None of this assistant's models can run right now. Bring one of its nodes online and signed in, or add another model in its settings."));
-            };
-
-            match choice {
-                Choice::Chat { provider_id, model, .. } => {
+            match chosen {
+                Some(ModelChoice { provider_id: Some(provider_id), model, .. }) => {
                     let started = chats::start(state, owner, CreateChatRequest { provider_id: Some(provider_id), agent: None, account: None, node_id: None, model, prompt: None, parent_id: None, client_id: None }, None, Some(id)).await?;
 
-                    sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started.id).execute(&state.pool).await?;
-                    crate::todos::carry(state, owner, id, started.id).await?;
-                    take_over(state, owner, id, started.id).await?;
+                    adopt(state, owner, id, started.id).await?;
 
                     chats::send(state, owner, started.id, text, request.attachments).await?
                 }
-                Choice::Workspace { agent, account, node_id, .. } => {
-                    let account = account_for(state, owner, node_id, agent, account).await?;
-                    let started = CreateConversationRequest { mode: None, config: None, node_id, agent, account, cwd: folder_of(id), project_id: None, branch: None, worktree_path: None, title: None, prompt: None, parent_id: None, side_kind: None, model: None, routing: None, client_id: None };
+                chosen => {
+                    let (agent, account, model, routing) = match chosen {
+                        Some(ModelChoice { agent: Some(agent), account: Some(account), model, any_model: false, .. }) => (agent, Some(account), model, None),
+                        Some(ModelChoice { agent: Some(agent), model, any_model: false, .. }) => (agent, None, model, Some(Routing::for_agent(agent))),
+                        _ => (AgentId::Claude, None, None, Some(Routing::AnyModel)),
+                    };
+                    let first = Some(text.to_string()).filter(|_| request.attachments.is_empty());
+                    let started = CreateConversationRequest { mode: None, config: None, node_id, agent, account, cwd: folder_of(id), project_id: None, branch: None, worktree_path: None, title: None, prompt: first.clone(), parent_id: None, side_kind: None, model, routing, client_id: None };
                     let started = conversations::start_for(state, owner, started, Some(id), false).await?;
 
-                    sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started.id).execute(&state.pool).await?;
-                    crate::todos::carry(state, owner, id, started.id).await?;
-                    take_over(state, owner, id, started.id).await?;
-                    prompts::send(state, owner, started.id, request.clone()).await?;
+                    adopt(state, owner, id, started.id).await?;
+
+                    if first.is_none() {
+                        prompts::send(state, owner, started.id, request.clone()).await?;
+                    }
 
                     store::find_owned(&state.pool, started.id, owner).await?.to_proto()?
                 }
@@ -550,6 +492,13 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
     publish(state, owner, id).await?;
 
     Ok(conversation)
+}
+
+async fn adopt(state: &AppState, owner: Uuid, id: Uuid, started: Uuid) -> ApiResult<()> {
+    sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started).execute(&state.pool).await?;
+    crate::todos::carry(state, owner, id, started).await?;
+
+    take_over(state, owner, id, started).await
 }
 
 async fn end_session(state: &AppState, owner: Uuid, id: Uuid, conversation_id: Uuid) -> ApiResult<()> {
@@ -791,107 +740,6 @@ pub fn folder_of(id: Uuid) -> String {
     format!("{FOLDER_ROOT}/{id}")
 }
 
-pub struct NodeFacts {
-    pub id: Uuid,
-    pub agents: Vec<String>,
-    pub accounts: Vec<(String, String)>,
-}
-
-pub struct Facts {
-    pub nodes: Vec<NodeFacts>,
-    pub limited: Vec<usize>,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum Choice {
-    Chat { index: usize, provider_id: Uuid, model: Option<String> },
-    Workspace { index: usize, agent: AgentId, account: Option<String>, model: Option<String>, node_id: Uuid },
-}
-
-pub fn choose(preferences: &AssistantPreferences, facts: &Facts, workspace_only: bool) -> Option<Choice> {
-    let chat_choice = |index: usize| {
-        let choice = &preferences.models[index];
-
-        choice.provider_id.filter(|_| !facts.limited.contains(&index)).map(|provider_id| Choice::Chat { index, provider_id, model: choice.model.clone() })
-    };
-    let workspace_choice = |index: usize| {
-        let choice = &preferences.models[index];
-        let agent = choice.agent.filter(|_| !facts.limited.contains(&index))?;
-        let preferred = preferences.nodes.iter().filter_map(|id| facts.nodes.iter().find(|node| node.id == *id));
-        let any = facts.nodes.iter();
-        let mut candidates: Box<dyn Iterator<Item = &NodeFacts>> = if preferences.nodes.is_empty() { Box::new(any) } else { Box::new(preferred) };
-        let node = candidates.find(|node| {
-            node.agents.iter().any(|available| available == agent.as_str())
-                && choice.account.as_ref().is_none_or(|account| node.accounts.iter().any(|(signed_in_agent, signed_in)| signed_in_agent == agent.as_str() && signed_in == account))
-        })?;
-
-        Some(Choice::Workspace { index, agent, account: choice.account.clone(), model: choice.model.clone(), node_id: node.id })
-    };
-
-    if preferences.chat_first && !workspace_only {
-        let first_chat = (0..preferences.models.len()).find_map(chat_choice);
-
-        if first_chat.is_some() {
-            return first_chat;
-        }
-    }
-
-    (0..preferences.models.len()).find_map(|index| match workspace_only {
-        true => workspace_choice(index),
-        false => chat_choice(index).or_else(|| workspace_choice(index)),
-    })
-}
-
-async fn effective_preferences(state: &AppState, owner: Uuid, assistant: &Assistant) -> ApiResult<AssistantPreferences> {
-    let models = crate::routing::expand_any_model(state, owner, assistant.preferences.models.clone()).await?;
-
-    Ok(AssistantPreferences { models, ..assistant.preferences.clone() })
-}
-
-async fn account_for(state: &AppState, owner: Uuid, node_id: Uuid, agent: AgentId, account: Option<String>) -> ApiResult<Option<String>> {
-    if account.is_some() {
-        return Ok(account);
-    }
-
-    crate::routing::best_account(state, owner, node_id, agent).await
-}
-
-pub async fn facts_of(state: &AppState, owner: Uuid, assistant_id: Uuid) -> ApiResult<Facts> {
-    let available = sqlx::query_as::<_, (Uuid, String)>(
-        "select n.id, a.agent from nodes n join agents a on a.node_id = n.id and a.available where n.created_by = $1 and n.revoked_at is null and not n.draining order by n.name, n.id",
-    )
-    .bind(owner)
-    .fetch_all(&state.pool)
-    .await?;
-    let mut nodes: Vec<NodeFacts> = Vec::new();
-
-    for (node_id, agent) in available.into_iter().filter(|(node_id, _)| state.hub.is_online(*node_id)) {
-        match nodes.iter_mut().find(|node| node.id == node_id) {
-            Some(node) => node.agents.push(agent),
-            None => nodes.push(NodeFacts { id: node_id, agents: vec![agent], accounts: Vec::new() }),
-        }
-    }
-
-    let ids: Vec<Uuid> = nodes.iter().map(|node| node.id).collect();
-    let logins = sqlx::query_as::<_, (Uuid, String, String)>("select node_id, agent, account from logins where node_id = any($1) and state = 'signed_in' and account is not null").bind(&ids).fetch_all(&state.pool).await?;
-
-    for (node_id, agent, account) in logins {
-        if let Some(node) = nodes.iter_mut().find(|node| node.id == node_id) {
-            node.accounts.push((agent, account));
-        }
-    }
-
-    let limited = sqlx::query_scalar::<_, Jsonb<Value>>("select limited from assistants where id = $1").bind(assistant_id).fetch_one(&state.pool).await?;
-    let now = chrono::Utc::now();
-    let limited = limited.0.as_object().into_iter().flatten().filter_map(|(index, until)| {
-        let until = until.as_str()?.parse::<chrono::DateTime<chrono::Utc>>().ok()?;
-
-        (until > now).then(|| index.parse::<usize>().ok()).flatten()
-    });
-
-    Ok(Facts { nodes, limited: limited.collect() })
-}
-
 pub async fn copy_down(state: &AppState, node_id: Uuid, assistant_id: Uuid) -> ApiResult<()> {
     let stored = sqlx::query_as::<_, (String, Vec<u8>)>("select path, content from assistant_files where assistant_id = $1 order by path").bind(assistant_id).fetch_all(&state.pool).await?;
     let root = folder_of(assistant_id);
@@ -1057,17 +905,12 @@ async fn move_to_workspace(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult
     let Some(assistant_id) = assistant_id else {
         return Ok(());
     };
-    let assistant = find_owned(state, assistant_id, owner).await?;
-    let facts = facts_of(state, owner, assistant_id).await?;
-    let preferences = effective_preferences(state, owner, &assistant).await?;
-    let Some(Choice::Workspace { agent, account, node_id, .. }) = choose(&preferences, &facts, true) else {
-        return Err(ApiError::conflict("no_choice_available", "No node can run this assistant right now."));
-    };
-    let account = account_for(state, owner, node_id, agent, account).await?;
+    let node_id = crate::node_pick::pick(state, owner, None).await?.node_id;
+    let start = crate::routing::start_pick(state, owner, node_id, Routing::AnyModel).await?;
 
     copy_down(state, node_id, assistant_id).await?;
 
-    let target = Target { agent: enum_text(&agent), account, provider_id: None, model: None, node_id: Some(node_id), cwd: Some(folder_of(assistant_id)) };
+    let target = Target { agent: enum_text(&start.agent), account: Some(start.account), provider_id: None, model: start.model, node_id: Some(node_id), cwd: Some(folder_of(assistant_id)) };
 
     continuation::continue_on(state, owner, id, target, None).await?;
     prompts::continue_unless_queued(state, owner, id, "You now have a working folder on a node, and your files are in it. Carry on with the request above.").await?;
@@ -1203,7 +1046,7 @@ pub async fn use_workspace_tool(state: &AppState, conversation_id: Option<Uuid>)
         Some(conversation_id) => sqlx::query_as::<_, (Option<Uuid>, String, Uuid)>("select assistant_id, agent, owner from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?,
         None => None,
     };
-    let (Some(conversation_id), Some((Some(assistant_id), agent, owner))) = (conversation_id, session) else {
+    let (Some(conversation_id), Some((Some(_), agent, owner))) = (conversation_id, session) else {
         return Ok(("This conversation does not belong to an assistant.".to_string(), true));
     };
 
@@ -1211,186 +1054,19 @@ pub async fn use_workspace_tool(state: &AppState, conversation_id: Option<Uuid>)
         return Ok(("You already have a working folder.".to_string(), true));
     }
 
-    let assistant = find_owned(state, assistant_id, owner).await?;
-    let facts = facts_of(state, owner, assistant_id).await?;
-    let preferences = effective_preferences(state, owner, &assistant).await?;
-
-    let Some(Choice::Workspace { node_id, .. }) = choose(&preferences, &facts, true) else {
-        return Ok(("No node can run this assistant right now. Tell the person to bring one of its nodes online and signed in, or to add one in the assistant's settings.".to_string(), true));
+    let Ok(picked) = crate::node_pick::pick(state, owner, None).await else {
+        return Ok(("No node can run this assistant right now. Tell the person to bring a node online and signed in.".to_string(), true));
     };
-
-    let name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(node_id).fetch_one(&state.pool).await?;
+    let name = picked.name;
 
     state.hub.ask_workspace(conversation_id);
 
     Ok((format!("The thread moves to {name} when this reply ends, with your storage in a working folder. Finish this reply, then carry on there."), false))
 }
 
-pub async fn session_started(state: &AppState, owner: Uuid, conversation_id: Uuid) {
-    let found = sqlx::query_as::<_, (Option<Uuid>, String, Option<String>)>("select assistant_id, agent, account from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await;
-    let Ok(Some((Some(assistant_id), agent, account))) = found else {
-        return;
-    };
-    let Ok(assistant) = find_owned(state, assistant_id, owner).await else {
-        return;
-    };
-    let Ok(facts) = facts_of(state, owner, assistant_id).await else {
-        return;
-    };
-    let model = assistant.preferences.models.iter().enumerate().find(|(index, choice)| {
-        choice.agent.is_some_and(|choice_agent| choice_agent.as_str() == agent) && (choice.account.is_none() || choice.account == account) && !facts.limited.contains(index)
-    });
-
-    if let Some((_, choice)) = model && let Some(model) = &choice.model && let Err(error) = prompts::apply_model(state, owner, conversation_id, Some(model), None).await {
-        tracing::warn!("could not set the model {model} for assistant {assistant_id}: {}", error.message());
-    }
-}
-
-async fn unavailable_reason(state: &AppState, row: &ConversationRow) -> ApiResult<Option<&'static str>> {
-    if !state.hub.is_online(row.node_id) {
-        return Ok(Some("offline"));
-    }
-
-    let signed_in = match (&row.account, parse_enum::<AgentId>(&row.agent)) {
-        (Some(account), Ok(agent)) => sqlx::query_scalar::<_, bool>("select exists (select 1 from logins where node_id = $1 and agent = $2 and account = $3 and state = 'signed_in')").bind(row.node_id).bind(agent.as_str()).bind(account).fetch_one(&state.pool).await?,
-        _ => true,
-    };
-
-    Ok((!signed_in).then_some("signed_out"))
-}
-
-fn current_index(preferences: &AssistantPreferences, row: &ConversationRow) -> Option<usize> {
-    preferences.models.iter().position(|choice| match (choice.agent, choice.provider_id) {
-        (Some(agent), _) => agent.as_str() == row.agent && (choice.account.is_none() || choice.account == row.account),
-        (None, Some(provider_id)) => row.provider_id == Some(provider_id) && (choice.model.is_none() || choice.model == row.model),
-        _ => false,
-    })
-}
-
-async fn label_of(state: &AppState, choice: &Choice) -> ApiResult<String> {
-    match choice {
-        Choice::Chat { provider_id, model, .. } => {
-            let name = sqlx::query_scalar::<_, String>("select name from model_providers where id = $1").bind(provider_id).fetch_optional(&state.pool).await?;
-
-            Ok([name, model.clone()].into_iter().flatten().collect::<Vec<_>>().join(" · "))
-        }
-        Choice::Workspace { agent, node_id, .. } => {
-            let name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(node_id).fetch_one(&state.pool).await?;
-            let agent = agent.display_name();
-
-            Ok(format!("{agent} on {name}"))
-        }
-    }
-}
-
-async fn next_choice_label(state: &AppState, owner: Uuid, assistant: &Assistant) -> ApiResult<Option<String>> {
-    let facts = facts_of(state, owner, assistant.id).await?;
-    let preferences = effective_preferences(state, owner, assistant).await?;
-
-    match choose(&preferences, &facts, false) {
-        Some(choice) => Ok(Some(label_of(state, &choice).await?)),
-        None => Ok(None),
-    }
-}
-
-pub async fn fall_back(state: &AppState, owner: Uuid, conversation_id: Uuid, reason: &str, until: Option<chrono::DateTime<chrono::Utc>>) -> bool {
-    match try_fall_back(state, owner, conversation_id, reason, until).await {
-        Ok(moved) => moved,
-        Err(error) => {
-            tracing::warn!("could not move conversation {conversation_id} to the assistant's next choice ({reason}): {}", error.message());
-
-            false
-        }
-    }
-}
-
-async fn try_fall_back(state: &AppState, owner: Uuid, conversation_id: Uuid, reason: &str, until: Option<chrono::DateTime<chrono::Utc>>) -> ApiResult<bool> {
-    let row = store::find_owned(&state.pool, conversation_id, owner).await?;
-    let Some(assistant_id) = row.assistant_id else {
-        return Ok(false);
-    };
-    let assistant = find_owned(state, assistant_id, owner).await?;
-
-    if !assistant.preferences.fall_back_on.iter().any(|condition| condition == reason) {
-        return Ok(false);
-    }
-
-    let preferences = effective_preferences(state, owner, &assistant).await?;
-
-    if let (Some(until), Some(index)) = (until, current_index(&preferences, &row)) {
-        sqlx::query("update assistants set limited = limited || jsonb_build_object($2::text, $3::text) where id = $1").bind(assistant_id).bind(index.to_string()).bind(until.to_rfc3339()).execute(&state.pool).await?;
-    }
-
-    let facts = facts_of(state, owner, assistant_id).await?;
-    let target = match choose(&preferences, &facts, false) {
-        Some(Choice::Chat { provider_id, model, .. }) => Target { agent: chats::CHAT_AGENT.to_string(), account: None, provider_id: Some(provider_id), model, node_id: None, cwd: None },
-        Some(Choice::Workspace { agent, account, node_id, .. }) => {
-            let account = account_for(state, owner, node_id, agent, account).await?;
-
-            copy_down(state, node_id, assistant_id).await?;
-
-            Target { agent: enum_text(&agent), account, provider_id: None, model: None, node_id: Some(node_id), cwd: Some(folder_of(assistant_id)) }
-        }
-        None => return Ok(false),
-    };
-
-    continuation::continue_on(state, owner, conversation_id, target, Some(reason)).await?;
-    publish(state, owner, assistant_id).await?;
-
-    Ok(true)
-}
-
-pub async fn fall_back_after_chat_error(state: &AppState, owner: Uuid, id: Uuid) {
-    let until = chrono::Utc::now() + chrono::Duration::minutes(MODEL_ERROR_MINUTES);
-
-    if !fall_back(state, owner, id, "model_error", Some(until)).await {
-        return;
-    }
-
-    let resumed = match store::find_owned(&state.pool, id, owner).await {
-        Ok(row) if chats::is_chat(&row) => chats::resume_turn(state, owner, id).await,
-        Ok(_) => prompts::retry_failed(state, owner, id).await,
-        Err(error) => Err(error),
-    };
-
-    if let Err(error) = resumed {
-        tracing::warn!("could not carry on conversation {id} after its model failed: {}", error.message());
-    }
-}
-
-pub async fn carry_on_after_limit(state: &AppState, owner: Uuid, id: Uuid, text: &str) -> ApiResult<()> {
-    let row = store::find_owned(&state.pool, id, owner).await?;
-
-    if chats::is_chat(&row) {
-        chats::send(state, owner, id, text, Vec::new()).await?;
-
-        return Ok(());
-    }
-
-    prompts::retry_failed(state, owner, id).await?;
-    prompts::continue_unless_queued(state, owner, id, text).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mycelium_proto::api::ModelChoice;
-
-    fn chat(model: &str) -> ModelChoice {
-        ModelChoice { agent: None, provider_id: Some(Uuid::from_u128(1)), model: Some(model.into()), account: None, any_model: false }
-    }
-
-    fn harness(agent: AgentId, account: Option<&str>) -> ModelChoice {
-        ModelChoice { agent: Some(agent), provider_id: None, model: None, account: account.map(str::to_string), any_model: false }
-    }
-
-    fn node(id: u128, agents: &[&str], accounts: &[(&str, &str)]) -> NodeFacts {
-        NodeFacts { id: Uuid::from_u128(id), agents: agents.iter().map(|agent| agent.to_string()).collect(), accounts: accounts.iter().map(|(agent, account)| (agent.to_string(), account.to_string())).collect() }
-    }
-
-    fn preferences(models: Vec<ModelChoice>, nodes: Vec<u128>, chat_first: bool) -> AssistantPreferences {
-        AssistantPreferences { models, nodes: nodes.into_iter().map(Uuid::from_u128).collect(), chat_first, ..AssistantPreferences::default() }
-    }
 
     #[test]
     fn secret_names_must_be_environment_variable_names() {
@@ -1400,44 +1076,5 @@ mod tests {
         assert!(valid_secret_name("1TOKEN").is_err());
         assert!(valid_secret_name("A-B").is_err());
         assert!(valid_secret_name("").is_err());
-    }
-
-    #[test]
-    fn choose_prefers_a_chat_model_first_and_skips_limited_ones() {
-        let preferences = preferences(vec![harness(AgentId::Claude, None), chat("a"), chat("b")], vec![], true);
-        let facts = Facts { nodes: vec![node(10, &["claude"], &[])], limited: vec![1] };
-
-        let choice = choose(&preferences, &facts, false);
-
-        assert_eq!(choice, Some(Choice::Chat { index: 2, provider_id: Uuid::from_u128(1), model: Some("b".into()) }));
-    }
-
-    #[test]
-    fn choose_takes_the_first_workable_node_when_chat_is_not_first() {
-        let preferences = preferences(vec![harness(AgentId::Claude, Some("work")), chat("a")], vec![30, 20], false);
-        let facts = Facts { nodes: vec![node(20, &["claude"], &[("claude", "personal")]), node(30, &["claude"], &[("claude", "work")])], limited: vec![] };
-
-        let choice = choose(&preferences, &facts, false);
-
-        assert_eq!(choice, Some(Choice::Workspace { index: 0, agent: AgentId::Claude, account: Some("work".into()), model: None, node_id: Uuid::from_u128(30) }));
-    }
-
-    #[test]
-    fn choose_skips_offline_and_signed_out_choices_and_falls_to_the_next_model() {
-        let preferences = preferences(vec![harness(AgentId::Claude, Some("work")), harness(AgentId::Codex, None)], vec![20], false);
-        let facts = Facts { nodes: vec![node(20, &["claude", "codex"], &[])], limited: vec![] };
-
-        let choice = choose(&preferences, &facts, false);
-
-        assert_eq!(choice, Some(Choice::Workspace { index: 1, agent: AgentId::Codex, account: None, model: None, node_id: Uuid::from_u128(20) }));
-        assert_eq!(choose(&preferences, &Facts { nodes: vec![], limited: vec![] }, false), None);
-    }
-
-    #[test]
-    fn choosing_for_a_workspace_ignores_chat_models() {
-        let preferences = preferences(vec![chat("a")], vec![], true);
-        let facts = Facts { nodes: vec![node(10, &["claude"], &[])], limited: vec![] };
-
-        assert_eq!(choose(&preferences, &facts, true), None);
     }
 }

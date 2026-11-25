@@ -1,5 +1,6 @@
 use crate::common;
 use crate::common::{NodeLink, Server};
+use crate::continue_elsewhere;
 use mycelium_proto::link::{ControlToNode, GitCommand, NodeToControl};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -207,14 +208,13 @@ async fn next_matching<T>(link: &mut NodeLink, pick: impl Fn(&ControlToNode) -> 
     }
 }
 
-async fn wellness_on(server: &Server, link: &NodeLink) -> String {
+async fn wellness_on(server: &Server, link: &mut NodeLink) -> String {
+    continue_elsewhere::allow_any_model_on(server, link).await;
+
     let (status, assistant) = server.user.json(server.user.get("/api/v1/assistants/builtin/wellness")).await;
     assert_eq!(status, 200, "{assistant}");
-    let id = assistant["id"].as_str().unwrap().to_string();
-    let (status, patched) = server.user.json(server.user.patch(&format!("/api/v1/assistants/{id}")).json(&json!({"preferences": {"models": [{"agent": "claude"}], "nodes": [link.id]}}))).await;
-    assert_eq!(status, 200, "{patched}");
 
-    id
+    assistant["id"].as_str().unwrap().to_string()
 }
 
 async fn action_id(server: &Server, assistant: &str, name: &str) -> String {
@@ -300,7 +300,7 @@ async fn a_built_in_action_can_be_edited_and_reset_to_its_default() {
 async fn save_reflection_keeps_edited_sections() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
-    let assistant = wellness_on(&server, &link).await;
+    let assistant = wellness_on(&server, &mut link).await;
     let (scheduled, asked) = run_action(&server, &mut link, &assistant, "Weekly reflection", json!({"week": "2026-10-28"})).await;
     assert!(asked.contains("the week containing 2026-10-28") && asked.contains("save_reflection"), "{asked}");
     let token = link.token.clone();
@@ -342,7 +342,7 @@ async fn a_conversation_that_is_not_the_wellness_assistant_cannot_save_a_reflect
 async fn patch_marks_sections_edited() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
-    let assistant = wellness_on(&server, &link).await;
+    let assistant = wellness_on(&server, &mut link).await;
     let (scheduled, _) = run_action(&server, &mut link, &assistant, "Weekly reflection", json!({})).await;
     let token = link.token.clone();
     save_reflection(&server, &token, scheduled, json!({"done": "A", "learned": "B"})).await;
@@ -361,14 +361,14 @@ async fn patch_marks_sections_edited() {
 }
 
 #[tokio::test]
-async fn redrafting_before_the_wellness_assistant_has_a_model_says_what_to_do() {
+async fn redrafting_with_no_node_online_says_what_to_bring_online() {
     let server = Server::start().await;
     let user = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
     let id = sqlx::query_scalar::<_, Uuid>("insert into reflections (owner, week) values ($1, '2026-10-26') returning id").bind(user).fetch_one(&server.pool).await.unwrap();
 
     let (status, body) = server.user.json(server.user.post(&format!("/api/v1/reflections/{id}/redraft"))).await;
 
-    assert_eq!((status, body["error"].clone()), (400, json!("model_required")));
+    assert_eq!((status, body["error"].clone()), (409, json!("no_node_available")));
 }
 
 async fn skills(server: &Server) -> Vec<Value> {
@@ -601,7 +601,7 @@ async fn review_runs_through_the_wellness_assistant_and_saves_comments_and_test_
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     project_on(&server, &link).await;
-    let assistant = wellness_on(&server, &link).await;
+    let assistant = wellness_on(&server, &mut link).await;
     let source = started_conversation(&server, &mut link).await;
     let exercise = proposed_exercise(&server, &link, source).await;
     start_exercise(&server, &mut link, &exercise).await;

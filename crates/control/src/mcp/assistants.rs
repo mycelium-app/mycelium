@@ -73,7 +73,7 @@ pub fn definitions() -> Value {
         },
         {
             "name": "assistant_create",
-            "description": "Propose a new assistant. The person approves it before it exists. Other settings start at their defaults, and the person sets models and nodes afterwards.",
+            "description": "Propose a new assistant. The person approves it before it exists. Other settings start at their defaults.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -87,15 +87,13 @@ pub fn definitions() -> Value {
         },
         {
             "name": "assistant_update",
-            "description": "Change an assistant. Description, group, models and nodes apply straight away, and the person can undo them. A new instructions text waits for the person's approval. Secrets and archiving are not available.",
+            "description": "Change an assistant. Description and group apply straight away, and the person can undo them. A new instructions text waits for the person's approval. Secrets and archiving are not available.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "id": {"type": "string", "description": "The assistant id, as assistant_list returned it."},
                     "description": {"type": "string"},
                     "group": {"type": "string", "description": "The name of one of the person's groups."},
-                    "models": {"type": "array", "items": {"type": "object", "properties": {"agent": {"type": "string", "enum": ["claude", "codex", "vibe"]}, "provider_id": {"type": "string"}, "model": {"type": "string"}, "account": {"type": "string"}}}, "description": "The models in order of preference."},
-                    "nodes": {"type": "array", "items": {"type": "string"}, "description": "Node ids the assistant may run on."},
                     "instructions": {"type": "string", "description": "The whole new instructions text."},
                     "reason": {"type": "string", "description": "Why the instructions change, shown with the proposal."},
                 },

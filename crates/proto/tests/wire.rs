@@ -433,9 +433,10 @@ fn permission_answer_and_login_bodies_round_trip() {
     round_trip(&StartLoginResponse { login_id: id() });
     round_trip(&LoginInputRequest { text: "x".into() });
     round_trip(&DrainRequest { draining: true });
-    round_trip(&PromptRequest { text: "go".into(), attachments: vec![], spoken: false, client_id: None });
-    round_trip(&PromptRequest { text: "go".into(), attachments: vec![], spoken: true, client_id: None });
-    round_trip(&PromptRequest { text: "go".into(), attachments: vec![], spoken: false, client_id: Some(Uuid::nil()) });
+    round_trip(&PromptRequest { text: "go".into(), ..Default::default() });
+    round_trip(&PromptRequest { text: "go".into(), spoken: true, ..Default::default() });
+    round_trip(&PromptRequest { text: "go".into(), client_id: Some(Uuid::nil()), ..Default::default() });
+    round_trip(&PromptRequest { text: "go".into(), model: Some(ModelChoice { agent: Some(AgentId::Vibe), provider_id: None, model: Some("mistral-large-4".into()), account: None, any_model: false }), node_id: Some(Uuid::nil()), ..Default::default() });
     round_trip(&SavePrivacyRequest { voice_enabled: true });
     round_trip(&SpeechRequest { text: "hi".into(), voice: Some("alloy".into()), speed: None });
     round_trip(&PatchQueueRequest { text: Some("edit".into()), attachments: None, editing: Some(true) });

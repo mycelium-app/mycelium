@@ -261,20 +261,6 @@ pub async fn send_reopening(state: &AppState, owner: Uuid, id: Uuid, text: &str,
     Ok(conversation)
 }
 
-pub async fn resume_turn(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
-    let mut tx = state.pool.begin().await?;
-    let row = lock_owned(&mut tx, id, owner).await?;
-    let Some(provider_id) = row.provider_id else {
-        return Err(ApiError::conflict("provider_removed", "This chat's model provider was removed. Choose another model in the message box to carry on."));
-    };
-    let working = set_status(&mut tx, id, ConversationStatus::Working).await?;
-    tx.commit().await?;
-
-    state.publish(Some(owner), StreamMessage::Conversation(working.to_proto()?));
-
-    spawn_turn(state, owner, id, provider_id, row.model.unwrap_or_default()).await
-}
-
 async fn spawn_turn(state: &AppState, owner: Uuid, id: Uuid, provider_id: Uuid, model: String) -> ApiResult<()> {
     let provider = model_providers::find_owned(state, provider_id, owner).await?;
     let messages = history(state, id).await?;
@@ -489,10 +475,6 @@ fn run_turn(state: AppState, owner: Uuid, id: Uuid, provider: ProviderRow, model
 
         if let Err(cause) = finish(&state, owner, id, stop_reason, Some(usage)).await {
             tracing::warn!("could not finish the reply of chat {id}: {}", cause.message());
-        }
-
-        if stop_reason == "error" {
-            crate::assistants::fall_back_after_chat_error(&state, owner, id).await;
         }
     })
 }

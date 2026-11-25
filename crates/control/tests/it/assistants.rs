@@ -6,7 +6,8 @@ use axum::extract::State;
 use axum::response::Response;
 use axum::routing::{get, post};
 use base64::Engine;
-use crate::common::{Client, Server, next_matching, serve};
+use crate::common::{Client, NodeLink, Server, next_matching, serve};
+use crate::continue_elsewhere;
 use mycelium_proto::link::{ControlToNode, FolderFile, NodeToControl};
 use futures_util::stream;
 use serde_json::{Value, json};
@@ -105,6 +106,17 @@ async fn prompt(client: &Client, id: &str, text: &str) -> Value {
     conversation
 }
 
+async fn prompt_on(client: &Client, id: &str, text: &str, model: Value) -> Value {
+    let (status, conversation) = client.json(client.post(&format!("/api/v1/assistants/{id}/prompt")).json(&json!({"text": text, "model": model}))).await;
+    assert_eq!(status, 200, "{conversation}");
+
+    conversation
+}
+
+fn llama(provider: &Value) -> Value {
+    json!({"provider_id": provider["id"], "model": "llama3.2"})
+}
+
 async fn create(client: &Client, body: Value) -> Value {
     let (status, assistant) = client.json(client.post("/api/v1/assistants").json(&body)).await;
     assert_eq!(status, 201, "{assistant}");
@@ -158,40 +170,13 @@ async fn a_duplicate_name_is_refused_with_a_message_naming_it() {
 }
 
 #[tokio::test]
-async fn preferences_naming_an_unknown_node_or_a_model_less_choice_are_refused() {
-    let server = Server::start().await;
-
-    let (status, refused) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "A", "preferences": {"nodes": [uuid::Uuid::new_v4()]}}))).await;
-    assert_eq!((status, refused["message"].clone()), (400, json!("That node is not one of yours")));
-
-    let (status, refused) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "A", "preferences": {"models": [{}]}}))).await;
-    assert_eq!((status, refused["message"].clone()), (400, json!("Choose a model for this assistant")));
-}
-
-#[tokio::test]
-async fn a_new_assistant_with_no_models_chosen_uses_auto_which_picks_from_favourites() {
-    let server = Server::start().await;
-    let created = create(&server.user, json!({"name": "Stand-up"})).await;
-
-    assert_eq!(created["preferences"]["models"], json!([{"any_model": true}]));
-}
-
-#[tokio::test]
-async fn an_assistant_can_keep_auto_alongside_a_named_model() {
-    let server = Server::start().await;
-    let created = create(&server.user, json!({"name": "Stand-up", "preferences": {"models": [{"agent": "claude", "model": "opus"}, {"any_model": true}]}})).await;
-
-    assert_eq!(created["preferences"]["models"], json!([{"agent": "claude", "model": "opus"}, {"any_model": true}]));
-}
-
-#[tokio::test]
 async fn the_first_prompt_starts_a_chat_session_and_later_prompts_reuse_it() {
     let server = Server::start().await;
     let (provider, fake) = chat_provider(&server).await;
-    let assistant = create(&server.user, json!({"name": "Stand-up", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up"})).await;
     let id = assistant["id"].as_str().unwrap();
 
-    let first = prompt(&server.user, id, "What did we ship?").await;
+    let first = prompt_on(&server.user, id, "What did we ship?", llama(&provider)).await;
     finished_turns(&server, first["id"].as_str().unwrap(), 1).await;
     let second = prompt(&server.user, id, "And yesterday?").await;
     finished_turns(&server, second["id"].as_str().unwrap(), 2).await;
@@ -204,14 +189,15 @@ async fn the_first_prompt_starts_a_chat_session_and_later_prompts_reuse_it() {
 }
 
 #[tokio::test]
-async fn a_prompt_with_no_chat_model_chosen_says_how_to_fix_it() {
+async fn a_first_prompt_with_no_model_and_an_empty_any_model_list_says_to_edit_the_list() {
     let server = Server::start().await;
+    let _link = server.online_node("laptop").await;
     let assistant = create(&server.user, json!({"name": "Stand-up"})).await;
 
     let (status, refused) = server.user.json(server.user.post(&format!("/api/v1/assistants/{}/prompt", assistant["id"].as_str().unwrap())).json(&json!({"text": "Hello"}))).await;
 
-    assert_eq!((status, refused["error"].clone()), (400, json!("model_required")));
-    assert!(refused["message"].as_str().unwrap().contains("settings"));
+    assert_eq!((status, refused["error"].clone()), (409, json!("no_routing_choice")));
+    assert!(refused["message"].as_str().unwrap().contains("Any model list"));
 }
 
 #[tokio::test]
@@ -219,16 +205,16 @@ async fn clear_starts_a_new_session_and_keeps_instructions_and_group() {
     let server = Server::start().await;
     let (provider, _) = chat_provider(&server).await;
     let (_, group) = server.user.json(server.user.post("/api/v1/groups").json(&json!({"name": "acme"}))).await;
-    let assistant = create(&server.user, json!({"name": "Stand-up", "group_id": group["id"], "instructions": "Be brief.", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up", "group_id": group["id"], "instructions": "Be brief."})).await;
     let id = assistant["id"].as_str().unwrap();
-    let first = prompt(&server.user, id, "Hello").await;
+    let first = prompt_on(&server.user, id, "Hello", llama(&provider)).await;
     finished_turns(&server, first["id"].as_str().unwrap(), 1).await;
 
     let (status, cleared) = server.user.json(server.user.post(&format!("/api/v1/assistants/{id}/clear"))).await;
     assert_eq!(status, 200, "{cleared}");
     assert!(cleared.get("conversation_id").is_none());
 
-    let second = prompt(&server.user, id, "Hello again").await;
+    let second = prompt_on(&server.user, id, "Hello again", llama(&provider)).await;
     let (_, fetched) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}"))).await;
     assert_ne!(first["id"], second["id"]);
     assert_eq!((fetched["group_id"].clone(), fetched["instructions"].clone(), fetched["session_count"].clone()), (group["id"].clone(), json!("Be brief."), json!(2)));
@@ -238,16 +224,16 @@ async fn clear_starts_a_new_session_and_keeps_instructions_and_group() {
 async fn the_to_do_list_survives_clear_and_the_new_session_is_given_it() {
     let server = Server::start().await;
     let (provider, fake) = chat_provider(&server).await;
-    let assistant = create(&server.user, json!({"name": "Stand-up", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up"})).await;
     let id = assistant["id"].as_str().unwrap();
-    let first = prompt(&server.user, id, "Hello").await;
+    let first = prompt_on(&server.user, id, "Hello", llama(&provider)).await;
     finished_turns(&server, first["id"].as_str().unwrap(), 1).await;
     let todos = json!([{"content": "Book the venue", "status": "in_progress", "description": "Somewhere near the station."}, {"content": "Send the invites", "status": "pending"}]);
     let (status, _) = server.user.json(server.user.put(&format!("/api/v1/conversations/{}/todos", first["id"].as_str().unwrap())).json(&json!({"todos": todos}))).await;
     assert_eq!(status, 204);
     server.user.json(server.user.post(&format!("/api/v1/assistants/{id}/clear"))).await;
 
-    let second = prompt(&server.user, id, "Where were we?").await;
+    let second = prompt_on(&server.user, id, "Where were we?", llama(&provider)).await;
     finished_turns(&server, second["id"].as_str().unwrap(), 1).await;
 
     assert_ne!(first["id"], second["id"]);
@@ -266,9 +252,9 @@ async fn assistant_sessions_take_the_assistants_group_and_its_agents_md_as_instr
     server.user.json(server.user.put("/api/v1/instructions/global").json(&json!({"text": "Global rule."}))).await;
     let (status, _) = server.user.json(server.user.put(&format!("/api/v1/groups/{}/instructions", group["id"].as_str().unwrap())).json(&json!({"text": "Group rule."}))).await;
     assert_eq!(status, 200);
-    let assistant = create(&server.user, json!({"name": "Stand-up", "group_id": group["id"], "instructions": "Assistant rule.", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up", "group_id": group["id"], "instructions": "Assistant rule."})).await;
 
-    let conversation = prompt(&server.user, assistant["id"].as_str().unwrap(), "Hello").await;
+    let conversation = prompt_on(&server.user, assistant["id"].as_str().unwrap(), "Hello", llama(&provider)).await;
     finished_turns(&server, conversation["id"].as_str().unwrap(), 1).await;
 
     let system = fake.requests.lock().unwrap()[0]["messages"][0]["content"].as_str().unwrap().to_string();
@@ -281,8 +267,8 @@ async fn assistant_sessions_carry_their_assistant_id_in_the_conversation_api() {
     let server = Server::start().await;
     let (provider, _) = chat_provider(&server).await;
     let (_, group) = server.user.json(server.user.post("/api/v1/groups").json(&json!({"name": "acme"}))).await;
-    let assistant = create(&server.user, json!({"name": "Stand-up", "group_id": group["id"], "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
-    let conversation = prompt(&server.user, assistant["id"].as_str().unwrap(), "Hello").await;
+    let assistant = create(&server.user, json!({"name": "Stand-up", "group_id": group["id"]})).await;
+    let conversation = prompt_on(&server.user, assistant["id"].as_str().unwrap(), "Hello", llama(&provider)).await;
     let id = conversation["id"].as_str().unwrap();
 
     let (_, listed) = server.user.json(server.user.get("/api/v1/conversations")).await;
@@ -312,9 +298,9 @@ async fn file_tools_read_and_write_storage_from_a_chat_and_refuse_outside_an_ass
         ("mcp__mycelium__assistant_list_files", json!({})),
     ];
     let (provider, _) = scripted_provider(&server, calls).await;
-    let assistant = create(&server.user, json!({"name": "Stand-up", "instructions": "Be brief.", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up", "instructions": "Be brief."})).await;
     let id = assistant["id"].as_str().unwrap();
-    let conversation = prompt(&server.user, id, "Keep a note").await;
+    let conversation = prompt_on(&server.user, id, "Keep a note", llama(&provider)).await;
     let chat = conversation["id"].as_str().unwrap();
 
     allow_calls(&server, chat, 5).await;
@@ -397,19 +383,28 @@ fn encoded(text: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(text)
 }
 
-async fn harness_assistant(server: &Server, nodes: Value) -> Value {
-    create(&server.user, json!({"name": "War room", "instructions": "Run the war room.", "preferences": {"models": [{"agent": "claude"}], "nodes": nodes}})).await
+async fn harness_assistant(server: &Server, link: &mut NodeLink) -> Value {
+    continue_elsewhere::allow_any_model_on(server, link).await;
+
+    create(&server.user, json!({"name": "War room", "instructions": "Run the war room."})).await
+}
+
+async fn prompt_on_node(client: &Client, id: &str, text: &str, node_id: Uuid) -> Value {
+    let (status, conversation) = client.json(client.post(&format!("/api/v1/assistants/{id}/prompt")).json(&json!({"text": text, "model": {"agent": "claude"}, "node_id": node_id}))).await;
+    assert_eq!(status, 200, "{conversation}");
+
+    conversation
 }
 
 #[tokio::test]
 async fn a_workspace_turn_copies_storage_down_and_changes_back() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
-    let assistant = harness_assistant(&server, json!([link.id])).await;
+    let assistant = harness_assistant(&server, &mut link).await;
     let id = assistant["id"].as_str().unwrap();
     server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/files/notes/old.md")).body("old")).await;
 
-    let started = prompt(&server.user, id, "Open the war room").await;
+    let started = prompt_on_node(&server.user, id, "Open the war room", link.id).await;
     let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
 
     let (root, files, replace) = next_matching(&mut link, |message| match message {
@@ -454,9 +449,9 @@ async fn a_workspace_turn_copies_storage_down_and_changes_back() {
 async fn instructions_changed_during_a_workspace_turn_survive_the_copy_back_and_reach_the_folder() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
-    let assistant = harness_assistant(&server, json!([link.id])).await;
+    let assistant = harness_assistant(&server, &mut link).await;
     let id = assistant["id"].as_str().unwrap();
-    let started = prompt(&server.user, id, "Open the war room").await;
+    let started = prompt_on_node(&server.user, id, "Open the war room", link.id).await;
     let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
     next_matching(&mut link, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
     link.start_session(conversation, "acp-1").await;
@@ -487,10 +482,11 @@ async fn instructions_changed_during_a_workspace_turn_survive_the_copy_back_and_
 async fn use_workspace_moves_the_thread_to_the_first_online_node() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
+    continue_elsewhere::allow_any_model_on(&server, &mut link).await;
     let (provider, _) = scripted_provider(&server, vec![("mcp__mycelium__assistant_use_workspace", json!({"reason": "Needs a repository"}))]).await;
-    let assistant = create(&server.user, json!({"name": "Stand-up", "instructions": "Be brief.", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}, {"agent": "claude"}], "nodes": [link.id]}})).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up", "instructions": "Be brief."})).await;
     let id = assistant["id"].as_str().unwrap();
-    let started = prompt(&server.user, id, "Clone the repository").await;
+    let started = prompt_on(&server.user, id, "Clone the repository", llama(&provider)).await;
     let chat = started["id"].as_str().unwrap();
 
     allow_calls(&server, chat, 1).await;
@@ -515,131 +511,13 @@ async fn use_workspace_moves_the_thread_to_the_first_online_node() {
 }
 
 #[tokio::test]
-async fn an_offline_first_node_falls_back_to_the_next_node_before_starting() {
+async fn a_first_prompt_with_no_node_online_says_what_to_bring_online() {
     let server = Server::start().await;
-    let (offline, _) = server.join("node", "willow").await;
-    let mut link = server.online_node("orion").await;
-    let assistant = harness_assistant(&server, json!([offline, link.id])).await;
-
-    prompt(&server.user, assistant["id"].as_str().unwrap(), "Start").await;
-
-    let started = next_matching(&mut link, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
-    assert_eq!(started, ());
-}
-
-#[tokio::test]
-async fn a_prompt_with_no_node_online_says_what_to_bring_online() {
-    let server = Server::start().await;
-    let (offline, _) = server.join("node", "willow").await;
-    let assistant = harness_assistant(&server, json!([offline])).await;
+    let assistant = create(&server.user, json!({"name": "War room"})).await;
 
     let (status, refused) = server.user.json(server.user.post(&format!("/api/v1/assistants/{}/prompt", assistant["id"].as_str().unwrap())).json(&json!({"text": "Start"}))).await;
 
-    assert_eq!((status, refused["error"].clone()), (409, json!("no_choice_available")));
-}
-
-fn limit_message() -> String {
-    let resets = chrono::Utc::now() + chrono::Duration::hours(2);
-
-    format!("Internal error: You've hit your session limit · resets {} (UTC)", resets.format("%-I:%M%P"))
-}
-
-async fn named_provider(server: &Server, name: &str, router: Router) -> Value {
-    let base = serve(router).await;
-    let (status, provider) = server.user.json(server.user.post("/api/v1/model-providers").json(&json!({"kind": "openai_compatible", "name": name, "base_url": format!("{base}/v1")}))).await;
-    assert_eq!(status, 201, "{provider}");
-
-    provider
-}
-
-fn broken_openai() -> Router {
-    async fn models() -> Json<Value> {
-        Json(json!({"object": "list", "data": [{"id": "llama3.2"}]}))
-    }
-
-    async fn completions() -> (axum::http::StatusCode, &'static str) {
-        (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "model is down")
-    }
-
-    Router::new().route("/v1/models", get(models)).route("/v1/chat/completions", post(completions))
-}
-
-#[tokio::test]
-async fn a_usage_limit_moves_the_thread_to_the_next_model_and_records_why() {
-    let server = Server::start().await;
-    let mut link = server.online_node("laptop").await;
-    let (provider, fake) = chat_provider(&server).await;
-    let assistant = create(&server.user, json!({"name": "War room", "preferences": {"chat_first": false, "nodes": [link.id], "models": [{"agent": "claude"}, {"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
-    let id = assistant["id"].as_str().unwrap();
-    let started = prompt(&server.user, id, "Open the war room").await;
-    let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
-
-    next_matching(&mut link, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
-    link.start_session(conversation, "acp-1").await;
-    link.expect_prompt().await;
-    link.send(NodeToControl::SessionFailed { conversation_id: conversation, seq: 3, message: limit_message() }).await;
-
-    finished_turns(&server, &conversation.to_string(), 1).await;
-    let moved = server.conversation(conversation).await;
-    let events = server.events(conversation).await;
-    let continued = events.iter().find(|event| event["kind"] == "continued").unwrap();
-    let (_, fetched) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}"))).await;
-
-    assert_eq!((moved["agent"].clone(), continued["payload"]["reason"].clone()), (json!("chat"), json!("usage_limit")));
-    assert_eq!(fake.requests.lock().unwrap().len(), 1);
-    assert_eq!(fetched["next_choice"], json!("Ollama · llama3.2"));
-}
-
-#[tokio::test]
-async fn a_failing_chat_model_moves_the_turn_to_the_next_model() {
-    let server = Server::start().await;
-    let broken = named_provider(&server, "Broken", broken_openai()).await;
-    let (router, fake) = fake_openai(Vec::new());
-    let working = named_provider(&server, "Working", router).await;
-    let assistant = create(&server.user, json!({"name": "Stand-up", "preferences": {"fall_back_on": ["model_error"], "models": [{"provider_id": broken["id"], "model": "llama3.2"}, {"provider_id": working["id"], "model": "llama3.2"}]}})).await;
-
-    let started = prompt(&server.user, assistant["id"].as_str().unwrap(), "What did we ship?").await;
-    let chat = started["id"].as_str().unwrap();
-
-    common::eventually("the reply from the next model", || async { (!fake.requests.lock().unwrap().is_empty()).then_some(()) }).await;
-    let events = server.events(chat.parse().unwrap()).await;
-    let continued = events.iter().find(|event| event["kind"] == "continued").unwrap();
-    let conversation = server.conversation(chat.parse().unwrap()).await;
-
-    assert_eq!((continued["payload"]["reason"].clone(), continued["payload"]["kind"].clone()), (json!("model_error"), json!("model")));
-    assert_eq!(conversation["provider_id"], working["id"]);
-}
-
-#[tokio::test]
-async fn a_session_whose_node_went_offline_moves_on_before_the_next_prompt() {
-    let server = Server::start().await;
-    let mut link = server.online_node("laptop").await;
-    let node_id = link.id;
-    let (provider, _) = chat_provider(&server).await;
-    let assistant = create(&server.user, json!({"name": "War room", "preferences": {"chat_first": false, "nodes": [node_id], "models": [{"agent": "claude"}, {"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
-    let id = assistant["id"].as_str().unwrap();
-    let started = prompt(&server.user, id, "Open the war room").await;
-    let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
-
-    next_matching(&mut link, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
-    link.start_session(conversation, "acp-1").await;
-    link.expect_prompt().await;
-    link.send(NodeToControl::TurnEnd { conversation_id: conversation, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
-    common::eventually("the turn to end", || async { (server.conversation(conversation).await["status"] == "review").then_some(()) }).await;
-    drop(link);
-    common::eventually("the node to go offline", || async {
-        let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
-
-        nodes.as_array().unwrap().iter().any(|node| node["id"] == json!(node_id) && node["online"] == false).then_some(())
-    })
-    .await;
-
-    prompt(&server.user, id, "Are you there?").await;
-
-    let moved = server.conversation(conversation).await;
-    let events = server.events(conversation).await;
-    let continued = events.iter().find(|event| event["kind"] == "continued").unwrap();
-    assert_eq!((moved["agent"].clone(), continued["payload"]["reason"].clone()), (json!("chat"), json!("offline")));
+    assert_eq!((status, refused["error"].clone()), (409, json!("no_node_available")));
 }
 
 #[tokio::test]
@@ -647,10 +525,9 @@ async fn a_prompt_while_the_session_waits_mid_turn_queues_into_it_even_when_its_
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let node_id = link.id;
-    let (provider, _) = chat_provider(&server).await;
-    let assistant = create(&server.user, json!({"name": "War room", "preferences": {"chat_first": false, "nodes": [node_id], "models": [{"agent": "claude"}, {"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let assistant = harness_assistant(&server, &mut link).await;
     let id = assistant["id"].as_str().unwrap();
-    let started = prompt(&server.user, id, "Read the release conversation").await;
+    let started = prompt_on_node(&server.user, id, "Read the release conversation", node_id).await;
     let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
 
     next_matching(&mut link, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
@@ -678,10 +555,10 @@ async fn a_prompt_while_the_session_waits_mid_turn_queues_into_it_even_when_its_
 async fn a_new_session_ends_the_earlier_one_mid_turn_and_takes_over_its_watches_managed_chats_and_messages() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
-    let assistant = harness_assistant(&server, json!([link.id])).await;
+    let assistant = harness_assistant(&server, &mut link).await;
     let id = assistant["id"].as_str().unwrap();
     let assistant_id: Uuid = id.parse().unwrap();
-    let first: Uuid = prompt(&server.user, id, "Run the daily review").await["id"].as_str().unwrap().parse().unwrap();
+    let first: Uuid = prompt_on_node(&server.user, id, "Run the daily review", link.id).await["id"].as_str().unwrap().parse().unwrap();
     next_matching(&mut link, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
     link.start_session(first, "acp-1").await;
     link.expect_prompt().await;
@@ -692,7 +569,7 @@ async fn a_new_session_ends_the_earlier_one_mid_turn_and_takes_over_its_watches_
     sqlx::query("insert into watches (owner, watcher_id, kind, due_at, note) select owner, id, 'timer', now() + interval '1 hour', 'Check the rollout' from conversations where id = $1").bind(first).execute(&server.pool).await.unwrap();
     sqlx::query("update assistants set conversation_id = null where id = $1").bind(assistant_id).execute(&server.pool).await.unwrap();
 
-    let second: Uuid = prompt(&server.user, id, "Read REVIEW-PENDING.md and run the review").await["id"].as_str().unwrap().parse().unwrap();
+    let second: Uuid = prompt_on_node(&server.user, id, "Read REVIEW-PENDING.md and run the review", link.id).await["id"].as_str().unwrap().parse().unwrap();
 
     next_matching(&mut link, |message| matches!(message, ControlToNode::CloseSession { conversation_id } if *conversation_id == first).then_some(())).await;
     let watchers = sqlx::query_scalar::<_, Uuid>("select watcher_id from watches where ended_at is null order by kind").fetch_all(&server.pool).await.unwrap();
@@ -711,9 +588,9 @@ async fn a_new_session_ends_the_earlier_one_mid_turn_and_takes_over_its_watches_
 async fn a_wake_up_due_on_a_cleared_session_starts_the_assistants_next_session_instead_of_reopening_it() {
     let server = Server::start_with(|config| config.scheduler_tick = std::time::Duration::from_millis(50)).await;
     let mut link = server.online_node("laptop").await;
-    let assistant = harness_assistant(&server, json!([link.id])).await;
+    let assistant = harness_assistant(&server, &mut link).await;
     let id = assistant["id"].as_str().unwrap();
-    let first: Uuid = prompt(&server.user, id, "Run the daily review").await["id"].as_str().unwrap().parse().unwrap();
+    let first: Uuid = prompt_on_node(&server.user, id, "Run the daily review", link.id).await["id"].as_str().unwrap().parse().unwrap();
     next_matching(&mut link, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
     link.start_session(first, "acp-1").await;
     link.expect_prompt().await;
@@ -743,7 +620,7 @@ fn events_text(events: &[Value]) -> String {
 async fn secrets_are_never_returned_reach_the_node_as_environment_and_are_redacted_from_events() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
-    let assistant = harness_assistant(&server, json!([link.id])).await;
+    let assistant = harness_assistant(&server, &mut link).await;
     let id = assistant["id"].as_str().unwrap();
 
     let (status, saved) = server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/secrets/GITHUB_TOKEN")).json(&json!({"value": "ghp_supersecret", "description": "Pushes"}))).await;
@@ -753,7 +630,7 @@ async fn secrets_are_never_returned_reach_the_node_as_environment_and_are_redact
     assert!(!listed.to_string().contains("supersecret") && !fetched.to_string().contains("supersecret"));
     assert_eq!(fetched["secrets"][0]["name"], json!("GITHUB_TOKEN"));
 
-    let started = prompt(&server.user, id, "Push the branch").await;
+    let started = prompt_on_node(&server.user, id, "Push the branch", link.id).await;
     let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
     let env = next_matching(&mut link, |message| match message {
         ControlToNode::StartSession { env, .. } => Some(env.clone()),
@@ -774,11 +651,11 @@ async fn secrets_are_never_returned_reach_the_node_as_environment_and_are_redact
 async fn a_changed_secret_reaches_the_running_session_at_once_and_restarts_it_before_the_next_turn() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
-    let assistant = harness_assistant(&server, json!([link.id])).await;
+    let assistant = harness_assistant(&server, &mut link).await;
     let id = assistant["id"].as_str().unwrap();
     server.user.put(&format!("/api/v1/assistants/{id}/secrets/GITHUB_TOKEN")).json(&json!({"value": "ghp_first"})).send().await.unwrap();
 
-    let started = prompt(&server.user, id, "Push the branch").await;
+    let started = prompt_on_node(&server.user, id, "Push the branch", link.id).await;
     let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
     next_matching(&mut link, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
     link.start_session(conversation, "acp-1").await;
@@ -818,9 +695,9 @@ async fn request_secret_creates_a_waiting_secret_the_person_can_fill() {
     let server = Server::start().await;
     let calls = vec![("mcp__mycelium__assistant_request_secret", json!({"name": "JELLYFIN_KEY", "description": "From Jellyfin, Dashboard, API keys"}))];
     let (provider, _) = scripted_provider(&server, calls).await;
-    let assistant = create(&server.user, json!({"name": "Jellyfin", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let assistant = create(&server.user, json!({"name": "Jellyfin"})).await;
     let id = assistant["id"].as_str().unwrap();
-    let chat = prompt(&server.user, id, "Check the library").await["id"].as_str().unwrap().to_string();
+    let chat = prompt_on(&server.user, id, "Check the library", llama(&provider)).await["id"].as_str().unwrap().to_string();
 
     allow_calls(&server, &chat, 1).await;
     finished_turns(&server, &chat, 1).await;
@@ -837,9 +714,9 @@ async fn a_secret_the_assistant_stores_is_redacted_from_its_own_tool_call() {
     let server = Server::start().await;
     let calls = vec![("mcp__mycelium__assistant_set_secret", json!({"name": "API_KEY", "value": "sk-live-12345"}))];
     let (provider, _) = scripted_provider(&server, calls).await;
-    let assistant = create(&server.user, json!({"name": "Stand-up", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up"})).await;
     let id = assistant["id"].as_str().unwrap();
-    let chat = prompt(&server.user, id, "Remember my key sk-live-12345").await["id"].as_str().unwrap().to_string();
+    let chat = prompt_on(&server.user, id, "Remember my key sk-live-12345", llama(&provider)).await["id"].as_str().unwrap().to_string();
 
     allow_calls(&server, &chat, 1).await;
     finished_turns(&server, &chat, 1).await;
@@ -988,9 +865,9 @@ async fn a_schedule_on_an_assistant_prompts_its_current_session() {
     let server = Server::start().await;
     let calls = vec![("mcp__mycelium__propose_schedule", json!({"prompt": "Post the stand-up", "preset": "weekdays at 08:00"}))];
     let (provider, fake) = scripted_provider(&server, calls).await;
-    let assistant = create(&server.user, json!({"name": "Stand-up", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up"})).await;
     let id = assistant["id"].as_str().unwrap();
-    let chat = prompt(&server.user, id, "Post the stand-up every weekday").await["id"].as_str().unwrap().to_string();
+    let chat = prompt_on(&server.user, id, "Post the stand-up every weekday", llama(&provider)).await["id"].as_str().unwrap().to_string();
 
     allow_calls(&server, &chat, 1).await;
     finished_turns(&server, &chat, 1).await;
@@ -1050,10 +927,10 @@ async fn a_spoken_prompt_marks_the_message_as_spoken_and_a_typed_one_does_not() 
     let (provider, _) = chat_provider(&server).await;
     let (_, voice) = server.user.json(server.user.get("/api/v1/assistants/builtin/voice")).await;
     let id = voice["id"].as_str().unwrap();
-    let (status, patched) = server.user.json(server.user.patch(&format!("/api/v1/assistants/{id}")).json(&json!({"preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}], "voice_name": "nova", "speech_speed": "faster"}}))).await;
+    let (status, patched) = server.user.json(server.user.patch(&format!("/api/v1/assistants/{id}")).json(&json!({"preferences": {"voice_name": "nova", "speech_speed": "faster"}}))).await;
     assert_eq!((status, patched["preferences"]["voice_name"].clone(), patched["preferences"]["speech_speed"].clone()), (200, json!("nova"), json!("faster")));
 
-    let (status, spoken) = server.user.json(server.user.post(&format!("/api/v1/assistants/{id}/prompt")).json(&json!({"text": "What is next?", "spoken": true}))).await;
+    let (status, spoken) = server.user.json(server.user.post(&format!("/api/v1/assistants/{id}/prompt")).json(&json!({"text": "What is next?", "spoken": true, "model": llama(&provider)}))).await;
     assert_eq!(status, 200, "{spoken}");
     finished_turns(&server, spoken["id"].as_str().unwrap(), 1).await;
     prompt(&server.user, id, "And after that?").await;
@@ -1107,8 +984,8 @@ async fn an_unknown_assistant_icon_or_colour_or_a_file_that_is_not_an_image_is_r
 async fn a_side_chat_of_an_assistant_session_stays_with_its_assistant() {
     let server = Server::start().await;
     let mut link = server.online_node("atlas").await;
-    let assistant = harness_assistant(&server, json!([link.id])).await;
-    let started = prompt(&server.user, assistant["id"].as_str().unwrap(), "Open the war room").await;
+    let assistant = harness_assistant(&server, &mut link).await;
+    let started = prompt_on_node(&server.user, assistant["id"].as_str().unwrap(), "Open the war room", link.id).await;
     let parent: Uuid = started["id"].as_str().unwrap().parse().unwrap();
     link.start_session(parent, "acp-1").await;
 
@@ -1122,8 +999,8 @@ async fn a_side_chat_of_an_assistant_session_stays_with_its_assistant() {
 async fn a_side_chat_of_an_assistants_model_chat_stays_with_its_assistant() {
     let server = Server::start().await;
     let (provider, _) = chat_provider(&server).await;
-    let assistant = create(&server.user, json!({"name": "Stand-up", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
-    let started = prompt(&server.user, assistant["id"].as_str().unwrap(), "Hello").await;
+    let assistant = create(&server.user, json!({"name": "Stand-up"})).await;
+    let started = prompt_on(&server.user, assistant["id"].as_str().unwrap(), "Hello", llama(&provider)).await;
     let parent = started["id"].as_str().unwrap();
 
     let (status, side) = server.user.json(server.user.post(&format!("/api/v1/conversations/{parent}/side")).json(&json!({"kind": "side"}))).await;

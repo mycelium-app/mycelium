@@ -602,19 +602,6 @@ async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid
     let mut switched = false;
 
     if let Some(owner) = owner.filter(|_| recorded && hit_limit) {
-        let until = resume_at.unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::hours(1));
-
-        if crate::assistants::fall_back(state, owner, conversation_id, "usage_limit", Some(until)).await {
-            let text = format!("The usage limit was reached on {}. Continue from where you stopped.", limited_account.as_deref().unwrap_or("the account in use"));
-
-            match crate::assistants::carry_on_after_limit(state, owner, conversation_id, &text).await {
-                Ok(()) => switched = true,
-                Err(error) => tracing::warn!("carrying on {conversation_id} after its fallback failed: {}", error.message()),
-            }
-        }
-    }
-
-    if let Some(owner) = owner.filter(|_| recorded && hit_limit && !switched) {
         let window = limited_window.as_deref().unwrap_or("usage");
 
         if crate::routing::switch_after_limit(state, owner, conversation_id, window).await {
@@ -839,11 +826,6 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
     state.add_session(node_id, conversation_id).await?;
     state.publish(Some(updated.owner), StreamMessage::Conversation(updated.to_proto()?));
     crate::conversations::spawn_branch_refresh(state, conversation_id);
-
-    if before.acp_session_id.is_none() {
-        crate::assistants::session_started(state, updated.owner, conversation_id).await;
-
-    }
 
     if let Some(chosen) = before.model.as_deref() && updated.model.as_deref() != Some(chosen) && let Err(error) = crate::prompts::apply_model(state, updated.owner, conversation_id, Some(chosen), None).await {
         tracing::warn!("could not set the model {chosen} chosen for conversation {conversation_id}: {}", error.message());

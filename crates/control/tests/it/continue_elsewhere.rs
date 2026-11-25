@@ -69,8 +69,7 @@ pub async fn expect_prompt(link: &mut NodeLink) -> String {
     }
 }
 
-pub async fn node_with_accounts(server: &Server, version: &str, accounts: Vec<LoginInfo>) -> NodeLink {
-    let mut link = server.online_node_as("laptop", version).await;
+pub async fn report_accounts(server: &Server, link: &mut NodeLink, accounts: Vec<LoginInfo>) {
     link.send(NodeToControl::Logins { logins: accounts }).await;
 
     let user = server.user.clone();
@@ -82,6 +81,18 @@ pub async fn node_with_accounts(server: &Server, version: &str, accounts: Vec<Lo
         (!node["logins"].as_array().unwrap().is_empty()).then_some(())
     })
     .await;
+}
+
+pub async fn allow_any_model_on(server: &Server, link: &mut NodeLink) {
+    let (status, body) = server.user.json(server.user.put("/api/v1/agent-settings").json(&json!({"default_modes": {}, "any_model": [{"agent": "claude"}]}))).await;
+    assert_eq!(status, 200, "{body}");
+
+    report_accounts(server, link, vec![with_usage("sam@example.com", 80)]).await;
+}
+
+pub async fn node_with_accounts(server: &Server, version: &str, accounts: Vec<LoginInfo>) -> NodeLink {
+    let mut link = server.online_node_as("laptop", version).await;
+    report_accounts(server, &mut link, accounts).await;
 
     link
 }
