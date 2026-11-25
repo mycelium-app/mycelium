@@ -191,7 +191,9 @@ class ModelPickerTest {
         val model = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
         rule.onNodeWithText("Claude Opus 5.5 with the longest model name seen", useUnmergedTree = true).fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult].action!!.invoke(model)
 
-        assertEquals(false to true, layouts.single().hasVisualOverflow to model.single().hasVisualOverflow)
+        val shortened = { layout: androidx.compose.ui.text.TextLayoutResult -> layout.multiParagraph.intrinsics.maxIntrinsicWidth > layout.size.width + 0.5f }
+
+        assertEquals(false to true, shortened(layouts.single()) to shortened(model.single()))
     }
 
     @Test

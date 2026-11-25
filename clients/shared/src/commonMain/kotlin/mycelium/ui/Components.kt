@@ -343,8 +343,8 @@ fun MyButton(
                         overflow = if (textMaxWidth != null) TextOverflow.Ellipsis else TextOverflow.Visible,
                     )
                 } else {
-                    Row(if (textMaxWidth != null) Modifier.widthIn(max = textMaxWidth) else Modifier, verticalAlignment = Alignment.CenterVertically) {
-                        BasicText(text, Modifier.weight(1f, fill = false), style = style, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        BasicText(text, if (textMaxWidth != null) Modifier.widthIn(max = textMaxWidth) else Modifier, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         BasicText(keptText, style = style, maxLines = 1, softWrap = false)
                     }
                 }
