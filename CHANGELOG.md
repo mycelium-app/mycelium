@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.34.64
+
+- An assistant's action row menu pins or unpins it above the composer, beside Edit.
+- An assistant can propose a change to one of its existing actions. The card reads Proposed a change to an action, underlines and highlights the prompt text it adds, and lists each other field as changed (Pinned: yes, was no) or unchanged. Approve changes the action in place, so its schedules keep running it; Edit opens the action dialog with the change; Decline leaves it as it was.
+- An assistant can propose an action already pinned above the composer, and the card shows Pinned: yes.
+- Pinned action chips sit evenly between the to-do bar and the message box, instead of right under the to-do bar's divider.
+- Proposing a new action under an existing action's name is still refused, and the reply gives that action's id so the assistant can propose a change to it instead.
+- A node signed in to an agent lists that agent's models as soon as it is signed in, so the model menu offers them before any conversation has run there. Mistral Large 4 and Mistral Medium 3.5 were greyed out on a node signed in to Mistral Vibe until a Vibe conversation had started on it.
+
 ## v0.34.63
 
 - Plans show in sentence case, such as Individual instead of INDIVIDUAL, on the Usage card, the account page and Usage history.
