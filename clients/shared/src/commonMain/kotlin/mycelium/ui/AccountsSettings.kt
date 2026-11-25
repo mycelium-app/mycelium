@@ -108,7 +108,7 @@ fun AccountsSettings(store: Store) {
                 val rows = agents.flatMap { agent -> listOf(agent to null) + listed.filter { it.agent == agent }.map { agent to it } }
 
                 Table(
-                    listOf(Col("Account", 160.dp, weight = 1f)) + nodes.map { Col(it.name, 120.dp, preferred = 150.dp) } + listOf(Col("Usage", 90.dp), ActionColumn),
+                    listOf(Col("Account", 160.dp, weight = 1f)) + nodes.map { Col(it.name, 120.dp, rigid = true) } + listOf(Col("Usage", 90.dp), ActionColumn),
                     rows.size,
                     { row, column ->
                         val account = rows[row].second

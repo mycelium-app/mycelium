@@ -1,5 +1,13 @@
 package mycelium.desktop
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -185,6 +193,22 @@ class AccountsAndSessionsTest {
         rule.onNodeWithContentDescription("sam@example.com: Signed out on willow").assertExists()
         rule.onNodeWithContentDescription("Add work@example.net on orion").assertExists()
         rule.onNodeWithText("Not installed").assertExists()
+    }
+
+    @Test
+    fun aSignedOutCellShowsItsStateAndSignInWholeInANarrowWindow() {
+        val store = store(SignInsJson)
+        rule.setContent { MyceliumTheme(true) { Box(Modifier.width(360.dp)) { AccountsSettings(store) } } }
+
+        val words = rule.onAllNodes(hasText("Sign in") or hasText("Signed out") or hasText("Expired"), useUnmergedTree = true).fetchSemanticsNodes()
+        val clipped = words.filter { node ->
+            val layouts = mutableListOf<TextLayoutResult>()
+            node.config[SemanticsActions.GetTextLayoutResult].action?.invoke(layouts)
+            layouts.any { it.multiParagraph.intrinsics.maxIntrinsicWidth > it.size.width + 0.5f || it.didOverflowHeight }
+        }.map { it.config[SemanticsProperties.Text].joinToString() }
+
+        assertTrue(words.size >= 4, "${words.size}")
+        assertEquals(emptyList(), clipped)
     }
 
     @Test
