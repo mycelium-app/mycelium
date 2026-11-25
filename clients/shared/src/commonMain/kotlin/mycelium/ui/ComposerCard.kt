@@ -67,6 +67,8 @@ class ModelPickerControls(
 
 private const val ModelMenuTitle = "Model"
 
+private const val AccountSeparator = " · "
+
 private const val NoNodeOnline = "No node online"
 
 
@@ -116,10 +118,14 @@ fun ModelPicker(controls: ModelPickerControls, maxWidth: Dp = Tokens.Size.Accoun
         if (trigger != null) {
             trigger({ open = true }, open)
         } else {
+            val split = controls.label.lastIndexOf(AccountSeparator).takeIf { controls.account != null && it > 0 }
+            val parts = split?.let { listOf(controls.label.substring(0, it), controls.label.substring(it + AccountSeparator.length)) } ?: listOf(controls.label)
+
             MyButton(
                 { open = true },
                 Modifier.then(controls.focus?.let { Modifier.focusRequester(it) } ?: Modifier).semantics { controls.problem?.let { error(it) } },
-                text = controls.label,
+                text = parts.first(),
+                keptText = parts.getOrNull(1)?.let { "$AccountSeparator$it" },
                 description = "$ModelMenuTitle: ${controls.label}",
                 icon = if (controls.anyChosen) MyIcon.Layers else controls.chosen?.agent?.let(::agentIcon) ?: MyIcon.Chat,
                 muted = true,

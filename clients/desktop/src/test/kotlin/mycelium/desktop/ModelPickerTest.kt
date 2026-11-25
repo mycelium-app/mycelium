@@ -179,6 +179,22 @@ class ModelPickerTest {
     }
 
     @Test
+    fun aPinnedAccountShowsInFullAndTheModelNameIsShortenedFirst() {
+        rule.setContent {
+            MyceliumTheme(true) {
+                ModelPicker(ModelPickerControls(label = "Claude Opus 5.5 with the longest model name seen · work@example.org", options = options, favourites = emptyList(), providers = emptyList(), onPickModel = {}, onFavourite = { _, _ -> }, account = "claude:work@example.org"))
+            }
+        }
+
+        val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        rule.onNodeWithText(" · work@example.org", useUnmergedTree = true).fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult].action!!.invoke(layouts)
+        val model = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        rule.onNodeWithText("Claude Opus 5.5 with the longest model name seen", useUnmergedTree = true).fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult].action!!.invoke(model)
+
+        assertEquals(false to true, layouts.single().hasVisualOverflow to model.single().hasVisualOverflow)
+    }
+
+    @Test
     fun theAccountSubmenuOffersAnyAccountAndEachAccountWithItsNodeAndUsage() {
         var picked: String? = "unset"
         showPicker(onPickAccount = { picked = it })

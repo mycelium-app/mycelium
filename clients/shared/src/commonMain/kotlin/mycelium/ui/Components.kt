@@ -271,6 +271,7 @@ fun MyButton(
     maxWidth: Dp? = null,
     iconColour: Color? = null,
     wraps: Boolean = false,
+    keptText: String? = null,
 ) {
     val colors = MyTheme.colors
     val source = remember { MutableInteractionSource() }
@@ -331,14 +332,22 @@ fun MyButton(
             if (text != null) {
                 val iconSlots = listOfNotNull(icon, trailingIcon).size
                 val textMaxWidth = maxWidth?.let { it - padding * 2 - (iconSize + gap) * iconSlots }
+                val style = textStyle.themed().copy(color = contentColor)
 
-                BasicText(
-                    text,
-                    (if (fill) Modifier.weight(1f) else Modifier).then(if (textMaxWidth != null) Modifier.widthIn(max = textMaxWidth) else Modifier),
-                    style = textStyle.themed().copy(color = contentColor),
-                    softWrap = wraps,
-                    overflow = if (textMaxWidth != null) TextOverflow.Ellipsis else TextOverflow.Visible,
-                )
+                if (keptText == null) {
+                    BasicText(
+                        text,
+                        (if (fill) Modifier.weight(1f) else Modifier).then(if (textMaxWidth != null) Modifier.widthIn(max = textMaxWidth) else Modifier),
+                        style = style,
+                        softWrap = wraps,
+                        overflow = if (textMaxWidth != null) TextOverflow.Ellipsis else TextOverflow.Visible,
+                    )
+                } else {
+                    Row(if (textMaxWidth != null) Modifier.widthIn(max = textMaxWidth) else Modifier, verticalAlignment = Alignment.CenterVertically) {
+                        BasicText(text, Modifier.weight(1f, fill = false), style = style, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        BasicText(keptText, style = style, maxLines = 1, softWrap = false)
+                    }
+                }
             }
 
             if (trailingIcon != null) {
