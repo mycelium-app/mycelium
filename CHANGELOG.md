@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.71
+
+- Includes everything in v0.34.70, which was not published: its builds were turned away by Maven Central's rate limit, so builds now retry dependency downloads for longer.
+
 ## v0.34.70
 
 - Update on a Windows node finds how each agent was installed, through npm's .cmd shims or uv's launcher, and updates it in place. Tested on Windows 11 ARM64.
