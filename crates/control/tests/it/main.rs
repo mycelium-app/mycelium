@@ -84,6 +84,7 @@ mod ssh_access;
 mod stream;
 mod start_proposals;
 mod subscription_prices;
+mod todo_enforcement;
 mod workflows;
 mod stoat;
 mod tandoor;

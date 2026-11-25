@@ -314,6 +314,17 @@ private fun InstructionsSection(store: Store, assistant: Assistant, onChanged: (
             })
         }
 
+        Label("To-do list", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Top) {
+            Checkbox(assistant.enforceTodos, "Enforce to-do list", { runner { onChanged(store.patchAssistant(assistant, PatchAssistantRequest(enforceTodos = !assistant.enforceTodos))) } }, checkedState = "On", uncheckedState = "Off")
+
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+                Label("Enforce to-do list")
+                Label("If a turn ends without the assistant updating its to-do list since your last message, Mycelium asks it to before it stops.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+            }
+        }
+
         Label("Proposed edits", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
         InstructionProposals(store, layer = "assistant:${assistant.id}")
     }

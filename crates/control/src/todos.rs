@@ -183,6 +183,36 @@ pub async fn from_harness(conn: &mut PgConnection, conversation_id: Uuid, mut up
     Ok(update)
 }
 
+pub const TODOS_ORIGIN: &str = "todos";
+const UPDATE_THE_LIST: &str = "Before you stop, update your to-do list with set_todos: mark finished items completed, keep the current one in progress, and add anything new. Call it even if nothing changed.";
+
+pub async fn turn_ended(state: &AppState, conversation_id: Uuid, stop_reason: &str) -> ApiResult<()> {
+    if stop_reason == "cancelled" {
+        return Ok(());
+    }
+
+    let enforced = sqlx::query_scalar::<_, Uuid>("select c.owner from conversations c join assistants a on a.id = c.assistant_id where c.id = $1 and a.enforce_todos").bind(conversation_id).fetch_optional(&state.pool).await?;
+    let Some(owner) = enforced else {
+        return Ok(());
+    };
+    let last_message = sqlx::query_as::<_, (i64, Option<String>)>("select seq, payload->>'origin' from events where conversation_id = $1 and kind = 'user_message' order by seq desc limit 1").bind(conversation_id).fetch_optional(&state.pool).await?;
+    let Some((after, origin)) = last_message else {
+        return Ok(());
+    };
+
+    if origin.as_deref() == Some(TODOS_ORIGIN) || crate::link::waiting_on_person(state, conversation_id).await? {
+        return Ok(());
+    }
+
+    let updated = sqlx::query_scalar::<_, bool>("select exists (select 1 from events where conversation_id = $1 and seq > $2 and kind = 'acp_update' and payload->'update'->>'sessionUpdate' = 'plan')").bind(conversation_id).bind(after).fetch_one(&state.pool).await?;
+
+    if updated {
+        return Ok(());
+    }
+
+    crate::goals::enqueue(state, owner, conversation_id, UPDATE_THE_LIST, TODOS_ORIGIN).await
+}
+
 pub async fn carry(state: &AppState, owner: Uuid, assistant_id: Uuid, conversation_id: Uuid) -> ApiResult<()> {
     let previous = sqlx::query_scalar::<_, Uuid>("select id from conversations where assistant_id = $1 and id <> $2 order by created_at desc limit 1").bind(assistant_id).bind(conversation_id).fetch_optional(&state.pool).await?;
     let Some(previous) = previous else {

@@ -228,8 +228,8 @@ async fn end(state: &AppState, owner: Uuid, conversation_id: Uuid, goal_state: G
     announce(state, owner, conversation_id).await
 }
 
-async fn enqueue(state: &AppState, owner: Uuid, conversation_id: Uuid, text: &str) -> ApiResult<()> {
-    sqlx::query("insert into queued_prompts (conversation_id, position, text, origin) select $1, coalesce(max(position), 0) + 1, $2, $3 from queued_prompts where conversation_id = $1").bind(conversation_id).bind(text).bind(GOAL_ORIGIN).execute(&state.pool).await?;
+pub(crate) async fn enqueue(state: &AppState, owner: Uuid, conversation_id: Uuid, text: &str, origin: &str) -> ApiResult<()> {
+    sqlx::query("insert into queued_prompts (conversation_id, position, text, origin) select $1, coalesce(max(position), 0) + 1, $2, $3 from queued_prompts where conversation_id = $1").bind(conversation_id).bind(text).bind(origin).execute(&state.pool).await?;
 
     pump(state, conversation_id, false).await?;
     publish_queue(state, owner, conversation_id).await
@@ -243,7 +243,7 @@ async fn deliver(state: &AppState, owner: Uuid, conversation_id: Uuid, text: &st
     sqlx::query("delete from queued_prompts where conversation_id = $1 and origin = $2").bind(conversation_id).bind(GOAL_ORIGIN).execute(&state.pool).await?;
     let person = sqlx::query_scalar::<_, String>("select u.name from users u join conversations c on c.owner = u.id where c.id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     let person = if person.trim().is_empty() { "the person".to_string() } else { person };
-    enqueue(state, owner, conversation_id, &format!("Work towards this goal: {text}. When the goal is done, or you cannot go on without {person}, call report_goal and say why.")).await?;
+    enqueue(state, owner, conversation_id, &format!("Work towards this goal: {text}. When the goal is done, or you cannot go on without {person}, call report_goal and say why."), GOAL_ORIGIN).await?;
 
     let (node_id, node_name, agent) = sqlx::query_as::<_, (Uuid, String, String)>("select c.node_id, n.name, c.agent from conversations c join nodes n on n.id = c.node_id where c.id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
 
@@ -334,7 +334,7 @@ async fn nudge(state: &AppState, owner: Uuid, conversation_id: Uuid, why: &str) 
     };
     announce(state, owner, conversation_id).await?;
 
-    enqueue(state, owner, conversation_id, &body).await
+    enqueue(state, owner, conversation_id, &body, GOAL_ORIGIN).await
 }
 
 async fn record_report(state: &AppState, owner: Uuid, conversation_id: Uuid, outcome: &str, reason: &str) -> ApiResult<()> {

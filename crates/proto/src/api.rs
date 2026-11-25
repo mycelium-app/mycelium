@@ -2628,6 +2628,8 @@ pub struct Assistant {
     pub colour: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub enforce_todos: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -2670,6 +2672,8 @@ pub struct PatchAssistantRequest {
     pub colour: Option<String>,
     #[serde(default)]
     pub clear_colour: bool,
+    #[serde(default)]
+    pub enforce_todos: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

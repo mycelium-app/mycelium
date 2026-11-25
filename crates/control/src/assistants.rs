@@ -35,7 +35,7 @@ const FOLDER_ROOT: &str = ".mycelium-assistants";
 const FOLDER_CHUNK_BYTES: usize = 1024 * 1024;
 const FOLDER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const SECRET_NAME_LIMIT: usize = 100;
-const ASSISTANT_COLUMNS: &str = "a.id, a.name, a.description, a.group_id, a.preferences, a.builtin_key, a.conversation_id, a.backup, a.pinned_at, a.archived_at, a.icon, a.colour, a.avatar_sha256, a.created_at,
+const ASSISTANT_COLUMNS: &str = "a.id, a.name, a.description, a.group_id, a.preferences, a.builtin_key, a.conversation_id, a.backup, a.pinned_at, a.archived_at, a.icon, a.colour, a.avatar_sha256, a.enforce_todos, a.created_at,
     c.status as current_status,
     (select max(updated_at) from conversations where assistant_id = a.id) as last_active_at,
     (select count(*) from conversations where assistant_id = a.id) as session_count,
@@ -57,6 +57,7 @@ struct AssistantRow {
     icon: Option<String>,
     colour: Option<String>,
     avatar_sha256: Option<String>,
+    enforce_todos: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     current_status: Option<String>,
     last_active_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -100,6 +101,7 @@ impl AssistantRow {
             icon: self.icon,
             colour: self.colour,
             avatar_sha256: self.avatar_sha256,
+            enforce_todos: self.enforce_todos,
             created_at: self.created_at,
         }
     }
@@ -339,6 +341,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
              icon = case when $10 then null else coalesce($11, icon) end,
              avatar_sha256 = case when $10 or $11::text is not null then null else avatar_sha256 end,
              colour = case when $12 then null else coalesce($13, colour) end,
+             enforce_todos = coalesce($14, enforce_todos),
              updated_at = now()
          where id = $1 and owner = $2",
     )
@@ -355,6 +358,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .bind(icon)
     .bind(request.clear_colour)
     .bind(request.colour.as_deref())
+    .bind(request.enforce_todos)
     .execute(&state.pool)
     .await;
 

@@ -114,6 +114,18 @@ class AssistantSettingsTest {
     }
 
     @Test
+    fun turningOnEnforceToDoListSavesItOnTheAssistant() {
+        shell()
+        openSection("Instructions")
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Enforce to-do list").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Enforce to-do list").performClick()
+        rule.waitUntil(5_000) { requests.any { it.first == "PATCH /api/v1/assistants/a1" && it.second.contains("enforce_todos") } }
+
+        assertEquals(true, requests.last { it.first == "PATCH /api/v1/assistants/a1" }.second.contains("\"enforce_todos\":true"))
+    }
+
+    @Test
     fun theIdentityPageHasNoHelperTextUnderTheDescription() {
         shell()
 
