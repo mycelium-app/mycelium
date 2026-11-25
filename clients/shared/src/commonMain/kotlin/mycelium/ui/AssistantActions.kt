@@ -558,7 +558,7 @@ internal fun AssistantChangeCard(store: Store, state: AppState, change: mycelium
             groupName?.let { DetailLine("Group", it) }
             change.description?.let { DetailLine("Description", it) }
             change.instructions?.let { DetailLine("Instructions", it) }
-            Label("Models, nodes, storage and secrets start at their defaults. Change them in its settings.", style = Tokens.Type.Meta, color = colors.textMuted)
+            Label("Storage and secrets start at their defaults. Change them in its settings.", style = Tokens.Type.Meta, color = colors.textMuted)
         } else {
             change.description?.let { Label("Description: $it", color = colors.textMuted) }
             groupName?.let { Label("Group: $it", color = colors.textMuted) }

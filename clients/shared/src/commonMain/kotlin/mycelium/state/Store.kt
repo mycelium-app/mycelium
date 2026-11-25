@@ -652,7 +652,7 @@ class Store(
         return reset
     }
 
-    fun promptAssistant(assistant: mycelium.api.Assistant, text: String, spoken: Boolean = false) {
+    fun promptAssistant(assistant: mycelium.api.Assistant, text: String, spoken: Boolean = false, model: mycelium.api.ModelChoice? = null, nodeId: String? = null) {
         val prompt = text.trim()
         val sending = assistant.id to prompt
         val alreadyInFlight = sendsInFlight.getAndUpdate { it + sending }
@@ -667,7 +667,7 @@ class Store(
 
         act {
             try {
-                reusingIdAfterDroppedConnection { api.promptAssistant(assistant.id, prompt, spoken, clientId) }
+                reusingIdAfterDroppedConnection { api.promptAssistant(assistant.id, prompt, spoken, clientId, model, nodeId) }
                 refreshAssistants()
             } finally {
                 mutableState.update { it.copy(sending = it.sending.withoutFirst(assistant.id, prompt)) }

@@ -14,10 +14,6 @@ data class ModelChoice(
 
 @Serializable
 data class AssistantPreferences(
-    val models: List<ModelChoice> = emptyList(),
-    val nodes: List<String> = emptyList(),
-    @SerialName("chat_first") val chatFirst: Boolean = true,
-    @SerialName("fall_back_on") val fallBackOn: List<String> = listOf("usage_limit", "signed_out", "offline"),
     @SerialName("voice_name") val voiceName: String? = null,
     @SerialName("speech_speed") val speechSpeed: String? = null,
 )
@@ -36,7 +32,6 @@ data class Assistant(
     @SerialName("pinned_at") val pinnedAt: String? = null,
     @SerialName("archived_at") val archivedAt: String? = null,
     val instructions: String? = null,
-    @SerialName("next_choice") val nextChoice: String? = null,
     val secrets: List<AssistantSecret> = emptyList(),
     val backup: AssistantBackup? = null,
     val wakes: String? = null,
@@ -109,7 +104,6 @@ data class AssistantChange(
     val description: String? = null,
     @SerialName("group_id") val groupId: String? = null,
     val instructions: String? = null,
-    val preferences: AssistantPreferences? = null,
     val state: String,
     @SerialName("created_at") val createdAt: String,
 )

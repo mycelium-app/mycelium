@@ -26,7 +26,11 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import mycelium.api.AnyNodePick
 import mycelium.api.Assistant
+import mycelium.api.ModelChoice
+import mycelium.api.ModelProvider
+import mycelium.state.modelOptions
 import mycelium.api.Conversation
 import mycelium.api.PutAssistantSecretRequest
 import mycelium.state.AppState
@@ -71,11 +75,14 @@ fun AssistantScreen(store: Store, state: AppState, id: String, onOpenSettings: (
     } else if (conversationId != null) {
         ConversationScreen(store, state, conversationId, onArchived = {}, onOpenConversation = onOpenConversation, onOpenArtefact = onOpenArtefact, header = HeaderSlots(title, menu, notices), onManageActions = onManageActions)
     } else {
+        val place = remember(id) { FirstMessagePlace() }
+
         Column(Modifier.fillMaxSize()) {
             Bar {
                 OpenListButton()
 
                 title()
+                RunOnMenu(store, state, place)
                 Box(Modifier.weight(1f))
 
                 val menuState = rememberRowMenuState()
@@ -84,7 +91,7 @@ fun AssistantScreen(store: Store, state: AppState, id: String, onOpenSettings: (
             }
 
             notices()
-            StartSession(store, state, assistant, onManageActions)
+            StartSession(store, state, assistant, place, onManageActions)
         }
     }
 }
@@ -210,8 +217,53 @@ private fun EarlierSession(store: Store, state: AppState, session: Conversation)
     }
 }
 
+internal class FirstMessagePlace {
+    var nodeId by mutableStateOf<String?>(null)
+    var model by mutableStateOf<ModelChoice?>(null)
+}
+
 @Composable
-private fun ColumnScope.StartSession(store: Store, state: AppState, assistant: Assistant, onManageActions: () -> Unit) {
+private fun RunOnMenu(store: Store, state: AppState, place: FirstMessagePlace) {
+    var open by remember { mutableStateOf(false) }
+    var pick by remember { mutableStateOf<AnyNodePick?>(null) }
+    val chosen = place.nodeId?.let { state.nodes[it] }
+    val online = state.nodes.values.filter { it.online }.sortedBy { it.name }
+
+    LaunchedEffect(open) {
+        if (open) {
+            pick = runCatching { store.api.anyNodePick() }.getOrNull()
+        }
+    }
+
+    Box {
+        MyButton(
+            { open = true },
+            text = chosen?.name ?: "Any node",
+            icon = chosen?.let(::nodeIcon) ?: MyIcon.Server,
+            iconColour = chosen?.let { nodeColour(it) },
+            description = "Node: ${chosen?.name ?: "Any node"}",
+            muted = true,
+            size = ButtonSize.Sm,
+            selected = open,
+            trailingIcon = MyIcon.ChevronDown,
+        )
+
+        if (open) {
+            MenuPopup(onDismiss = { open = false }, width = PlaceMenuWidth) {
+                MenuLabel("Run on")
+                MenuItem("Any node", onClick = { place.nodeId = null; open = false }, checked = chosen == null, hint = pick?.let { "${it.name} now, most free" }, leading = MyIcon.Server)
+                Hairline(Modifier.padding(vertical = Tokens.Space.S1))
+
+                for (node in online) {
+                    MenuItem(node.name, onClick = { place.nodeId = node.id; open = false }, checked = node.id == place.nodeId, leading = nodeIcon(node), leadingColour = nodeColour(node))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColumnScope.StartSession(store: Store, state: AppState, assistant: Assistant, place: FirstMessagePlace, onManageActions: () -> Unit) {
     var message by remember(assistant.id) { mutableStateOf(TextFieldValue("")) }
     var problem by remember(assistant.id) { mutableStateOf<String?>(null) }
     var missing by remember(assistant.id) { mutableStateOf<String?>(null) }
@@ -223,8 +275,15 @@ private fun ColumnScope.StartSession(store: Store, state: AppState, assistant: A
         }
     }
 
+    var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
+    val favourites = rememberFavouriteModels(store)
+    val node = place.nodeId?.let { state.nodes[it] }
+    val options = remember(state.nodes, providers, node) { modelOptions(state.nodes.values, node, providers) }
+    val chosenOption = place.model?.let { choice -> options.firstOrNull { it.isChosen(choice) } }
+
     LaunchedEffect(assistant.id) {
         store.act { store.refreshAssistantActions(assistant.id) }
+        store.act { providers = store.api.modelProviders() }
     }
 
     fun send() {
@@ -236,7 +295,7 @@ private fun ColumnScope.StartSession(store: Store, state: AppState, assistant: A
         }
 
         missing = null
-        store.promptAssistant(assistant, text)
+        store.promptAssistant(assistant, text, model = place.model, nodeId = place.nodeId)
         message = TextFieldValue("", TextRange.Zero)
     }
 
@@ -253,6 +312,21 @@ private fun ColumnScope.StartSession(store: Store, state: AppState, assistant: A
             modifier = Modifier.widthIn(max = readingMeasure()),
             error = missing,
             assistantActions = actions,
+            model = {
+                ModelPicker(
+                    ModelPickerControls(
+                        label = chosenOption?.name ?: "Any model",
+                        options = options,
+                        favourites = favourites.list,
+                        providers = providers,
+                        chosen = place.model,
+                        anyChosen = place.model == null,
+                        onFavourite = favourites.toggle,
+                        onPickAny = { place.model = null },
+                        onPickModel = { place.model = it.choice() },
+                    ),
+                )
+            },
         )
     }
 }

@@ -122,22 +122,6 @@ class AssistantSettingsTest {
     }
 
     @Test
-    fun modelPreferencesReorderWithMoveUpAndAreSavedInThatOrder() {
-        shell()
-        openSection("Models and nodes")
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for qwen").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("More for qwen").performClick()
-        rule.onNodeWithText("Move up").performClick()
-        rule.onNodeWithText("Save").performScrollTo().performClick()
-
-        rule.waitUntil(5_000) { requests.any { it.first == "PATCH /api/v1/assistants/a1" } }
-        val sent = requests.last { it.first == "PATCH /api/v1/assistants/a1" }.second
-
-        assertEquals(true, sent.indexOf("qwen") in 0 until sent.indexOf("llama3.2"), sent)
-    }
-
-    @Test
     fun theStorageTableListsFilesApartFromTheInstructionsAndSavesAnEdit() {
         shell()
         openSection("Storage and secrets")
@@ -153,25 +137,6 @@ class AssistantSettingsTest {
 
         rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/assistants/a1/files/notes/today.md" } }
         assertEquals(true, requests.last { it.first.startsWith("PUT") }.second.contains("and v2"))
-    }
-
-    @Test
-    fun addingClaudeCodeAndANodeIsSavedAsPreferences() {
-        shell()
-        openSection("Models and nodes")
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Add a model").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Model: Add a model").performScrollTo().performClick()
-        rule.onNodeWithContentDescription("Claude Code: Claude Code").performClick()
-        rule.onNodeWithText("Add node").performScrollTo().performClick()
-        rule.onNodeWithText("willow").performClick()
-        rule.onNodeWithContentDescription("Chat first when no files are needed").performScrollTo().performClick()
-        rule.onNodeWithText("Save").performScrollTo().performClick()
-
-        rule.waitUntil(5_000) { requests.any { it.first == "PATCH /api/v1/assistants/a1" } }
-        val sent = requests.last { it.first == "PATCH /api/v1/assistants/a1" }.second
-
-        assertEquals(true, """{"agent":"claude"}""" in sent && """"nodes":["n1"]""" in sent && """"chat_first":false""" in sent, sent)
     }
 
     @Test

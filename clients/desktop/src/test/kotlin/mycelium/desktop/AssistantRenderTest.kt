@@ -12,6 +12,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -212,10 +214,19 @@ class AssistantRenderTest {
     }
 
     @Test
-    fun modelsSettings() {
-        show(Route.AssistantSettings("as1", AssistantSection.ModelsAndNodes))
-        waitFor("Runs on, in order of preference")
-        snap("7.8-models")
+    fun theFirstMessageStartsOnTheNodeChosenInTheHeaderAndAnyModel() {
+        show(Route.Assistant("as2"))
+        waitFor("Any node")
+        rule.onNodeWithContentDescription("Model: Any model").assertExists()
+        snap("7.24-first-message")
+        rule.onNodeWithContentDescription("Node: Any node").performClick()
+        rule.onAllNodesWithText("willow").onLast().performClick()
+        rule.onNodeWithContentDescription("Message").performTextInput("Tag the release")
+        rule.onNodeWithContentDescription("Send").performClick()
+        rule.waitUntil(5_000) { sent.any { it.first == "POST /api/v1/assistants/as2/prompt" } }
+
+        val body = sent.first { it.first == "POST /api/v1/assistants/as2/prompt" }.second
+        assertTrue(body.contains("\"node_id\":\"$Laptop\"") && !body.contains("\"model\""), body)
     }
 
     @Test

@@ -51,7 +51,6 @@ import mycelium.state.modelOptions
 enum class AssistantSection(val label: String, val icon: MyIcon) {
     Identity("Identity", MyIcon.Person),
     Instructions("Instructions", MyIcon.File),
-    ModelsAndNodes("Models and nodes", MyIcon.Server),
     StorageAndSecrets("Storage and secrets", MyIcon.Key),
     SchedulesAndActions("Schedules and actions", MyIcon.Calendar),
 }
@@ -119,7 +118,6 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String, 
                         when (section) {
                             AssistantSection.Identity -> IdentitySection(store, state, current, onChanged = { loaded = it }, onArchived = onDone)
                             AssistantSection.Instructions -> InstructionsSection(store, current, onChanged = { loaded = it })
-                            AssistantSection.ModelsAndNodes -> ModelsSection(store, state, current, onChanged = { loaded = it })
                             AssistantSection.StorageAndSecrets -> {
                                 StorageSection(store, current.id)
                                 SecretsSection(store, current.id)
@@ -321,107 +319,6 @@ private fun InstructionsSection(store: Store, assistant: Assistant, onChanged: (
     }
 }
 
-@Composable
-private fun ModelsSection(store: Store, state: AppState, assistant: Assistant, onChanged: (Assistant) -> Unit) {
-    val colors = MyTheme.colors
-    var models by remember(assistant.id) { mutableStateOf(assistant.preferences.models) }
-    var nodes by remember(assistant.id) { mutableStateOf(assistant.preferences.nodes) }
-    var chatFirst by remember(assistant.id) { mutableStateOf(assistant.preferences.chatFirst) }
-    var fallBackOn by remember(assistant.id) { mutableStateOf(assistant.preferences.fallBackOn) }
-    var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
-    val runner = rememberAction(assistant.id)
-    val favourites = rememberFavouriteModels(store)
-    val options = remember(state.nodes, providers) { modelOptions(state.nodes.values, null, providers) }
-
-    LaunchedEffect(Unit) {
-        store.act { providers = store.api.modelProviders() }
-    }
-
-    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
-        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
-
-        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-            Label("Models, in order of preference", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-            Label("A new session starts on the first model that can run. Any model picks from your favourites.", style = Tokens.Type.Meta, color = colors.textMuted)
-
-            OrderedRows(
-                names = models.map { it.displayName(options, providers) },
-                onMove = { from, to -> models = models.moved(from, to) },
-                onRemove = { index -> models = models.filterIndexed { position, _ -> position != index } },
-            )
-
-            Row {
-                ModelPicker(
-                    ModelPickerControls(
-                        label = "Add a model",
-                        options = options,
-                        favourites = favourites.list,
-                        providers = providers,
-                        onPickModel = { picked -> models = models + picked.choice() },
-                        onPickAny = { models = models + ModelChoice(anyModel = true) },
-                        onFavourite = favourites.toggle,
-                    ),
-                )
-            }
-        }
-
-        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-            Label("Runs on, in order of preference", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-            Label("Used when a session needs files or commands. Leave empty to use any node that is online.", style = Tokens.Type.Meta, color = colors.textMuted)
-
-            OrderedRows(
-                names = nodes.map { state.nodes[it]?.name ?: "Removed node" },
-                onMove = { from, to -> nodes = nodes.moved(from, to) },
-                onRemove = { index -> nodes = nodes.filterIndexed { position, _ -> position != index } },
-            )
-
-            val addable = state.nodes.values.filter { it.id !in nodes }.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) }
-
-            if (addable.isNotEmpty()) {
-                Row {
-                    OptionMenu("Add node", addable, null, { nodes = nodes + it }, title = "Add node", icon = MyIcon.Plus)
-                }
-            }
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(chatFirst, "Chat first when no files are needed", { chatFirst = !chatFirst }, checkedState = "On", uncheckedState = "Off")
-            Label("Chat first when no files are needed")
-        }
-
-        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-            Label("Move to the next choice when", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-
-            for ((condition, label) in FallBackConditions) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(condition in fallBackOn, label, { fallBackOn = if (condition in fallBackOn) fallBackOn - condition else fallBackOn + condition }, checkedState = "On", uncheckedState = "Off")
-                    Label(label)
-                }
-            }
-
-            assistant.nextChoice?.let { Label("Next turn: $it", style = Tokens.Type.Meta, color = colors.textMuted) }
-        }
-
-        SectionActions(
-            onSave = { runner { onChanged(store.patchAssistant(assistant, PatchAssistantRequest(preferences = assistant.preferences.copy(models = models, nodes = nodes, chatFirst = chatFirst, fallBackOn = fallBackOn)))) } },
-            onCancel = {
-                models = assistant.preferences.models
-                nodes = assistant.preferences.nodes
-                chatFirst = assistant.preferences.chatFirst
-                fallBackOn = assistant.preferences.fallBackOn
-            },
-        )
-    }
-}
-
-private val FallBackConditions = listOf(
-    "usage_limit" to "A usage limit is reached",
-    "signed_out" to "The account is signed out",
-    "offline" to "The node is offline",
-    "model_error" to "The model fails",
-)
-
-private fun harnessName(agent: String): String = if (agent == "claude") "Claude Code" else agentName(agent)
 
 private fun <T> List<T>.moved(from: Int, to: Int): List<T> = toMutableList().also { it.add(to, it.removeAt(from)) }
 

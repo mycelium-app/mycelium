@@ -74,7 +74,7 @@ private const val AgentAccountSeparator = "|"
 private const val RecentProjects = 3
 private const val NewProjectForgePreference = "new-project-forge"
 
-private val PlaceMenuWidth = 360.dp
+internal val PlaceMenuWidth = 360.dp
 
 fun startableNodes(state: AppState) = state.nodes.values.filter { it.online && !it.draining }.sortedBy { it.name }
 

@@ -595,8 +595,8 @@ class MyceliumApi(
 
     private fun filePath(path: String): String = path.split('/').joinToString("/") { it.encodeURLPathPart() }
 
-    suspend fun promptAssistant(id: String, text: String, spoken: Boolean = false, clientId: String? = null): Conversation =
-        call("/assistants/$id/prompt") { client.post(it) { authorise(); json(PromptRequest(text, spoken = spoken, clientId = clientId)) } }.body()
+    suspend fun promptAssistant(id: String, text: String, spoken: Boolean = false, clientId: String? = null, model: ModelChoice? = null, nodeId: String? = null): Conversation =
+        call("/assistants/$id/prompt") { client.post(it) { authorise(); json(PromptRequest(text, spoken = spoken, clientId = clientId, model = model, nodeId = nodeId)) } }.body()
 
     suspend fun voiceAssistant(): Assistant = call("/assistants/builtin/voice") { client.get(it) { authorise() } }.body()
 

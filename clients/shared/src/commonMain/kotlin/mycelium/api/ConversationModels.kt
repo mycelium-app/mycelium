@@ -126,7 +126,7 @@ data class Attachment(
 )
 
 @Serializable
-data class PromptRequest(val text: String, val attachments: List<Attachment> = emptyList(), val spoken: Boolean = false, @SerialName("client_id") val clientId: String? = null)
+data class PromptRequest(val text: String, val attachments: List<Attachment> = emptyList(), val spoken: Boolean = false, @SerialName("client_id") val clientId: String? = null, val model: ModelChoice? = null, @SerialName("node_id") val nodeId: String? = null)
 
 @Serializable
 data class PromptAccepted(val queued: Boolean, val message: String)
