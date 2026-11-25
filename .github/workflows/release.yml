@@ -44,6 +44,41 @@ jobs:
           name: binary
           path: dist/
 
+  windows-node:
+    name: Windows ARM64 node binary
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+
+      - name: Build
+        env:
+          XWIN_ACCEPT_LICENSE: "1"
+        run: |
+          rust_version=$(awk -F '"' '$1 == "rust = " { print $2 }' mise.toml)
+          rustup toolchain install "$rust_version" --profile minimal --target aarch64-pc-windows-msvc
+          export RUSTUP_TOOLCHAIN="$rust_version"
+          export CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_RUSTFLAGS="-C target-feature=+crt-static --remap-path-prefix=$PWD=/src/mycelium --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}/registry/src=/src/cargo"
+          nixpkgs="github:NixOS/nixpkgs/$(jq -r '.nodes.nixpkgs.locked.rev' flake.lock)"
+          nix shell "$nixpkgs#cargo-xwin" "$nixpkgs#llvmPackages.clang-unwrapped" "$nixpkgs#llvm" "$nixpkgs#lld" "$nixpkgs#ninja" \
+            --command cargo xwin build --release --locked -j 4 --package mycelium-cli --target aarch64-pc-windows-msvc
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp target/aarch64-pc-windows-msvc/release/mycelium.exe dist/mycelium-windows-arm64.exe
+          cd dist && sha256sum mycelium-windows-arm64.exe | cut -d' ' -f1 > mycelium-windows-arm64.exe.sha256
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-node
+          path: dist/
+
   desktop-web:
     name: Desktop and web clients
     runs-on: ubuntu-24.04
@@ -353,7 +388,7 @@ jobs:
   release:
     name: GitHub release
     if: github.ref_type == 'tag'
-    needs: [binary, desktop-web, sign-android, image, agent-image, local-speech-image, flake]
+    needs: [binary, windows-node, desktop-web, sign-android, image, agent-image, local-speech-image, flake]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
