@@ -94,7 +94,7 @@ while ($null -ne ($line = [Console]::ReadLine())) {
     $request = ConvertFrom-Json $line
     $result = $null
     switch ($request.method) {
-        'initialize' { $result = @{ protocolVersion = 1; agentCapabilities = @{}; authMethods = @() } }
+        'initialize' { $result = @{ protocolVersion = 1; agentCapabilities = @{ mcpCapabilities = @{ http = $true } }; authMethods = @() } }
         'session/new' {
             if ((Get-Location).Path -notlike '*demo workspace') { exit 3 }
             $helper = $request.params._meta.claudeCode.options.mcpServers.mycelium.headersHelper
@@ -107,7 +107,7 @@ while ($null -ne ($line = [Console]::ReadLine())) {
     }
 
     if ($null -ne $result) {
-        [Console]::WriteLine((ConvertTo-Json -Compress @{ jsonrpc = '2.0'; id = $request.id; result = $result }))
+        [Console]::WriteLine((ConvertTo-Json -Compress -Depth 10 @{ jsonrpc = '2.0'; id = $request.id; result = $result }))
     }
 }
 "#).unwrap();
