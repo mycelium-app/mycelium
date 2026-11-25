@@ -27,6 +27,7 @@ fn numbers(version: &str) -> Option<Vec<u64>> {
 pub fn asset_name(os: &str, arch: &str) -> Result<String> {
     match (os, arch) {
         ("linux", "x86_64") => Ok("mycelium-linux-x86_64".into()),
+        ("windows", "aarch64") => Ok("mycelium-windows-arm64.exe".into()),
         _ => Err(anyhow!("No build for {os} {arch}")),
     }
 }
@@ -64,19 +65,42 @@ async fn download(client: &reqwest::Client, url: &str) -> Result<Vec<u8>> {
     Ok(bytes.to_vec())
 }
 
+fn beside(target: &Path, suffix: &str) -> PathBuf {
+    let mut path = target.as_os_str().to_owned();
+    path.push(suffix);
+
+    PathBuf::from(path)
+}
+
 fn swap(binary: &[u8], target: &Path) -> std::io::Result<()> {
-    let mut staged = target.as_os_str().to_owned();
-    staged.push(".new");
-    let staged = PathBuf::from(staged);
+    let staged = beside(target, ".new");
 
     std::fs::write(&staged, binary)?;
     #[cfg(unix)]
     std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755))?;
 
+    #[cfg(windows)]
+    let renamed = replace_running(&staged, target);
+    #[cfg(not(windows))]
     let renamed = std::fs::rename(&staged, target);
 
     if renamed.is_err() {
         let _ = std::fs::remove_file(&staged);
+    }
+
+    renamed
+}
+
+#[cfg(windows)]
+fn replace_running(staged: &Path, target: &Path) -> std::io::Result<()> {
+    let previous = beside(target, ".old");
+    let _ = std::fs::remove_file(&previous);
+
+    std::fs::rename(target, &previous)?;
+    let renamed = std::fs::rename(staged, target);
+
+    if renamed.is_err() {
+        let _ = std::fs::rename(&previous, target);
     }
 
     renamed
@@ -94,8 +118,10 @@ mod tests {
     }
 
     #[test]
-    fn only_linux_x86_64_has_a_build() {
+    fn only_linux_x86_64_and_windows_arm64_have_a_build() {
         assert_eq!(asset_name("linux", "x86_64").unwrap(), "mycelium-linux-x86_64");
+        assert_eq!(asset_name("windows", "aarch64").unwrap(), "mycelium-windows-arm64.exe");
+        assert_eq!(asset_name("windows", "x86_64").unwrap_err().to_string(), "No build for windows x86_64");
         assert_eq!(asset_name("macos", "aarch64").unwrap_err().to_string(), "No build for macos aarch64");
     }
 }

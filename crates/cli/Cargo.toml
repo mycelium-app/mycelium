@@ -33,6 +33,7 @@ tempfile.workspace = true
 assert_cmd.workspace = true
 predicates.workspace = true
 reqwest.workspace = true
+sha2.workspace = true
 
 [target.'cfg(not(windows))'.dev-dependencies]
 sqlx.workspace = true

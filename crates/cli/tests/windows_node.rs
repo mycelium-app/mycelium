@@ -8,6 +8,7 @@ use mycelium_node::config::NodeConfig;
 use mycelium_proto::conversation::AgentId;
 use mycelium_proto::link::{ControlToNode, NodeToControl};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::time::Duration;
 use tokio::process::Command;
@@ -128,5 +129,32 @@ while ($null -ne ($line = [Console]::ReadLine())) {
     let exit = std::fs::read_to_string(config.sessions_dir().join(conversation_id.to_string()).join("exit.json")).unwrap();
     assert_eq!(serde_json::from_str::<Value>(&exit).unwrap()["exit"], 1);
     daemon.kill().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test]
+async fn an_update_replaces_the_executable_while_it_is_running() {
+    const ASSET: &str = "mycelium-windows-arm64.exe";
+    let checksum: String = Sha256::digest(b"new build").iter().map(|byte| format!("{byte:02x}")).collect();
+    let path = format!("/v9.9.9/{ASSET}");
+    let app = Router::new()
+        .route(&path, get(|| async { &b"new build"[..] }))
+        .route(&format!("{path}.sha256"), get(move || async move { format!("{checksum}  {ASSET}\n") }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().join("mycelium.exe");
+    let system = std::env::var("SystemRoot").unwrap();
+    std::fs::copy(Path::new(&system).join("System32").join("PING.EXE"), &target).unwrap();
+    let mut running = Command::new(&target).args(["-n", "60", "127.0.0.1"]).kill_on_drop(true).spawn().unwrap();
+
+    let installed = mycelium_node::update::install(&reqwest::Client::new(), &url, "v9.9.9", ASSET, &target).await;
+
+    assert!(installed.is_ok(), "{installed:?}");
+    assert_eq!(std::fs::read(&target).unwrap(), b"new build");
+    assert!(running.try_wait().unwrap().is_none());
+    running.kill().await.unwrap();
     server.abort();
 }

@@ -122,6 +122,15 @@ link, check that the code matches and approve. Run it as root for a system servi
 or as yourself for a user service in `~/.local/bin`. Published builds are for Linux x86_64. On macOS,
 build from source and set `MYCELIUM_BINARY=/path/to/mycelium` before you run the installer.
 
+On Windows 11 ARM64, run this in PowerShell as yourself:
+
+```powershell
+& ([scriptblock]::Create((irm https://github.com/mycelium-app/mycelium/releases/latest/download/install.ps1))) https://mycelium.example.com
+```
+
+It installs to `%LOCALAPPDATA%\Programs\Mycelium`, joins the node and starts it at every sign-in
+through the scheduled task "Mycelium node", which restarts it after an update.
+
 On NixOS, nix-darwin or home-manager, add the flake as an input:
 
 ```nix

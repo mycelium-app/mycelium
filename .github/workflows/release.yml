@@ -410,6 +410,7 @@ jobs:
           set -euo pipefail
           rm -f dist/mycelium-android-unsigned.apk
           cp install.sh dist/install.sh
+          cp install.ps1 dist/install.ps1
           printf '%s' "$GITHUB_REF_NAME" > dist/latest
           awk -v tag="## $GITHUB_REF_NAME" '$0 == tag {on=1; next} /^## / {on=0} on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
           [ -s "$RUNNER_TEMP/notes.md" ] || echo "mycelium $GITHUB_REF_NAME." > "$RUNNER_TEMP/notes.md"
