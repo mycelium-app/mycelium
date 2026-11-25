@@ -10,6 +10,7 @@ import mycelium.api.NodeSummary
 import mycelium.api.ResetCredits
 import mycelium.api.UsageWindow
 import kotlinx.serialization.json.JsonObject
+import kotlin.math.ceil
 import kotlin.math.roundToInt
 import kotlin.random.Random
 import kotlin.time.Clock
@@ -27,6 +28,10 @@ fun accountShortName(account: String): String = account.substringAfter('@')
 data class AccountOnNode(val nodeName: String, val state: LoginState, val nodeId: String = "", val method: String = "", val managed: Boolean = false)
 
 data class AgentAccount(val agent: String, val label: String, val method: String, val nodes: List<AccountOnNode>, val windows: List<UsageWindow> = emptyList(), val usageReadAt: String? = null, val resetCredits: ResetCredits? = null, val plan: String? = null, val usageNote: String? = null)
+
+val AgentAccount.displayName: String get() = if (label == UnnamedAccount || label == DefaultVibeLogin && agent == "vibe" && nodes.none { it.managed }) agentName(agent) else label
+
+private const val DefaultVibeLogin = "default"
 
 fun agentAccounts(nodes: Collection<NodeSummary>): List<AgentAccount> {
     val grouped = linkedMapOf<Triple<String, String?, String?>, MutableList<Pair<NodeSummary, LoginInfo>>>()
@@ -250,6 +255,8 @@ fun usageClockTime(iso: String, localDateTime: (Long) -> String?, now: Instant =
 
 private val MonthNames = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
+private val MonthFullNames = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+
 fun monthAbbreviation(month: Int): String = MonthNames[month - 1]
 
 fun usageProjection(window: UsageWindow, localDateTime: (Long) -> String?, now: Instant = Clock.System.now()): String {
@@ -290,26 +297,25 @@ fun compactWindowUsage(window: UsageWindow, localDateTime: (Long) -> String?, no
     val attention = percent < 100 && runsOutBeforeReset(window)
     val forecast = window.runsOutAt?.takeIf { attention }?.let { "runs out ${until(it, now)}" }
     val localReset = resets?.let { localDateTime(it.toEpochMilliseconds()) ?: it.toString() }
-    val left = when {
-        resetsAt == null -> ""
-        resets != null && localReset != null && resets - now >= 1.days -> {
-            val (_, month, day) = localReset.substringBefore('T').split('-')
-
-            if (resets - now >= SevenDays) ", resets ${weekdayAbbreviation(localReset)} ${day.toInt()} ${MonthNames[month.toInt() - 1]}" else ", resets ${weekdayAbbreviation(localReset)}"
-        }
-        else -> ", ${until(resetsAt, now).removePrefix("in ")} left"
-    }
     val remaining = resets?.let { it - now }
     val reset = when {
-        remaining == null -> ""
-        localReset != null && remaining >= 1.days -> weekdayAbbreviation(localReset)
+        remaining == null || localReset == null -> ""
+        remaining > SevenDays -> "${ceil(remaining.inWholeSeconds / 86_400.0).toInt()}d"
+        remaining >= 1.days -> weekdayAbbreviation(localReset)
         remaining.inWholeMinutes < 60 -> "${remaining.inWholeMinutes}m"
         else -> "${remaining.inWholeHours}h ${(remaining.inWholeMinutes % 60).toString().padStart(2, '0')}m"
     }
-    val resetDescription = when {
-        remaining == null -> null
-        localReset != null && remaining >= 1.days -> "resets $reset"
-        else -> "resets in $reset"
+    val resetDescription = localReset?.takeIf { remaining != null }?.let { local ->
+        val (_, month, day) = local.substringBefore('T').split('-')
+        val date = "${WeekdayNames[weekdayOf(local.substringBefore('T'))]} ${day.toInt()} ${MonthFullNames[month.toInt() - 1]}"
+
+        if (remaining != null && remaining < 1.days) "resets $date at ${local.substringAfter('T').take(5)}" else "resets $date"
+    }
+    val left = when {
+        remaining == null || reset.isEmpty() -> ""
+        remaining < 1.days -> ", ${until(resetsAt.orEmpty(), now).removePrefix("in ")} left"
+        remaining > SevenDays -> ", resets in $reset"
+        else -> ", resets $reset"
     }
     val description = listOfNotNull(forecast?.let { "at this rate $it" }, resetDescription).joinToString(", ")
 

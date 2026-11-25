@@ -27,6 +27,8 @@ import androidx.compose.runtime.setValue
 import kotlin.time.Clock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import mycelium.state.planName
+import mycelium.state.displayName
 import mycelium.state.accountShortName
 import mycelium.state.evenPacePercent
 import mycelium.state.nextUsageTick
@@ -174,7 +176,7 @@ internal fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (s
                 Row(Modifier.width(UsageNameWidth), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                     if (index == 0) {
                         Icon(agentIcon(account.agent), colors.text, Tokens.Size.IconSm)
-                        Label(accountShortName(account.label), style = Tokens.Type.MetaStrong, maxLines = 1)
+                        Label(accountShortName(account.displayName), style = Tokens.Type.MetaStrong, maxLines = 1)
                     } else if (thisChat && index == 1) {
                         Label("This chat", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
                     }
@@ -200,13 +202,13 @@ internal fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (s
         }
 
         val note = account.usageNote
-        val plan = account.plan
+        val plan = account.plan?.let(::planName)
 
         if (shown.isEmpty() && note != null) {
             Row(Modifier.fillMaxWidth().height(UsageRowHeight), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                 Row(Modifier.width(UsageNameWidth), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                     Icon(agentIcon(account.agent), colors.text, Tokens.Size.IconSm)
-                    Label(accountShortName(account.label), style = Tokens.Type.MetaStrong, maxLines = 1)
+                    Label(accountShortName(account.displayName), style = Tokens.Type.MetaStrong, maxLines = 1)
                 }
 
                 Hinted(note, Modifier.weight(1f).semantics { contentDescription = note }) {

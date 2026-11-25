@@ -6,7 +6,13 @@ import mycelium.api.UsageHistoryAccount
 
 private val PlanNames = mapOf("pro" to "Pro", "max_5x" to "Max 5x", "max_20x" to "Max 20x", "plus" to "Plus", "team" to "Team")
 
-fun planName(plan: String): String = PlanNames[plan] ?: plan.replace('_', ' ').replaceFirstChar { it.uppercase() }
+fun planName(plan: String): String {
+    val name = plan.substringBefore(", ")
+    val words = name.replace('_', ' ')
+    val shown = PlanNames[name.lowercase()] ?: (if (words.none { it.isLowerCase() }) words.lowercase() else words).replaceFirstChar { it.uppercase() }
+
+    return shown + plan.removePrefix(name)
+}
 
 fun approximateTokens(tokens: Double): String = "~${formatTokens(tokens.roundToLong())}"
 

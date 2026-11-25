@@ -18,6 +18,8 @@ import mycelium.state.splitSignedOut
 import mycelium.state.usageClockTime
 import mycelium.state.usageProjection
 import mycelium.state.compactWindowUsage
+import mycelium.state.displayName
+import mycelium.state.planName
 import mycelium.state.usageUpdated
 import mycelium.state.windowShortName
 import mycelium.state.CompactWindowUsage
@@ -166,31 +168,40 @@ class AccountUsageTest {
     fun aCompactWindowGivesItsForecastAndTimeLeft() {
         val window = UsageWindow("five_hour", 64.0, resetsAt = "2026-10-23T19:00:00Z", ratePerHour = 12.0, runsOutAt = "2026-10-23T17:00:00Z")
 
-        assertEquals(CompactWindowUsage(64, "runs out in 3h", "64% used, 5h left", true, "5h 00m", "at this rate runs out in 3h, resets in 5h 00m"), compactWindowUsage(window, ::utc, Now))
+        assertEquals(CompactWindowUsage(64, "runs out in 3h", "64% used, 5h left", true, "5h 00m", "at this rate runs out in 3h, resets Friday 23 October at 19:00"), compactWindowUsage(window, ::utc, Now))
     }
 
     @Test
-    fun aCompactWindowThatLastsUntilItResetsHasNoForecast() {
-        val window = UsageWindow("seven_day", 20.0, resetsAt = "2026-10-28T09:00:00Z", ratePerHour = 0.2)
+    fun aResetJustUnderADayAwayCountsDownTheHoursAndMinutes() {
+        val window = UsageWindow("five_hour", 12.0, resetsAt = "2026-10-24T13:59:00Z")
 
-        assertEquals(CompactWindowUsage(20, null, "20% used, resets Wed", false, "Wed", "resets Wed"), compactWindowUsage(window, ::utc, Now))
+        assertEquals("23h 59m", compactWindowUsage(window, ::utc, Now).reset)
+        assertEquals("45m", compactWindowUsage(window.copy(resetsAt = "2026-10-23T14:45:00Z"), ::utc, Now).reset)
     }
 
     @Test
-    fun aWindowResettingLaterTodayGivesTheHoursAndPaddedMinutesLeft() {
-        val window = UsageWindow("five_hour", 12.0, resetsAt = "2026-10-23T18:05:00Z")
+    fun aResetFromADayToSevenDaysAwayNamesTheWeekday() {
+        val aDay = UsageWindow("seven_day", 12.0, resetsAt = "2026-10-24T14:00:00Z")
+        val sevenDays = aDay.copy(resetsAt = "2026-10-30T14:00:00Z")
 
-        assertEquals("4h 05m", compactWindowUsage(window, ::utc, Now).reset)
-        assertEquals("resets in 4h 05m", compactWindowUsage(window, ::utc, Now).resetDescription)
+        assertEquals("Sat", compactWindowUsage(aDay, ::utc, Now).reset)
+        assertEquals("Fri", compactWindowUsage(sevenDays, ::utc, Now).reset)
+        assertEquals("12% used, resets Fri", compactWindowUsage(sevenDays, ::utc, Now).summary)
     }
 
     @Test
-    fun aResetUnderADayAwayGivesHoursAndMinutesAndFurtherAwayTheWeekday() {
-        val soon = UsageWindow("five_hour", 12.0, resetsAt = "2026-10-23T16:40:00Z")
-        val later = UsageWindow("seven_day", 12.0, resetsAt = "2026-10-27T13:00:00Z")
+    fun aResetMoreThanSevenDaysAwayCountsTheDaysLeft() {
+        val justOver = UsageWindow("monthly", 12.0, resetsAt = "2026-10-30T14:01:00Z")
+        val monthly = UsageWindow("monthly", 0.01, resetsAt = "2026-11-01T00:00:00Z")
 
-        assertEquals("2h 40m", compactWindowUsage(soon, { null }, Now).reset)
-        assertEquals("Tue", compactWindowUsage(later, { null }, Now).reset)
+        assertEquals("8d", compactWindowUsage(justOver, ::utc, Now).reset)
+        assertEquals(CompactWindowUsage(0, null, "0% used, resets in 9d", false, "9d", "resets Sunday 1 November"), compactWindowUsage(monthly, ::utc, Now))
+    }
+
+    @Test
+    fun withoutALocalClockResetsAreReadInUtc() {
+        assertEquals("2h 40m", compactWindowUsage(UsageWindow("five_hour", 12.0, resetsAt = "2026-10-23T16:40:00Z"), { null }, Now).reset)
+        assertEquals("Tue", compactWindowUsage(UsageWindow("seven_day", 12.0, resetsAt = "2026-10-27T13:00:00Z"), { null }, Now).reset)
     }
 
     @Test
@@ -207,25 +218,30 @@ class AccountUsageTest {
     }
 
     @Test
-    fun aWindowResettingTwoDaysAwayNamesTheLocalWeekdayInsteadOfDaysLeft() {
-        val mondayEvening = Instant.parse("2026-10-26T18:00:00Z")
-        val window = UsageWindow("seven_day", 56.0, resetsAt = "2026-10-28T19:00:00Z")
-
-        assertEquals("56% used, resets Wed", compactWindowUsage(window, ::utc, mondayEvening).summary)
-    }
-
-    @Test
-    fun aWindowResettingAWeekAwayNamesTheWeekdayAndDate() {
-        val window = UsageWindow("seven_day", 56.0, resetsAt = "2026-11-02T19:00:00Z")
-
-        assertEquals("56% used, resets Mon 2 Nov", compactWindowUsage(window, ::utc, Instant.parse("2026-10-26T18:00:00Z")).summary)
-    }
-
-    @Test
     fun aFullWindowDoesNotSayWhenItRunsOut() {
         val window = UsageWindow("five_hour", 100.0, resetsAt = "2026-10-23T14:06:00Z", ratePerHour = 20.0, runsOutAt = "2026-10-23T13:57:00Z")
 
-        assertEquals(CompactWindowUsage(100, null, "100% used, 6m left", false, "6m", "resets in 6m"), compactWindowUsage(window, ::utc, Now))
+        assertEquals(CompactWindowUsage(100, null, "100% used, 6m left", false, "6m", "resets Friday 23 October at 14:06"), compactWindowUsage(window, ::utc, Now))
+    }
+
+    @Test
+    fun planCodesShowInSentenceCaseOrTheirProductName() {
+        assertEquals("Individual", planName("INDIVIDUAL"))
+        assertEquals("Individual, pay-as-you-go on", planName("INDIVIDUAL, pay-as-you-go on"))
+        assertEquals("Max 5x", planName("max_5x"))
+        assertEquals("Team", planName("TEAM"))
+        assertEquals("Some plan", planName("SOME_PLAN"))
+        assertEquals("ChatGPT Plus", planName("ChatGPT Plus"))
+    }
+
+    @Test
+    fun aDefaultLoginWithoutANameShowsTheAgentName() {
+        val vibe = AgentAccount("vibe", "default", "browser", listOf(AccountOnNode("willow", LoginState.SignedIn)))
+
+        assertEquals("Mistral Vibe", vibe.displayName)
+        assertEquals("default", vibe.copy(nodes = listOf(AccountOnNode("willow", LoginState.SignedIn, managed = true))).displayName)
+        assertEquals("Claude Code", AgentAccount("claude", UnnamedAccount, "oauth_token", emptyList()).displayName)
+        assertEquals("sam@example.com", AgentAccount("claude", "sam@example.com", "oauth_token", emptyList()).displayName)
     }
 
     @Test

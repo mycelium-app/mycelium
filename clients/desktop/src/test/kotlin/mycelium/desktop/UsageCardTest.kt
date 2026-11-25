@@ -337,7 +337,7 @@ class UsageCardTest {
 
         rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false)) } }
 
-        rule.onNode(hasContentDescription("5-hour window, 5% used, resets in", substring = true) and hasContentDescription("even pace 50%", substring = true)).assertExists()
+        rule.onNode(hasContentDescription("5-hour window, 5% used, resets ", substring = true) and hasContentDescription("even pace 50%", substring = true)).assertExists()
     }
 
     @Test

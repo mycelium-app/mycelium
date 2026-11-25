@@ -22,6 +22,8 @@ import kotlin.math.roundToInt
 import mycelium.api.AccountPrice
 import mycelium.api.LoginState
 import mycelium.api.NodeSummary
+import mycelium.state.planName
+import mycelium.state.displayName
 import mycelium.state.AccountOnNode
 import mycelium.state.AgentAccount
 import mycelium.state.Store
@@ -51,7 +53,7 @@ fun AgentAccountPage(store: Store, account: AgentAccount, nodes: List<NodeSummar
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             BackButton("Accounts", onBack, showText = true)
-            Label(account.label, Modifier.semantics { heading() }, Tokens.Type.Title)
+            Label(account.displayName, Modifier.semantics { heading() }, Tokens.Type.Title)
             Label(agentName(account.agent), color = colors.textMuted)
         }
 
@@ -121,7 +123,7 @@ fun AgentAccountPage(store: Store, account: AgentAccount, nodes: List<NodeSummar
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             Label("Plan and price", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-            account.plan?.let { plan -> Label("Plan: $plan") }
+            account.plan?.let { plan -> Label("Plan: ${planName(plan)}") }
 
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
                 if (price == null) {
