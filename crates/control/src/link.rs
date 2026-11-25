@@ -19,7 +19,7 @@ use axum::response::Response;
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use mycelium_proto::api::{HarnessModel, KubernetesNode};
-use mycelium_proto::conversation::{AgentInfo, ConversationStatus, EventKind, LoginInfo, SessionPosition};
+use mycelium_proto::conversation::{AgentId, AgentInfo, ConversationStatus, EventKind, LoginInfo, SessionPosition};
 use mycelium_proto::link::{ControlToNode, NodeToControl, REPLACED_CLOSE_CODE};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
@@ -557,6 +557,18 @@ async fn stop_at_limit(state: &AppState, node_id: Uuid, conversation_id: Uuid, m
     stop_for_failure(state, node_id, conversation_id, owner, None, message, Some(limit)).await
 }
 
+async fn reject_login(state: &AppState, node_id: Uuid, conversation_id: Uuid) -> ApiResult<()> {
+    let ran_as = sqlx::query_as::<_, (String, Option<String>)>("select agent, account from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?;
+
+    if let Some((agent, account)) = ran_as
+        && let Ok(agent) = crate::store::parse_enum::<AgentId>(&agent)
+    {
+        state.hub.send(node_id, ControlToNode::LoginRejected { agent, account });
+    }
+
+    Ok(())
+}
+
 async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid, owner: Option<Uuid>, seq: Option<i64>, message: &str, limit: Option<crate::usage_limits::Detected>) -> ApiResult<()> {
     let resume_at = limit.as_ref().and_then(|limit| limit.resume_at);
     let resumes_on_another_account = limit.as_ref().is_some_and(|limit| limit.resumes_on_another_account);
@@ -570,11 +582,16 @@ async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid
         tracing::warn!("goal handling after a failed session failed for {conversation_id}: {}", error.message());
     }
 
+    let sign_in_required = limit.is_none() && message.to_lowercase().contains("authentication required");
     let payload = match limit {
         Some(limit) => limit.payload,
-        None if message.to_lowercase().contains("authentication required") => json!({"message": message, "sign_in_required": true}),
+        None if sign_in_required => json!({"message": message, "sign_in_required": true}),
         None => json!({"message": message}),
     };
+
+    if sign_in_required {
+        reject_login(state, node_id, conversation_id).await?;
+    }
     let recorded = record(state, node_id, conversation_id, seq, EventKind::Error, payload, Some(ConversationStatus::Failed)).await?;
 
     if recorded && let Err(error) = crate::watches::conversation_ended(state, conversation_id, crate::watches::Ending::Failed).await {

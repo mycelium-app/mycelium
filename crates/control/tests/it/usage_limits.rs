@@ -645,6 +645,24 @@ async fn a_failure_that_needs_the_account_signed_in_again_says_so() {
 }
 
 #[tokio::test]
+async fn a_failure_that_needs_a_sign_in_tells_the_node_which_login_was_rejected() {
+    let server = Server::start().await;
+    let mut link = server.online_node("orion").await;
+    let id = working_conversation(&server, &mut link).await;
+    sqlx::query("update conversations set account = 'work@example.com' where id = $1").bind(id).execute(&server.pool).await.unwrap();
+
+    hit_limit(&server, &mut link, id, "Authentication required: Failed to authenticate: this login reached its time limit and cannot be renewed").await;
+
+    let rejected = common::next_matching(&mut link, |message| match message {
+        mycelium_proto::link::ControlToNode::LoginRejected { agent, account } => Some((*agent, account.clone())),
+        _ => None,
+    })
+    .await;
+
+    assert_eq!(rejected, (mycelium_proto::conversation::AgentId::Claude, Some("work@example.com".to_string())));
+}
+
+#[tokio::test]
 async fn an_ordinary_failure_does_not_ask_for_a_sign_in() {
     let server = Server::start().await;
     let mut link = server.online_node("orion").await;

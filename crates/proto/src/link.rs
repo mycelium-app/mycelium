@@ -571,6 +571,10 @@ pub enum ControlToNode {
         agent: AgentId,
         account: String,
     },
+    LoginRejected {
+        agent: AgentId,
+        account: Option<String>,
+    },
     UpdateAgent {
         update_id: Uuid,
         agent: AgentId,

@@ -1266,6 +1266,7 @@ async fn a_failed_turn_has_ended_so_stopping_it_sends_the_node_no_cancel() {
     link.expect_prompt().await;
     link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: "Authentication required".into() }).await;
     common::eventually("the conversation to fail", || async { (status_of(&server, id).await == "failed").then_some(()) }).await;
+    assert_eq!(link.next().await, ControlToNode::LoginRejected { agent: mycelium_proto::conversation::AgentId::Claude, account: None });
 
     let (status, _) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/cancel"))).await;
     assert_eq!(status, 204);
@@ -1282,6 +1283,7 @@ async fn closing_a_failed_conversation_dismisses_it_and_ends_its_agent() {
     link.expect_prompt().await;
     link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: "Authentication required".into() }).await;
     common::eventually("the conversation to fail", || async { (status_of(&server, id).await == "failed").then_some(()) }).await;
+    assert_eq!(link.next().await, ControlToNode::LoginRejected { agent: mycelium_proto::conversation::AgentId::Claude, account: None });
 
     assert_eq!(close(&server, id).await, 204);
 

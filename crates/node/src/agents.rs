@@ -179,6 +179,15 @@ pub fn sign_out(home: &Path, agent: AgentId, account: &AccountHome) -> std::io::
     }
 }
 
+pub fn mark_rejected(home: &Path, agent: AgentId, account: &AccountHome) -> std::io::Result<()> {
+    let (_, Some(stored)) = credential(home, agent, account) else {
+        return Ok(());
+    };
+
+    std::fs::create_dir_all(&account.dir)?;
+    std::fs::write(account.dir.join(REJECTED_MARKER), fingerprint(&stored))
+}
+
 pub fn account_env(agent: AgentId, account: &AccountHome) -> Vec<(String, String)> {
     if account.profile.is_none() {
         return Vec::new();
@@ -193,18 +202,20 @@ pub fn account_env(agent: AgentId, account: &AccountHome) -> Vec<(String, String
     vec![(variable.to_string(), account.dir.display().to_string())]
 }
 
+const REJECTED_MARKER: &str = ".mycelium-rejected";
+
 pub fn login_state(home: &Path, accounts_dir: &Path, available: &[AgentInfo], usage: &UsageCache) -> Vec<LoginInfo> {
     let mut logins = Vec::new();
 
     for info in available.iter().filter(|info| info.available) {
         for account in account_homes(home, accounts_dir, info.agent) {
-            let (method, credential_present) = match (info.agent, &account.profile) {
-                (AgentId::Claude, None) => claude_credential(home),
-                (AgentId::Claude, Some(_)) => ("oauth_token", account.dir.join(".credentials.json").exists()),
-                (AgentId::Codex, _) => ("device_auth", account.dir.join("auth.json").exists()),
-                (AgentId::Vibe, profile) => ("browser", vibe_key(&account.dir, profile.is_none()).is_some()),
+            let (method, stored) = credential(home, info.agent, &account);
+            let credential_present = stored.is_some();
+            let state = match stored {
+                None => LoginState::SignedOut,
+                Some(stored) if rejected(&account, &stored) || claude_login_ended(info.agent, &stored, chrono::Utc::now().timestamp_millis()) => LoginState::Expired,
+                Some(_) => LoginState::SignedIn,
             };
-            let state = if credential_present { LoginState::SignedIn } else { LoginState::SignedOut };
 
             let reading = usage.reading(&account.dir).filter(|_| credential_present);
             let usage_left = reading.as_ref().and_then(|reading| usage_left(&reading.windows));
@@ -217,16 +228,45 @@ pub fn login_state(home: &Path, accounts_dir: &Path, available: &[AgentInfo], us
     logins
 }
 
-fn claude_credential(home: &Path) -> (&'static str, bool) {
-    if std::env::var_os("ANTHROPIC_API_KEY").is_some() {
-        return ("api_key", true);
+fn credential(home: &Path, agent: AgentId, account: &AccountHome) -> (&'static str, Option<Vec<u8>>) {
+    match (agent, &account.profile) {
+        (AgentId::Claude, None) => claude_credential(home),
+        (AgentId::Claude, Some(_)) => ("oauth_token", std::fs::read(account.dir.join(".credentials.json")).ok()),
+        (AgentId::Codex, _) => ("device_auth", std::fs::read(account.dir.join("auth.json")).ok()),
+        (AgentId::Vibe, profile) => ("browser", vibe_key(&account.dir, profile.is_none()).map(String::into_bytes)),
+    }
+}
+
+fn claude_credential(home: &Path) -> (&'static str, Option<Vec<u8>>) {
+    if let Some(key) = std::env::var_os("ANTHROPIC_API_KEY") {
+        return ("api_key", Some(key.into_encoded_bytes()));
     }
 
-    if std::env::var_os("CLAUDE_CODE_OAUTH_TOKEN").is_some() {
-        return ("oauth_token", true);
+    if let Some(token) = std::env::var_os("CLAUDE_CODE_OAUTH_TOKEN") {
+        return ("oauth_token", Some(token.into_encoded_bytes()));
     }
 
-    ("oauth_token", home.join(".claude").join(".credentials.json").exists())
+    ("oauth_token", std::fs::read(home.join(".claude").join(".credentials.json")).ok())
+}
+
+fn claude_login_ended(agent: AgentId, stored: &[u8], now_millis: i64) -> bool {
+    let Some(oauth) = (agent == AgentId::Claude).then(|| serde_json::from_slice::<serde_json::Value>(stored).ok()).flatten().map(|parsed| parsed["claudeAiOauth"].clone()).filter(serde_json::Value::is_object) else {
+        return false;
+    };
+    let access_ended = oauth["expiresAt"].as_i64().is_some_and(|at| at <= now_millis);
+    let refresh_ended = oauth["refreshToken"].as_str().is_none_or(str::is_empty) || oauth["refreshTokenExpiresAt"].as_i64().is_some_and(|at| at <= now_millis);
+
+    access_ended && refresh_ended
+}
+
+fn rejected(account: &AccountHome, stored: &[u8]) -> bool {
+    std::fs::read_to_string(account.dir.join(REJECTED_MARKER)).is_ok_and(|marked| marked.trim() == fingerprint(stored))
+}
+
+fn fingerprint(stored: &[u8]) -> String {
+    use sha2::Digest;
+
+    sha2::Sha256::digest(stored).iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 pub fn vibe_key(dir: &Path, default: bool) -> Option<String> {
@@ -455,6 +495,42 @@ mod tests {
         let logins = login_state(home.path(), &accounts, &available(AgentId::Vibe), &no_usage());
         assert_eq!((logins[0].account.as_deref(), logins[0].state), (Some("default"), LoginState::SignedOut));
         assert_eq!(std::fs::read_to_string(home.path().join(".vibe").join(".env")).unwrap(), "OTHER=1\n");
+    }
+
+    #[test]
+    fn a_claude_login_whose_token_and_refresh_have_both_ended_is_expired() {
+        let home = tempfile::tempdir().unwrap();
+        let accounts = home.path().join("accounts");
+        let now = chrono::Utc::now().timestamp_millis();
+        let hour = 3_600_000;
+        let credential = |expires: i64, refresh: &str, refresh_expires: i64| format!(r#"{{"claudeAiOauth": {{"accessToken": "sk-ant-oat01-example", "expiresAt": {expires}, "refreshToken": "{refresh}", "refreshTokenExpiresAt": {refresh_expires}}}}}"#);
+        write(&accounts.join("claude/cleared/.credentials.json"), &credential(0, "", now - hour));
+        write(&accounts.join("claude/lapsed/.credentials.json"), &credential(now - hour, "sk-ant-ort01-example", now - 1));
+        write(&accounts.join("claude/refreshes/.credentials.json"), &credential(now - hour, "sk-ant-ort01-example", now + hour));
+        write(&accounts.join("claude/current/.credentials.json"), &credential(now + hour, "", now - hour));
+
+        let logins = login_state(home.path(), &accounts, &available(AgentId::Claude), &no_usage());
+
+        let listed: Vec<(Option<&str>, LoginState)> = logins.iter().skip(1).map(|login| (login.account.as_deref(), login.state)).collect();
+        assert_eq!(listed, vec![(Some("cleared"), LoginState::Expired), (Some("current"), LoginState::SignedIn), (Some("lapsed"), LoginState::Expired), (Some("refreshes"), LoginState::SignedIn)]);
+    }
+
+    #[test]
+    fn a_login_the_agent_rejected_is_expired_until_it_signs_in_again() {
+        let home = tempfile::tempdir().unwrap();
+        let accounts = home.path().join("accounts");
+        write(&home.path().join(".claude.json"), r#"{"oauthAccount": {"emailAddress": "sam@example.com"}}"#);
+        write(&home.path().join(".claude/.credentials.json"), r#"{"claudeAiOauth": {"accessToken": "first"}}"#);
+        write(&accounts.join("claude/work/.credentials.json"), r#"{"claudeAiOauth": {"accessToken": "work"}}"#);
+        let states = || login_state(home.path(), &accounts, &available(AgentId::Claude), &no_usage()).iter().map(|login| login.state).collect::<Vec<_>>();
+
+        mark_rejected(home.path(), AgentId::Claude, &find_account(home.path(), &accounts, AgentId::Claude, "sam@example.com").unwrap()).unwrap();
+
+        assert_eq!(states(), vec![LoginState::Expired, LoginState::SignedIn]);
+
+        write(&home.path().join(".claude/.credentials.json"), r#"{"claudeAiOauth": {"accessToken": "second"}}"#);
+
+        assert_eq!(states(), vec![LoginState::SignedIn, LoginState::SignedIn]);
     }
 
     #[test]

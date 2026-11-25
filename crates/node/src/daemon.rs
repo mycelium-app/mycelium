@@ -1,5 +1,5 @@
 use crate::acp::Command;
-use crate::agents::{account_env, account_homes, accounts_dir, detect_agents, find_account, pod_agents, login_command, login_state, new_account, resolve_program, sign_out, update_command};
+use crate::agents::{account_env, account_homes, accounts_dir, detect_agents, find_account, mark_rejected, pod_agents, login_command, login_state, new_account, resolve_program, sign_out, update_command};
 use crate::login::run_streamed;
 use crate::usage::{CODEX_USAGE_ENDPOINT, USAGE_ENDPOINT, USAGE_MIN_AGE, UsageCache, VIBE_BILLING_ENDPOINT};
 use crate::instructions::deliver;
@@ -363,6 +363,7 @@ impl Daemon {
             ControlToNode::StopLogin { login_id } => self.logins.stop(login_id),
             ControlToNode::RemoveLogin { agent, account } => self.remove_login(agent, &account),
             ControlToNode::SignOutLogin { agent, account } => self.sign_out_login(agent, &account),
+            ControlToNode::LoginRejected { agent, account } => self.reject_login(agent, account.as_deref()),
             ControlToNode::UpdateAgent { update_id, agent, version } => self.update_agent(update_id, agent, &version),
             ControlToNode::StartTerminal { terminal_id, conversation_id, cwd, cols, rows, command } => self.terminals.start(terminal_id, conversation_id, &cwd, cols, rows, command.as_deref()),
             ControlToNode::TerminalInput { terminal_id, data } => self.terminals.input(terminal_id, &data),
@@ -722,6 +723,24 @@ impl Daemon {
 
         if let Err(error) = sign_out(&self.options.home, agent, &account) {
             tracing::warn!("could not sign out the {} login {label}: {error}", agent.as_str());
+        }
+
+        let report = self.logins.report_state();
+        let _ = self.out.send(report());
+    }
+
+    fn reject_login(&self, agent: AgentId, label: Option<&str>) {
+        let accounts = accounts_dir(&self.config.state_dir);
+        let found = match label {
+            Some(label) => find_account(&self.options.home, &accounts, agent, label),
+            None => account_homes(&self.options.home, &accounts, agent).into_iter().find(|home| home.profile.is_none()),
+        };
+        let Some(account) = found else {
+            return;
+        };
+
+        if let Err(error) = mark_rejected(&self.options.home, agent, &account) {
+            tracing::warn!("could not mark the {} login {} as expired: {error}", agent.as_str(), label.unwrap_or("default"));
         }
 
         let report = self.logins.report_state();
