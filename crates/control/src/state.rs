@@ -239,6 +239,19 @@ node_answers! {
     EnvironmentLaunchAnswer => environment_launch_requests,
 }
 
+pub struct SteerClaim {
+    hub: Arc<Hub>,
+    conversation_id: Uuid,
+}
+
+impl Drop for SteerClaim {
+    fn drop(&mut self) {
+        if let Ok(mut steering) = self.hub.steering.lock() {
+            steering.remove(&self.conversation_id);
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Hub {
     nodes: Mutex<HashMap<Uuid, NodeConnection>>,
@@ -246,6 +259,7 @@ pub struct Hub {
     agent_updates: Mutex<HashMap<Uuid, LoginOwner>>,
     terminals: Mutex<HashMap<Uuid, TerminalSession>>,
     send_now: Mutex<HashMap<Uuid, Uuid>>,
+    steering: Mutex<HashSet<Uuid>>,
     stale_secrets: Mutex<HashSet<Uuid>>,
     unacknowledged: Mutex<Vec<UnacknowledgedPrompt>>,
     file_requests: PendingRequests<Vec<String>>,
@@ -824,6 +838,12 @@ impl Hub {
 
     pub fn take_send_now(&self, conversation_id: Uuid) -> bool {
         self.send_now.lock().is_ok_and(|mut send_now| send_now.remove(&conversation_id).is_some())
+    }
+
+    pub fn claim_steer(self: &Arc<Self>, conversation_id: Uuid) -> Option<SteerClaim> {
+        let claimed = self.steering.lock().is_ok_and(|mut steering| steering.insert(conversation_id));
+
+        claimed.then(|| SteerClaim { hub: self.clone(), conversation_id })
     }
 
     fn forget_send_now_on(&self, node_id: Uuid) {

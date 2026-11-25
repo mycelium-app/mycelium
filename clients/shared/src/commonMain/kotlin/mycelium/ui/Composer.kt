@@ -309,8 +309,6 @@ fun Composer(
             chipReferences = emptyMap()
             images = emptyMap()
             history = EditHistory()
-        } else if (queue.isNotEmpty()) {
-            onSendQueuedNow(queue.minBy { it.position }.id)
         }
     }
 

@@ -733,6 +733,25 @@ async fn send_now_on_a_steering_node_injects_into_the_running_turn_instead_of_st
 }
 
 #[tokio::test]
+async fn send_now_pressed_repeatedly_steers_the_message_into_the_turn_once() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", STEERING_NODE).await;
+    let id = started_conversation(&server, &mut link, Some("long task")).await;
+    next_but_git(&mut link).await;
+
+    prompt(&server, id, "give me a command I can rerun").await;
+    let queued = queue(&server, id).await[0]["id"].as_str().unwrap().to_string();
+
+    let url = format!("/api/v1/conversations/{id}/queue/{queued}/send-now");
+    let presses = async { tokio::join!(server.user.json(server.user.post(&url)), server.user.json(server.user.post(&url)), server.user.json(server.user.post(&url))) };
+    let (_, text) = tokio::join!(presses, answer_steer(&mut link, "injected"));
+
+    assert_eq!(text, "give me a command I can rerun");
+    assert_eq!(user_message_texts(&server, id).await, vec!["long task", "give me a command I can rerun"]);
+    assert_turn_not_cancelled(&server, &mut link, id).await;
+}
+
+#[tokio::test]
 async fn send_all_now_on_a_steering_node_injects_the_combined_message() {
     let server = Server::start().await;
     let mut link = server.online_node_as("laptop", STEERING_NODE).await;

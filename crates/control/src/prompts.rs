@@ -511,7 +511,18 @@ async fn send_queued_now(state: &AppState, owner: Uuid, id: Uuid, queue_id: Uuid
     if matches!(row.status.as_str(), "working" | "input") {
         let node_version = sqlx::query_scalar::<_, String>("select version from nodes where id = $1").bind(row.node_id).fetch_optional(&state.pool).await?;
         let steerable = node_version.is_some_and(|version| node_has(&version, STEERING_SINCE));
+        let claim = match steerable {
+            true => match state.hub.claim_steer(id) {
+                Some(claim) => Some(claim),
+                None => return Ok(()),
+            },
+            false => None,
+        };
         let queued = sqlx::query_as::<_, (String, sqlx::types::Json<Vec<Attachment>>)>("select text, attachments from queued_prompts where id = $1 and conversation_id = $2").bind(queue_id).bind(id).fetch_optional(&state.pool).await?;
+
+        if claim.is_some() && queued.is_none() {
+            return Ok(());
+        }
 
         if let (true, Some((text, sqlx::types::Json(attachments)))) = (steerable, queued) {
             let loaded = attachments::for_node(state, &attachments).await?;
@@ -526,6 +537,7 @@ async fn send_queued_now(state: &AppState, owner: Uuid, id: Uuid, queue_id: Uuid
                     Err(_) => {
                         let late_state = state.clone();
                         tokio::spawn(async move {
+                            let _claim = claim;
                             let late = tokio::time::timeout(LATE_STEER_WINDOW, answered).await;
                             late_state.hub.forget_request::<SteerAnswer>(request_id);
 

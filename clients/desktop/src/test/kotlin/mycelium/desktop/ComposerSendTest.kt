@@ -48,7 +48,7 @@ class ComposerSendTest {
     }
 
     @Test
-    fun enterInAnEmptyComposerSendsTheNextQueuedMessageNow() {
+    fun enterInAnEmptyComposerSendsNothingAndLeavesTheQueueAlone() {
         val sentNow = mutableListOf<String>()
         val conversation = Conversation("c1", "u", "n", "claude", "/work", "t", ConversationStatus.Working, createdAt = "2026-10-22T10:00:00Z", updatedAt = "2026-10-22T10:00:00Z")
         val queue = listOf(QueuedPrompt("q2", "c1", 2, "second", "2026-10-22T10:00:00Z"), QueuedPrompt("q1", "c1", 1, "first", "2026-10-22T10:00:00Z"))
@@ -66,8 +66,8 @@ class ComposerSendTest {
         val field = rule.onNode(hasSetTextAction())
 
         field.requestFocus()
-        field.performKeyInput { pressKey(Key.Enter) }
+        repeat(16) { field.performKeyInput { pressKey(Key.Enter) } }
 
-        assertEquals(listOf("q1"), sentNow)
+        assertEquals(emptyList(), sentNow)
     }
 }
