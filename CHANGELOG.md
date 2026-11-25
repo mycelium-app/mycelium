@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.34.68
+
+- Accounts and Nodes are one settings page, Accounts and nodes. Both tables list nodes in the same order, fill the page width and scroll sideways in a narrow window with the first column kept in view, and never cut a version, usage or button short.
+- A node shows each available update in its row, such as 0.34.60 → 0.34.66, and has one Update button that applies them all and follows each in a dialog. Update agents is gone; the row menu holds the node's other actions.
+- An agent a node lacks shows Install in its cell. Install uses the same command and dialog as Update, installs Node.js or uv first when the node has neither, and is refused where Update would be.
+- A message sent while the agent is working, or while messages are queued, goes to the end of the Queued messages list instead of showing as Sending in the thread.
+- A message the agent has been sent but has not started on yet shows greyed out in the thread, and turns normal once the agent answers it.
+- Enter in an empty composer no longer sends the next queued message, and Send now pressed repeatedly steers a queued message into the running turn once, so repeated Enter can no longer deliver the same message many times.
+- A conversation that moves to another agent drops the old agent's models and settings, so the composer no longer shows Codex controls on a conversation now running on Claude Code.
+- A watched conversation that fails the same way again tells its watcher once, until the failure changes or the conversation does something else.
+- The no-routing message points to Settings, Accounts and nodes.
+- Nodes run on Windows 11 ARM64: mycelium-windows-arm64.exe and install.ps1, which joins the node and starts it at sign-in. Windows nodes update themselves, and sign-in and agents find claude.exe and npm's .cmd shims on the node's Path. Joining, Claude Code sign-in, running an agent and SSH are tested on Windows 11 ARM64; install.ps1, the scheduled task and self-update from a published release are not yet.
+
 ## v0.34.67
 
 - Each Stoat or Discord account chooses the assistant that gets its mentions and direct messages, or Off, from the integration's page or from the assistant's Schedules and triggers. It is one setting, so changing it in either place changes both, and an account goes to at most one assistant.
