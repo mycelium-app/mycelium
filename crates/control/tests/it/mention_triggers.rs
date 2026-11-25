@@ -2,6 +2,9 @@ use axum::Json;
 use axum::Router;
 use axum::extract::State;
 use axum::routing::get;
+#[path = "common/fake_stoat.rs"]
+mod fake_stoat;
+
 use crate::common::{NodeLink, Server, serve};
 use crate::continue_elsewhere;
 use futures_util::{SinkExt, StreamExt};
@@ -29,7 +32,7 @@ async fn gateway_url(State(gateway): State<Arc<Gateway>>) -> Json<Value> {
 fn message(id: &str, author: (&str, &str), content: &str, mentions_bot: bool) -> Value {
     let mentions = if mentions_bot { json!([{"id": BOT}]) } else { json!([]) };
 
-    json!({"op": 0, "t": "MESSAGE_CREATE", "s": 2, "d": {"id": id, "channel_id": "20", "author": {"id": author.0, "username": author.1.to_lowercase(), "global_name": author.1}, "content": content, "mentions": mentions}})
+    json!({"op": 0, "t": "MESSAGE_CREATE", "s": 2, "d": {"id": id, "channel_id": "20", "guild_id": "70", "author": {"id": author.0, "username": author.1.to_lowercase(), "global_name": author.1}, "content": content, "mentions": mentions}})
 }
 
 async fn fake_discord(messages: Vec<Value>) -> (String, Arc<Gateway>) {
@@ -109,15 +112,60 @@ async fn a_mention_from_an_allowed_sender_reaches_the_assistant_with_its_channel
 }
 
 #[tokio::test]
-async fn a_stoat_integration_signed_in_as_a_person_cannot_take_a_trigger() {
+async fn a_stoat_account_signed_in_as_the_person_takes_a_trigger() {
     let server = Server::start().await;
     let (status, assistant) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "Garden helper", "instructions": "Be brief."}))).await;
     assert_eq!(status, 201, "{assistant}");
     let integration: uuid::Uuid = sqlx::query_scalar("insert into chat_tool_servers (owner, name, tool_prefix, kind, url, settings) values ((select id from users limit 1), 'Stoat', 'stoat', 'stoat', 'https://stoat.example.test', '{\"token_kind\": \"user\"}') returning id").fetch_one(&server.pool).await.unwrap();
 
-    let (status, refused) = server.user.json(server.user.post("/api/v1/mention-triggers").json(&json!({"server_id": integration, "assistant_id": assistant["id"]}))).await;
+    let (status, trigger) = server.user.json(server.user.post("/api/v1/mention-triggers").json(&json!({"server_id": integration, "assistant_id": assistant["id"]}))).await;
 
-    assert_eq!((status, refused["error"].clone()), (400, json!("bot_token_required")), "{refused}");
+    assert_eq!((status, trigger["assistant_id"].clone()), (201, assistant["id"].clone()), "{trigger}");
+}
+
+#[tokio::test]
+async fn an_account_goes_to_one_assistant_so_choosing_another_moves_it() {
+    let (server, _link, _gateway) = trigger_setup(Vec::new(), Vec::new()).await;
+    let (_, before) = server.user.json(server.user.get("/api/v1/mention-triggers")).await;
+    let (status, other) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "Release captain", "instructions": "Be brief."}))).await;
+    assert_eq!(status, 201, "{other}");
+
+    let (status, moved) = server.user.json(server.user.post("/api/v1/mention-triggers").json(&json!({"server_id": before[0]["server_id"], "assistant_id": other["id"]}))).await;
+    let (_, after) = server.user.json(server.user.get("/api/v1/mention-triggers")).await;
+
+    assert_eq!(status, 201, "{moved}");
+    assert_eq!((after.as_array().unwrap().len(), after[0]["assistant_id"].clone()), (1, other["id"].clone()));
+}
+
+#[tokio::test]
+async fn a_direct_message_to_the_bot_reaches_the_assistant_as_a_direct_message() {
+    let mut direct = message("103", (SAM, "Sam"), "Is the greenhouse shut?", false);
+    direct["d"]["guild_id"] = Value::Null;
+    let in_server = message("104", (ALEX, "Alex"), "Not for the bot", false);
+    let (_server, mut link, _gateway) = trigger_setup(vec![in_server, direct], Vec::new()).await;
+
+    let prompt = first_prompt(&mut link).await;
+
+    assert!(prompt.contains("Sam messaged the bot directly on Discord") && prompt.contains("Is the greenhouse shut?"), "{prompt}");
+    assert!(!prompt.contains("Not for the bot"), "{prompt}");
+}
+
+#[tokio::test]
+async fn a_direct_message_to_the_persons_own_stoat_account_reaches_the_assistant() {
+    let server = Server::start_with(|config| config.scheduler_tick = Duration::from_millis(50)).await;
+    let mut link = server.online_node("laptop").await;
+    continue_elsewhere::allow_any_model_on(&server, &mut link).await;
+    let (base, _stoat) = fake_stoat::fake_stoat().await;
+    let (status, integration) = server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Stoat", "kind": "stoat", "url": base, "bearer_token": fake_stoat::TOKEN, "settings": {"token_kind": "user"}}))).await;
+    assert_eq!(status, 201, "{integration}");
+    let (_, assistant) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "Garden helper", "instructions": "Be brief."}))).await;
+    let (status, trigger) = server.user.json(server.user.post("/api/v1/mention-triggers").json(&json!({"server_id": integration["id"], "assistant_id": assistant["id"]}))).await;
+    assert_eq!(status, 201, "{trigger}");
+
+    let prompt = first_prompt(&mut link).await;
+
+    assert!(prompt.contains("Grace messaged you directly on Stoat") && prompt.contains("Can you water the tomatoes?"), "{prompt}");
+    assert!(!prompt.contains("Lunch at one?"), "{prompt}");
 }
 
 #[tokio::test]

@@ -121,6 +121,17 @@ async fn events(listener: TcpListener) {
             });
 
             socket.send(Message::Text(ready.to_string().into())).await.unwrap();
+
+            for message in [
+                json!({"type": "Message", "_id": "01MSGLAB000000000000000000", "channel": CHANNEL, "author": "01USERGRACE00000000000000A", "content": "Lunch at one?", "mentions": []}),
+                json!({"type": "Message", "_id": "01MSGDM0000000000000000000", "channel": "01DM00000000000000000000AA", "author": "01USERGRACE00000000000000A", "content": "Can you water the tomatoes?"}),
+            ] {
+                if socket.send(Message::Text(message.to_string().into())).await.is_err() {
+                    return;
+                }
+            }
+
+            while socket.next().await.is_some() {}
         });
     }
 }
