@@ -1,4 +1,5 @@
 use crate::config::KubernetesConfig;
+use crate::manifests::OUTPOST_LABEL;
 use anyhow::{Context, Result, bail};
 use futures_util::{AsyncBufReadExt as _, StreamExt as _};
 use k8s_openapi::api::core::v1::{Container, EmptyDirVolumeSource, EnvVar, PersistentVolumeClaim, PersistentVolumeClaimSpec, PersistentVolumeClaimVolumeSource, Pod, PodSecurityContext, PodSpec, ResourceRequirements, SecretVolumeSource, Volume, VolumeMount, VolumeResourceRequirements};
@@ -18,7 +19,6 @@ use uuid::Uuid;
 pub const MANAGED_BY_LABEL: &str = "app.kubernetes.io/managed-by";
 pub const MANAGED_BY: &str = "mycelium-node";
 pub const NODE_LABEL: &str = "mycelium.example/node";
-pub const OUTPOST_LABEL: &str = "mycelium.app/outpost";
 pub const CONVERSATION_LABEL: &str = "mycelium.example/conversation";
 pub const AGENT_CONTAINER: &str = "agent";
 pub const WORKSPACE_PATH: &str = "/workspace";

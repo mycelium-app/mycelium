@@ -3,6 +3,7 @@ use mycelium_proto::conversation::AgentId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+#[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -126,9 +127,7 @@ impl NodeConfig {
         }
 
         let text = toml::to_string_pretty(self)?;
-        let mut file = std::fs::OpenOptions::new().create(true).write(true).truncate(true).mode(0o600).open(path)?;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-        std::io::Write::write_all(&mut file, text.as_bytes())?;
+        write_private_file_at(path, text.as_bytes(), false)?;
 
         Ok(())
     }
@@ -187,10 +186,24 @@ impl NodeConfig {
     pub fn mcp_server_reading(&self, headers_file: &Path) -> Value {
         let base = self.control_plane.trim_end_matches('/');
 
+        #[cfg(unix)]
+        let helper = format!("cat '{}'", headers_file.display());
+        #[cfg(windows)]
+        let helper = {
+            use base64::Engine;
+
+            let path = headers_file.to_string_lossy().replace('\'', "''");
+            let script = format!("[Console]::Write([IO.File]::ReadAllText('{path}'))");
+            let wide: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+            let encoded = base64::engine::general_purpose::STANDARD.encode(wide);
+
+            format!("powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand {encoded}")
+        };
+
         json!({
             "type": "http",
             "url": format!("{base}/api/v1/mcp"),
-            "headersHelper": format!("cat '{}'", headers_file.display()),
+            "headersHelper": helper,
         })
     }
 
@@ -237,8 +250,16 @@ fn socket_base_of(control_plane: &str) -> Result<String> {
 }
 
 pub fn create_private_directory(path: &Path) -> std::io::Result<()> {
-    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(path)?;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    builder.mode(0o700);
+    builder.create(path)?;
+    #[cfg(unix)]
+    return std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700));
+
+    #[cfg(windows)]
+    mycelium_keeper::windows::secure_path(path, true)
 }
 
 pub fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -246,9 +267,25 @@ pub fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
         create_private_directory(parent)?;
     }
 
-    let mut file = std::fs::OpenOptions::new().create(true).write(true).truncate(true).mode(0o600).open(path)?;
+    write_private_file_at(path, bytes, false)?;
+
+    Ok(())
+}
+
+pub(crate) fn write_private_file_at(path: &Path, bytes: &[u8], new: bool) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).create_new(new).write(true).truncate(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options.open(path)?;
+    #[cfg(unix)]
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    #[cfg(windows)]
+    mycelium_keeper::windows::secure_path(path, false)?;
     std::io::Write::write_all(&mut file, bytes)?;
+    if new {
+        file.sync_all()?;
+    }
 
     Ok(())
 }
@@ -291,6 +328,35 @@ pub fn agent_command(agent: AgentId) -> Vec<String> {
     };
     let value = std::env::var(variable).unwrap_or_else(|_| default.to_string());
 
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        use windows_sys::Win32::Foundation::LocalFree;
+        use windows_sys::Win32::UI::Shell::CommandLineToArgvW;
+
+        let value = value.trim_start();
+        if value.is_empty() || value.contains('\0') {
+            return Vec::new();
+        }
+
+        let wide: Vec<u16> = value.encode_utf16().chain([0]).collect();
+        let mut count = 0;
+        let arguments = unsafe { CommandLineToArgvW(wide.as_ptr(), &mut count) };
+        if arguments.is_null() {
+            return Vec::new();
+        }
+
+        let command = (0..count as usize).map(|index| unsafe {
+            let argument = *arguments.add(index);
+            let length = (0..).find(|offset| *argument.add(*offset) == 0).unwrap();
+            std::ffi::OsString::from_wide(std::slice::from_raw_parts(argument, length)).to_string_lossy().into_owned()
+        }).collect();
+        unsafe { LocalFree(arguments.cast()) };
+
+        return command;
+    }
+
+    #[cfg(unix)]
     value.split_whitespace().map(str::to_string).collect()
 }
 

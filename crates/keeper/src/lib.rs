@@ -7,12 +7,35 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+#[cfg(unix)]
 use tokio::net::{UnixListener, UnixStream};
+#[cfg(windows)]
+pub mod windows;
+
+#[cfg(unix)]
+pub type Client = UnixStream;
+#[cfg(windows)]
+pub type Client = tokio::net::windows::named_pipe::NamedPipeClient;
+
+pub async fn connect(dir: &Path) -> std::io::Result<Client> {
+    #[cfg(unix)]
+    return UnixStream::connect(socket_path(dir)).await;
+
+    #[cfg(windows)]
+    {
+        let marker = std::fs::read_to_string(socket_path(dir))?;
+        let id = uuid::Uuid::parse_str(&marker).map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+
+        tokio::net::windows::named_pipe::ClientOptions::new().open(windows::pipe_name(id))
+    }
+}
 use tokio::process::Command;
 use tokio::sync::{mpsc, watch};
 
 const SESSION_MARK: &str = "MYCELIUM_KEEPER_SESSION";
+#[cfg(target_os = "linux")]
 const STRAY_GRACE_STEPS: u32 = 20;
+#[cfg(target_os = "linux")]
 const STRAY_GRACE_STEP: std::time::Duration = std::time::Duration::from_millis(100);
 const EXIT_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -54,10 +77,19 @@ pub async fn run(dir: PathBuf, command: Vec<String>) -> Result<()> {
     let dir = dir.canonicalize().with_context(|| format!("resolve {}", dir.display()))?;
     let _session = hold_session(&dir)?;
     stop_strays(&dir).await;
-    let socket_path = dir.join("keeper.sock");
+    let socket_path = socket_path(&dir);
     let _ = std::fs::remove_file(&socket_path);
     let _ = std::fs::remove_file(dir.join("exit.json"));
+    #[cfg(unix)]
     let listener = UnixListener::bind(&socket_path).with_context(|| format!("bind {}", socket_path.display()))?;
+
+    #[cfg(windows)]
+    let (mut listener, pipe_name, pipe_id) = {
+        let id = uuid::Uuid::new_v4();
+        let name = windows::pipe_name(id);
+        let listener = windows::listen(&name, true)?;
+        (listener, name, id)
+    };
 
     let journal_path = dir.join("journal.jsonl");
     let journal_file = OpenOptions::new().create(true).write(true).truncate(true).open(&journal_path)?;
@@ -73,7 +105,15 @@ pub async fn run(dir: PathBuf, command: Vec<String>) -> Result<()> {
         close,
     });
 
+    #[cfg(unix)]
     let mut agent = Command::new(program);
+    #[cfg(windows)]
+    let mut agent = {
+        let mut command = Command::new(std::env::current_exe()?);
+        command.args(["keeper-child", "--", program]);
+        command.kill_on_drop(true);
+        command
+    };
     agent.env(SESSION_MARK, &dir);
     stop_with_keeper(&mut agent);
     let mut child = agent
@@ -84,6 +124,13 @@ pub async fn run(dir: PathBuf, command: Vec<String>) -> Result<()> {
         .spawn()
         .with_context(|| format!("start {program}"))?;
     let mut child_stdin = child.stdin.take().context("agent stdin")?;
+    #[cfg(windows)]
+    let job = {
+        let job = windows::Job::new(&child)?;
+        child_stdin.write_all(&[1]).await?;
+        std::fs::write(&socket_path, pipe_id.to_string())?;
+        job
+    };
     let child_stdout = child.stdout.take().context("agent stdout")?;
 
     let (frames_to_agent, mut frames_from_clients) = mpsc::unbounded_channel::<Value>();
@@ -119,7 +166,23 @@ pub async fn run(dir: PathBuf, command: Vec<String>) -> Result<()> {
 
     let accept_shared = shared.clone();
     let accept = tokio::spawn(async move {
-        while let Ok((stream, _)) = listener.accept().await {
+        loop {
+            #[cfg(unix)]
+            let Ok((stream, _)) = listener.accept().await else { break };
+            #[cfg(windows)]
+            let stream = {
+                if listener.connect().await.is_err() {
+                    break;
+                }
+
+                match windows::listen(&pipe_name, false) {
+                    Ok(next) => std::mem::replace(&mut listener, next),
+                    Err(error) => {
+                        tracing::warn!("could not listen for keeper clients: {error}");
+                        break;
+                    }
+                }
+            };
             let client_shared = accept_shared.clone();
             let frames = frames_to_agent.clone();
             tokio::spawn(async move {
@@ -133,10 +196,15 @@ pub async fn run(dir: PathBuf, command: Vec<String>) -> Result<()> {
     let status = tokio::select! {
         status = child.wait() => status?,
         _ = close_requests.recv() => {
+            #[cfg(unix)]
             child.start_kill()?;
+            #[cfg(windows)]
+            job.terminate()?;
             child.wait().await?
         }
     };
+    #[cfg(windows)]
+    drop(job);
     stop_strays(&dir).await;
     let _ = tokio::time::timeout(EXIT_DRAIN_TIMEOUT, reader).await;
     let code = status.code().unwrap_or(-1);
@@ -152,8 +220,8 @@ pub async fn run(dir: PathBuf, command: Vec<String>) -> Result<()> {
     Ok(())
 }
 
-async fn serve_client(stream: UnixStream, shared: &Shared, frames_to_agent: mpsc::UnboundedSender<Value>) -> Result<()> {
-    let (read_half, mut write_half) = stream.into_split();
+async fn serve_client(stream: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin, shared: &Shared, frames_to_agent: mpsc::UnboundedSender<Value>) -> Result<()> {
+    let (read_half, mut write_half) = tokio::io::split(stream);
     let mut lines = BufReader::new(read_half).lines();
 
     let first = lines.next_line().await?.context("client closed before attaching")?;
@@ -229,13 +297,11 @@ async fn serve_client(stream: UnixStream, shared: &Shared, frames_to_agent: mpsc
 }
 
 fn hold_session(dir: &Path) -> Result<std::fs::File> {
-    use std::os::fd::AsRawFd;
-
-    let lock = OpenOptions::new().create(true).truncate(false).write(true).open(dir.join("keeper.lock"))?;
-    let taken = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-
-    if taken != 0 {
-        bail!("Another keeper already runs the agent for {}.", dir.display());
+    let lock = OpenOptions::new().create(true).truncate(false).read(true).write(true).open(dir.join("keeper.lock"))?;
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(std::fs::TryLockError::WouldBlock) => bail!("Another keeper already runs the agent for {}.", dir.display()),
+        Err(std::fs::TryLockError::Error(error)) => return Err(error.into()),
     }
 
     Ok(lock)

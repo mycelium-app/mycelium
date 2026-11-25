@@ -29,7 +29,7 @@ and publishes each `vX.Y.Z` tag. Never push to GitHub directly: the next mirror 
 | `image` | `ghcr.io/mycelium-app/mycelium:X.Y.Z`, and `:latest` when the tag is the newest release. It reuses the `binary` and web builds. |
 | `local-speech-image` | `ghcr.io/mycelium-app/mycelium-local-speech:X.Y.Z`, and `:latest` when the tag is the newest release. The optional speech to text runner from `deploy/local-speech`. |
 | `flake` | `mycelium-flake.tar.gz` for NixOS and home-manager |
-| `release` | A GitHub release with every file, its `.sha256`, `install.sh` and a `latest` file holding the tag. The release stays a draft until every upload succeeds. |
+| `release` | A GitHub release with every file, its `.sha256`, `install.sh`, `install.ps1` and a `latest` file holding the tag. The release stays a draft until every upload succeeds. |
 
 Pushes to `main` that change a lockfile run the build jobs without publishing. They keep the GitHub
 Actions caches warm, since a tag run can only restore caches made on `main`.

@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use mycelium_proto::conversation::{ResetCredits, UsageWindow};
+#[cfg(target_os = "linux")]
 use serde::Deserialize;
 use crate::agents::vibe_key;
 use crate::codex_app_server::read_reset_credits;

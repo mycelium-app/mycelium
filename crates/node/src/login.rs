@@ -8,6 +8,9 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+const CURSOR_QUERY: &[u8] = b"\x1b[6n";
+const CURSOR_AT_ORIGIN: &[u8] = b"\x1b[1;1R";
+
 type StateReport = Arc<dyn Fn() -> NodeToControl + Send + Sync>;
 
 pub struct LoginProcess {
@@ -97,7 +100,7 @@ pub fn run_streamed(running: &Running, id: Uuid, command: &[String], env: &[(Str
     };
 
     let pair = native_pty_system().openpty(PtySize { rows: 24, cols: 100, pixel_width: 0, pixel_height: 0 }).context("open a terminal for the command")?;
-    let mut builder = CommandBuilder::new(program);
+    let mut builder = pty_command(program);
     builder.args(args);
 
     for (name, value) in env {
@@ -112,15 +115,28 @@ pub fn run_streamed(running: &Running, id: Uuid, command: &[String], env: &[(Str
     let killer = child.clone_killer();
     running.lock().map_err(|_| anyhow::anyhow!("process table poisoned"))?.insert(id, LoginProcess { writer, killer });
 
+    let (exited, exit) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let ok = child.wait().map(|status| status.success()).unwrap_or(false);
+        drop(pair.master);
+        let _ = exited.send(ok);
+    });
+
     let running = running.clone();
     std::thread::spawn(move || {
-        let _master = pair.master;
         let mut buffer = [0u8; 4096];
         let mut carry: Vec<u8> = Vec::new();
 
         while let Ok(read) = reader.read(&mut buffer) {
             if read == 0 {
                 break;
+            }
+
+            if buffer[..read].windows(CURSOR_QUERY.len()).any(|window| window == CURSOR_QUERY) {
+                if let Some(process) = running.lock().ok().as_mut().and_then(|running| running.get_mut(&id)) {
+                    let _ = process.writer.write_all(CURSOR_AT_ORIGIN);
+                    let _ = process.writer.flush();
+                }
             }
 
             carry.extend_from_slice(&buffer[..read]);
@@ -130,7 +146,7 @@ pub fn run_streamed(running: &Running, id: Uuid, command: &[String], env: &[(Str
             }
         }
 
-        let ok = child.wait().map(|status| status.success()).unwrap_or(false);
+        let ok = exit.recv().unwrap_or(false);
         if let Ok(mut running) = running.lock() {
             running.remove(&id);
         }
@@ -139,6 +155,32 @@ pub fn run_streamed(running: &Running, id: Uuid, command: &[String], env: &[(Str
     });
 
     Ok(())
+}
+
+pub fn pty_command(program: &str) -> CommandBuilder {
+    #[cfg(not(windows))]
+    return CommandBuilder::new(program);
+
+    #[cfg(windows)]
+    {
+        let resolved = crate::agents::resolve_program(program).unwrap_or_else(|| PathBuf::from(program));
+        let batch = resolved.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat"));
+        let mut builder = if batch {
+            let mut builder = CommandBuilder::new(std::env::var_os("ComSpec").unwrap_or_else(|| "cmd.exe".into()));
+            builder.args(["/d", "/c"]);
+            builder.arg(resolved);
+
+            builder
+        } else {
+            CommandBuilder::new(resolved)
+        };
+
+        for (name, value) in std::env::vars_os() {
+            builder.env(name, value);
+        }
+
+        builder
+    }
 }
 
 fn discard(dir: Option<PathBuf>) {
@@ -221,6 +263,25 @@ mod tests {
 
         assert_eq!(next, NodeToControl::LoginFinished { login_id, ok: true });
         assert_eq!(next_message(&mut messages).await, NodeToControl::Pong);
+    }
+
+    #[tokio::test]
+    async fn a_cursor_position_query_is_answered_so_the_sign_in_can_go_on() {
+        let (out, mut messages) = mpsc::unbounded_channel();
+        let manager = LoginManager::new(out, Arc::new(|| NodeToControl::Pong));
+        let login_id = Uuid::from_u128(4);
+
+        manager.start(login_id, vec!["sh".into(), "-c".into(), r#"stty -icanon -echo min 6; printf '\033[6n'; reply=$(dd bs=6 count=1 2>/dev/null | od -An -c | tr -d ' \n'); echo "answered $reply""#.into()], vec![], None);
+
+        let mut seen = String::new();
+        let mut next = next_message(&mut messages).await;
+        while let NodeToControl::LoginOutput { data, .. } = &next {
+            seen.push_str(data);
+            next = next_message(&mut messages).await;
+        }
+
+        assert!(seen.contains("answered 033[1;1R"), "{seen}");
+        assert_eq!(next, NodeToControl::LoginFinished { login_id, ok: true });
     }
 
     #[tokio::test]

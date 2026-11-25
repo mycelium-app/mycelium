@@ -3,13 +3,15 @@ use anyhow::{Context, Result};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use mycelium_proto::link::NodeToControl;
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use crate::login::pty_command;
+use portable_pty::{PtySize, native_pty_system};
 use russh::keys::ssh_key::LineEnding;
 use russh::keys::{Algorithm, PrivateKey};
 use russh::server::{Auth, ChannelOpenHandle, Config, Handle, Handler, Msg, Session};
 use russh::{Channel, ChannelId, MethodKind, MethodSet, Pty};
 use std::collections::HashMap;
 use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -368,7 +370,20 @@ fn kill_group(pid: Option<u32>) {
         return;
     };
 
+    #[cfg(unix)]
     let _ = nix::sys::signal::killpg(nix::unistd::Pid::from_raw(pid as i32), nix::sys::signal::Signal::SIGKILL);
+    #[cfg(windows)]
+    let _ = std::process::Command::new("taskkill").args(["/T", "/F", "/PID", &pid.to_string()]).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
+}
+
+#[cfg(unix)]
+fn command_arguments(text: &str) -> [&str; 2] {
+    ["-c", text]
+}
+
+#[cfg(windows)]
+fn command_arguments(text: &str) -> [&str; 3] {
+    ["/d", "/c", text]
 }
 
 async fn run_process(spec: ProcessSpec, handle: Handle, channel: ChannelId, inputs: mpsc::UnboundedReceiver<ProcessInput>, ended: watch::Receiver<bool>) {
@@ -394,12 +409,17 @@ async fn run_with_pipes(spec: &ProcessSpec, handle: &Handle, channel: ChannelId,
     let mut command = tokio::process::Command::new(&spec.shell);
 
     if let Some(text) = &spec.command {
-        command.arg("-c").arg(text);
+        #[cfg(unix)]
+        command.args(command_arguments(text));
+        #[cfg(windows)]
+        command.raw_arg(format!("/d /s /c \"{text}\""));
     }
 
     command.current_dir(&spec.home).envs(spec.env.iter().cloned());
     command.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
-    command.kill_on_drop(true).process_group(0);
+    command.kill_on_drop(true);
+    #[cfg(unix)]
+    command.process_group(0);
 
     let mut child = command.spawn().context("Could not start the command on this node.")?;
     let pid = child.id();
@@ -443,7 +463,12 @@ async fn run_with_pipes(spec: &ProcessSpec, handle: &Handle, channel: ChannelId,
     })
     .await;
 
-    Ok(status.code().map(|code| code as u32).or_else(|| status.signal().map(|signal| 128 + signal as u32)).unwrap_or(1))
+    #[cfg(unix)]
+    let signalled = status.signal().map(|signal| 128 + signal as u32);
+    #[cfg(windows)]
+    let signalled = None;
+
+    Ok(status.code().map(|code| code as u32).or(signalled).unwrap_or(1))
 }
 
 async fn forward(mut source: impl AsyncRead + Unpin, handle: Handle, channel: ChannelId, extended: Option<u32>) {
@@ -472,10 +497,10 @@ async fn forward(mut source: impl AsyncRead + Unpin, handle: Handle, channel: Ch
 
 async fn run_with_pty(spec: &ProcessSpec, pty: &PtyRequest, handle: &Handle, channel: ChannelId, mut inputs: mpsc::UnboundedReceiver<ProcessInput>, mut ended: watch::Receiver<bool>) -> Result<u32> {
     let pair = native_pty_system().openpty(PtySize { rows: pty.rows, cols: pty.cols, pixel_width: 0, pixel_height: 0 }).context("Could not open a terminal on this node.")?;
-    let mut builder = CommandBuilder::new(&spec.shell);
+    let mut builder = pty_command(&spec.shell);
 
     if let Some(text) = &spec.command {
-        builder.args(["-c", text]);
+        builder.args(command_arguments(text));
     }
 
     builder.cwd(&spec.home);

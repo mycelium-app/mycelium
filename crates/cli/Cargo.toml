@@ -11,13 +11,15 @@ path = "src/main.rs"
 
 [dependencies]
 rustls.workspace = true
-mycelium-control.workspace = true
 mycelium-node.workspace = true
 mycelium-keeper.workspace = true
-mycelium-artifacts.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
+
+[target.'cfg(not(windows))'.dependencies]
+mycelium-control.workspace = true
+mycelium-artifacts.workspace = true
 
 [dev-dependencies]
 mycelium-proto.workspace = true
@@ -30,5 +32,10 @@ uuid.workspace = true
 tempfile.workspace = true
 assert_cmd.workspace = true
 predicates.workspace = true
-sqlx.workspace = true
 reqwest.workspace = true
+sha2.workspace = true
+russh.workspace = true
+base64.workspace = true
+
+[target.'cfg(not(windows))'.dev-dependencies]
+sqlx.workspace = true

@@ -3,6 +3,7 @@ use crate::usage::{UsageCache, usage_left};
 use mycelium_proto::conversation::{AgentId, AgentInfo, LoginInfo, LoginState};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -13,6 +14,7 @@ const VERSION_TIMEOUT: Duration = Duration::from_secs(3);
 
 const POD_AGENTS: [AgentId; 2] = [AgentId::Claude, AgentId::Codex];
 
+#[cfg(unix)]
 pub fn resolve_program(program: &str) -> Option<PathBuf> {
     if program.contains('/') {
         let path = PathBuf::from(program);
@@ -25,9 +27,13 @@ pub fn resolve_program(program: &str) -> Option<PathBuf> {
     std::env::split_paths(&search_path).map(|directory| directory.join(program)).find(|candidate| is_executable(candidate))
 }
 
+#[cfg(unix)]
 fn is_executable(path: &Path) -> bool {
     std::fs::metadata(path).map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0).unwrap_or(false)
 }
+
+#[cfg(windows)]
+pub use mycelium_keeper::windows::resolve_program;
 
 async fn report_version(program: &Path) -> Option<String> {
     let output = Command::new(program).arg("--version").stdin(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true).output();
@@ -366,7 +372,7 @@ pub fn login_command(agent: AgentId, method: &str) -> Option<Vec<String>> {
     Some(words.iter().map(|word| word.to_string()).collect())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
 
     #[test]

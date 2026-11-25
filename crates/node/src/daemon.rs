@@ -1,5 +1,5 @@
 use crate::acp::Command;
-use crate::agents::{install_command, Tools, account_env, account_homes, accounts_dir, detect_agents, find_account, mark_rejected, pod_agents, login_command, login_state, new_account, resolve_program, sign_out, update_command};
+use crate::agents::{install_command, Tools, account_env, account_homes, accounts_dir, detect_agents, find_account, mark_rejected, login_command, login_state, new_account, resolve_program, sign_out, update_command};
 use crate::login::run_streamed;
 use crate::usage::{CODEX_USAGE_ENDPOINT, USAGE_ENDPOINT, USAGE_MIN_AGE, UsageCache, VIBE_BILLING_ENDPOINT};
 use crate::instructions::deliver;
@@ -7,11 +7,16 @@ use crate::config::{NodeConfig, agent_command, codex_command, agent_env, config_
 use crate::join::hostname;
 use crate::link::{Backoff, Liveness, run_link};
 use crate::login::LoginManager;
+#[cfg(unix)]
 use crate::resources::Watcher;
 use crate::ssh::SshServer;
+#[cfg(unix)]
 use crate::environment::EnvironmentManager;
 use crate::terminal::{TerminalManager, user_shell};
+#[cfg(unix)]
 use crate::pod::PodRuntime;
+#[cfg(unix)]
+use crate::agents::pod_agents;
 use crate::session::{Launch, SessionHandle, SessionSpec, next_failure_seq, spawn_session};
 use crate::transcripts::TranscriptFollower;
 use anyhow::{Context, Result};
@@ -36,8 +41,12 @@ pub const VERSION: &str = match option_env!("MYCELIUM_VERSION") {
 
 const FILE_CHUNK_CHARS: usize = 1024 * 1024;
 const UPDATE_EXIT_DELAY: Duration = Duration::from_millis(500);
+#[cfg(unix)]
 const RESOURCE_INTERVAL: Duration = Duration::from_secs(3);
+#[cfg(unix)]
 const POD_INTERVAL: Duration = Duration::from_secs(3);
+#[cfg(windows)]
+const WINDOWS_ENVIRONMENT_UNAVAILABLE: &str = "Desktop environments are unavailable on this node.";
 const USAGE_INTERVAL: Duration = Duration::from_secs(310);
 
 type CommandSource = Arc<dyn Fn(AgentId) -> Vec<String> + Send + Sync>;
@@ -105,11 +114,14 @@ pub struct Daemon {
     usage_wanted: Arc<tokio::sync::Notify>,
     probed: Mutex<std::collections::HashSet<AgentId>>,
     terminals: TerminalManager,
+    #[cfg(unix)]
     environments: EnvironmentManager,
     ssh: SshServer,
+    #[cfg(unix)]
     watcher: Watcher,
     transcripts: Mutex<TranscriptFollower>,
     connected: AtomicBool,
+    #[cfg(unix)]
     pods: Option<PodRuntime>,
 }
 
@@ -192,14 +204,23 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     crate::config::create_private_directory(&config.sessions_dir())?;
 
     let (out, out_rx) = mpsc::unbounded_channel();
+    #[cfg(unix)]
     let pods = match config.kubernetes.enabled {
         true => Some(PodRuntime::connect(config.kubernetes.clone(), config.node_id).await?),
         false => None,
     };
+    #[cfg(unix)]
     let agents = match &pods {
         Some(_) => pod_agents(),
         None => detect_agents(|agent| (options.agent_commands)(agent)).await,
     };
+    #[cfg(windows)]
+    if config.kubernetes.enabled {
+        anyhow::bail!("Kubernetes outposts are unavailable on this node.");
+    }
+
+    #[cfg(windows)]
+    let agents = detect_agents(|agent| (options.agent_commands)(agent)).await;
     let logins_home = options.home.clone();
     let logins_accounts = accounts_dir(&config.state_dir);
     let usage = Arc::new(UsageCache::new(&options.usage_endpoint, &options.codex_usage_endpoint, &options.codex_command, USAGE_MIN_AGE).with_vibe_endpoint(&options.vibe_billing_endpoint));
@@ -213,20 +234,24 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     });
     let transcripts = TranscriptFollower::new(options.home.clone(), options.transcript_roots.clone(), config.state_dir.join("transcripts.json"), out.clone());
 
+    let tmux_dir = cfg!(unix).then(|| config.state_dir.join("tmux"));
     let daemon = Arc::new(Daemon {
         logins: LoginManager::new(out.clone(), login_report),
         agent_updates: Default::default(),
         usage,
         usage_wanted,
         probed: Mutex::default(),
-        terminals: TerminalManager::new(out.clone(), user_shell(), Some(&config.state_dir.join("tmux"))),
+        terminals: TerminalManager::new(out.clone(), user_shell(), tmux_dir.as_deref()),
+        #[cfg(unix)]
         environments: EnvironmentManager::new(out.clone(), std::env::var_os("PATH").unwrap_or_default()),
         ssh: SshServer::new(out.clone(), config.ssh_host_key_path(), options.home.clone(), user_shell()),
+        #[cfg(unix)]
         watcher: Watcher::new(out.clone(), PathBuf::from("/proc"), watched_disks(&config.projects_root), RESOURCE_INTERVAL),
         transcripts: Mutex::new(transcripts),
         sessions: Mutex::new(HashMap::new()),
         launched_secrets: Mutex::new(HashMap::new()),
         connected: AtomicBool::new(false),
+        #[cfg(unix)]
         pods,
         config,
         config_file,
@@ -239,21 +264,31 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     tokio::spawn(follow_transcripts(daemon.clone()));
     tokio::spawn(follow_usage(daemon.clone()));
 
+    #[cfg(unix)]
     if daemon.pods.is_some() {
         tokio::spawn(follow_pods(daemon.clone()));
     }
 
-    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let shutdown = async {
+        #[cfg(unix)]
+        {
+            let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+            tokio::select! {
+                _ = terminate.recv() => Ok(()),
+                result = tokio::signal::ctrl_c() => result,
+            }
+        }
+
+        #[cfg(windows)]
+        tokio::signal::ctrl_c().await
+    };
     let linked = run_link(daemon.clone(), out_rx);
 
     tokio::select! {
         result = linked => result,
-        _ = terminate.recv() => {
-            daemon.environments.stop_all().await;
-
-            Ok(())
-        }
-        _ = tokio::signal::ctrl_c() => {
+        result = shutdown => {
+            result?;
+            #[cfg(unix)]
             daemon.environments.stop_all().await;
 
             Ok(())
@@ -261,6 +296,7 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     }
 }
 
+#[cfg(unix)]
 fn watched_disks(projects_root: &Path) -> Vec<PathBuf> {
     use std::os::unix::fs::MetadataExt;
 
@@ -290,6 +326,7 @@ async fn follow_transcripts(daemon: Arc<Daemon>) {
     }
 }
 
+#[cfg(unix)]
 async fn follow_pods(daemon: Arc<Daemon>) {
     let mut ticker = tokio::time::interval(POD_INTERVAL);
     let mut sent = None;
@@ -372,10 +409,16 @@ impl Daemon {
     }
 
     pub async fn kubernetes_report(&self) -> Option<KubernetesNode> {
-        let pods = self.pods.as_ref()?;
-        let conversations: Vec<Uuid> = self.session_handles().into_iter().map(|(conversation_id, _)| conversation_id).collect();
+        #[cfg(unix)]
+        {
+            let pods = self.pods.as_ref()?;
+            let conversations: Vec<Uuid> = self.session_handles().into_iter().map(|(conversation_id, _)| conversation_id).collect();
 
-        Some(pods.report(&conversations).await)
+            Some(pods.report(&conversations).await)
+        }
+
+        #[cfg(windows)]
+        None
     }
 
     fn use_reset(&self, request_id: Uuid, agent: AgentId, account: Option<String>, idempotency_key: String) {
@@ -412,7 +455,10 @@ impl Daemon {
         self.connected.store(true, Ordering::SeqCst);
         self.usage_wanted.notify_one();
         self.write_status();
+        #[cfg(unix)]
         self.environments.report();
+        #[cfg(windows)]
+        self.report_environment_unavailable();
 
         if let Ok(mut transcripts) = self.transcripts.lock() {
             transcripts.on_connect();
@@ -428,6 +474,7 @@ impl Daemon {
             return;
         };
 
+        #[cfg(unix)]
         if self.pods.is_some() {
             return;
         }
@@ -467,6 +514,19 @@ impl Daemon {
                 }
             });
         }
+    }
+
+    #[cfg(windows)]
+    fn report_environment_unavailable(&self) {
+        let capability = mycelium_proto::api::EnvironmentCapability {
+            available: false,
+            missing: Vec::new(),
+            versions: Default::default(),
+            note: Some(WINDOWS_ENVIRONMENT_UNAVAILABLE.to_string()),
+            running: Vec::new(),
+            apps: Vec::new(),
+        };
+        let _ = self.out.send(NodeToControl::EnvironmentCapability { capability });
     }
 
     pub fn on_disconnected(&self) {
@@ -514,18 +574,62 @@ impl Daemon {
                 };
                 let _ = self.out.send(buffer);
             }
+            #[cfg(unix)]
             ControlToNode::StartEnvironment { conversation_id, width, height, apps } => self.environments.start(conversation_id, width, height, apps),
+            #[cfg(unix)]
             ControlToNode::EnvironmentLaunch { request_id, conversation_id, app, file } => self.environments.launch(request_id, conversation_id, app, file),
+            #[cfg(unix)]
             ControlToNode::EnvironmentFocus { request_id, conversation_id, window } => self.environments.focus(request_id, conversation_id, window),
+            #[cfg(unix)]
             ControlToNode::StopEnvironment { conversation_id } => self.environments.stop(conversation_id),
+            #[cfg(unix)]
             ControlToNode::CheckEnvironment => self.environments.report(),
+            #[cfg(unix)]
             ControlToNode::EnvironmentInput { request_id, conversation_id, action } => self.environments.input(request_id, conversation_id, action),
+            #[cfg(unix)]
             ControlToNode::EnvironmentScreenshot { request_id, conversation_id } => self.environments.screenshot(request_id, conversation_id),
+            #[cfg(unix)]
             ControlToNode::EnvironmentBrowserRead { request_id, conversation_id } => self.environments.browser_read(request_id, conversation_id),
+            #[cfg(unix)]
             ControlToNode::EnvironmentBrowserAct { request_id, conversation_id, action } => self.environments.browser_act(request_id, conversation_id, action),
+            #[cfg(unix)]
             ControlToNode::OpenEnvironmentStream { stream_id, conversation_id } => self.environments.open_stream(stream_id, conversation_id),
+            #[cfg(unix)]
             ControlToNode::EnvironmentStreamInput { stream_id, data } => self.environments.stream_input(stream_id, &data),
+            #[cfg(unix)]
             ControlToNode::CloseEnvironmentStream { stream_id } => self.environments.close_stream(stream_id),
+            #[cfg(windows)]
+            ControlToNode::StartEnvironment { conversation_id, .. } => {
+                let _ = self.out.send(NodeToControl::EnvironmentChanged { conversation_id, state: mycelium_proto::api::EnvironmentState::Failed, failure: Some(WINDOWS_ENVIRONMENT_UNAVAILABLE.to_string()), browser: None });
+            }
+            #[cfg(windows)]
+            ControlToNode::CheckEnvironment => self.report_environment_unavailable(),
+            #[cfg(windows)]
+            ControlToNode::EnvironmentLaunch { request_id, .. } => {
+                let _ = self.out.send(NodeToControl::EnvironmentLaunched { request_id, window: None, error: Some(WINDOWS_ENVIRONMENT_UNAVAILABLE.to_string()) });
+            }
+            #[cfg(windows)]
+            ControlToNode::EnvironmentFocus { request_id, .. } | ControlToNode::EnvironmentInput { request_id, .. } => {
+                let _ = self.out.send(NodeToControl::EnvironmentInputDone { request_id, error: Some(WINDOWS_ENVIRONMENT_UNAVAILABLE.to_string()) });
+            }
+            #[cfg(windows)]
+            ControlToNode::EnvironmentScreenshot { request_id, .. } => {
+                let _ = self.out.send(NodeToControl::EnvironmentScreenshotTaken { request_id, png: None, error: Some(WINDOWS_ENVIRONMENT_UNAVAILABLE.to_string()) });
+            }
+            #[cfg(windows)]
+            ControlToNode::EnvironmentBrowserRead { request_id, .. } => {
+                let _ = self.out.send(NodeToControl::EnvironmentBrowserControls { request_id, page: String::new(), controls: Vec::new(), error: Some(WINDOWS_ENVIRONMENT_UNAVAILABLE.to_string()) });
+            }
+            #[cfg(windows)]
+            ControlToNode::EnvironmentBrowserAct { request_id, .. } => {
+                let _ = self.out.send(NodeToControl::EnvironmentBrowserActed { request_id, error: Some(WINDOWS_ENVIRONMENT_UNAVAILABLE.to_string()) });
+            }
+            #[cfg(windows)]
+            ControlToNode::OpenEnvironmentStream { stream_id, .. } => {
+                let _ = self.out.send(NodeToControl::EnvironmentStreamClosed { stream_id });
+            }
+            #[cfg(windows)]
+            ControlToNode::StopEnvironment { .. } | ControlToNode::EnvironmentStreamInput { .. } | ControlToNode::CloseEnvironmentStream { .. } => {}
             ControlToNode::TranscriptAck { path, bytes } => {
                 if let Ok(mut transcripts) = self.transcripts.lock() {
                     transcripts.ack(&path, bytes);
@@ -605,9 +709,11 @@ impl Daemon {
                     let _ = out.send(message);
                 });
             }
+            #[cfg(unix)]
             ControlToNode::Watch { seconds } => {
                 self.watcher.extend(Duration::from_secs(seconds.into()));
             }
+            #[cfg(unix)]
             ControlToNode::StopProcess { request_id, pid, name } => {
                 let out = self.out.clone();
                 let proc_root = self.watcher.proc_root().to_path_buf();
@@ -616,6 +722,12 @@ impl Daemon {
                     let stopped = crate::resources::Sampler::new(proc_root, Vec::new()).stop(pid, &name);
                     let _ = out.send(NodeToControl::ProcessStopped { request_id, ok: stopped.is_ok(), error: stopped.err().map(|error| error.to_string()) });
                 });
+            }
+            #[cfg(windows)]
+            ControlToNode::Watch { .. } => {}
+            #[cfg(windows)]
+            ControlToNode::StopProcess { request_id, .. } => {
+                let _ = self.out.send(NodeToControl::ProcessStopped { request_id, ok: false, error: Some("Process monitoring is unavailable on this node.".to_string()) });
             }
             ControlToNode::UseReset { request_id, agent, account, idempotency_key } => self.use_reset(request_id, agent, account, idempotency_key),
             ControlToNode::ApiToken { conversation_id, token } => {
@@ -656,6 +768,7 @@ impl Daemon {
 
         let out = self.out.clone();
 
+        #[cfg(unix)]
         let environments = self.environments.clone();
         tokio::spawn(async move {
             let asset = crate::update::asset_name(std::env::consts::OS, std::env::consts::ARCH);
@@ -670,6 +783,7 @@ impl Daemon {
 
             if ok {
                 tokio::time::sleep(UPDATE_EXIT_DELAY).await;
+                #[cfg(unix)]
                 environments.stop_all().await;
                 std::process::exit(0);
             }
@@ -677,6 +791,7 @@ impl Daemon {
     }
 
     async fn agents(&self) -> Vec<AgentInfo> {
+        #[cfg(unix)]
         if self.pods.is_some() {
             return pod_agents();
         }
@@ -768,7 +883,7 @@ impl Daemon {
                 continue;
             }
 
-            let spec = SessionSpec { conversation_id, dir: entry.path(), launch: None, pods: self.pods.clone() };
+            let spec = SessionSpec { conversation_id, dir: entry.path(), launch: None, #[cfg(unix)] pods: self.pods.clone() };
             let handle = spawn_session(spec, self.out.clone());
             if let Ok(mut sessions) = self.sessions.lock() {
                 sessions.insert(conversation_id, handle);
@@ -814,6 +929,7 @@ impl Daemon {
             let _ = out.send(NodeToControl::AgentUpdateFinished { update_id, ok: false });
         };
 
+        #[cfg(unix)]
         if self.pods.is_some() {
             return refuse(format!("{} runs in this node's agent image, so it updates with the image.", agent.display_name()));
         }
@@ -907,23 +1023,32 @@ impl Daemon {
 
         let mut agent_command = (self.options.agent_commands)(agent);
 
-        let (env, folder, requested_account) = if self.pods.is_some() {
+        #[cfg(unix)]
+        let pod_folder = self.pods.as_ref().map(|_| Path::new(crate::pod::WORKSPACE_PATH).join(cwd.trim_start_matches('/')));
+        #[cfg(windows)]
+        let pod_folder: Option<PathBuf> = None;
+        let uses_pods = pod_folder.is_some();
+        let (env, folder, requested_account) = if let Some(folder) = pod_folder {
             let mut env = agent_env(agent);
 
             if let (AgentId::Codex, Some(text)) = (agent, &instructions) {
                 env = with_developer_instructions(env, text);
             }
 
-            let folder = std::path::Path::new(crate::pod::WORKSPACE_PATH).join(cwd.trim_start_matches('/'));
-
             (env, folder, account)
         } else {
-            let available = agent_command.first().and_then(|program| crate::agents::resolve_program(program)).is_some();
-            if !available {
+            let Some(program) = agent_command.first().and_then(|program| resolve_program(program)) else {
                 self.refuse(conversation_id, format!("{} is not installed on this node.", agent.as_str()));
 
                 return;
+            };
+
+            #[cfg(windows)]
+            {
+                agent_command[0] = program.to_string_lossy().into_owned();
             }
+            #[cfg(unix)]
+            let _ = program;
 
             let mut env = agent_env(agent);
             match crate::secrets_file::write(&self.session_dir(conversation_id), &secrets) {
@@ -994,7 +1119,7 @@ impl Daemon {
             (env, folder, requested_account)
         };
 
-        let mcp_in_claude_options = agent == AgentId::Claude && self.pods.is_none();
+        let mcp_in_claude_options = agent == AgentId::Claude && !uses_pods;
         let mut mcp_headers_file = None;
         let mcp_server = if mcp_in_claude_options {
             match self.config.save_mcp_headers(conversation_id, Uuid::new_v4(), &mcp_token) {
@@ -1028,7 +1153,7 @@ impl Daemon {
             resume,
             fork,
         };
-        let spec = SessionSpec { conversation_id, dir: self.session_dir(conversation_id), launch: Some(launch), pods: self.pods.clone() };
+        let spec = SessionSpec { conversation_id, dir: self.session_dir(conversation_id), launch: Some(launch), #[cfg(unix)] pods: self.pods.clone() };
         let handle = spawn_session(spec, self.out.clone());
         if let Ok(mut sessions) = self.sessions.lock() {
             sessions.insert(conversation_id, handle);

@@ -25,12 +25,17 @@ dirs.workspace = true
 portable-pty.workspace = true
 russh.workspace = true
 rand.workspace = true
-nix.workspace = true
-libc.workspace = true
 sha2.workspace = true
 resvg.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix.workspace = true
+libc.workspace = true
 kube.workspace = true
 k8s-openapi.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_System_Threading", "Win32_UI_Shell"] }
 
 [dev-dependencies]
 tempfile.workspace = true

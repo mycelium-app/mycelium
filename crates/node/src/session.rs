@@ -1,8 +1,9 @@
 use crate::attachments;
+#[cfg(unix)]
 use crate::pod::{PodLaunch, PodRuntime};
 use crate::acp::{Action, Command, Direction, SessionSnapshot, SessionState, StartPlan};
 use anyhow::{Context, Result, bail};
-use mycelium_keeper::socket_path;
+use mycelium_keeper::{Client, connect as connect_keeper, socket_path};
 use mycelium_proto::conversation::AgentId;
 use mycelium_proto::link::NodeToControl;
 use serde::{Deserialize, Serialize};
@@ -15,8 +16,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
-use tokio::net::unix::OwnedWriteHalf;
+use tokio::io::WriteHalf;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -24,6 +24,7 @@ const KEEPER_SOCKET_ATTEMPTS: usize = 250;
 const KEEPER_SOCKET_RETRY: Duration = Duration::from_millis(20);
 const CANCEL_GRACE: Duration = Duration::from_secs(3);
 
+#[cfg(unix)]
 const LONGEST_SOCKET_PATH: usize = if cfg!(target_os = "linux") { 107 } else { 103 };
 
 #[derive(Debug, Clone)]
@@ -46,6 +47,7 @@ pub struct SessionSpec {
     pub conversation_id: Uuid,
     pub dir: PathBuf,
     pub launch: Option<Launch>,
+    #[cfg(unix)]
     pub pods: Option<PodRuntime>,
 }
 
@@ -207,7 +209,11 @@ pub fn journal_head(dir: &Path) -> i64 {
 pub fn spawn_session(spec: SessionSpec, out: mpsc::UnboundedSender<NodeToControl>) -> SessionHandle {
     let (messages, inbox) = mpsc::unbounded_channel();
     let acked = Arc::new(AtomicI64::new(read_acked(&spec.dir)));
-    let already_ended = spec.launch.is_none() && (spec.dir.join("exit.json").exists() || (spec.pods.is_none() && !socket_path(&spec.dir).exists()));
+    #[cfg(unix)]
+    let local = spec.pods.is_none();
+    #[cfg(windows)]
+    let local = true;
+    let already_ended = spec.launch.is_none() && (spec.dir.join("exit.json").exists() || (local && !socket_path(&spec.dir).exists()));
     let handle = SessionHandle { messages, acked: acked.clone(), ended: Arc::new(AtomicBool::new(already_ended)), acp_session_id: Arc::new(Mutex::new(None)), busy: Arc::new(AtomicBool::new(true)), closing: Arc::new(AtomicBool::new(false)), launched_as: spec.launch.as_ref().map(|launch| (launch.agent, launch.account.clone())), last_active: Arc::new(AtomicU64::new(now_millis())) };
 
     let base = if spec.launch.is_some() { start_new_journal_epoch(&spec.dir) } else { read_base(&spec.dir) };
@@ -284,7 +290,8 @@ fn start_new_journal_epoch(dir: &Path) -> i64 {
 }
 
 enum Writer {
-    Keeper(OwnedWriteHalf),
+    Keeper(WriteHalf<Client>),
+    #[cfg(unix)]
     Pod(mpsc::UnboundedSender<Value>),
 }
 
@@ -559,6 +566,7 @@ async fn write_to_keeper(connection: &mut Connection, message: Value) {
                 tracing::warn!("keeper write failed: {error}");
             }
         }
+        #[cfg(unix)]
         Writer::Pod(frames) => {
             let _ = frames.send(message);
         }
@@ -566,6 +574,7 @@ async fn write_to_keeper(connection: &mut Connection, message: Value) {
 }
 
 async fn connect(spec: &SessionSpec, after: usize) -> Result<Connection> {
+    #[cfg(unix)]
     if let Some(pods) = &spec.pods {
         return connect_pod(pods.clone(), spec, after).await;
     }
@@ -577,14 +586,14 @@ async fn connect(spec: &SessionSpec, after: usize) -> Result<Connection> {
         return attach(stream, 0).await;
     }
 
-    match UnixStream::connect(socket_path(&spec.dir)).await {
+    match connect_keeper(&spec.dir).await {
         Ok(stream) => attach(stream, after).await,
         Err(_) => replay_ended_journal(&spec.dir, after),
     }
 }
 
-async fn attach(stream: UnixStream, after: usize) -> Result<Connection> {
-    let (read_half, mut write_half) = stream.into_split();
+async fn attach(stream: Client, after: usize) -> Result<Connection> {
+    let (read_half, mut write_half) = tokio::io::split(stream);
     let (entries_tx, entries) = mpsc::unbounded_channel();
 
     let attach = format!("{}\n", json!({"attach": {"after": after}}));
@@ -606,6 +615,7 @@ async fn attach(stream: UnixStream, after: usize) -> Result<Connection> {
     Ok(Connection { entries, writer: Some(Writer::Keeper(write_half)) })
 }
 
+#[cfg(unix)]
 async fn connect_pod(pods: PodRuntime, spec: &SessionSpec, after: usize) -> Result<Connection> {
     let (entries_tx, entries) = mpsc::unbounded_channel();
     let (frames_tx, frames) = mpsc::unbounded_channel();
@@ -661,9 +671,9 @@ fn replay_ended_journal(dir: &Path, after: usize) -> Result<Connection> {
     Ok(Connection { entries, writer: None })
 }
 
-async fn connect_socket(dir: &Path) -> Result<UnixStream> {
+async fn connect_socket(dir: &Path) -> Result<Client> {
     for _ in 0..KEEPER_SOCKET_ATTEMPTS {
-        if let Ok(stream) = UnixStream::connect(socket_path(dir)).await {
+        if let Ok(stream) = connect_keeper(dir).await {
             return Ok(stream);
         }
 
@@ -674,8 +684,10 @@ async fn connect_socket(dir: &Path) -> Result<UnixStream> {
 }
 
 async fn launch_keeper(dir: &Path, launch: &Launch) -> Result<()> {
+    #[cfg(unix)]
     let socket = socket_path(dir);
 
+    #[cfg(unix)]
     if socket.as_os_str().len() > LONGEST_SOCKET_PATH {
         bail!(
             "The keeper's socket path {} is {} bytes, and Unix sockets allow {LONGEST_SOCKET_PATH}. Set state_dir in node.toml to a shorter directory, such as ~/.local/state/mycelium.",
@@ -685,7 +697,7 @@ async fn launch_keeper(dir: &Path, launch: &Launch) -> Result<()> {
     }
 
     for _ in 0..KEEPER_SOCKET_ATTEMPTS {
-        if UnixStream::connect(&socket).await.is_err() {
+        if connect_keeper(dir).await.is_err() {
             break;
         }
 
@@ -704,8 +716,11 @@ async fn launch_keeper(dir: &Path, launch: &Launch) -> Result<()> {
         .envs(launch.agent_env.iter().map(|(name, value)| (name, value)))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .process_group(0);
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    command.process_group(0);
+    #[cfg(windows)]
+    command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP | windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
     if launch.cwd.is_dir() {
         command.current_dir(&launch.cwd);
     }
