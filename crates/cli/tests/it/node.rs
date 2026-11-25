@@ -169,6 +169,7 @@ impl Fixture {
             usage_endpoint: "http://127.0.0.1:9/api/oauth/usage".to_string(),
             codex_usage_endpoint: "http://127.0.0.1:9/backend-api/wham/usage".to_string(),
             vibe_billing_endpoint: "http://127.0.0.1:9/v1/billing".to_string(),
+            node_releases: "http://127.0.0.1:9/dist".to_string(),
             codex_command: "codex-not-installed".to_string(),
         };
 

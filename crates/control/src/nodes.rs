@@ -155,8 +155,8 @@ pub async fn start_login(State(state): State<AppState>, user: AuthUser, Path(id)
 
 pub async fn update_agent(State(state): State<AppState>, user: AuthUser, Path((id, agent)): Path<(Uuid, String)>) -> ApiResult<Json<StartAgentUpdateResponse>> {
     let parsed: AgentId = crate::store::parse_enum(&agent).map_err(|_| ApiError::not_found("That agent"))?;
-    let installed = sqlx::query_scalar::<_, Option<String>>(
-        "select a.version from agents a join nodes n on n.id = a.node_id where a.node_id = $1 and n.created_by = $2 and n.revoked_at is null and a.agent = $3 and a.available",
+    let (installed, available) = sqlx::query_as::<_, (Option<String>, bool)>(
+        "select a.version, a.available from agents a join nodes n on n.id = a.node_id where a.node_id = $1 and n.created_by = $2 and n.revoked_at is null and a.agent = $3",
     )
     .bind(id)
     .bind(user.id)
@@ -165,8 +165,12 @@ pub async fn update_agent(State(state): State<AppState>, user: AuthUser, Path((i
     .await?
     .ok_or_else(|| ApiError::not_found("That agent"))?;
 
-    let Some(version) = installed.as_deref().and_then(|installed| crate::versions::newer(installed, state.latest.get(&agent))) else {
-        return Err(ApiError::conflict("agent_current", "This agent is already up to date on this node."));
+    let version = match available {
+        false => state.latest.get(&agent).unwrap_or_else(|| "latest".to_string()),
+        true => match installed.as_deref().and_then(|installed| crate::versions::newer(installed, state.latest.get(&agent))) {
+            Some(version) => version,
+            None => return Err(ApiError::conflict("agent_current", "This agent is already up to date on this node.")),
+        },
     };
 
     let update_id = Uuid::new_v4();

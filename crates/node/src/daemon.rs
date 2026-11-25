@@ -1,5 +1,5 @@
 use crate::acp::Command;
-use crate::agents::{account_env, account_homes, accounts_dir, detect_agents, find_account, mark_rejected, pod_agents, login_command, login_state, new_account, resolve_program, sign_out, update_command};
+use crate::agents::{install_command, Tools, account_env, account_homes, accounts_dir, detect_agents, find_account, mark_rejected, pod_agents, login_command, login_state, new_account, resolve_program, sign_out, update_command};
 use crate::login::run_streamed;
 use crate::usage::{CODEX_USAGE_ENDPOINT, USAGE_ENDPOINT, USAGE_MIN_AGE, UsageCache, VIBE_BILLING_ENDPOINT};
 use crate::instructions::deliver;
@@ -56,6 +56,7 @@ pub struct DaemonOptions {
     pub usage_endpoint: String,
     pub codex_usage_endpoint: String,
     pub vibe_billing_endpoint: String,
+    pub node_releases: String,
     pub codex_command: String,
 }
 
@@ -74,6 +75,7 @@ impl DaemonOptions {
             usage_endpoint: USAGE_ENDPOINT.to_string(),
             codex_usage_endpoint: CODEX_USAGE_ENDPOINT.to_string(),
             vibe_billing_endpoint: VIBE_BILLING_ENDPOINT.to_string(),
+            node_releases: NODE_RELEASES.to_string(),
             codex_command: codex_command(),
             home,
         })
@@ -111,7 +113,82 @@ pub struct Daemon {
     pods: Option<PodRuntime>,
 }
 
+struct AgentCommandRunner {
+    out: mpsc::UnboundedSender<NodeToControl>,
+    running: crate::login::Running,
+    commands: CommandSource,
+    update_id: Uuid,
+}
+
+impl AgentCommandRunner {
+    fn run(self, command: Vec<String>) {
+        let AgentCommandRunner { out, running, commands, update_id } = self;
+        let output = out.clone();
+        let finished = out.clone();
+        let runtime = tokio::runtime::Handle::current();
+        let started = run_streamed(
+            &running,
+            update_id,
+            &command,
+            &[],
+            move |data| {
+                let _ = output.send(NodeToControl::AgentUpdateOutput { update_id, data });
+            },
+            move |ok| {
+                let _ = finished.send(NodeToControl::AgentUpdateFinished { update_id, ok });
+
+                runtime.spawn(async move {
+                    let agents = detect_agents(|agent| commands(agent)).await;
+                    let _ = finished.send(NodeToControl::Agents { agents });
+                });
+            },
+        );
+
+        if let Err(error) = started {
+            let _ = out.send(NodeToControl::AgentUpdateOutput { update_id, data: format!("{error:#}\r\n") });
+            let _ = out.send(NodeToControl::AgentUpdateFinished { update_id, ok: false });
+        }
+    }
+}
+
+pub fn node_tools(state_dir: &Path) -> PathBuf {
+    state_dir.join("tools").join("node")
+}
+
+async fn node_download(releases: &str) -> Option<String> {
+    let platform = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "linux-x64",
+        ("linux", "aarch64") => "linux-arm64",
+        ("macos", "x86_64") => "darwin-x64",
+        ("macos", "aarch64") => "darwin-arm64",
+        _ => return None,
+    };
+    let base = releases.trim_end_matches('/');
+    let index: serde_json::Value = reqwest::get(format!("{base}/index.json")).await.ok()?.json().await.ok()?;
+    let version = index.as_array()?.iter().find(|release| release["lts"].is_string())?["version"].as_str()?.to_string();
+
+    Some(format!("{base}/{version}/node-{version}-{platform}.tar.gz"))
+}
+
+const NODE_RELEASES: &str = "https://nodejs.org/dist";
+
+fn with_installed_tools(state_dir: &Path, home: &Path) {
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let mut folders: Vec<PathBuf> = std::env::split_paths(&current).collect();
+
+    for folder in [node_tools(state_dir).join("bin"), home.join(".local").join("bin")] {
+        if !folders.contains(&folder) {
+            folders.push(folder);
+        }
+    }
+
+    if let Ok(joined) = std::env::join_paths(folders) {
+        unsafe { std::env::set_var("PATH", joined) };
+    }
+}
+
 pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: DaemonOptions) -> Result<()> {
+    with_installed_tools(&config.state_dir, &options.home);
     crate::config::create_private_directory(&config.sessions_dir())?;
 
     let (out, out_rx) = mpsc::unbounded_channel();
@@ -732,7 +809,7 @@ impl Daemon {
 
     fn update_agent(&self, update_id: Uuid, agent: AgentId, version: &str) {
         let out = self.out.clone();
-        let refuse = |message: String| {
+        let refuse = move |message: String| {
             let _ = out.send(NodeToControl::AgentUpdateOutput { update_id, data: format!("{message}\r\n") });
             let _ = out.send(NodeToControl::AgentUpdateFinished { update_id, ok: false });
         };
@@ -742,39 +819,35 @@ impl Daemon {
         }
 
         let installed = (self.options.agent_commands)(agent).first().and_then(|program| resolve_program(program));
-        let Some(installed) = installed else {
-            return refuse(format!("{} is not installed on this node.", agent.display_name()));
-        };
-        let command = match update_command(agent, version, &installed) {
-            Ok(command) => command,
-            Err(message) => return refuse(message),
-        };
+        let runner = AgentCommandRunner { out: self.out.clone(), running: self.agent_updates.clone(), commands: self.options.agent_commands.clone(), update_id };
 
-        let output = self.out.clone();
-        let finished = self.out.clone();
-        let commands = self.options.agent_commands.clone();
-        let runtime = tokio::runtime::Handle::current();
-        let started = run_streamed(
-            &self.agent_updates,
-            update_id,
-            &command,
-            &[],
-            move |data| {
-                let _ = output.send(NodeToControl::AgentUpdateOutput { update_id, data });
-            },
-            move |ok| {
-                let _ = finished.send(NodeToControl::AgentUpdateFinished { update_id, ok });
+        if let Some(installed) = installed {
+            match update_command(agent, version, &installed) {
+                Ok(command) => runner.run(command),
+                Err(message) => refuse(message),
+            }
 
-                runtime.spawn(async move {
-                    let agents = detect_agents(|agent| commands(agent)).await;
-                    let _ = finished.send(NodeToControl::Agents { agents });
-                });
-            },
-        );
-
-        if let Err(error) = started {
-            refuse(format!("{error:#}"));
+            return;
         }
+
+        let version = version.to_string();
+        let node_folder = node_tools(&self.config.state_dir);
+        let releases = self.options.node_releases.clone();
+
+        tokio::spawn(async move {
+            let npm = resolve_program("npm");
+            let uv = resolve_program("uv");
+            let download = match (&npm, agent) {
+                (None, AgentId::Claude | AgentId::Codex) => node_download(&releases).await,
+                _ => None,
+            };
+            let tools = Tools { npm: npm.as_deref(), uv: uv.as_deref(), node_download: download.as_deref(), node_folder: &node_folder };
+
+            match install_command(agent, &version, &tools) {
+                Ok(command) => runner.run(command),
+                Err(message) => refuse(message),
+            }
+        });
     }
 
     fn sign_out_login(&self, agent: AgentId, label: &str) {

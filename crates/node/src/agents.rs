@@ -303,6 +303,53 @@ pub fn update_command(agent: AgentId, version: &str, installed: &Path) -> Result
     Err(format!("Mycelium cannot tell how {name} was installed at {}. Update it there.", installed.display()))
 }
 
+pub struct Tools<'a> {
+    pub npm: Option<&'a Path>,
+    pub uv: Option<&'a Path>,
+    pub node_download: Option<&'a str>,
+    pub node_folder: &'a Path,
+}
+
+pub fn install_command(agent: AgentId, version: &str, tools: &Tools) -> Result<Vec<String>, String> {
+    let name = agent.display_name();
+    let from_nix = |program: &Path| std::fs::canonicalize(program).unwrap_or_else(|_| program.to_path_buf()).starts_with("/nix/store");
+    let script = match agent {
+        AgentId::Claude | AgentId::Codex => {
+            let packages = match agent {
+                AgentId::Claude => format!("@agentclientprotocol/claude-agent-acp@{version} @anthropic-ai/claude-code"),
+                _ => format!("@agentclientprotocol/codex-acp@{version} @openai/codex"),
+            };
+            let npm = match (tools.npm, tools.node_download) {
+                (Some(npm), _) if from_nix(npm) => return Err(format!("Node.js on this node comes from Nix, so Mycelium cannot install {name} with it. Add {name} to the node's Nix configuration.")),
+                (Some(npm), _) => quoted(&npm.display().to_string()),
+                (None, Some(url)) => {
+                    let folder = quoted(&tools.node_folder.display().to_string());
+
+                    return Ok(shell(format!("set -e\necho 'Installing Node.js'\nmkdir -p {folder}\ncurl -fsSL {} | tar -xz -C {folder} --strip-components=1\n{folder}/bin/npm install --global {packages}", quoted(url))));
+                }
+                (None, None) => return Err(format!("Node.js is not installed on this node and Mycelium could not find a Node.js build for it. Install Node.js, then install {name} again.")),
+            };
+
+            format!("set -e\n{npm} install --global {packages}")
+        }
+        AgentId::Vibe => match tools.uv {
+            Some(uv) if from_nix(uv) => return Err(format!("uv on this node comes from Nix, so Mycelium cannot install {name} with it. Add {name} to the node's Nix configuration.")),
+            Some(uv) => format!("set -e\n{} tool install mistral-vibe", quoted(&uv.display().to_string())),
+            None => "set -e\necho 'Installing uv'\ncurl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh\n\"$HOME/.local/bin/uv\" tool install mistral-vibe".to_string(),
+        },
+    };
+
+    Ok(shell(script))
+}
+
+fn quoted(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+fn shell(script: String) -> Vec<String> {
+    vec!["sh".to_string(), "-c".to_string(), script]
+}
+
 pub fn login_command(agent: AgentId, method: &str) -> Option<Vec<String>> {
     if (agent, method) == (AgentId::Vibe, "browser") {
         let node = std::env::current_exe().ok()?;
@@ -503,6 +550,51 @@ mod tests {
         let logins = login_state(home.path(), &accounts, &available(AgentId::Vibe), &no_usage());
         assert_eq!((logins[0].account.as_deref(), logins[0].state), (Some("default"), LoginState::SignedOut));
         assert_eq!(std::fs::read_to_string(home.path().join(".vibe").join(".env")).unwrap(), "OTHER=1\n");
+    }
+
+    #[test]
+    fn installing_claude_code_uses_the_nodes_npm_for_the_adapter_and_the_cli() {
+        let npm = std::path::PathBuf::from("/usr/local/bin/npm");
+        let tools = Tools { npm: Some(&npm), uv: None, node_download: None, node_folder: Path::new("/var/lib/mycelium/tools/node") };
+
+        let command = install_command(AgentId::Claude, "0.13.0", &tools).unwrap();
+
+        assert_eq!(command[..2], ["sh".to_string(), "-c".to_string()]);
+        assert!(command[2].ends_with("'/usr/local/bin/npm' install --global @agentclientprotocol/claude-agent-acp@0.13.0 @anthropic-ai/claude-code"), "{}", command[2]);
+    }
+
+    #[test]
+    fn without_npm_codex_installs_node_js_into_mycelium_first() {
+        let tools = Tools { npm: None, uv: None, node_download: Some("https://nodejs.example.org/v24.1.0/node-v24.1.0-linux-x64.tar.gz"), node_folder: Path::new("/var/lib/mycelium/tools/node") };
+
+        let script = install_command(AgentId::Codex, "2.7.0", &tools).unwrap().remove(2);
+
+        assert!(script.contains("curl -fsSL 'https://nodejs.example.org/v24.1.0/node-v24.1.0-linux-x64.tar.gz' | tar -xz -C '/var/lib/mycelium/tools/node' --strip-components=1"), "{script}");
+        assert!(script.ends_with("'/var/lib/mycelium/tools/node'/bin/npm install --global @agentclientprotocol/codex-acp@2.7.0 @openai/codex"), "{script}");
+    }
+
+    #[test]
+    fn without_uv_mistral_vibe_installs_uv_first_and_with_it_uses_it() {
+        let folder = Path::new("/var/lib/mycelium/tools/node");
+        let uv = std::path::PathBuf::from("/opt/uv/bin/uv");
+
+        let without = install_command(AgentId::Vibe, "latest", &Tools { npm: None, uv: None, node_download: None, node_folder: folder }).unwrap().remove(2);
+        let with = install_command(AgentId::Vibe, "latest", &Tools { npm: None, uv: Some(&uv), node_download: None, node_folder: folder }).unwrap().remove(2);
+
+        assert!(without.contains("https://astral.sh/uv/install.sh") && without.ends_with("uv\" tool install mistral-vibe"), "{without}");
+        assert!(with.ends_with("'/opt/uv/bin/uv' tool install mistral-vibe"), "{with}");
+    }
+
+    #[test]
+    fn an_agent_is_not_installed_with_tools_from_nix_or_without_node_js_to_fetch() {
+        let folder = Path::new("/var/lib/mycelium/tools/node");
+        let nix = std::path::PathBuf::from("/nix/store/abc-nodejs/bin/npm");
+
+        let from_nix = install_command(AgentId::Claude, "0.13.0", &Tools { npm: Some(&nix), uv: None, node_download: None, node_folder: folder }).unwrap_err();
+        let nothing = install_command(AgentId::Claude, "0.13.0", &Tools { npm: None, uv: None, node_download: None, node_folder: folder }).unwrap_err();
+
+        assert!(from_nix.contains("comes from Nix"), "{from_nix}");
+        assert!(nothing.starts_with("Node.js is not installed on this node"), "{nothing}");
     }
 
     #[test]

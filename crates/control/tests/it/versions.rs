@@ -176,3 +176,25 @@ async fn an_agent_that_is_already_up_to_date_is_not_updated() {
 
     assert_eq!((status, refused["error"].as_str()), (409, Some("agent_current")));
 }
+
+#[tokio::test]
+async fn installing_an_agent_a_node_lacks_sends_the_latest_version_to_install() {
+    let (_, base) = publisher("v0.1.16", "2.2.0").await;
+    let server = server_checking(&base, Duration::from_millis(50)).await;
+    let mut link = server.online_node("atlas").await;
+    link.send(NodeToControl::Agents { agents: vec![AgentInfo { agent: AgentId::Claude, version: None, available: false, update_available: None }] }).await;
+    eventually("the missing agent", || async { (first_node(&server).await["agents"][0]["available"] == false).then_some(()) }).await;
+    eventually("the latest version", || async { server.user.json(server.user.get("/api/v1/nodes")).await.1[0]["update_available"].is_string().then_some(()) }).await;
+
+    let (status, started) = server.user.json(server.user.post(&format!("/api/v1/nodes/{}/agents/claude/update", link.id))).await;
+    assert_eq!(status, 200, "{started}");
+    let update_id: Uuid = started["update_id"].as_str().unwrap().parse().unwrap();
+
+    let version = next_matching(&mut link, |message| match message {
+        ControlToNode::UpdateAgent { update_id: sent, agent: AgentId::Claude, version } if *sent == update_id => Some(version.clone()),
+        _ => None,
+    })
+    .await;
+
+    assert_eq!(version, "2.2.0");
+}
