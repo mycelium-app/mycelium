@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.34.66
+
+- A message you send shows in the thread at once, dimmed with Sending. A message that could not be sent no longer disappears: it stays in place with a red border, says why it was not sent, and has Retry and Delete.
+- Unsent messages are kept on the device, on the web, desktop and Android, across reloads and restarts, and are sent again by themselves when the connection comes back. A retry reuses the message's client id, so a send that arrived but whose answer was lost is never duplicated.
+- Messages on their way no longer show in the Queued messages list; they show in the thread instead.
+- An agent can show an image artefact, or one artboard of a design drawn as a picture, inline in its message with ![description](artifact:<id>) or ![description](artifact:<id>#<artboard id>). It loads at once through your own session; if the conversation cannot view the artefact, the description shows instead.
+- Includes everything in v0.34.65, which was not published.
+
 ## v0.34.65
 
 - An assistant's thread starts on the node chosen in its header and the model chosen in its composer, Any node and Any model unless you change them, the same way a new conversation does. Both stay switchable afterwards, as in any conversation.
