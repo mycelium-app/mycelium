@@ -167,19 +167,35 @@ pub fn node_tools(state_dir: &Path) -> PathBuf {
     state_dir.join("tools").join("node")
 }
 
+#[cfg(unix)]
+fn node_programs(state_dir: &Path) -> PathBuf {
+    node_tools(state_dir).join("bin")
+}
+
+#[cfg(windows)]
+fn node_programs(state_dir: &Path) -> PathBuf {
+    node_tools(state_dir)
+}
+
 async fn node_download(releases: &str) -> Option<String> {
     let platform = match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => "linux-x64",
         ("linux", "aarch64") => "linux-arm64",
         ("macos", "x86_64") => "darwin-x64",
         ("macos", "aarch64") => "darwin-arm64",
+        ("windows", "x86_64") => "win-x64",
+        ("windows", "aarch64") => "win-arm64",
         _ => return None,
+    };
+    let archive = match std::env::consts::OS {
+        "windows" => "zip",
+        _ => "tar.gz",
     };
     let base = releases.trim_end_matches('/');
     let index: serde_json::Value = reqwest::get(format!("{base}/index.json")).await.ok()?.json().await.ok()?;
     let version = index.as_array()?.iter().find(|release| release["lts"].is_string())?["version"].as_str()?.to_string();
 
-    Some(format!("{base}/{version}/node-{version}-{platform}.tar.gz"))
+    Some(format!("{base}/{version}/node-{version}-{platform}.{archive}"))
 }
 
 const NODE_RELEASES: &str = "https://nodejs.org/dist";
@@ -188,7 +204,7 @@ fn with_installed_tools(state_dir: &Path, home: &Path) {
     let current = std::env::var_os("PATH").unwrap_or_default();
     let mut folders: Vec<PathBuf> = std::env::split_paths(&current).collect();
 
-    for folder in [node_tools(state_dir).join("bin"), home.join(".local").join("bin")] {
+    for folder in [node_programs(state_dir), home.join(".local").join("bin")] {
         if !folders.contains(&folder) {
             folders.push(folder);
         }

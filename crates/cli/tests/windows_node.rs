@@ -4,6 +4,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use mycelium_node::agents::{Tools, install_command, resolve_program};
 use mycelium_node::config::NodeConfig;
 use mycelium_proto::conversation::AgentId;
 use mycelium_proto::link::{ControlToNode, NodeToControl};
@@ -293,4 +294,47 @@ async fn ssh_to_a_windows_node_runs_commands_and_an_interactive_shell() {
     let (printed, status) = ssh_output(&mut shell, true).await;
     assert!(printed.contains("typed over ssh"), "{printed}");
     assert_eq!(status, Some(4));
+}
+
+const RECORDING_NPM: &str = "@echo off\r\necho %*> \"%~dp0npm-arguments.txt\"\r\n";
+
+fn run_install(command: Vec<String>) -> std::process::Output {
+    let program = resolve_program(&command[0]).unwrap();
+
+    std::process::Command::new(program).args(&command[1..]).output().unwrap()
+}
+
+fn recorded_arguments(folder: &Path) -> String {
+    std::fs::read_to_string(folder.join("npm-arguments.txt")).unwrap().trim().to_string()
+}
+
+#[test]
+fn installing_claude_code_runs_the_nodes_npm_from_powershell() {
+    let folder = tempfile::tempdir().unwrap();
+    let npm = folder.path().join("npm.cmd");
+    std::fs::write(&npm, RECORDING_NPM).unwrap();
+    let tools = Tools { npm: Some(&npm), uv: None, node_download: None, node_folder: folder.path() };
+
+    let output = run_install(install_command(AgentId::Claude, "0.13.0", &tools).unwrap());
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(recorded_arguments(folder.path()), "install --global @agentclientprotocol/claude-agent-acp@0.13.0 @anthropic-ai/claude-code");
+}
+
+#[test]
+fn without_npm_codex_unpacks_the_node_js_zip_into_mycelium_and_installs_there() {
+    let work = tempfile::tempdir().unwrap();
+    let build = work.path().join("node-v24.1.0-win-arm64");
+    std::fs::create_dir(&build).unwrap();
+    std::fs::write(build.join("npm.cmd"), RECORDING_NPM).unwrap();
+    let packed = std::process::Command::new("tar.exe").current_dir(work.path()).args(["-a", "-cf", "node.zip", "node-v24.1.0-win-arm64"]).status().unwrap();
+    assert!(packed.success());
+    let url = format!("file:///{}", work.path().join("node.zip").display().to_string().replace('\\', "/"));
+    let folder = work.path().join("state").join("tools").join("node");
+    let tools = Tools { npm: None, uv: None, node_download: Some(&url), node_folder: &folder };
+
+    let output = run_install(install_command(AgentId::Codex, "2.7.0", &tools).unwrap());
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(recorded_arguments(&folder), format!("install --global --prefix {} @agentclientprotocol/codex-acp@2.7.0 @openai/codex", folder.display()));
 }

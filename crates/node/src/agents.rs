@@ -321,39 +321,115 @@ pub fn install_command(agent: AgentId, version: &str, tools: &Tools) -> Result<V
     let from_nix = |program: &Path| std::fs::canonicalize(program).unwrap_or_else(|_| program.to_path_buf()).starts_with("/nix/store");
     let script = match agent {
         AgentId::Claude | AgentId::Codex => {
-            let packages = match agent {
-                AgentId::Claude => format!("@agentclientprotocol/claude-agent-acp@{version} @anthropic-ai/claude-code"),
-                _ => format!("@agentclientprotocol/codex-acp@{version} @openai/codex"),
+            let adapter = match agent {
+                AgentId::Claude => format!("@agentclientprotocol/claude-agent-acp@{version}"),
+                _ => format!("@agentclientprotocol/codex-acp@{version}"),
             };
-            let npm = match (tools.npm, tools.node_download) {
+            let cli = match agent {
+                AgentId::Claude => "@anthropic-ai/claude-code",
+                _ => "@openai/codex",
+            };
+            let packages = [adapter.as_str(), cli];
+
+            match (tools.npm, tools.node_download) {
                 (Some(npm), _) if from_nix(npm) => return Err(format!("Node.js on this node comes from Nix, so Mycelium cannot install {name} with it. Add {name} to the node's Nix configuration.")),
-                (Some(npm), _) => quoted(&npm.display().to_string()),
-                (None, Some(url)) => {
-                    let folder = quoted(&tools.node_folder.display().to_string());
-
-                    return Ok(shell(format!("set -e\necho 'Installing Node.js'\nmkdir -p {folder}\ncurl -fsSL {} | tar -xz -C {folder} --strip-components=1\n{folder}/bin/npm install --global {packages}", quoted(url))));
-                }
+                (Some(npm), _) => npm_install(npm, &packages),
+                (None, Some(url)) => node_js_then_npm_install(url, tools.node_folder, &packages),
                 (None, None) => return Err(format!("Node.js is not installed on this node and Mycelium could not find a Node.js build for it. Install Node.js, then install {name} again.")),
-            };
-
-            format!("set -e\n{npm} install --global {packages}")
+            }
         }
         AgentId::Vibe => match tools.uv {
             Some(uv) if from_nix(uv) => return Err(format!("uv on this node comes from Nix, so Mycelium cannot install {name} with it. Add {name} to the node's Nix configuration.")),
-            Some(uv) => format!("set -e\n{} tool install mistral-vibe", quoted(&uv.display().to_string())),
-            None => "set -e\necho 'Installing uv'\ncurl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh\n\"$HOME/.local/bin/uv\" tool install mistral-vibe".to_string(),
+            uv => uv_install(uv),
         },
     };
 
     Ok(shell(script))
 }
 
+#[cfg(unix)]
+fn npm_install(npm: &Path, packages: &[&str]) -> String {
+    format!("set -e\n{} install --global {}", quoted(&npm.display().to_string()), packages.join(" "))
+}
+
+#[cfg(windows)]
+fn npm_install(npm: &Path, packages: &[&str]) -> String {
+    format!("$ErrorActionPreference = 'Stop'\n& {} install --global {}\nexit $LASTEXITCODE", quoted(&npm.display().to_string()), quoted_words(packages))
+}
+
+#[cfg(unix)]
+fn node_js_then_npm_install(url: &str, folder: &Path, packages: &[&str]) -> String {
+    let folder = quoted(&folder.display().to_string());
+
+    format!("set -e\necho 'Installing Node.js'\nmkdir -p {folder}\ncurl -fsSL {} | tar -xz -C {folder} --strip-components=1\n{folder}/bin/npm install --global {}", quoted(url), packages.join(" "))
+}
+
+#[cfg(windows)]
+fn node_js_then_npm_install(url: &str, folder: &Path, packages: &[&str]) -> String {
+    let npm = quoted(&folder.join("npm.cmd").display().to_string());
+    let folder = quoted(&folder.display().to_string());
+
+    format!(
+        "$ErrorActionPreference = 'Stop'\n\
+         Write-Output 'Installing Node.js'\n\
+         $archive = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString() + '.zip')\n\
+         curl.exe -fsSL -o $archive {}\n\
+         if ($LASTEXITCODE) {{ exit $LASTEXITCODE }}\n\
+         New-Item -ItemType Directory -Force -Path {folder} | Out-Null\n\
+         tar.exe -xf $archive -C {folder} --strip-components=1\n\
+         if ($LASTEXITCODE) {{ exit $LASTEXITCODE }}\n\
+         Remove-Item $archive\n\
+         & {npm} install --global --prefix {folder} {}\n\
+         exit $LASTEXITCODE",
+        quoted(url),
+        quoted_words(packages)
+    )
+}
+
+#[cfg(unix)]
+fn uv_install(uv: Option<&Path>) -> String {
+    match uv {
+        Some(uv) => format!("set -e\n{} tool install mistral-vibe", quoted(&uv.display().to_string())),
+        None => "set -e\necho 'Installing uv'\ncurl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh\n\"$HOME/.local/bin/uv\" tool install mistral-vibe".to_string(),
+    }
+}
+
+#[cfg(windows)]
+fn uv_install(uv: Option<&Path>) -> String {
+    let (install_uv, uv) = match uv {
+        Some(uv) => ("", quoted(&uv.display().to_string())),
+        None => ("Write-Output 'Installing uv'\n$env:UV_NO_MODIFY_PATH = '1'\nInvoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression\n", "(Join-Path $HOME '.local\\bin\\uv.exe')".to_string()),
+    };
+
+    format!("$ErrorActionPreference = 'Stop'\n{install_uv}& {uv} tool install mistral-vibe\nexit $LASTEXITCODE")
+}
+
+#[cfg(unix)]
 fn quoted(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
+#[cfg(windows)]
+fn quoted(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "''"))
+}
+
+#[cfg(windows)]
+fn quoted_words(words: &[&str]) -> String {
+    words.iter().map(|word| quoted(word)).collect::<Vec<_>>().join(" ")
+}
+
+#[cfg(unix)]
 fn shell(script: String) -> Vec<String> {
     vec!["sh".to_string(), "-c".to_string(), script]
+}
+
+#[cfg(windows)]
+fn shell(script: String) -> Vec<String> {
+    let utf16: Vec<u8> = script.encode_utf16().flat_map(|unit| unit.to_le_bytes()).collect();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(utf16);
+
+    ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", &encoded].map(str::to_string).to_vec()
 }
 
 pub fn login_command(agent: AgentId, method: &str) -> Option<Vec<String>> {
