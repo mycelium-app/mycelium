@@ -103,7 +103,7 @@ jobs:
         working-directory: clients
         run: |
           export MYCELIUM_JBR_HOME="$JAVA_HOME"
-          ./gradlew --no-daemon --configuration-cache :desktop:packageDeb :desktop:createDistributable :web:wasmJsBrowserDistribution
+          ../ci/annotate-failure.sh "Desktop and web build" ./gradlew --no-daemon --configuration-cache :desktop:packageDeb :desktop:createDistributable :web:wasmJsBrowserDistribution
 
       - name: Package
         run: |
