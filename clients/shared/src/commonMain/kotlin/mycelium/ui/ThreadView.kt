@@ -339,7 +339,7 @@ val LocalReadAloud = compositionLocalOf<((String) -> Unit)?> { null }
 @Composable
 private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?, onSignIn: (() -> Unit)?, signInFor: String?, onDismissFailure: (() -> Unit)?, limitActions: LimitActions?, agent: String, runsOnModel: Boolean, thinkingLive: Boolean, outbox: OutboxControls?) {
     when (item) {
-        is ThreadItem.UserMessage -> UserMessage(item.text, item.files, item.images, item.goalSentAt, item.goalNudge, item.goalWhy, item.spoken, item.spokenAt, agent, item.delivery, outbox)
+        is ThreadItem.UserMessage -> UserMessage(item.text, item.files, item.images, item.goalSentAt, item.goalNudge, item.goalWhy, item.spoken, item.spokenAt, agent, item.delivery, outbox, item.waiting)
         is ThreadItem.GoalReport -> GoalReportBlock(item, agent)
         is ThreadItem.AgentMessage -> AgentMessage(item.text)
         is ThreadItem.Thought -> if (item.finished || !thinkingLive) ThoughtSummary(item) else ThinkingBlock(item.text, item.startedAt)
@@ -420,7 +420,7 @@ private fun SwitchLine(text: String, why: String, icon: MyIcon = MyIcon.Refresh)
 }
 
 @Composable
-internal fun UserMessage(text: String, files: List<Attachment>, images: List<ThreadImage>, goalSentAt: String?, goalNudge: Int?, goalWhy: String?, spoken: Boolean, spokenAt: String?, agent: String, delivery: Delivery? = null, outbox: OutboxControls? = null) {
+internal fun UserMessage(text: String, files: List<Attachment>, images: List<ThreadImage>, goalSentAt: String?, goalNudge: Int?, goalWhy: String?, spoken: Boolean, spokenAt: String?, agent: String, delivery: Delivery? = null, outbox: OutboxControls? = null, waiting: Boolean = false) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
 
@@ -433,7 +433,7 @@ internal fun UserMessage(text: String, files: List<Attachment>, images: List<Thr
                 .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
             verticalArrangement = Arrangement.spacedBy(if (delivery != null) Tokens.Space.S1_5 else 0.dp),
         ) {
-            Column(Modifier.alpha(if (delivery != null) OutgoingAlpha else 1f)) {
+            Column(Modifier.alpha(if (delivery != null || waiting) OutgoingAlpha else 1f)) {
                 if (goalSentAt != null) {
                     val sentAt = clockTime(goalSentAt) { millis -> platform?.localDateTime(millis) }
                     val sender = if (goalNudge == null) "Goal" else "Nudge $goalNudge"

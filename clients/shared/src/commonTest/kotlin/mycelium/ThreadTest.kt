@@ -9,6 +9,7 @@ import mycelium.state.PlanEntry
 import mycelium.state.PlanStatus
 import mycelium.state.ThreadItem
 import mycelium.state.ToolStatus
+import mycelium.state.awaitingPickUp
 import mycelium.state.buildThread
 import mycelium.state.currentTodos
 import mycelium.state.diffLines
@@ -359,5 +360,22 @@ class SuggestedRepliesTest {
         val agent = buildThread(events).filterIsInstance<ThreadItem.Workflow>().single().progress.agents.single()
 
         assertTrue(agent.finished && agent.failed)
+    }
+
+    @Test
+    fun aDeliveredMessageWaitsGreyedUntilTheAgentAnswersIt() {
+        val items = listOf(
+            ThreadItem.UserMessage("u1", "Build the release"),
+            ThreadItem.AgentMessage("a1", "Built."),
+            ThreadItem.UserMessage("u2", "Now tag it"),
+            ThreadItem.UserMessage("u3", "And publish it"),
+        )
+
+        val waiting = awaitingPickUp(items, working = true).filterIsInstance<ThreadItem.UserMessage>().map { it.key to it.waiting }
+        val answered = awaitingPickUp(items + ThreadItem.AgentMessage("a2", "Tagging."), working = true).filterIsInstance<ThreadItem.UserMessage>().map { it.waiting }
+
+        assertEquals(listOf("u1" to false, "u2" to true, "u3" to true), waiting)
+        assertEquals(listOf(false, false, false), answered)
+        assertEquals(items, awaitingPickUp(items, working = false))
     }
 }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.ui.text.style.TextOverflow
 import mycelium.api.ModelChoice
 import mycelium.state.sessionOpenOn
+import mycelium.state.awaitingPickUp
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.seconds
 import mycelium.api.Routing
@@ -768,7 +769,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
                 CompositionLocalProvider(LocalResponseActions provides responses, LocalPausedWorkflow provides PausedWorkflow(conversation.agent, limitActions)) {
                     ThreadView(
-                        items = thread + listOfNotNull(unexplainedFailure) + listOfNotNull(initialMessage) + outgoing.map { ThreadItem.UserMessage("outgoing:${it.clientId}", it.text, delivery = Delivery(it.clientId, it.failure)) },
+                        items = awaitingPickUp(thread, agentWorking) + listOfNotNull(unexplainedFailure) + listOfNotNull(initialMessage) + outgoing.map { ThreadItem.UserMessage("outgoing:${it.clientId}", it.text, delivery = Delivery(it.clientId, it.failure)) },
                         outbox = outboxControls,
                         hasOlder = state.hasOlderEvents(id),
                         loadingOlder = id in state.loadingOlderEvents,

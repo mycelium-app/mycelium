@@ -112,6 +112,14 @@ data class ThreadImage(val sha256: String, val name: String, val mediaType: Stri
 
 data class Delivery(val clientId: String, val failure: String?)
 
+fun awaitingPickUp(items: List<ThreadItem>, working: Boolean): List<ThreadItem> {
+    if (!working) return items
+
+    val pickedUp = items.indexOfLast { it !is ThreadItem.UserMessage }
+
+    return items.mapIndexed { index, item -> if (index > pickedUp && item is ThreadItem.UserMessage) item.copy(waiting = true) else item }
+}
+
 fun remoteThreadImage(ref: InlineImageRef) = ThreadImage("", ref.alt, "", url = ref.url, host = ref.host, pageUrl = ref.pageUrl)
 
 sealed interface ThreadItem {
@@ -128,6 +136,7 @@ sealed interface ThreadItem {
         val spoken: Boolean = false,
         val spokenAt: String? = null,
         val delivery: Delivery? = null,
+        val waiting: Boolean = false,
     ) : ThreadItem
 
     data class GoalReport(override val key: String, val outcome: String, val reason: String, val at: String) : ThreadItem
