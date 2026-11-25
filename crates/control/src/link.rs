@@ -186,6 +186,7 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
     match message {
         NodeToControl::Hello { version, hostname, os, arch, agents, sessions, kubernetes } => hello(state, node_id, version, hostname, os, arch, agents, sessions, kubernetes).await,
         NodeToControl::SessionStarted { conversation_id, acp_session_id, modes, models, config_options } => session_started(state, node_id, conversation_id, acp_session_id, modes, models, config_options).await,
+        NodeToControl::HarnessOffered { agent, modes, models, config_options } => harness_offered(state, node_id, agent, modes, models, config_options).await,
         NodeToControl::PromptReceived { conversation_id, prompt_id } => {
             state.hub.acknowledge_prompt(node_id, conversation_id, prompt_id);
 
@@ -761,6 +762,47 @@ fn reported_modes(modes: Option<&Value>) -> Vec<HarnessModel> {
     advertised.filter_map(|mode| Some(HarnessModel { id: mode["id"].as_str()?.to_string(), name: mode["name"].as_str().unwrap_or_else(|| mode["id"].as_str().unwrap_or_default()).to_string() })).collect()
 }
 
+async fn record_harness(tx: &mut sqlx::PgConnection, node_id: Uuid, agent: &str, account: &str, modes: Option<&Value>, models: Option<&Value>, config_options: Option<&Value>) -> ApiResult<bool> {
+    let reported = reported_models(models, config_options);
+    let offered_modes = reported_modes(modes);
+    let models_reported = !reported.is_empty() || config_options.is_some();
+    let reports = models_reported || !offered_modes.is_empty();
+
+    if reports {
+        sqlx::query(
+            "insert into harness_models (node_id, agent, account, models, default_model, config_options, modes, reported_at) values ($1, $2, $3, $4, $5, $6, $7, now())
+             on conflict (node_id, agent, account) do update set
+                models = case when $8 then excluded.models else harness_models.models end,
+                default_model = case when $8 then excluded.default_model else harness_models.default_model end,
+                config_options = case when $8 then excluded.config_options else harness_models.config_options end,
+                modes = coalesce(excluded.modes, harness_models.modes), reported_at = now()",
+        )
+        .bind(node_id)
+        .bind(agent)
+        .bind(account)
+        .bind(sqlx::types::Json(&reported))
+        .bind(models.and_then(|models| models["currentModelId"].as_str()))
+        .bind(config_options)
+        .bind(Some(sqlx::types::Json(&offered_modes)).filter(|_| !offered_modes.is_empty()))
+        .bind(models_reported)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    Ok(reports)
+}
+
+async fn harness_offered(state: &AppState, node_id: Uuid, agent: AgentId, modes: Option<Value>, models: Option<Value>, config_options: Option<Value>) -> ApiResult<()> {
+    let mut connection = state.pool.acquire().await?;
+    let reports = record_harness(&mut *connection, node_id, &enum_text(&agent), "", modes.as_ref(), models.as_ref(), config_options.as_ref()).await?;
+
+    if reports {
+        publish_node(state, node_id).await?;
+    }
+
+    Ok(())
+}
+
 async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid, acp_session_id: String, modes: Option<Value>, models: Option<Value>, config_options: Option<Value>) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
     let Some(before) = lock_on_node(&mut tx, conversation_id, node_id).await? else {
@@ -786,31 +828,7 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
     .bind(options)
     .fetch_one(&mut *tx)
     .await?;
-    let reported = reported_models(models_value.as_ref(), config_value.as_ref());
-    let offered_modes = reported_modes(modes.as_ref());
-    let models_reported = !reported.is_empty() || config_value.is_some();
-    let reports = models_reported || !offered_modes.is_empty();
-
-    if reports {
-        sqlx::query(
-            "insert into harness_models (node_id, agent, account, models, default_model, config_options, modes, reported_at) values ($1, $2, $3, $4, $5, $6, $7, now())
-             on conflict (node_id, agent, account) do update set
-                models = case when $8 then excluded.models else harness_models.models end,
-                default_model = case when $8 then excluded.default_model else harness_models.default_model end,
-                config_options = case when $8 then excluded.config_options else harness_models.config_options end,
-                modes = coalesce(excluded.modes, harness_models.modes), reported_at = now()",
-        )
-        .bind(node_id)
-        .bind(&updated.agent)
-        .bind(updated.account.clone().unwrap_or_default())
-        .bind(sqlx::types::Json(&reported))
-        .bind(models_value.as_ref().and_then(|models| models["currentModelId"].as_str()))
-        .bind(config_value.as_ref())
-        .bind(Some(sqlx::types::Json(&offered_modes)).filter(|_| !offered_modes.is_empty()))
-        .bind(models_reported)
-        .execute(&mut *tx)
-        .await?;
-    }
+    let reports = record_harness(&mut *tx, node_id, &updated.agent, updated.account.as_deref().unwrap_or_default(), modes.as_ref(), models_value.as_ref(), config_value.as_ref()).await?;
 
     tx.commit().await?;
 

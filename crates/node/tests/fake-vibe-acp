@@ -3,7 +3,7 @@
 
 initialize advertises browser-auth-delegated when the client asks for it. authenticate takes its
 action in _meta, as Vibe's ACP library spreads _meta into the arguments: "start" returns a sign-in page for attempt a1, and "complete" saves a key to $VIBE_HOME/.env and
-reports completion. It refuses to sign in unless the keyring is switched off, as Vibe would then
+reports completion. session/new offers two Mistral models. It refuses to sign in unless the keyring is switched off, as Vibe would then
 keep the key where the node cannot see it.
 """
 import json
@@ -29,6 +29,8 @@ for line in sys.stdin:
         with open(os.path.join(os.environ["VIBE_HOME"], ".env"), "w") as env:
             env.write("MISTRAL_API_KEY=signed-in-placeholder\n")
         result = {"_meta": {"browser-auth-delegated": {"attemptId": "a1", "status": "completed"}}}
+    elif method == "session/new":
+        result = {"sessionId": "v1", "models": {"currentModelId": "mistral-medium-3.5", "availableModels": [{"modelId": "mistral-large-4", "name": "Mistral Large 4"}, {"modelId": "mistral-medium-3.5", "name": "Mistral Medium 3.5"}]}}
     else:
         print(json.dumps({"jsonrpc": "2.0", "id": ident, "error": {"code": -32601, "message": "unknown"}}), flush=True)
         continue

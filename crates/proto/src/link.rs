@@ -80,6 +80,15 @@ pub enum NodeToControl {
     Logins {
         logins: Vec<LoginInfo>,
     },
+    HarnessOffered {
+        agent: AgentId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        modes: Option<Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        models: Option<Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        config_options: Option<Value>,
+    },
     NodeStatus {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         kubernetes: Option<KubernetesNode>,

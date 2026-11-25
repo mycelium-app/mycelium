@@ -1,5 +1,6 @@
 use crate::common;
 use crate::common::Server;
+use mycelium_proto::conversation::AgentId;
 use mycelium_proto::link::{ControlToNode, ListeningPort, NodeToControl, ProcessUsage, ResourceSample};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::json;
@@ -89,6 +90,25 @@ async fn the_modes_models_and_settings_a_session_offers_are_kept_on_the_conversa
     assert_eq!(conversation["options"]["config_options"], settings);
     let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
     assert_eq!(nodes[0]["harness_models"][0]["config_options"], settings);
+}
+
+#[tokio::test]
+async fn the_models_a_signed_in_agent_offers_before_any_session_are_listed_on_its_node() {
+    let server = Server::start().await;
+    let mut link = server.online_node("framework").await;
+    let models = json!({"currentModelId": "mistral-medium-3.5", "availableModels": [{"modelId": "mistral-large-4", "name": "Mistral Large 4"}, {"modelId": "mistral-medium-3.5", "name": "Mistral Medium 3.5"}]});
+
+    link.send(NodeToControl::HarnessOffered { agent: AgentId::Vibe, modes: None, models: Some(models), config_options: None }).await;
+
+    let user = server.user.clone();
+    let offered = common::eventually("the offered models", || async {
+        let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;
+
+        nodes[0]["harness_models"].as_array().and_then(|reports| reports.iter().find(|report| report["agent"] == "vibe").cloned())
+    })
+    .await;
+
+    assert_eq!(offered["models"], json!([{"id": "mistral-large-4", "name": "Mistral Large 4"}, {"id": "mistral-medium-3.5", "name": "Mistral Medium 3.5"}]));
 }
 
 #[tokio::test]

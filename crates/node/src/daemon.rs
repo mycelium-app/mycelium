@@ -18,7 +18,7 @@ use anyhow::{Context, Result};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use mycelium_proto::api::KubernetesNode;
-use mycelium_proto::conversation::{AgentId, AgentInfo, LoginInfo, SessionPosition};
+use mycelium_proto::conversation::{AgentId, AgentInfo, LoginInfo, LoginState, SessionPosition};
 use mycelium_proto::link::{ControlToNode, NodeToControl};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -101,6 +101,7 @@ pub struct Daemon {
     agent_updates: crate::login::Running,
     usage: Arc<UsageCache>,
     usage_wanted: Arc<tokio::sync::Notify>,
+    probed: Mutex<std::collections::HashSet<AgentId>>,
     terminals: TerminalManager,
     environments: EnvironmentManager,
     ssh: SshServer,
@@ -140,6 +141,7 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
         agent_updates: Default::default(),
         usage,
         usage_wanted,
+        probed: Mutex::default(),
         terminals: TerminalManager::new(out.clone(), user_shell(), Some(&config.state_dir.join("tmux"))),
         environments: EnvironmentManager::new(out.clone(), std::env::var_os("PATH").unwrap_or_default()),
         ssh: SshServer::new(out.clone(), config.ssh_host_key_path(), options.home.clone(), user_shell()),
@@ -251,6 +253,7 @@ async fn follow_usage(daemon: Arc<Daemon>) {
         if daemon.connected.load(Ordering::SeqCst) {
             let report = daemon.logins_report().await;
 
+            daemon.probe_offered_models(&report);
             let _ = daemon.out.send(report);
         }
     }
@@ -330,6 +333,7 @@ impl Daemon {
 
     pub fn on_connected(&self) {
         self.connected.store(true, Ordering::SeqCst);
+        self.usage_wanted.notify_one();
         self.write_status();
         self.environments.report();
 
@@ -339,6 +343,52 @@ impl Daemon {
 
         for (_, handle) in self.session_handles() {
             handle.replay();
+        }
+    }
+
+    fn probe_offered_models(self: &Arc<Self>, report: &NodeToControl) {
+        let NodeToControl::Logins { logins } = report else {
+            return;
+        };
+
+        if self.pods.is_some() {
+            return;
+        }
+
+        for login in logins.iter().filter(|login| !login.managed) {
+            let Ok(mut probed) = self.probed.lock() else {
+                return;
+            };
+            let first = login.state == LoginState::SignedIn && probed.insert(login.agent);
+
+            if login.state != LoginState::SignedIn {
+                probed.remove(&login.agent);
+            }
+
+            drop(probed);
+
+            if !first {
+                continue;
+            }
+
+            let daemon = self.clone();
+            let agent = login.agent;
+
+            tokio::spawn(async move {
+                let command = (daemon.options.agent_commands)(agent);
+                let folder = daemon.config.state_dir.join("model-probe").join(agent.as_str());
+
+                match crate::model_probe::offered(agent, &command, &folder).await {
+                    Ok(offered) => {
+                        let _ = daemon.out.send(offered);
+                    }
+                    Err(_) => {
+                        if let Ok(mut probed) = daemon.probed.lock() {
+                            probed.remove(&agent);
+                        }
+                    }
+                }
+            });
         }
     }
 

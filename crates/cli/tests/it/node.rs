@@ -797,6 +797,24 @@ async fn a_node_with_vibe_acp_reports_mistral_vibe_and_runs_a_conversation_with_
 }
 
 #[tokio::test]
+async fn a_node_signed_in_to_vibe_reports_its_models_before_any_session() {
+    let mut control = ControlServer::start().await;
+    let mut fixture = Fixture::new(&control.url);
+    let agent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../node/tests/fake-vibe-acp").canonicalize().unwrap().display().to_string();
+    fixture.options.agent_commands = Arc::new(move |agent_id| if agent_id == AgentId::Vibe { vec![agent.clone()] } else { vec!["/nonexistent/agent-acp".to_string()] });
+    std::fs::create_dir_all(fixture.options.home.join(".vibe")).unwrap();
+    std::fs::write(fixture.options.home.join(".vibe").join(".env"), "MISTRAL_API_KEY=placeholder-key\n").unwrap();
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+
+    let offered = connection.next_matching(|message| matches!(message, NodeToControl::HarnessOffered { .. })).await;
+
+    let NodeToControl::HarnessOffered { agent, models, .. } = offered else { unreachable!() };
+    let names: Vec<&str> = models.as_ref().and_then(|models| models["availableModels"].as_array()).unwrap().iter().filter_map(|model| model["name"].as_str()).collect();
+    assert_eq!((agent, names), (AgentId::Vibe, vec!["Mistral Large 4", "Mistral Medium 3.5"]));
+}
+
+#[tokio::test]
 async fn after_a_reconnect_only_unacknowledged_messages_are_replayed_once() {
     let mut control = ControlServer::start().await;
     let fixture = Fixture::new(&control.url);

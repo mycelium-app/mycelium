@@ -18,6 +18,7 @@ pub mod link;
 pub mod login;
 pub mod logo;
 pub mod manifests;
+pub mod model_probe;
 pub mod pod;
 pub mod resources;
 pub mod rfb;
