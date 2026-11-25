@@ -55,7 +55,10 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value> {
         GitCommand::Switch { branch, create, track } => switch(cwd, &branch, create, track.as_deref()),
         GitCommand::Diff { path, staged } => diff(cwd, &path, staged),
         GitCommand::ScopeDiff { scope } => scope_diff(cwd, &scope),
+        #[cfg(unix)]
         GitCommand::RunTests { command, timeout_secs } => crate::test_run::run(cwd, command.as_deref(), timeout_secs),
+        #[cfg(windows)]
+        GitCommand::RunTests { .. } => anyhow::bail!("Running project tests is unavailable on this node."),
         GitCommand::ChangesLayout => changes::layout(cwd),
         GitCommand::ChangesRows { ranges } => changes::rows(cwd, &ranges),
         GitCommand::Stage { paths } => changed(cwd, &["add", "--"], &paths),

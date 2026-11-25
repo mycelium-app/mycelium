@@ -211,6 +211,10 @@ pub fn find_in_path(program: &str, path: &std::ffi::OsStr) -> Option<String> {
 }
 
 pub fn user_shell() -> String {
+    #[cfg(windows)]
+    return std::env::var("COMSPEC").ok().filter(|shell| !shell.is_empty()).unwrap_or_else(|| "cmd.exe".to_string());
+
+    #[cfg(unix)]
     std::env::var("SHELL").ok().filter(|shell| !shell.is_empty()).unwrap_or_else(|| "/bin/sh".to_string())
 }
 
@@ -405,8 +409,10 @@ impl TerminalManager {
     fn shell_command(&self, cwd: &str, command: Option<&str>) -> Vec<String> {
         let shell = self.shell_in(cwd);
 
+        let flags = if cfg!(windows) { &["/D", "/C"][..] } else { &["-lc"][..] };
+
         match command {
-            Some(command) => [shell, vec!["-lc".to_string(), command.to_string()]].concat(),
+            Some(command) => shell.into_iter().chain(flags.iter().map(|flag| flag.to_string())).chain([command.to_string()]).collect(),
             None => shell,
         }
     }

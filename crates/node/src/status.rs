@@ -1,13 +1,32 @@
 use crate::config::{NodeConfig, config_path};
 use crate::daemon::{StatusFile, status_file_path};
 use anyhow::Result;
+#[cfg(unix)]
 use nix::sys::signal::kill;
+#[cfg(unix)]
 use nix::unistd::Pid;
 use std::fmt::Write;
 use std::path::Path;
 
+#[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
     kill(Pid::from_raw(pid as i32), None).is_ok()
+}
+
+#[cfg(windows)]
+fn process_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
+
+    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+    if handle.is_null() {
+        return false;
+    }
+
+    let status = unsafe { WaitForSingleObject(handle, 0) };
+    unsafe { CloseHandle(handle) };
+
+    status == windows_sys::Win32::Foundation::WAIT_TIMEOUT
 }
 
 fn connection_label(state_dir: &Path) -> &'static str {
@@ -31,7 +50,7 @@ fn session_labels(config: &NodeConfig) -> Vec<(String, String)> {
         let exit = std::fs::read_to_string(entry.path().join("exit.json")).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
         let label = match exit {
             Some(exit) => format!("ended (exit {})", exit["exit"]),
-            None if entry.path().join("keeper.sock").exists() => "running".to_string(),
+            None if mycelium_keeper::socket_path(&entry.path()).exists() => "running".to_string(),
             None => "not started".to_string(),
         };
 

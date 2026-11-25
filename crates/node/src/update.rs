@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow, bail};
 use sha2::{Digest, Sha256};
 use std::io::ErrorKind;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -69,6 +70,7 @@ fn swap(binary: &[u8], target: &Path) -> std::io::Result<()> {
     let staged = PathBuf::from(staged);
 
     std::fs::write(&staged, binary)?;
+    #[cfg(unix)]
     std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755))?;
 
     let renamed = std::fs::rename(&staged, target);

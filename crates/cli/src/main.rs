@@ -16,11 +16,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    #[cfg(not(windows))]
     /// Run the control plane
     Control {
         #[command(subcommand)]
         command: ControlCommand,
     },
+    #[cfg(not(windows))]
     /// Run the artifact host
     Artifacts,
     /// Join this machine to a control plane and run the node daemon
@@ -32,6 +34,12 @@ enum Command {
     Keeper {
         #[arg(long)]
         dir: PathBuf,
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
+    #[cfg(windows)]
+    #[command(hide = true)]
+    KeeperChild {
         #[arg(last = true, required = true)]
         command: Vec<String>,
     },
@@ -47,6 +55,7 @@ enum Command {
     Version,
 }
 
+#[cfg(not(windows))]
 #[derive(Subcommand)]
 enum ControlCommand {
     Serve,
@@ -98,8 +107,11 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        #[cfg(not(windows))]
         Command::Control { command: ControlCommand::Serve } => mycelium_control::serve().await,
+        #[cfg(not(windows))]
         Command::Control { command: ControlCommand::RotateSecrets } => mycelium_control::rotate_secrets().await,
+        #[cfg(not(windows))]
         Command::Artifacts => mycelium_artifacts::serve().await,
         Command::Node { command: NodeCommand::Join { url, join_token, join_token_file, name } } => {
             mycelium_node::join(mycelium_node::JoinOptions { control_plane: url, join_token, join_token_file, name, config_path: None }).await
@@ -122,6 +134,8 @@ async fn main() -> Result<()> {
         Command::Node { command: NodeCommand::Status } => mycelium_node::status().await,
         Command::Node { command: NodeCommand::VibeSignIn } => mycelium_node::vibe_sign_in::run().await,
         Command::Keeper { dir, command } => mycelium_keeper::run(dir, command).await,
+        #[cfg(windows)]
+        Command::KeeperChild { command } => std::process::exit(mycelium_keeper::windows::run_child(command)?),
         Command::SshProxy { node, token_file, control_plane } => mycelium_node::ssh_proxy::run(node, token_file, control_plane).await,
         Command::Version => {
             println!("{VERSION}");

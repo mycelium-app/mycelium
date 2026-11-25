@@ -1,5 +1,3 @@
-use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 pub const SECRETS_FILE_ENV: &str = "MYCELIUM_SECRETS_FILE";
@@ -15,10 +13,7 @@ pub fn write(session_dir: &Path, secrets: &[(String, String)]) -> std::io::Resul
     let staging = session_dir.join("secrets.env.new");
     let _ = std::fs::remove_file(&staging);
 
-    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&staging)?;
-    file.write_all(render(secrets).as_bytes())?;
-    file.sync_all()?;
-    std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o600))?;
+    crate::config::write_private_file_at(&staging, render(secrets).as_bytes(), true)?;
     std::fs::rename(&staging, &path)?;
 
     Ok(path)
@@ -32,9 +27,10 @@ fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
 
     fn sourced(path: &Path, name: &str) -> String {

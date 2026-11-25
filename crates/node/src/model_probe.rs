@@ -19,6 +19,8 @@ async fn ask(agent: AgentId, command: &[String], folder: &Path) -> Result<NodeTo
     let (program, arguments) = command.split_first().ok_or_else(|| anyhow!("{} has no ACP command on this node.", agent.as_str()))?;
     std::fs::create_dir_all(folder)?;
 
+    #[cfg(windows)]
+    let program = crate::agents::resolve_program(program).ok_or_else(|| anyhow!("{} is not installed on this node.", agent.as_str()))?;
     let mut child = Command::new(program)
         .args(arguments)
         .envs(agent_env(agent))

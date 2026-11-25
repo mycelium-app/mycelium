@@ -1,7 +1,7 @@
 use crate::config::DEFAULT_AGENT_IMAGE;
-use crate::pod::OUTPOST_LABEL;
 use anyhow::{Result, bail};
 
+pub(crate) const OUTPOST_LABEL: &str = "mycelium.app/outpost";
 const NODE_IMAGE: &str = "ghcr.io/mycelium-app/mycelium:latest";
 const MAX_OUTPOST_NAME: usize = 40;
 const MAX_NAMESPACE_NAME: usize = 63;

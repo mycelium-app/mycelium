@@ -2810,6 +2810,8 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2845,6 +2847,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
