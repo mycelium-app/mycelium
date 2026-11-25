@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.34.62
+
+- The sign-in from a chat's Authentication required card names exactly what it signs in: Sign in to Claude Code as an account on a node. A chat on a node's default sign-in says so, asks for the account the chat should use, and names who was last signed in there. The card names the account and node too.
+- Runs on in the composer's model menu says where each account runs, lists this chat's node first and each account once per node. An expired or signed-out login shows that state, and choosing it opens its sign-in on that node.
+- A newly signed-in account's usage shows as soon as the sign-in finishes, instead of up to ten minutes later.
+- A Mistral Vibe plan that has no usage to share says "Mistral doesn't share usage for this plan." on the Usage card instead of showing nothing.
+
 ## v0.34.61
 
 - On Settings, Accounts, a Claude Code login whose token and refresh have both run out shows Expired, before a chat runs into it.
