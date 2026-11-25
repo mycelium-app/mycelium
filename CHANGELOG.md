@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.34.61
+
+- On Settings, Accounts, a Claude Code login whose token and refresh have both run out shows Expired, before a chat runs into it.
+- When an agent stops because its login needs signing in again, that account shows Expired on that node straight away, the banner counts it and Sign in to all includes it. It stays Expired until the account signs in again.
+- Node columns on Settings, Accounts fit their state and Sign in button, and a narrow window scrolls the table instead of clipping them.
+
 ## v0.34.60
 
 - Traces show every call the control plane makes to an outside service, such as forges, integrations, chat and speech providers, and Prometheus, with its host, path and status.
