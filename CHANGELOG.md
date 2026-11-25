@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.34.67
+
+- Each Stoat or Discord account chooses the assistant that gets its mentions and direct messages, or Off, from the integration's page or from the assistant's Schedules and triggers. It is one setting, so changing it in either place changes both, and an account goes to at most one assistant.
+- A Stoat account signed in as you hears mentions of you and your direct messages. A Discord account keeps its bot, and hears mentions of the bot and direct messages to it.
+- An assistant's Schedules and triggers table lists its mention triggers beside its schedules, and New offers a schedule or a mention.
+- An assistant can enforce its to-do list: with Enforce to-do list on under Instructions, a turn that ends without the list being updated since your last message gets one reminder to update it before stopping.
+- A conversation that reaches a usage limit tries every other signed-in account of the same agent before moving to another agent on its Any model list.
+- An account that reached its limit is not chosen again until the limit resets, even when its usage reads late, so a conversation no longer flips between exhausted accounts. When every signed-in account is at its limit, the conversation stops and the thread says so and when the next one resets.
+- An account folder whose credentials hold no token shows as Signed out and is never chosen for a conversation.
+- A model chosen in the composer before the agent's session has started is kept and applied when it starts, instead of refusing with "The session is still starting".
+- The composer's model control shows a chosen account in full; the model name is shortened first.
+- A message the server kept but could not deliver at once is no longer kept a second time when it is sent again.
+
 ## v0.34.66
 
 - A message you send shows in the thread at once, dimmed with Sending. A message that could not be sent no longer disappears: it stays in place with a red border, says why it was not sent, and has Retry and Delete.
