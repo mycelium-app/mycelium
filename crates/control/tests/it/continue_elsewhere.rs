@@ -121,6 +121,24 @@ async fn continue_on(server: &Server, id: Uuid, body: Value) -> (u16, Value) {
 }
 
 #[tokio::test]
+async fn moving_to_another_agent_drops_the_old_agents_models_and_settings() {
+    let server = Server::start().await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
+    let id = idle_conversation(&server, &mut link, "sam@example.com").await;
+    sqlx::query("update conversations set model = 'gpt-6.1-sol', mode = 'auto', options = $2 where id = $1")
+        .bind(id)
+        .bind(json!({"models": {"currentModelId": "gpt-6.1-sol", "availableModels": [{"modelId": "gpt-6.1-sol", "name": "gpt-6.1-sol"}]}, "config_options": [{"id": "reasoning", "currentValue": "medium"}]}))
+        .execute(&server.pool)
+        .await
+        .unwrap();
+
+    let (status, body) = continue_on(&server, id, json!({"agent": "codex"})).await;
+
+    assert_eq!(status, 200, "{body}");
+    assert_eq!((body["agent"].clone(), body.get("options").cloned().unwrap_or(Value::Null), body["model"].clone()), (json!("codex"), Value::Null, Value::Null), "{body}");
+}
+
+#[tokio::test]
 async fn continuing_on_another_account_resumes_the_same_session_there() {
     let server = Server::start().await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn), login("work@example.org", LoginState::SignedIn)]).await;

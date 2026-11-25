@@ -122,7 +122,7 @@ pub async fn continue_with(state: &AppState, owner: Uuid, id: Uuid, target: Targ
         let chat_node = chats::chat_node(state, owner).await?;
 
         row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
-            "update conversations set agent = $2, account = null, provider_id = $3, model = $4, node_id = $5, cwd = '', project_id = null, scratch = false,
+            "update conversations set agent = $2, account = null, provider_id = $3, model = $4, node_id = $5, cwd = '', project_id = null, scratch = false, options = null, mode = null,
                  previous_session_ids = case when acp_session_id is null then previous_session_ids else array_append(previous_session_ids, acp_session_id) end, acp_session_id = null
              where id = $1 returning {CONVERSATION_COLUMNS}"
         )))
@@ -172,6 +172,7 @@ pub async fn continue_with(state: &AppState, owner: Uuid, id: Uuid, target: Targ
 
         row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
             "update conversations set agent = $2, account = $3, provider_id = null, model = $7, node_id = $4, cwd = $5, project_id = $6, scratch = $8,
+                 options = case when agent = $2 then options else null end, mode = case when agent = $2 then mode else null end,
                  previous_session_ids = case when acp_session_id is null then previous_session_ids else array_append(previous_session_ids, acp_session_id) end, acp_session_id = null
              where id = $1 returning {CONVERSATION_COLUMNS}"
         )))
