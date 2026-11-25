@@ -1,6 +1,10 @@
 package mycelium.desktop
 
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
@@ -29,6 +33,10 @@ private const val FailedJson = """{"id":"c1","owner":"u","node_id":"n1","agent":
 
 private const val SignInError = """[{"conversation_id":"c1","seq":1,"kind":"error","payload":{"message":"Authentication required","sign_in_required":true}}]"""
 
+private const val ExpiredOnWillow = """[{"id":"n1","name":"willow","hostname":"willow","os":"linux","arch":"x86_64","version":"0.1.0","online":true,"draining":false,
+ "agents":[{"agent":"claude","version":"2.1.308","available":true}],
+ "logins":[{"agent":"claude","account":"sam@example.com","method":"oauth_token","state":"expired"}]}]"""
+
 private const val LimitError = """[{"conversation_id":"c1","seq":1,"kind":"error","payload":{"message":"This node already runs 4 conversations, its limit."}}]"""
 
 class RetryTest {
@@ -41,7 +49,7 @@ class RetryTest {
     private val retried = CopyOnWriteArrayList<String>()
     private val logins = CopyOnWriteArrayList<String>()
 
-    private fun store(events: String = LimitError): Store {
+    private fun store(events: String = LimitError, conversation: String = FailedJson, nodes: String = "[]"): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -59,10 +67,11 @@ class RetryTest {
             }
 
             val body = when {
-                path.endsWith("/conversations") -> "[$FailedJson]"
-                path.endsWith("/conversations/c1") -> FailedJson
+                path.endsWith("/conversations") -> "[$conversation]"
+                path.endsWith("/conversations/c1") -> conversation
                 path.endsWith("/events") -> events
-                path.endsWith("/queue") || path.endsWith("/nodes") || path.endsWith("/groups") || path.endsWith("/projects") -> "[]"
+                path.endsWith("/nodes") -> nodes
+                path.endsWith("/queue") || path.endsWith("/groups") || path.endsWith("/projects") -> "[]"
                 else -> "{}"
             }
 
@@ -124,5 +133,29 @@ class RetryTest {
         assertTrue(logins.single().startsWith("/api/v1/nodes/n1/logins "), logins.single())
         assertTrue(logins.single().contains("\"account\":\"sam@example.com\""), logins.single())
         assertEquals(emptyList(), retried)
+    }
+
+    @Test
+    fun aSignInCardNamesTheAccountAndNodeAndItsSignInSaysExactlyWhatItSignsIn() {
+        show(store(SignInError, nodes = ExpiredOnWillow))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Error: Authentication required. sam@example.com on willow").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Sign in Claude Code again").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodes(hasText("Sign in to Claude Code as sam@example.com on willow") and isHeading()).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, rule.onAllNodesWithText("This node's default sign-in has expired.", substring = true).fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun aChatOnTheDefaultSignInSaysSoAndNamesWhoWasLastSignedIn() {
+        show(store(SignInError, FailedJson.replace("\"account\":\"sam@example.com\"", "\"account\":null"), ExpiredOnWillow))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Error: Authentication required. Default sign-in on willow").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Sign in Claude Code again").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodes(hasText("Sign in to Claude Code on willow") and isHeading()).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("This node's default sign-in has expired. Sign in with the account this chat should use.").assertExists()
+        rule.onNodeWithText("Last signed in as sam@example.com").assertExists()
+        assertTrue(logins.single().startsWith("/api/v1/nodes/n1/logins "), logins.single())
     }
 }

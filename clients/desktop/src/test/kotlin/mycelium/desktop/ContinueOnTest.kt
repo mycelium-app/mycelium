@@ -102,7 +102,7 @@ class ContinueOnTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Claude Code · example.com").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Model: Claude Code · example.com").performClick()
         rule.onNodeWithText("Account").performClick()
-        rule.onNodeWithText("Claude Code · work@example.org").performClick()
+        rule.onNodeWithText("Claude Code · work@example.org on willow").performClick()
 
         rule.waitUntil(5_000) { requests.toList().any { it.first == "PATCH /api/v1/conversations/c1" } }
         assertEquals("""{"account":"work@example.org"}""", requests.toList().last { it.first == "PATCH /api/v1/conversations/c1" }.second)

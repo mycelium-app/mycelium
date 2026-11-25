@@ -34,6 +34,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import mycelium.api.LoginState
 import mycelium.api.ModelChoice
 import mycelium.api.ModelProvider
 import mycelium.state.ModelOption
@@ -68,14 +69,13 @@ private const val ModelMenuTitle = "Model"
 
 private const val NoNodeOnline = "No node online"
 
-private const val ThisDevice = "This device"
 
 private const val AnyAccount = "Any account"
 
 private fun PickerAccount.description(): String = when {
-    signIn -> "$label, $usage"
+    state != LoginState.SignedIn -> "$label, $usage. Sign in to use it"
     node == null -> "$label, $NoNodeOnline"
-    else -> "$label on ${if (here) ThisDevice.lowercase() else node.name}, $usage"
+    else -> "$label, $usage"
 }
 
 @Composable
@@ -168,9 +168,12 @@ fun ModelPicker(controls: ModelPickerControls, maxWidth: Dp = Tokens.Size.Accoun
                         for (row in controls.accounts) {
                             val rowRefusal = refusal?.takeIf { it.rowId == row.id }
 
+                            val needsSignIn = row.state != LoginState.SignedIn
+
                             MenuItem(
-                                if (row.signIn) "${row.usage} · ${row.account}" else row.label,
+                                if (row.signIn && !needsSignIn) "${row.usage} · ${row.account}" else row.label,
                                 leading = MyIcon.Person,
+                                trailing = if (needsSignIn) ({ StatusMark(row.usage, Tone.Failed, MyIcon.Failed) }) else null,
                                 onClick = { chooseAccount(row.id) },
                                 checked = row.id == controls.account,
                                 description = row.description(),

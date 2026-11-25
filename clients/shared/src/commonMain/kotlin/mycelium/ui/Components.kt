@@ -1102,7 +1102,7 @@ fun ReconnectingBanner(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun ErrorBanner(message: String, onDismiss: () -> Unit, modifier: Modifier = Modifier, actions: (@Composable RowScope.() -> Unit)? = null) {
+fun ErrorBanner(message: String, onDismiss: () -> Unit, modifier: Modifier = Modifier, detail: String? = null, actions: (@Composable RowScope.() -> Unit)? = null) {
     val colors = MyTheme.colors
 
     Column(
@@ -1112,14 +1112,17 @@ fun ErrorBanner(message: String, onDismiss: () -> Unit, modifier: Modifier = Mod
             .border(Tokens.Size.Hairline, colors.statusFailed, ControlShape)
             .padding(start = Tokens.Space.S3, top = Tokens.Space.S1, end = Tokens.Space.S1, bottom = Tokens.Space.S2)
             .semantics {
-                contentDescription = "Error: $message"
+                contentDescription = "Error: $message${detail?.let { ". $it" }.orEmpty()}"
                 liveRegion = LiveRegionMode.Polite
             },
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Top) {
             Icon(MyIcon.Failed, colors.statusFailed, Tokens.Size.IconSm, Modifier.padding(top = Tokens.Space.S1))
-            Label(message, Modifier.weight(1f).padding(top = Tokens.Space.S0_5), Tokens.Type.Meta)
+            Column(Modifier.weight(1f).padding(top = Tokens.Space.S0_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+                Label(message, style = Tokens.Type.Meta)
+                detail?.let { Label(it, style = Tokens.Type.Meta, color = colors.textMuted) }
+            }
             MyButton(onDismiss, icon = MyIcon.Close, description = "Dismiss", size = ButtonSize.Sm, muted = true)
         }
 

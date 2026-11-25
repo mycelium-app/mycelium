@@ -18,6 +18,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import mycelium.api.ModelChoice
 import mycelium.api.MyceliumJson
+import mycelium.api.LoginState
 import mycelium.api.NodeSummary
 import mycelium.state.PickerAccount
 import mycelium.state.ModelOption
@@ -67,10 +68,11 @@ class ModelPickerTest {
         onPickModel: (ModelOption) -> Unit = {},
         onFavourite: (ModelOption, Boolean) -> Unit = { _, _ -> },
         onPickAccount: (String?) -> Unit = {},
+        extra: List<PickerAccount> = emptyList(),
     ) {
         val willow = nodes.first { it.name == "willow" }
         val atlas = nodes.first { it.name == "atlas" }
-        val accounts = listOf(row(atlas, "claude", "work@example.org", "64% left", false), row(willow, "claude", "sam@example.com", "18% left", true))
+        val accounts = listOf(row(atlas, "claude", "work@example.org", "64% left", false), row(willow, "claude", "sam@example.com", "18% left", true)) + extra
 
         rule.setContent {
             MyceliumTheme(true) {
@@ -184,10 +186,23 @@ class ModelPickerTest {
         rule.onNodeWithText("Account").performClick()
 
         rule.onNodeWithContentDescription("Claude Code · work@example.org on atlas, 64% left").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Claude Code · sam@example.com on this device, 18% left").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Claude Code · sam@example.com on willow, 18% left").assertIsDisplayed()
         rule.onNodeWithText("Any account").performClick()
 
         assertEquals(null, picked)
+    }
+
+    @Test
+    fun anExpiredLoginIsListedWithItsStateAndChoosingItOpensItsSignIn() {
+        var picked: String? = "unset"
+        val birch = nodes.first { it.name == "atlas" }.copy(id = "n3", name = "birch")
+        showPicker(onPickAccount = { picked = it }, extra = listOf(PickerAccount("sign in:n3:claude:sam@example.com", "claude", "sam@example.com", birch, false, "Expired", signIn = true, state = LoginState.Expired)))
+
+        rule.onNodeWithText("Account").performClick()
+        rule.onNodeWithText("Expired").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Claude Code · sam@example.com on birch, Expired. Sign in to use it").performClick()
+
+        assertEquals("sign in:n3:claude:sam@example.com", picked)
     }
 
     @Test

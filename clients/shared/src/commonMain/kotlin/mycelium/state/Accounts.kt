@@ -166,10 +166,10 @@ fun currentContinueLabel(conversation: Conversation, providers: List<ModelProvid
     else -> "${agentName(conversation.agent)} · ${conversation.account ?: "Default account"}"
 }
 
-fun reachableLogins(nodes: Collection<NodeSummary>, firstNodeId: String? = null): List<Pair<NodeSummary, LoginInfo>> =
-    nodes.filter { it.online }.sortedBy { if (it.id == firstNodeId) 0 else 1 }.flatMap { node ->
-        node.logins.filter { login -> login.state == LoginState.SignedIn && node.agents.any { it.agent == login.agent && it.available } }.map { node to it }
-    }
+fun reachableLogins(nodes: Collection<NodeSummary>, firstNodeId: String? = null, shown: (LoginInfo) -> Boolean = { it.state == LoginState.SignedIn }): List<Pair<NodeSummary, LoginInfo>> =
+    nodes.filter { it.online }.sortedWith(compareBy({ if (it.id == firstNodeId) 0 else 1 }, { it.name })).flatMap { node ->
+        node.logins.filter { login -> shown(login) && node.agents.any { it.agent == login.agent && it.available } }.map { node to it }
+    }.distinctBy { (node, login) -> Triple(node.id, login.agent, login.account) }
 
 fun continueAccountId(conversation: Conversation, node: NodeSummary, login: LoginInfo): String = when {
     node.id == conversation.nodeId && login.agent == conversation.agent -> "$ContinueAccountPrefix${accountChoiceId(login)}"
@@ -177,8 +177,8 @@ fun continueAccountId(conversation: Conversation, node: NodeSummary, login: Logi
     else -> "$ContinueNodePrefix${node.id}:${login.agent}:${accountChoiceId(login)}"
 }
 
-data class PickerAccount(val id: String, val agent: String, val account: String?, val node: NodeSummary?, val here: Boolean, val usage: String, val signIn: Boolean = false) {
-    val label: String = "${agentName(agent)} · ${account ?: "Default account"}"
+data class PickerAccount(val id: String, val agent: String, val account: String?, val node: NodeSummary?, val here: Boolean, val usage: String, val signIn: Boolean = false, val state: LoginState = LoginState.SignedIn) {
+    val label: String = "${agentName(agent)} · ${account ?: "Default account"}${node?.let { " on ${it.name}" }.orEmpty()}"
 }
 
 const val UsageUnknown = "Usage unknown"
@@ -192,6 +192,19 @@ fun loginUsage(login: LoginInfo): String {
 
 fun pickerAccounts(nodes: Collection<NodeSummary>, hereNodeId: String?, idOf: (NodeSummary, LoginInfo) -> String): List<PickerAccount> =
     reachableLogins(nodes, hereNodeId).map { (node, login) -> PickerAccount(idOf(node, login), login.agent, login.account, node, node.id == hereNodeId, loginUsage(login)) }
+
+fun conversationAccounts(nodes: Collection<NodeSummary>, conversation: Conversation, node: NodeSummary?): List<PickerAccount> {
+    val needsSignIn = { login: LoginInfo -> login.state == LoginState.Expired || login.state == LoginState.SignedOut && login.account != null }
+    val listed = reachableLogins(nodes, conversation.nodeId) { it.state == LoginState.SignedIn || needsSignIn(it) }.map { (on, login) ->
+        when (login.state) {
+            LoginState.SignedIn -> PickerAccount(continueAccountId(conversation, on, login), login.agent, login.account, on, on.id == conversation.nodeId, loginUsage(login))
+            else -> PickerAccount("$SignInPrefix${on.id}:${login.agent}:${accountChoiceId(login)}", login.agent, login.account, on, on.id == conversation.nodeId, if (login.state == LoginState.Expired) "Expired" else "Signed out", signIn = true, state = login.state)
+        }
+    }
+    val offered = node?.let { signInAccounts(nodes, it, conversation.agent) }.orEmpty().filter { offer -> listed.none { it.agent == offer.agent && it.account == offer.account && it.node?.id == offer.node?.id } }
+
+    return listed + offered
+}
 
 fun signInAccounts(nodes: Collection<NodeSummary>, node: NodeSummary, agent: String): List<PickerAccount> =
     accountsElsewhere(nodes, node, agent).map { PickerAccount(SignInPrefix + it, agent, it, node, true, "Sign in on ${node.name}", signIn = true) }

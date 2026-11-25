@@ -35,7 +35,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import mycelium.state.HarnessAgents
 
-data class LoginSession(val loginId: String, val agent: String)
+data class LoginSession(val loginId: String, val agent: String, val account: String? = null, val node: String? = null, val expiredDefault: Boolean = false, val lastSignedInAs: String? = null) {
+    val title: String = "Sign in to ${agentName(agent)}${account?.let { " as $it" }.orEmpty()}${node?.let { " on $it" }.orEmpty()}"
+}
 
 fun loginMethodFor(agent: String): String = when (agent) {
     "codex" -> "device_auth"
@@ -383,7 +385,13 @@ fun LoginPanel(
         Modifier.fillMaxWidth().then(if (framed) Modifier.background(colors.bgSelected).padding(Tokens.Space.S3) else Modifier).semantics { contentDescription = "${agentName(session.agent)} sign-in" },
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
     ) {
-        Label("Sign in ${agentName(session.agent)}", style = Tokens.Type.UiStrong)
+        Label(session.title, Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+
+        if (session.expiredDefault) {
+            Label("This node's default sign-in has expired. Sign in with the account this chat should use.", style = Tokens.Type.Meta, color = colors.textMuted)
+        }
+
+        session.lastSignedInAs?.let { Label("Last signed in as $it", style = Tokens.Type.Meta, color = colors.textMuted) }
 
         SelectionContainer {
             Box(

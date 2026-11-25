@@ -679,7 +679,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                             if (pickedAccount != null && pickedAccount.startsWith(SignInPrefix) && node != null && chosenAgent != null) {
                                                 store.act {
                                                     val started = store.api.startLogin(node.id, chosenAgent, loginMethodFor(chosenAgent), pickedAccount.removePrefix(SignInPrefix))
-                                                    signIn = LoginSession(started.loginId, chosenAgent)
+                                                    signIn = LoginSession(started.loginId, chosenAgent, pickedAccount.removePrefix(SignInPrefix), node.name)
                                                 }
                                             } else {
                                                 anyModel = false

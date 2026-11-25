@@ -10,6 +10,7 @@ import mycelium.api.NodeSummary
 import mycelium.state.accountsElsewhere
 import mycelium.state.PickerAccount
 import mycelium.state.continueAccountId
+import mycelium.state.conversationAccounts
 import mycelium.state.pickerAccounts
 import mycelium.state.reachableLogins
 import mycelium.state.newChatAccounts
@@ -46,8 +47,22 @@ class PickerAccountsTest {
 
         assertEquals(listOf("account:sam@example.com", "account:work@example.org", "agent:codex:codex@example.com"), listed.map { it.id })
         assertEquals(listOf("claude", "claude", "codex"), listed.map { it.agent })
-        assertEquals("Claude Code · work@example.org", listed[1].label)
+        assertEquals("Claude Code · work@example.org on willow", listed[1].label)
         assertEquals(listOf(true, true, true), listed.map { it.here })
+    }
+
+    @Test
+    fun aChatListsEachAccountWhereItRunsWithItsOwnNodeFirstAndOneRowPerAgentAccountAndNode() {
+        val atlas = Node.copy(id = "n2", name = "atlas", logins = listOf(login("claude", "sam@example.com"), login("claude", "sam@example.com")))
+        val birch = Node.copy(id = "n3", name = "birch", logins = listOf(login("claude", "sam@example.com", LoginState.Expired), login("claude", null, LoginState.SignedOut)))
+        val willow = Node.copy(logins = listOf(login("claude", "sam@example.com")))
+
+        val listed = conversationAccounts(listOf(atlas, birch, willow), conversation("claude", "sam@example.com"), willow)
+
+        assertEquals(listOf("Claude Code · sam@example.com on willow", "Claude Code · sam@example.com on atlas", "Claude Code · sam@example.com on birch"), listed.map { it.label })
+        assertEquals(listOf(LoginState.SignedIn, LoginState.SignedIn, LoginState.Expired), listed.map { it.state })
+        assertEquals("Expired", listed.last().usage)
+        assertEquals(listOf(false, false, true), listed.map { it.signIn })
     }
 
     @Test

@@ -219,13 +219,13 @@ class AccountsAndSessionsTest {
         rule.onNodeWithText("2 sign-ins need you").assertExists()
         rule.onNodeWithText("Sign in to all 2").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Sign in Claude Code").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Sign in to Claude Code as sam@example.com on orion").fetchSemanticsNodes().isNotEmpty() }
         assertEquals(listOf("/api/v1/nodes/n2/logins"), logins())
         assertTrue(bodies.last().contains("\"agent\":\"claude\"") && bodies.last().contains("\"account\":\"sam@example.com\""), bodies.last())
 
         rule.onNodeWithText("Cancel").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Sign in Codex").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Sign in to Codex as sam@example.com", substring = true).fetchSemanticsNodes().isNotEmpty() }
         assertEquals(listOf("/api/v1/nodes/n2/logins", "/api/v1/nodes/n1/logins"), logins())
         assertTrue(bodies.last().contains("\"agent\":\"codex\"") && bodies.last().contains("\"account\":\"sam@example.com\""), bodies.last())
 
@@ -233,7 +233,7 @@ class AccountsAndSessionsTest {
         rule.waitForIdle()
 
         assertEquals(2, logins().size)
-        assertEquals(0, rule.onAllNodesWithText("Sign in Codex").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("Sign in to Codex", substring = true).fetchSemanticsNodes().size)
     }
 
     @Test
@@ -256,7 +256,7 @@ class AccountsAndSessionsTest {
         rule.onNodeWithText("1 sign-in needs you").assertExists()
         rule.onNodeWithContentDescription("Sign in default on orion").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Sign in Mistral Vibe").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Sign in to Mistral Vibe as default on orion").fetchSemanticsNodes().isNotEmpty() }
         assertEquals(listOf("/api/v1/nodes/n1/logins"), logins())
         assertTrue(bodies.last().contains("\"account\":\"default\""), bodies.last())
         assertTrue(bodies.last().contains("\"agent\":\"vibe\""), bodies.last())
@@ -393,7 +393,7 @@ class AccountsAndSessionsTest {
 
         rule.onNodeWithContentDescription("Model: Claude Opus 5.5").performClick()
         rule.onNodeWithText("Account").performClick()
-        rule.onNodeWithText("Claude Code · sam@example.com").performClick()
+        rule.onNodeWithText("Claude Code · sam@example.com on willow").performClick()
 
         assertEquals("sam@example.com", picked)
     }
@@ -405,7 +405,7 @@ class AccountsAndSessionsTest {
 
         rule.onNodeWithContentDescription("Model: Claude Opus 5.5").performClick()
         rule.onNodeWithText("Account").performClick()
-        rule.onNodeWithText("Claude Code · sam@example.com").performClick()
+        rule.onNodeWithText("Claude Code · sam@example.com on willow").performClick()
 
         assertEquals("sam@example.com", picked)
     }
@@ -418,7 +418,7 @@ class AccountsAndSessionsTest {
         rule.onNodeWithContentDescription("More for Claude Code").performClick()
         rule.onNodeWithText("Sign in a new account on willow").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Sign in Claude Code").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Sign in to Claude Code as account-", substring = true).fetchSemanticsNodes().isNotEmpty() }
         assertEquals(listOf("/api/v1/nodes/n1/logins"), logins())
         assertTrue(Regex(""""account":"account-\d{4}"""").containsMatchIn(bodies.last()), bodies.last())
     }
@@ -450,8 +450,8 @@ class AccountsAndSessionsTest {
         rule.onNodeWithContentDescription("Model: Claude Opus 5.5").performClick()
         rule.onNodeWithText("Account").performClick()
 
-        rule.onNodeWithContentDescription("Claude Code · sam@example.com on this device, 18% left").assertExists()
-        rule.onNodeWithContentDescription("Claude Code · work@example.net on this device, Usage unknown").assertExists()
+        rule.onNodeWithContentDescription("Claude Code · sam@example.com on willow, 18% left").assertExists()
+        rule.onNodeWithContentDescription("Claude Code · work@example.net on willow, Usage unknown").assertExists()
     }
 
     @Test
@@ -461,7 +461,7 @@ class AccountsAndSessionsTest {
 
         rule.onNodeWithContentDescription("Model: Claude Opus 5.5").performClick()
         rule.onNodeWithText("Account").performClick()
-        rule.onNodeWithText("Claude Code · Default account").performClick()
+        rule.onNodeWithText("Claude Code · Default account on willow").performClick()
 
         assertEquals(DefaultAccountId, picked)
     }

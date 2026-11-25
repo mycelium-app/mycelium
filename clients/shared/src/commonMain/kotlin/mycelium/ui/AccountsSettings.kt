@@ -51,7 +51,7 @@ fun AccountsSettings(store: Store) {
     val startSignIn: (PendingSignIn) -> Unit = { pending ->
         store.act {
             val started = store.api.startLogin(pending.node.id, pending.agent, loginMethodFor(pending.agent), pending.account)
-            signIn = LoginSession(started.loginId, pending.agent)
+            signIn = LoginSession(started.loginId, pending.agent, pending.account, pending.node.name)
         }
     }
     val signInInTurn: (List<PendingSignIn>) -> Unit = { pending ->

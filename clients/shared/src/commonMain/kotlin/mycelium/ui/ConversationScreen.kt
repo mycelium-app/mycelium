@@ -105,15 +105,13 @@ import mycelium.state.Store
 import mycelium.state.hasSpeechToText
 import mycelium.state.ThreadItem
 import mycelium.state.continueAccountId
-import mycelium.state.pickerAccounts
-import mycelium.state.signInAccounts
+import mycelium.state.conversationAccounts
 import mycelium.state.ContinueChatPrefix
 import mycelium.state.routedStatus
 import mycelium.state.currentContinueId
 import mycelium.state.agentName
 import mycelium.state.ContinueAccountPrefix
 import mycelium.state.DefaultAccountId
-import mycelium.state.SignInPrefix
 import mycelium.state.isLaptop
 import mycelium.state.sessionGrants
 import mycelium.state.ConversationPlace
@@ -361,12 +359,12 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     }
 
     val node = if (conversation.runsOnModel) null else state.nodes[conversation.nodeId]
+    val defaultSignIn = node?.logins?.firstOrNull { it.agent == conversation.agent && !it.managed && it.account?.contains('@') == true }
     val accountPicker = run {
         val favourites = rememberFavouriteModels(store)
         val login = node?.logins?.firstOrNull { it.agent == conversation.agent && it.account == conversation.account }
         val accounts = remember(conversation, state.nodes) {
-            pickerAccounts(state.nodes.values, conversation.nodeId) { pickedNode, pickedLogin -> continueAccountId(conversation, pickedNode, pickedLogin) } +
-                node?.let { signInAccounts(state.nodes.values, it, conversation.agent) }.orEmpty()
+            conversationAccounts(state.nodes.values, conversation, node)
         }
         val options = remember(state.nodes, providers, node) { modelOptions(state.nodes.values, node, providers) }
         val sessionModel = remember(conversation, state.events[id], state.sessionUpdates[id], node) {
@@ -405,9 +403,9 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
                     try {
                         when {
-                            chosen.startsWith(SignInPrefix) && node != null -> {
-                                val started = api.startLogin(node.id, conversation.agent, loginMethodFor(conversation.agent), chosen.removePrefix(SignInPrefix))
-                                signIn = LoginSession(started.loginId, conversation.agent)
+                            row?.signIn == true && row.node != null -> {
+                                val started = api.startLogin(row.node.id, row.agent, loginMethodFor(row.agent), row.account)
+                                signIn = LoginSession(started.loginId, row.agent, row.account, row.node.name)
                             }
                             conversation.acpSessionId == null && chosen == "$ContinueAccountPrefix$DefaultAccountId" -> api.patchConversation(id, PatchConversationRequest(useDefaultAccount = true))
                             conversation.acpSessionId == null && chosen.startsWith(ContinueAccountPrefix) -> api.patchConversation(id, PatchConversationRequest(account = chosen.removePrefix(ContinueAccountPrefix)))
@@ -776,10 +774,11 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         modifier = Modifier.weight(1f),
                         onSuggest = ::send,
                         onRetry = if (conversation.status == ConversationStatus.Failed) ({ store.act { api.retryConversation(id) } }) else null,
+                        signInFor = node?.let { "${conversation.account ?: "Default sign-in"} on ${it.name}" },
                         onSignIn = if (conversation.status == ConversationStatus.Failed) ({
                             store.act {
                                 val started = api.startLogin(conversation.nodeId, conversation.agent, loginMethodFor(conversation.agent), conversation.account)
-                                signIn = LoginSession(started.loginId, conversation.agent)
+                                signIn = LoginSession(started.loginId, conversation.agent, conversation.account, node?.name, expiredDefault = conversation.account == null, lastSignedInAs = defaultSignIn?.account?.takeIf { conversation.account == null })
                             }
                         }) else null,
                         onDismissFailure = if (conversation.status == ConversationStatus.Failed) ({ store.dismissFailure(conversation) }) else null,
