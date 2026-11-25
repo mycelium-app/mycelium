@@ -59,12 +59,13 @@ class QueuedMessagesTest {
         remove: (String) -> Unit = {},
         queueEdit: QueueEdit? = null,
         initialText: String = "",
+        parked: List<mycelium.state.Outgoing> = emptyList(),
     ) {
         rule.setContent {
             MyceliumTheme(true) {
                 CompositionLocalProvider(LocalPlatform provides platform, LocalTouch provides touch, LocalAttachmentBytes provides { testPng(96, 64) }) {
                     Composer(
-                        conversation = conversation, working = true, queue = queued, onSend = {}, onStop = {},
+                        conversation = conversation, working = true, queue = queued, parked = parked, onSend = {}, onStop = {},
                         onSendQueuedNow = sendNow, onEditQueued = edit, onMoveQueued = move, onRemoveQueued = remove,
                         options = SessionOptions(emptyList(), null, emptyList(), null, emptyList()), commands = emptyList(),
                         onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },
@@ -73,6 +74,15 @@ class QueuedMessagesTest {
                 }
             }
         }
+    }
+
+    @Test
+    fun aMessageSentWhileATurnRunsWaitsAtTheEndOfTheQueueAsSending() {
+        show(parked = listOf(mycelium.state.Outgoing("c-3", "this ui makes no sense")))
+
+        rule.onNodeWithText("3 queued messages").assertExists()
+        rule.onNodeWithText("this ui makes no sense").assertExists()
+        rule.onNodeWithText("Sending").assertExists()
     }
 
     private fun openActions(number: Int) {

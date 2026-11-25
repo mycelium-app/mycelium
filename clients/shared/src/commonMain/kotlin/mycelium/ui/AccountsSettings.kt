@@ -82,7 +82,7 @@ fun AccountsSettings(store: Store) {
             onBack = { opened = null },
         )
     } else {
-        Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
             if (needYou.isNotEmpty()) {
                 val count = needYou.size
 
@@ -103,12 +103,12 @@ fun AccountsSettings(store: Store) {
             }
 
             if (agents.isEmpty()) {
-                Label("No agent is installed on any node. Join a node from Settings, Nodes.", color = colors.textMuted)
+                Label("No agent is installed on any node. Install one from the nodes above.", color = colors.textMuted)
             } else {
                 val rows = agents.flatMap { agent -> listOf(agent to null) + listed.filter { it.agent == agent }.map { agent to it } }
 
                 Table(
-                    listOf(Col("Account", 160.dp, weight = 1f)) + nodes.map { Col(it.name, 120.dp, rigid = true) } + listOf(Col("Usage", 90.dp), ActionColumn),
+                    listOf(Col("Account", 160.dp, weight = 1f, rigid = true)) + nodes.map { Col(it.name, 96.dp, rigid = true) } + listOf(Col("Usage", 72.dp, rigid = true), ActionColumn),
                     rows.size,
                     { row, column ->
                         val account = rows[row].second
@@ -121,6 +121,10 @@ fun AccountsSettings(store: Store) {
                             else -> TableCell.Slot {
                                 RowMenu(account.label) { close ->
                                     MenuItem("Open", onClick = { close(); opened = account.agent to account.label }, leading = MyIcon.ChevronRight)
+
+                                    for (on in account.nodes.filter { it.managed }) {
+                                        MenuItem("Remove from ${on.nodeName}", onClick = { close(); store.act { store.api.removeLogin(on.nodeId, account.agent, account.label) } }, leading = MyIcon.Close)
+                                    }
                                 }
                             }
                         }
@@ -128,6 +132,7 @@ fun AccountsSettings(store: Store) {
                     rowKey = { row -> "${rows[row].first}/${rows[row].second?.label}" },
                     onRow = { row -> rows[row].second?.let { opened = it.agent to it.label } },
                     rowDescription = { row -> rows[row].second?.let { "${agentName(it.agent)} ${it.label}" } ?: agentName(rows[row].first) },
+                    stickyFirst = true,
                     rowSpan = { row ->
                         val agent = rows[row].first
 
@@ -135,7 +140,7 @@ fun AccountsSettings(store: Store) {
                             {
                                 val installedOn = nodes.filter { node -> node.online && node.agents.any { it.agent == agent && it.available } }
 
-                                Row(Modifier.fillMaxWidth().padding(vertical = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                                Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
                                     Icon(agentIcon(agent), colors.textMuted, Tokens.Size.IconSm)
                                     Label(agentName(agent), Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong)
 
@@ -174,7 +179,7 @@ private fun accountCell(account: AgentAccount, node: NodeSummary, muted: Color, 
 
     return when {
         on == null && installed && node.online -> TableCell.Slot("Add", extra = 24.dp) {
-            MyButton({ onSignIn(pending) }, text = "Add", size = ButtonSize.Sm, muted = true, description = "Add ${account.label} on ${node.name}")
+            MyButton({ onSignIn(pending) }, text = "Add", size = ButtonSize.Sm, muted = true, flush = true, description = "Add ${account.label} on ${node.name}")
         }
 
         on == null && installed -> TableCell.Text("Not signed in", Tokens.Type.Meta, muted)

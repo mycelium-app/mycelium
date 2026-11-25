@@ -102,14 +102,14 @@ fun NodesSettings(store: Store, platform: Platform, onOpenNode: (String) -> Unit
     val loadFailures by store.loadFailures.collectAsState()
     val load = { store.load(NodesList) { store.refreshNodes() } }
     var joinOpen by remember { mutableStateOf(false) }
-    var updating by remember { mutableStateOf<NodeSummary?>(null) }
-    val nodes = state.nodes.values.sortedWith(compareByDescending<NodeSummary> { it.online }.thenBy { it.name })
+    var changing by remember { mutableStateOf<NodeChanges?>(null) }
+    val nodes = state.nodes.values.sortedBy { it.name }
 
     LaunchedEffect(Unit) {
         load()
     }
 
-    Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             Label("Nodes", Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong)
 
@@ -128,109 +128,161 @@ fun NodesSettings(store: Store, platform: Platform, onOpenNode: (String) -> Unit
             Label("No nodes. Choose Join a node to connect the first one.", color = colors.textMuted)
         } else {
             Table(
-                listOf(Col("Node", 120.dp, weight = 1f), Col("State", 72.dp), Col("Mycelium", 88.dp)) + HarnessAgents.map { Col(agentName(it), 104.dp) } + Col("", 120.dp, align = ColumnAlign.End),
+                listOf(Col("Node", 120.dp, weight = 1f, rigid = true), Col("Mycelium", 72.dp, rigid = true)) + HarnessAgents.map { Col(agentName(it), 88.dp, rigid = true) } + Col("", 32.dp, align = ColumnAlign.End, rigid = true),
                 nodes.size,
                 { row, column ->
                     val node = nodes[row]
+                    val updates = updatesOn(node)
 
                     when (column) {
-                        0 -> TableCell.Slot(node.name + if (node.kubernetes != null) " Kubernetes" else "", extra = Tokens.Size.IconSm + Tokens.Space.S2 * 2) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconSm)
-                                Label(node.name, maxLines = 1)
+                        0 -> nodeCell(node)
+                        1 -> versionCell(bare(node.version), node.updateAvailable?.let(::bare))
 
-                                if (node.kubernetes != null) {
-                                    Tag("Kubernetes")
+                        2 + HarnessAgents.size -> when {
+                            node.online && updates.any() -> TableCell.Slot("Update", extra = Tokens.Space.S3 * 2) {
+                                MyButton({ changing = updates }, text = "Update", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Update ${node.name}")
+                            }
+
+                            else -> TableCell.Slot("", extra = Tokens.Size.ControlSm) {
+                                RowMenu(node.name) { close ->
+                                    MenuItem("Open", onClick = { close(); onOpenNode(node.id) }, leading = MyIcon.ChevronRight)
                                 }
                             }
                         }
 
-                        1 -> when {
-                            node.draining -> TableCell.Slot("Draining", extra = Tokens.Size.IconSm + Tokens.Space.S1) { StatusMark("Draining", Tone.Attention, MyIcon.Clock) }
-                            node.online -> TableCell.Text("Online", color = colors.textMuted)
-                            else -> TableCell.Slot("Offline", extra = Tokens.Size.IconSm + Tokens.Space.S1) { StatusMark("Offline", Tone.Muted, MyIcon.Failed) }
-                        }
-
-                        2 -> versionCell(node.version, node.updateAvailable)
-
-                        3 + HarnessAgents.size -> if (node.online && node.agents.any { it.available && it.updateAvailable != null }) {
-                            TableCell.Slot("Update agents") {
-                                MyButton({ updating = node }, text = "Update agents", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Update the agents on ${node.name}")
-                            }
-                        } else {
-                            TableCell.Text("")
-                        }
-
                         else -> {
-                            val agent = node.agents.firstOrNull { it.agent == HarnessAgents[column - 3] && it.available }
+                            val name = HarnessAgents[column - 2]
+                            val agent = node.agents.firstOrNull { it.agent == name && it.available }
 
-                            if (agent == null) {
-                                TableCell.Text("Not installed", color = colors.textMuted)
-                            } else {
-                                versionCell(agentVersion(agent.version), agent.updateAvailable)
+                            when {
+                                agent != null -> versionCell(agentVersion(agent.version), agent.updateAvailable)
+                                node.online -> TableCell.Slot("Not installed Install", extra = Tokens.Space.S2 + Tokens.Space.S3 * 2) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                                        Label("Not installed", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                                        MyButton({ changing = NodeChanges(node, mycelium = false, agents = listOf(name), installing = true) }, text = "Install", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Install ${agentName(name)} on ${node.name}")
+                                    }
+                                }
+
+                                else -> TableCell.Text("Not installed", Tokens.Type.Meta, colors.textMuted)
                             }
                         }
                     }
                 },
                 onRow = { onOpenNode(nodes[it].id) },
                 rowDescription = { "Open ${nodes[it].name}" },
+                stickyFirst = true,
             )
         }
 
-        Label("Sign-ins live in Accounts. Select a node for its agents, resources and ports.", style = Tokens.Type.Meta, color = colors.textMuted)
+        Label("Select a node for its agents, resources and ports.", style = Tokens.Type.Meta, color = colors.textMuted)
     }
 
-    updating?.let { node -> AgentUpdatesDialog(store, node, onClose = { updating = null }) }
+    changing?.let { changes -> NodeChangesDialog(store, changes, onClose = { changing = null }) }
+}
+
+data class NodeChanges(val node: NodeSummary, val mycelium: Boolean, val agents: List<String>, val installing: Boolean = false) {
+    fun any(): Boolean = mycelium || agents.isNotEmpty()
+}
+
+fun updatesOn(node: NodeSummary): NodeChanges = NodeChanges(node, mycelium = node.updateAvailable != null, agents = node.agents.filter { it.available && it.updateAvailable != null }.map { it.agent })
+
+private fun bare(version: String): String = version.removePrefix("v")
+
+private fun nodeCell(node: NodeSummary): TableCell {
+    val state = when {
+        node.draining -> "Draining"
+        node.online -> "Online"
+        else -> "Offline"
+    }
+
+    return TableCell.Slot("${node.name} $state" + if (node.kubernetes != null) " Kubernetes" else "", extra = Tokens.Size.IconSm + Tokens.Space.S2 * 3) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+            Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconSm)
+            Label(node.name, maxLines = 1)
+            Label(state, style = Tokens.Type.Meta, color = if (node.online && !node.draining) MyTheme.colors.textMuted else MyTheme.colors.statusAttention, maxLines = 1)
+
+            if (node.kubernetes != null) {
+                Tag("Kubernetes")
+            }
+        }
+    }
 }
 
 @Composable
-private fun AgentUpdatesDialog(store: Store, node: NodeSummary, onClose: () -> Unit) {
+private fun NodeChangesDialog(store: Store, changes: NodeChanges, onClose: () -> Unit) {
     val colors = MyTheme.colors
     val state by store.state.collectAsState()
-    val updates = remember(node.id) { node.agents.filter { it.available && it.updateAvailable != null } }
+    val node = changes.node
+    val live = state.nodes[node.id] ?: node
     var started by remember(node.id) { mutableStateOf(emptyMap<String, String>()) }
     var refused by remember(node.id) { mutableStateOf(emptyMap<String, String>()) }
+    var myceliumStarted by remember(node.id) { mutableStateOf(false) }
+    val verb = if (changes.installing) "Install" else "Update"
 
     LaunchedEffect(node.id) {
-        for (agent in updates) {
+        if (changes.mycelium) {
             try {
-                started = started + (agent.agent to store.api.updateAgent(node.id, agent.agent).updateId)
+                store.api.updateNodeSoftware(node.id)
+                myceliumStarted = true
             } catch (failure: Exception) {
-                refused = refused + (agent.agent to (failure.message ?: "The update could not start."))
+                refused = refused + (MyceliumRow to (failure.message ?: "The update could not start."))
+            }
+        }
+
+        for (agent in changes.agents) {
+            try {
+                started = started + (agent to store.api.updateAgent(node.id, agent).updateId)
+            } catch (failure: Exception) {
+                refused = refused + (agent to (failure.message ?: "The $verb could not start."))
             }
         }
     }
 
     Dialog(onDismiss = onClose) {
-        Label("Update agents on ${node.name}", Modifier.semantics { heading() }, Tokens.Type.Title)
+        Label(if (changes.installing) "Install ${changes.agents.joinToString(", ") { agentName(it) }} on ${node.name}" else "Update ${node.name}", Modifier.semantics { heading() }, Tokens.Type.Title)
 
-        for (agent in updates) {
-            val updateId = started[agent.agent]
+        if (changes.mycelium) {
+            val done = node.updateAvailable != null && bare(live.version) == bare(node.updateAvailable)
+
+            ChangeLine("Mycelium ${bare(node.version)} to ${bare(node.updateAvailable.orEmpty())}", done = done, failed = refused[MyceliumRow] != null, detail = refused[MyceliumRow] ?: if (myceliumStarted && !done) "The node restarts on the new version." else null)
+        }
+
+        for (agent in changes.agents) {
+            val updateId = started[agent]
             val finished = updateId?.let { state.finishedAgentUpdates[it] }
             val output = updateId?.let { state.agentUpdateOutput[it] }.orEmpty()
             val lastLine = withoutTerminalCodes(output).lines().lastOrNull { it.isNotBlank() }?.trim()
+            val held = node.agents.firstOrNull { it.agent == agent && it.available }
+            val title = if (held == null) agentName(agent) else "${agentName(agent)} ${agentVersion(held.version)} to ${held.updateAvailable}"
 
-            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                    Label("${agentName(agent.agent)} ${agentVersion(agent.version)} to ${agent.updateAvailable}", Modifier.weight(1f))
-
-                    when {
-                        refused[agent.agent] != null || finished == false -> StatusMark("Failed", Tone.Failed, MyIcon.Failed)
-                        finished == true -> StatusMark("Updated", Tone.Done, MyIcon.Check)
-                        else -> StatusMark("Updating", Tone.Working, MyIcon.Working)
-                    }
-                }
-
-                val detail = refused[agent.agent] ?: lastLine
-
-                if (detail != null && finished != true) {
-                    Label(detail, style = Tokens.Type.Meta, color = if (finished == false || refused[agent.agent] != null) colors.statusFailed else colors.textMuted)
-                }
-            }
+            ChangeLine(title, done = finished == true, failed = refused[agent] != null || finished == false, detail = refused[agent] ?: lastLine.takeIf { finished != true }, installing = changes.installing)
         }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             MyButton(onClose, text = "Close", muted = true)
+        }
+    }
+}
+
+private const val MyceliumRow = "mycelium"
+
+@Composable
+private fun ChangeLine(title: String, done: Boolean, failed: Boolean, detail: String?, installing: Boolean = false) {
+    val colors = MyTheme.colors
+
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+            Label(title, Modifier.weight(1f))
+
+            when {
+                failed -> StatusMark("Failed", Tone.Failed, MyIcon.Failed)
+                done -> StatusMark(if (installing) "Installed" else "Updated", Tone.Done, MyIcon.Check)
+                else -> StatusMark(if (installing) "Installing" else "Updating", Tone.Working, MyIcon.Working)
+            }
+        }
+
+        if (detail != null && !done) {
+            Label(detail, style = Tokens.Type.Meta, color = if (failed) colors.statusFailed else colors.textMuted)
         }
     }
 }

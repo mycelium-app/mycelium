@@ -69,7 +69,7 @@ class NodeColoursTest {
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
         rule.setContent { MyceliumTheme(true) { Shell(store, ColoursPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Settings) } }
-        rule.onNodeWithText("Nodes").performClick()
+        rule.onNodeWithText("Accounts and nodes").performClick()
         rule.onNodeWithContentDescription("Open laptop").performClick()
     }
 

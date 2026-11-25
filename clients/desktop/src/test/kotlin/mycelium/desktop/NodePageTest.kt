@@ -92,7 +92,7 @@ class NodePageTest {
         runBlocking { store.refresh() }
         NodePagePlatform.opened = null
         rule.setContent { MyceliumTheme(true) { Shell(store, NodePagePlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Settings) } }
-        rule.onNodeWithText("Nodes").performClick()
+        rule.onNodeWithText("Accounts and nodes").performClick()
     }
 
     private fun openNode(tab: String) {

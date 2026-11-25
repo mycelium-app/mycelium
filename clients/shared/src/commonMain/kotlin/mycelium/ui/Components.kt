@@ -272,6 +272,7 @@ fun MyButton(
     iconColour: Color? = null,
     wraps: Boolean = false,
     keptText: String? = null,
+    flush: Boolean = false,
 ) {
     val colors = MyTheme.colors
     val source = remember { MutableInteractionSource() }
@@ -321,7 +322,7 @@ fun MyButton(
                     stateDescription = stateDescription,
                     source = source,
                 )
-                .padding(horizontal = if (text == null) 0.dp else padding),
+                .padding(horizontal = if (text == null || flush) 0.dp else padding),
             horizontalArrangement = Arrangement.spacedBy(gap, if (fill) Alignment.Start else Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
         ) {

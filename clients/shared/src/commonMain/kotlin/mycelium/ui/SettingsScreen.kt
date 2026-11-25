@@ -46,9 +46,8 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
     Experiments("Experiments", MyIcon.Sliders),
     Schedules("Schedules", MyIcon.Calendar, "Prompts that start conversations on a timetable"),
     Ides("IDEs", MyIcon.Code, "Where Open in IDE opens a folder"),
-    Accounts("Accounts", MyIcon.Person, "Agent accounts, where they are signed in and their usage"),
+    AccountsAndNodes("Accounts and nodes", MyIcon.Server, "Nodes, their agent versions, and the accounts signed in on them"),
     ChatModels("Chat models", MyIcon.Sliders, "Model providers for chats, speech and decisions"),
-    Nodes("Nodes", MyIcon.Server, "Nodes, their agents and versions"),
     Agents("Agents", MyIcon.ClaudeMark),
     Import("Import", MyIcon.Archive, "Past agent transcripts and Claude chats"),
     Groups("Groups", MyIcon.Group, "Instructions, folders and projects for each kind of work"),
@@ -64,7 +63,7 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
 
 internal val SettingsGroups = listOf(
     "General" to listOf(SettingsSection.Appearance, SettingsSection.TimeAndFocus, SettingsSection.Voice, SettingsSection.Experiments, SettingsSection.Ides),
-    "Agents and models" to listOf(SettingsSection.Accounts, SettingsSection.ChatModels, SettingsSection.Nodes, SettingsSection.Agents, SettingsSection.Schedules, SettingsSection.Connections),
+    "Agents and models" to listOf(SettingsSection.AccountsAndNodes, SettingsSection.ChatModels, SettingsSection.Agents, SettingsSection.Schedules, SettingsSection.Connections),
     "Knowledge" to listOf(SettingsSection.Groups, SettingsSection.Instructions, SettingsSection.Memories, SettingsSection.Import, SettingsSection.Indexing),
     "Services" to listOf(SettingsSection.ChatTools, SettingsSection.Forges),
     "Your account" to listOf(SettingsSection.Sessions, SettingsSection.Account),
@@ -192,7 +191,7 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
     val platform = LocalPlatform.current
     val openConversation = LocalOpenConversation.current
 
-    if (section == SettingsSection.Nodes && openNode != null && platform != null) {
+    if (section == SettingsSection.AccountsAndNodes && openNode != null && platform != null) {
         val state by store.state.collectAsState()
 
         Box(modifier.fillMaxHeight()) {
@@ -223,12 +222,14 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
             SettingsSection.Experiments -> ExperimentsSettings(store)
             SettingsSection.Schedules -> Unit
             SettingsSection.Ides -> LocalPlatform.current?.let { IdesSettings(it) }
-            SettingsSection.Accounts -> AccountsSettings(store)
+            SettingsSection.AccountsAndNodes -> {
+                platform?.let { NodesSettings(store, it, onOpenNode) }
+                AccountsSettings(store)
+            }
             SettingsSection.ChatModels -> {
                 ModelProvidersSettings(store, revealSpeech = links.tab == SpeechAnchor, addSpeechProvider = links.tab == AddSpeechProviderAnchor)
                 DecisionsSettings(store)
             }
-            SettingsSection.Nodes -> platform?.let { NodesSettings(store, it, onOpenNode) }
             SettingsSection.Agents -> AgentsSettings(store)
             SettingsSection.Import -> ImportSettings(store)
             SettingsSection.Groups -> GroupsSettings(store, openGroup, onOpenGroup, links.tab, links.openTimeAndFocus)

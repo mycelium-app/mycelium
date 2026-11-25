@@ -434,7 +434,7 @@ class AllScreensRenderTest {
         shell("empty-schedules", Route.Settings, extra = none, open = null)
         shell("empty-artefacts", Route.Artifacts, extra = none, open = null)
         shell("empty-assistants", Route.Assistants, extra = none, open = null)
-        snap("empty-nodes") { Surface { SettingsScreen(store(none, null), me, "https://mycelium.example.com", startOn = SettingsSection.Nodes, onSignOut = {}) } }
+        snap("empty-nodes") { Surface { SettingsScreen(store(none, null), me, "https://mycelium.example.com", startOn = SettingsSection.AccountsAndNodes, onSignOut = {}) } }
     }
 
     @Test
@@ -453,7 +453,7 @@ class AllScreensRenderTest {
             snap("settings-${section.name.lowercase()}") { Surface { SettingsScreen(store, me, "https://mycelium.example.com", startOn = section, onSignOut = {}) } }
         }
 
-        snap("node-page") { Surface { SettingsScreen(store, me, "https://mycelium.example.com", startOn = SettingsSection.Nodes, startNode = Willow, onSignOut = {}) } }
+        snap("node-page") { Surface { SettingsScreen(store, me, "https://mycelium.example.com", startOn = SettingsSection.AccountsAndNodes, startNode = Willow, onSignOut = {}) } }
     }
 
     @Test

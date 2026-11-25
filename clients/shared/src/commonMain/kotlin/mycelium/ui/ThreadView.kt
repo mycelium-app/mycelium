@@ -476,7 +476,7 @@ class OutboxControls(val retry: (String) -> Unit, val discard: (String) -> Unit)
 private const val OutgoingAlpha = 0.55f
 
 @Composable
-private fun DeliveryLine(delivery: Delivery, outbox: OutboxControls?) {
+internal fun DeliveryLine(delivery: Delivery, outbox: OutboxControls?) {
     val colors = MyTheme.colors
     val failure = delivery.failure
 

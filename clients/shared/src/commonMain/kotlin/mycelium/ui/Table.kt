@@ -3,6 +3,9 @@ package mycelium.ui
 import androidx.compose.foundation.border
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -154,6 +157,7 @@ fun Table(
     rowSpan: (Int) -> (@Composable () -> Unit)? = { null },
     rowModifier: @Composable (Int) -> Modifier = { Modifier },
     onNearEnd: (() -> Unit)? = null,
+    stickyFirst: Boolean = false,
 ) {
     val colors = MyTheme.colors
     val density = LocalDensity.current
@@ -242,16 +246,23 @@ fun Table(
 
             val spanned = if (head) null else rowSpan(index)
 
+            val pinned = stickyFirst && resolved.scroll
+            val fixedInPlace = if (pinned) Modifier.zIndex(1f).graphicsLayer { translationX = scroll.value.toFloat() }.background(if (head) headerBackground else colors.bgContent) else Modifier
+
             Column(Modifier.width(totalWidth).then(if (head) Modifier else rowModifier(index)).then(look)) {
                 if (spanned != null) {
-                    spanned()
+                    Box(Modifier.width(with(density) { (resolved.total - if (pinned) scroll.maxValue else 0).toDp() }).then(fixedInPlace)) {
+                        spanned()
+                    }
                 } else {
                     TableRow(resolved.widths, minHeight, wraps, centred, press) {
                         visible.forEachIndexed { position, column ->
                             val spec = columns[column]
                             val source = if (head) headerCell(column) else cell(index, column)
 
-                            CellBox(spec, source, wrapped = spec.overflow == Overflow.Wrap && !head, last = position == visible.lastIndex, muted = head)
+                            Box(if (position == 0) fixedInPlace else Modifier) {
+                                CellBox(spec, source, wrapped = spec.overflow == Overflow.Wrap && !head, last = position == visible.lastIndex, muted = head)
+                            }
                         }
                     }
 

@@ -459,7 +459,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
-    val outgoing = state.outbox[id].orEmpty()
+    val pending = state.outbox[id].orEmpty()
     val deliveredPrompts = state.events[id].orEmpty().filter { it.kind == mycelium.api.EventKinds.UserMessage }.mapNotNull { event ->
         val payload = event.payload as? kotlinx.serialization.json.JsonObject
         val promptId = payload?.get("prompt_id") as? JsonPrimitive
@@ -472,6 +472,10 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val unexplainedFailure = ThreadItem.Failure("failed", "The agent stopped with an error.").takeIf { conversation.status == ConversationStatus.Failed && thread.none { it is ThreadItem.Failure } }
     val initialMessage = initialQueued?.let { ThreadItem.UserMessage("queued:${it.id}", it.text, files = it.attachments) }
     val shownQueue = queue.filter { it.id != initialQueued?.id }
+    val parksMessages = agentWorking || shownQueue.isNotEmpty()
+    val parked = if (parksMessages) pending else emptyList()
+    val outgoing = if (parksMessages) emptyList() else pending
+    val outboxControls = OutboxControls(retry = { store.retry(id, it) }, discard = { store.discard(id, it) })
     var queueEditing by remember(id) { mutableStateOf<QueueEditing?>(null) }
     val loadAttachmentBytes = LocalAttachmentBytes.current
 
@@ -765,7 +769,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 CompositionLocalProvider(LocalResponseActions provides responses, LocalPausedWorkflow provides PausedWorkflow(conversation.agent, limitActions)) {
                     ThreadView(
                         items = thread + listOfNotNull(unexplainedFailure) + listOfNotNull(initialMessage) + outgoing.map { ThreadItem.UserMessage("outgoing:${it.clientId}", it.text, delivery = Delivery(it.clientId, it.failure)) },
-                        outbox = OutboxControls(retry = { store.retry(id, it) }, discard = { store.discard(id, it) }),
+                        outbox = outboxControls,
                         hasOlder = state.hasOlderEvents(id),
                         loadingOlder = id in state.loadingOlderEvents,
                         onLoadOlder = { store.act { store.loadOlder(id) } },
@@ -822,6 +826,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             working = agentWorking,
                             stopping = (stopping || closing) && !stopFailed,
                             queue = shownQueue.map { if (it.id == queueEditing?.queueId) it.copy(editing = true) else it },
+                            parked = parked,
+                            outbox = outboxControls,
                             onSend = ::send,
                             pendingCitations = citations,
                             onCitationPlaced = { placed -> citations = citations - placed },

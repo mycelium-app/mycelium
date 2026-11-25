@@ -52,7 +52,7 @@ class SettingsRenderTest {
         val appearance = Appearance(true, Accent.Neutral, Accent.entries.filter { it != Accent.System }, {})
         assertTrue(renderAt("settings-appearance", true, false) { CompositionLocalProvider(LocalAppearance provides appearance) { Surface { SettingsScreen(store, me, "https://mycelium.test", startOn = SettingsSection.Appearance, onSignOut = {}) } } }.length() > 5_000)
         assertTrue(renderAt("settings-appearance", true, true) { CompositionLocalProvider(LocalAppearance provides appearance) { Surface { SettingsScreen(store, me, "https://mycelium.test", startOn = SettingsSection.Appearance, onSignOut = {}) } } }.length() > 5_000)
-        assertTrue(renderAt("settings-providers", true, false, tabs = 4) { Surface { SettingsScreen(store, me, "https://mycelium.test", startOn = SettingsSection.Accounts, onSignOut = {}) } }.length() > 5_000)
+        assertTrue(renderAt("settings-providers", true, false, tabs = 4) { Surface { SettingsScreen(store, me, "https://mycelium.test", startOn = SettingsSection.AccountsAndNodes, onSignOut = {}) } }.length() > 5_000)
         assertTrue(renderAt("settings-integrations", true, false) { Surface { SettingsScreen(store, me, "https://mycelium.test", startOn = SettingsSection.ChatTools, onSignOut = {}) } }.length() > 5_000)
         assertTrue(renderAt("settings-instructions", true, false) { Surface { InstructionsSettings(store) } }.length() > 5_000)
     }

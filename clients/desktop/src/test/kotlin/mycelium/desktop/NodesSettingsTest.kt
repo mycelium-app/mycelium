@@ -28,6 +28,7 @@ import androidx.compose.ui.test.performScrollTo
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 private const val NodesJson = """[
 {"id":"n1","name":"atlas","hostname":"atlas","os":"linux","arch":"x86_64","version":"v0.34.50","update_available":"v0.34.56","address":"192.0.2.10","online":true,"draining":false,
@@ -113,7 +114,7 @@ class NodesSettingsTest {
 
         rule.onNodeWithText("Online").assertExists()
         rule.onNodeWithText("Offline").assertExists()
-        rule.onNodeWithText("v0.34.56").assertExists()
+        rule.onNodeWithText("0.34.56").assertExists()
         rule.onNodeWithText("2.2.2").assertExists()
         rule.onNodeWithText("0.108.1").assertExists()
     }
@@ -130,7 +131,7 @@ class NodesSettingsTest {
         showPage()
 
         rule.onNodeWithContentDescription("0.94.0, update to 0.108.1").assertExists()
-        rule.onNodeWithContentDescription("v0.34.50, update to v0.34.56").assertExists()
+        rule.onNodeWithContentDescription("0.34.50, update to 0.34.56").assertExists()
     }
 
     @Test
@@ -138,7 +139,7 @@ class NodesSettingsTest {
         showPage()
 
         rule.onNodeWithText("Join a node").assertExists()
-        rule.onNodeWithText("Sign-ins live in Accounts. Select a node for its agents, resources and ports.").assertExists()
+        rule.onNodeWithText("Select a node for its agents, resources and ports.").assertExists()
         assertEquals(0, rule.onAllNodesWithText("sam@example.com").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithText("Log in", substring = true).fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithText("Add login").fetchSemanticsNodes().size)
@@ -167,7 +168,7 @@ class NodesSettingsTest {
     fun aNodeOpensInsideSettingsWithABackLinkToNodes() {
         showShell(Route.Settings)
 
-        rule.onNodeWithText("Nodes").performClick()
+        rule.onNodeWithText("Accounts and nodes").performClick()
         rule.onNodeWithContentDescription("Open atlas").performClick()
         rule.waitForIdle()
 
@@ -185,7 +186,7 @@ class NodesSettingsTest {
         rule.runOnIdle { store.openScreen("nodes") }
         rule.waitForIdle()
 
-        rule.onNodeWithText("Sign-ins live in Accounts. Select a node for its agents, resources and ports.").assertExists()
+        rule.onNodeWithText("Select a node for its agents, resources and ports.").assertExists()
     }
 
     @Test
@@ -197,15 +198,15 @@ class NodesSettingsTest {
     }
 
     @Test
-    fun updateAgentsShowsOnlyOnAnOnlineNodeWithAnUpdateAndStreamsItsProgress() {
+    fun updateAppliesEveryChangeOnAnOnlineNodeAndStreamsItsProgress() {
         val store = showPage()
 
-        assertEquals(1, rule.onAllNodesWithText("Update agents").fetchSemanticsNodes().size)
-        rule.onNodeWithContentDescription("Update the agents on atlas").performScrollTo().performClick()
+        assertEquals(0, rule.onAllNodesWithContentDescription("Update orion").fetchSemanticsNodes().size)
+        rule.onNodeWithContentDescription("Update atlas").performClick()
 
-        rule.waitUntil(5_000) { updates.isNotEmpty() }
-        assertEquals(listOf("/api/v1/nodes/n1/agents/claude/update"), updates)
-        rule.onNodeWithText("Updating").assertExists()
+        rule.waitUntil(5_000) { updates.size == 2 }
+        assertEquals(listOf("/api/v1/nodes/n1/update", "/api/v1/nodes/n1/agents/claude/update"), updates.toList())
+        rule.onNodeWithText("Claude Code 0.94.0 to 0.108.1").assertExists()
 
         rule.runOnIdle { store.receive(StreamMessage.AgentUpdateOutput("u1", "added 1 package in 3s\r\n")) }
         rule.onNodeWithText("added 1 package in 3s").assertExists()
@@ -217,8 +218,8 @@ class NodesSettingsTest {
     @Test
     fun anUpdateThatFailsSaysSoWithItsLastLine() {
         val store = showPage()
-        rule.onNodeWithContentDescription("Update the agents on atlas").performScrollTo().performClick()
-        rule.waitUntil(5_000) { updates.isNotEmpty() }
+        rule.onNodeWithContentDescription("Update atlas").performClick()
+        rule.waitUntil(5_000) { updates.size == 2 }
 
         rule.runOnIdle {
             store.receive(StreamMessage.AgentUpdateOutput("u1", "npm error code EACCES\r\n"))
@@ -233,16 +234,16 @@ class NodesSettingsTest {
     fun anUpdateTheNodeRefusesShowsTheReason() {
         updateRefusal = "Claude Code on this node comes from Nix, so Mycelium cannot update it."
         showPage()
-        rule.onNodeWithContentDescription("Update the agents on atlas").performScrollTo().performClick()
+        rule.onNodeWithContentDescription("Update atlas").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Failed").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Claude Code on this node comes from Nix, so Mycelium cannot update it.", substring = true).assertExists()
+        assertTrue(rule.onAllNodesWithText("Claude Code on this node comes from Nix, so Mycelium cannot update it.", substring = true).fetchSemanticsNodes().isNotEmpty())
     }
 
     @Test
     fun aNodeWithEverythingUpToDateOffersNoUpdate() {
         showPage(UpToDateJson)
 
-        assertEquals(0, rule.onAllNodesWithText("Update agents").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithContentDescription("Update willow").fetchSemanticsNodes().size)
     }
 }

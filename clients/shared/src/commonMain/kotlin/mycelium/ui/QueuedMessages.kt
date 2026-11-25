@@ -1,5 +1,7 @@
 package mycelium.ui
 
+import mycelium.state.Delivery
+import mycelium.state.Outgoing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
@@ -69,6 +71,8 @@ fun QueuedMessages(
     onEdit: (QueuedPrompt) -> Unit,
     onMove: (String, Int) -> Unit,
     onRemove: (String) -> Unit,
+    parked: List<Outgoing> = emptyList(),
+    outbox: OutboxControls? = null,
 ) {
     val colors = MyTheme.colors
     var expanded by remember { mutableStateOf(true) }
@@ -103,7 +107,7 @@ fun QueuedMessages(
         ) {
             MyButton(
                 { expanded = !expanded },
-                text = "${queue.size} queued ${if (queue.size == 1) "message" else "messages"}",
+                text = "${queue.size + parked.size} queued ${if (queue.size + parked.size == 1) "message" else "messages"}",
                 description = if (expanded) "Collapse queued messages" else "Expand queued messages",
                 size = ButtonSize.Sm,
                 muted = true,
@@ -254,5 +258,15 @@ fun QueuedMessages(
             Hairline()
         }
 
+        for (outgoing in parked) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                MarkdownText(outgoing.text, Modifier.fillMaxWidth().alpha(ParkedAlpha), maxLines = 2)
+                DeliveryLine(Delivery(outgoing.clientId, outgoing.failure), outbox)
+            }
+
+            Hairline()
+        }
     }
 }
+
+private const val ParkedAlpha = 0.55f

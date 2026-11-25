@@ -599,7 +599,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
     }
 
     val openNodes: (String?) -> Unit = { id ->
-        settingsStart = SettingsSection.Nodes
+        settingsStart = SettingsSection.AccountsAndNodes
         settingsNode = id
         onRoute(Route.Settings)
     }
@@ -697,7 +697,8 @@ internal fun screenTarget(path: String): Pair<Route, SettingsSection?>? {
         "settings" -> {
             val key = when (argument) {
                 "privacy" -> "voice"
-                "providers" -> if (parts.getOrNull(2) in setOf(SpeechAnchor, AddSpeechProviderAnchor)) "chat-models" else "accounts"
+                "providers" -> if (parts.getOrNull(2) in setOf(SpeechAnchor, AddSpeechProviderAnchor)) "chat-models" else "accounts-and-nodes"
+                "accounts", "nodes" -> "accounts-and-nodes"
                 else -> argument
             }
 
@@ -709,7 +710,7 @@ internal fun screenTarget(path: String): Pair<Route, SettingsSection?>? {
         "project" -> argument?.let { Route.Project(it) to null }
         "inbox" -> Route.Inbox to null
         "new" -> Route.New to null
-        "nodes" -> Route.Settings to SettingsSection.Nodes
+        "nodes" -> Route.Settings to SettingsSection.AccountsAndNodes
         "schedules" -> Route.Settings to SettingsSection.Schedules
         "wellness" -> Route.Wellness to null
         "projects", "issues" -> Route.Archive to null

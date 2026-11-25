@@ -144,7 +144,7 @@ pub async fn start_pick(state: &AppState, owner: Uuid, node_id: Uuid, routing: R
     }
 
     exhausted.ok_or_else(|| match routing.agent() {
-        Some(agent) => ApiError::conflict("no_routing_choice", format!("No {} account is signed in on this node. Sign in to one in Settings, Providers, or choose another node.", agent.display_name())),
+        Some(agent) => ApiError::conflict("no_routing_choice", format!("No {} account is signed in on this node. Sign in to one in Settings, Accounts and nodes, or choose another node.", agent.display_name())),
         None => ApiError::conflict("no_routing_choice", "Nothing in your Any model list can start on this node. Sign in to an account it lists, or edit the list in Settings, Agents."),
     })
 }

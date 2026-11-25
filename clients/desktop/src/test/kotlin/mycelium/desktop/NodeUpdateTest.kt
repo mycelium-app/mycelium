@@ -75,7 +75,7 @@ class NodeUpdateTest {
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
         rule.setContent { MyceliumTheme(true) { Shell(store, UpdatePlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Settings) } }
-        rule.onNodeWithText("Nodes").performClick()
+        rule.onNodeWithText("Accounts and nodes").performClick()
         rule.onNodeWithContentDescription("Open willow").performClick()
         rule.waitForIdle()
     }

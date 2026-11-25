@@ -1,5 +1,6 @@
 package mycelium.ui
 
+import mycelium.state.Outgoing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -132,6 +133,8 @@ fun Composer(
     working: Boolean,
     stopping: Boolean = false,
     queue: List<QueuedPrompt>,
+    parked: List<Outgoing> = emptyList(),
+    outbox: OutboxControls? = null,
     onSend: (String) -> Unit,
     onStop: () -> Unit,
     onSendQueuedNow: (String) -> Unit,
@@ -600,8 +603,8 @@ fun Composer(
                     GoalAndTodoRegion(goal, todos, conversation.id, onSaveTodos = onSaveTodos)
                 }
 
-                if (queue.isNotEmpty()) {
-                    QueuedMessages(queue, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onMoveQueued, onRemoveQueued)
+                if (queue.isNotEmpty() || parked.isNotEmpty()) {
+                    QueuedMessages(queue, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onMoveQueued, onRemoveQueued, parked, outbox)
                 }
 
                 editStrip()
@@ -651,9 +654,9 @@ fun Composer(
             GoalAndTodoRegion(goal, todos, conversation.id, measured, onSaveTodos)
         }
 
-        if (queue.isNotEmpty()) {
+        if (queue.isNotEmpty() || parked.isNotEmpty()) {
             Box(measured) {
-                QueuedMessages(queue, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onMoveQueued, onRemoveQueued)
+                QueuedMessages(queue, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onMoveQueued, onRemoveQueued, parked, outbox)
             }
         }
 
