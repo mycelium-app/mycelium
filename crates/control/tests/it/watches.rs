@@ -175,6 +175,30 @@ async fn a_failed_session_tells_its_watcher_it_failed() {
 }
 
 #[tokio::test]
+async fn the_same_failure_again_is_told_once_until_the_failure_changes() {
+    let server = fast().await;
+    let mut link = server.online_node("laptop").await;
+    let watcher = begun(&server, &mut link, "Plan the release").await;
+    end_turn(&mut link, watcher, 1).await;
+    let target = begun(&server, &mut link, "Build the release").await;
+    connect(&server, watcher, target).await;
+    tool(&server, &link, watcher, "watch_conversation", json!({"conversation": target.to_string()})).await;
+
+    link.send(NodeToControl::SessionFailed { conversation_id: target, seq: 1, message: "The agent crashed".into() }).await;
+    told(&server, watcher, 1).await;
+    end_turn(&mut link, watcher, 3).await;
+    link.send(NodeToControl::SessionFailed { conversation_id: target, seq: 2, message: "The agent crashed".into() }).await;
+    link.send(NodeToControl::SessionFailed { conversation_id: target, seq: 3, message: "The agent crashed".into() }).await;
+    link.barrier(target, 4).await;
+
+    assert!(still(&server, watcher, 2).await, "{:?}", messages(&server, watcher).await);
+
+    link.send(NodeToControl::SessionFailed { conversation_id: target, seq: 5, message: "The agent stopped".into() }).await;
+
+    assert!(told(&server, watcher, 2).await.contains("The agent stopped"));
+}
+
+#[tokio::test]
 async fn notifications_that_arrive_while_the_watcher_works_come_as_one_turn() {
     let server = fast().await;
     let mut link = server.online_node("laptop").await;

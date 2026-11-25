@@ -150,8 +150,8 @@ pub async fn conversation_ended(state: &AppState, conversation: Uuid, ending: En
         return Ok(());
     }
 
-    let watches = sqlx::query_as::<_, (Uuid, Uuid, Uuid, bool)>(
-        "select w.id, w.owner, w.watcher_id, w.skip_finished from watches w join conversations target on target.id = w.target_id join conversations watcher on watcher.id = w.watcher_id
+    let watches = sqlx::query_as::<_, (Uuid, Uuid, Uuid, bool, Option<String>)>(
+        "select w.id, w.owner, w.watcher_id, w.skip_finished, w.last_notice from watches w join conversations target on target.id = w.target_id join conversations watcher on watcher.id = w.watcher_id
          where w.target_id = $1 and w.kind = 'conversation' and w.ended_at is null and target.archived_at is null and watcher.archived_at is null",
     )
     .bind(conversation)
@@ -176,13 +176,21 @@ pub async fn conversation_ended(state: &AppState, conversation: Uuid, ending: En
         (None, None) => format!("From {label}:\n\n{label} ({conversation}) {}.", ending.words()),
     };
 
-    for (watch, owner, watcher, skip_finished) in watches {
+    for (watch, owner, watcher, skip_finished, last_notice) in watches {
         if skip_finished && ending == Ending::Done {
             continue;
         }
 
-        if let Err(error) = deliver(state, owner, watch, watcher, &format!("{at}:{}", ending.key()), text.clone()).await {
-            tracing::warn!("could not tell {watcher} that {conversation} {}: {}", ending.words(), error.message());
+        if ending == Ending::Failed && last_notice.as_deref() == Some(text.as_str()) {
+            continue;
+        }
+
+        match deliver(state, owner, watch, watcher, &format!("{at}:{}", ending.key()), text.clone()).await {
+            Ok(true) => {
+                sqlx::query("update watches set last_notice = $2 where id = $1").bind(watch).bind(&text).execute(&state.pool).await?;
+            }
+            Ok(false) => {}
+            Err(error) => tracing::warn!("could not tell {watcher} that {conversation} {}: {}", ending.words(), error.message()),
         }
     }
 
