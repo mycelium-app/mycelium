@@ -292,21 +292,38 @@ pub fn vibe_key(dir: &Path, default: bool) -> Option<String> {
 pub fn update_command(agent: AgentId, version: &str, installed: &Path) -> Result<Vec<String>, String> {
     let name = agent.display_name();
     let real = std::fs::canonicalize(installed).unwrap_or_else(|_| installed.to_path_buf());
-    let path = real.to_string_lossy();
+    let path = installed_from(&real);
 
     if path.starts_with("/nix/store/") {
         return Err(format!("{name} on this node comes from Nix, so Mycelium cannot update it. Update it in the node's Nix configuration."));
     }
 
     if let Some(package) = path.split("/node_modules/").nth(1).map(|rest| rest.split('/').take(if rest.starts_with('@') { 2 } else { 1 }).collect::<Vec<_>>().join("/")) {
-        return Ok(vec!["npm".to_string(), "install".to_string(), "--global".to_string(), format!("{package}@{version}")]);
+        let mut command = vec!["npm".to_string(), "install".to_string(), "--global".to_string()];
+        #[cfg(windows)]
+        command.extend(["--prefix".to_string(), installed.parent().unwrap_or(installed).display().to_string()]);
+        command.push(format!("{package}@{version}"));
+
+        return Ok(command);
     }
 
-    if let Some(tool) = path.split("/uv/tools/").nth(1).and_then(|rest| rest.split('/').next()) {
+    if let Some(tool) = path.split("/uv/").nth(1).and_then(|rest| rest.strip_prefix("data/").unwrap_or(rest).strip_prefix("tools/")).and_then(|rest| rest.split('/').next()) {
         return Ok(vec!["uv".to_string(), "tool".to_string(), "upgrade".to_string(), tool.to_string()]);
     }
 
     Err(format!("Mycelium cannot tell how {name} was installed at {}. Update it there.", installed.display()))
+}
+
+#[cfg(unix)]
+fn installed_from(real: &Path) -> String {
+    real.to_string_lossy().into_owned()
+}
+
+#[cfg(windows)]
+fn installed_from(real: &Path) -> String {
+    let launcher = std::fs::read(real).unwrap_or_default();
+
+    format!("{}\n{}", real.display(), String::from_utf8_lossy(&launcher)).replace('\\', "/")
 }
 
 pub struct Tools<'a> {
