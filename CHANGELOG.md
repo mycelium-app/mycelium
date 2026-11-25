@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.72
+
+- Built-in terminals on a Windows node run cmd.exe and find agents and tools on the node's own Path, such as Node.js and the agents Install put in Mycelium's folder. Secrets stay out of them. Tested on Windows 11 ARM64.
+
 ## v0.34.71
 
 - Includes everything in v0.34.70, which was not published: its builds were turned away by Maven Central's rate limit, so builds now retry dependency downloads for longer.
