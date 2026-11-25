@@ -111,7 +111,7 @@ jobs:
 
       - name: Build
         working-directory: clients
-        run: ./gradlew --no-daemon --configuration-cache :androidApp:assembleRelease
+        run: ../ci/annotate-failure.sh "Android build" ./gradlew --no-daemon --configuration-cache :androidApp:assembleRelease
 
       - name: Package
         run: |
@@ -379,7 +379,7 @@ jobs:
           awk -v tag="## $GITHUB_REF_NAME" '$0 == tag {on=1; next} /^## / {on=0} on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
           [ -s "$RUNNER_TEMP/notes.md" ] || echo "mycelium $GITHUB_REF_NAME." > "$RUNNER_TEMP/notes.md"
           newest=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
-          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+          ci/annotate-failure.sh Publish gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
             --title "mycelium $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
-          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false \
+          ci/annotate-failure.sh Publish gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false \
             --latest="$([ "$GITHUB_REF_NAME" = "$newest" ] && echo true || echo false)"
