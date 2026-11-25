@@ -1060,6 +1060,23 @@ class Store(
         shareChatToolServers(servers)
     }
 
+    suspend fun refreshMentionTriggers() {
+        val triggers = api.mentionTriggers()
+
+        mutableState.update { it.copy(mentionTriggers = triggers) }
+    }
+
+    suspend fun sendMentions(serverId: String, assistantId: String?) {
+        val current = state.value.mentionTriggers.firstOrNull { it.serverId == serverId }
+
+        when {
+            assistantId != null -> api.createMentionTrigger(mycelium.api.CreateMentionTriggerRequest(serverId, assistantId))
+            current != null -> api.deleteMentionTrigger(current.id)
+        }
+
+        refreshMentionTriggers()
+    }
+
     suspend fun refreshApps() {
         val apps = api.apps()
 

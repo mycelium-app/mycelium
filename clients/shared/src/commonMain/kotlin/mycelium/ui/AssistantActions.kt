@@ -35,6 +35,10 @@ import mycelium.api.ActionProposal
 import mycelium.api.Assistant
 import mycelium.api.AssistantAction
 import mycelium.api.SaveActionRequest
+import mycelium.state.mentionPlatform
+import mycelium.state.mentionWhen
+import mycelium.state.takesMentions
+import mycelium.api.ChatToolServer
 import mycelium.state.AppState
 import mycelium.state.Choice
 import mycelium.state.Store
@@ -296,12 +300,17 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
     var creating by remember(assistant.id) { mutableStateOf(false) }
     var scheduling by remember(assistant.id) { mutableStateOf(false) }
     var editingSchedule by remember(assistant.id) { mutableStateOf<mycelium.api.Schedule?>(null) }
+    var choosingNew by remember(assistant.id) { mutableStateOf(false) }
+    var mentioning by remember(assistant.id) { mutableStateOf(false) }
+    val whens = schedules.map { When.Scheduled(it) } + state.mentionTriggers.filter { it.assistantId == assistant.id }.mapNotNull { trigger -> state.chatToolServers.firstOrNull { it.id == trigger.serverId }?.let { When.Mentioned(it) } }
     val runner = rememberAction(assistant.id)
 
     LaunchedEffect(assistant.id) {
         store.act { store.refreshAssistantActions(assistant.id) }
         store.act { store.refreshActionProposals(assistant.id) }
         store.act { store.refreshSchedules() }
+        store.act { store.refreshMentionTriggers() }
+        store.act { store.refreshChatToolServers() }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
@@ -379,30 +388,62 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Label("Schedules", Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong)
-                MyButton({ scheduling = true }, text = "New schedule", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
+                Label("Schedules and triggers", Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong)
+
+                Box {
+                    MyButton({ choosingNew = true }, text = "New", icon = MyIcon.Plus, variant = ButtonVariant.Outline, selected = choosingNew, trailingIcon = MyIcon.ChevronDown)
+
+                    if (choosingNew) {
+                        MenuPopup(onDismiss = { choosingNew = false }) {
+                            MenuItem("Schedule", onClick = { choosingNew = false; scheduling = true }, leading = MyIcon.Clock)
+                            MenuItem("Mention", onClick = { choosingNew = false; mentioning = true }, leading = MyIcon.Chat)
+                        }
+                    }
+                }
             }
 
             Label("Each run happens in the ${assistant.name} thread. Schedules also lists these.", style = Tokens.Type.Meta, color = colors.textMuted)
 
-            if (schedules.isNotEmpty()) {
+            if (whens.isNotEmpty()) {
                 Table(
                     listOf(Col("When", 120.dp, weight = 1f), Col("Runs", 120.dp, weight = 1f), Col("Next", 72.dp, max = 120.dp), ActionColumn),
-                    schedules.size,
+                    whens.size,
                     { row, column ->
-                        val schedule = schedules[row]
+                        when (val held = whens[row]) {
+                            is When.Scheduled -> {
+                                val schedule = held.schedule
 
-                        when (column) {
-                            0 -> TableCell.Text("${describeCron(schedule.cron)} ${schedule.timeZone}")
-                            1 -> TableCell.Text(actions.firstOrNull { it.id == schedule.actionId }?.name ?: schedule.prompt, color = colors.textMuted)
-                            2 -> TableCell.Text(if (schedule.paused) "Paused" else until(schedule.nextRunAt), color = if (schedule.paused) colors.textFaint else colors.text)
+                                when (column) {
+                                    0 -> TableCell.Text("${describeCron(schedule.cron)} ${schedule.timeZone}")
+                                    1 -> TableCell.Text(actions.firstOrNull { it.id == schedule.actionId }?.name ?: schedule.prompt, color = colors.textMuted)
+                                    2 -> TableCell.Text(if (schedule.paused) "Paused" else until(schedule.nextRunAt), color = if (schedule.paused) colors.textFaint else colors.text)
 
-                            else -> TableCell.Slot {
-                                RowMenu(schedule.prompt) { close ->
-                                    MenuItem("Run now", onClick = { close(); store.act { store.runSchedule(schedule) } }, leading = MyIcon.Refresh)
-                                    MenuItem("Edit", onClick = { close(); editingSchedule = schedule }, leading = MyIcon.Pencil)
-                                    MenuItem(if (schedule.paused) "Resume" else "Pause", onClick = { close(); store.act { store.pauseSchedule(schedule, !schedule.paused) } }, leading = MyIcon.Clock)
-                                    MenuItem("Delete", onClick = { close(); store.act { store.deleteSchedule(schedule) } }, leading = MyIcon.Close)
+                                    else -> TableCell.Slot {
+                                        RowMenu(schedule.prompt) { close ->
+                                            MenuItem("Run now", onClick = { close(); store.act { store.runSchedule(schedule) } }, leading = MyIcon.Refresh)
+                                            MenuItem("Edit", onClick = { close(); editingSchedule = schedule }, leading = MyIcon.Pencil)
+                                            MenuItem(if (schedule.paused) "Resume" else "Pause", onClick = { close(); store.act { store.pauseSchedule(schedule, !schedule.paused) } }, leading = MyIcon.Clock)
+                                            MenuItem("Delete", onClick = { close(); store.act { store.deleteSchedule(schedule) } }, leading = MyIcon.Close)
+                                        }
+                                    }
+                                }
+                            }
+
+                            is When.Mentioned -> when (column) {
+                                0 -> TableCell.Slot(mentionWhen(held.server)) {
+                                    Column {
+                                        Label(mentionWhen(held.server))
+                                        Label(accountTitle(held.server), style = Tokens.Type.Meta, color = colors.textMuted)
+                                    }
+                                }
+
+                                1 -> TableCell.Text("The message itself", color = colors.textMuted)
+                                2 -> TableCell.Text("Any time", color = colors.textMuted)
+
+                                else -> TableCell.Slot {
+                                    RowMenu("the ${mentionPlatform(held.server)} mention trigger") { close ->
+                                        MenuItem("Turn off", onClick = { close(); store.act { store.sendMentions(held.server.id, null) } }, leading = MyIcon.Close)
+                                    }
                                 }
                             }
                         }
@@ -410,6 +451,10 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
                 )
             }
         }
+    }
+
+    if (mentioning) {
+        MentionDialog(store, state, assistant, onDismiss = { mentioning = false })
     }
 
     if (creating) {
@@ -431,6 +476,45 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
 
     editingSchedule?.let { schedule ->
         ScheduleDialog(store, state, schedule, onDismiss = { editingSchedule = null })
+    }
+}
+
+private sealed interface When {
+    class Scheduled(val schedule: mycelium.api.Schedule) : When
+
+    class Mentioned(val server: ChatToolServer) : When
+}
+
+@Composable
+private fun MentionDialog(store: Store, state: AppState, assistant: Assistant, onDismiss: () -> Unit) {
+    val accounts = state.chatToolServers.filter(::takesMentions)
+    var chosen by remember { mutableStateOf(accounts.firstOrNull()?.id) }
+    val runner = rememberAction()
+    val elsewhere = state.mentionTriggers.firstOrNull { it.serverId == chosen && it.assistantId != assistant.id }?.let { state.assistants[it.assistantId]?.name }
+
+    Dialog(onDismiss) {
+        Label("New mention trigger", Modifier.semantics { heading() }, Tokens.Type.Title)
+
+        if (accounts.isEmpty()) {
+            Label("Connect Stoat or Discord in Integrations first.", color = MyTheme.colors.textMuted)
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                Label("Chat account", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
+                OptionMenu("Chat account", accounts.map { Choice(it.id, "${mentionPlatform(it)} · ${accountTitle(it)}") }, chosen, { chosen = it }, variant = ButtonVariant.Outline)
+            }
+
+            elsewhere?.let { Label("Its mentions go to $it now. Saving sends them to ${assistant.name} instead.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted) }
+        }
+
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
+
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+            MyButton(onDismiss, text = "Cancel", muted = true)
+
+            chosen?.let { serverId ->
+                MyButton({ runner { store.sendMentions(serverId, assistant.id); onDismiss() } }, text = "Save trigger", variant = ButtonVariant.Outline)
+            }
+        }
     }
 }
 

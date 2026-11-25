@@ -88,6 +88,7 @@ data class AppState(
     val watchesRevision: Map<String, Int> = emptyMap(),
     val forgeRevision: Int = 0,
     val chatToolServers: List<mycelium.api.ChatToolServer> = emptyList(),
+    val mentionTriggers: List<mycelium.api.MentionTrigger> = emptyList(),
     val apps: List<mycelium.api.AppSummary>? = null,
     val events: Map<String, List<Event>> = emptyMap(),
     val outlinePages: Map<String, OutlinePage> = emptyMap(),

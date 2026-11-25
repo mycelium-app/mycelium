@@ -21,6 +21,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import mycelium.api.ChatToolInfo
 import mycelium.api.ChatToolServer
+import androidx.compose.foundation.layout.heightIn
+import mycelium.state.Choice
+import mycelium.state.AppState
+import mycelium.state.mentionsHint
+import mycelium.state.takesMentions
 import mycelium.api.PatchChatToolServerRequest
 import mycelium.state.ColumnAlign
 import mycelium.state.Store
@@ -81,6 +86,13 @@ fun IntegrationPage(store: Store, integration: Integration, actions: PageActions
     val live by store.state.collectAsState()
     val enable = integration.group == IntegrationGroup.Disabled
 
+    LaunchedEffect(integration.key) {
+        if (integration.accounts.any(::takesMentions)) {
+            store.act { store.refreshMentionTriggers() }
+            store.act { store.refreshAssistants() }
+        }
+    }
+
     LaunchedEffect(removing) {
         recentConversations = null
 
@@ -115,6 +127,16 @@ fun IntegrationPage(store: Store, integration: Integration, actions: PageActions
             Section("Accounts") {
                 for (account in integration.accounts) {
                     AccountLink(account) { actions.onOpenAccount(account) }
+                }
+            }
+
+            if (integration.accounts.any(::takesMentions)) {
+                Section("Mentions") {
+                    Label(mentionsHint(integration.kind), style = Tokens.Type.Meta, color = colors.textMuted)
+
+                    for (account in integration.accounts.filter(::takesMentions)) {
+                        MentionsRow(store, live, account)
+                    }
                 }
             }
 
@@ -166,6 +188,19 @@ fun IntegrationPage(store: Store, integration: Integration, actions: PageActions
         }
     }
 }
+
+@Composable
+private fun MentionsRow(store: Store, live: AppState, account: ChatToolServer) {
+    val chosen = live.mentionTriggers.firstOrNull { it.serverId == account.id }?.assistantId
+    val choices = listOf(Choice(MentionsOff, "Off")) + live.assistants.values.filter { it.archivedAt == null }.sortedBy { it.name }.map { Choice(it.id, it.name) }
+
+    Row(Modifier.fillMaxWidth().heightIn(min = Tokens.Size.Row), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+        Label(accountTitle(account), Modifier.weight(1f), maxLines = 1)
+        OptionMenu("Mentions for ${accountTitle(account)}", choices, chosen ?: MentionsOff, { picked -> store.act { store.sendMentions(account.id, picked.takeIf { it != MentionsOff }) } }, title = "Send mentions to", variant = ButtonVariant.Outline)
+    }
+}
+
+private const val MentionsOff = "off"
 
 @Composable
 private fun AccountLink(account: ChatToolServer, onOpen: () -> Unit) {

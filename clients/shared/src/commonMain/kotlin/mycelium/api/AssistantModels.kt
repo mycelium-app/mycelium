@@ -154,3 +154,16 @@ data class PatchAssistantRequest(
     val colour: String? = null,
     @SerialName("clear_colour") val clearColour: Boolean = false,
 )
+
+@Serializable
+data class MentionTrigger(
+    val id: String,
+    @SerialName("server_id") val serverId: String,
+    @SerialName("assistant_id") val assistantId: String,
+    val channels: List<String> = emptyList(),
+    val senders: List<String> = emptyList(),
+    @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
+data class CreateMentionTriggerRequest(@SerialName("server_id") val serverId: String, @SerialName("assistant_id") val assistantId: String)

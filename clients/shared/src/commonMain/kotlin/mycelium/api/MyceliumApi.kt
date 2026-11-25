@@ -965,6 +965,15 @@ class MyceliumApi(
         call("/schedules/$id") { client.delete(it) { authorise() } }
     }
 
+    suspend fun mentionTriggers(): List<MentionTrigger> = call("/mention-triggers") { client.get(it) { authorise() } }.body()
+
+    suspend fun createMentionTrigger(request: CreateMentionTriggerRequest): MentionTrigger =
+        call("/mention-triggers") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun deleteMentionTrigger(id: String) {
+        call("/mention-triggers/$id") { client.delete(it) { authorise() } }
+    }
+
     suspend fun setTimeZone(timeZone: String) {
         call("/me/time-zone") { client.put(it) { authorise(); json(SetTimeZoneRequest(timeZone)) } }
     }

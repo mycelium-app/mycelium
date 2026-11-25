@@ -117,7 +117,10 @@ class AssistantRenderTest {
             "/assistant-changes" to Changes,
             "/groups" to Groups,
             "/nodes" to Nodes,
+            "/schedule-runs" to "[]",
             "/schedules" to Schedules,
+            "/mention-triggers" to """[{"id":"t1","server_id":"s1","assistant_id":"as1","created_at":"2026-11-20T10:00:00Z"}]""",
+            "/chat-tool-servers" to """[{"id":"s1","name":"Stoat","kind":"stoat","url":"https://chat.example.org","account":"alex on chat.example.org","enabled":true,"tools":[],"created_at":"2026-10-22T14:00:00Z"}]""",
             "/model-providers" to """[{"id":"mp1","kind":"anthropic","name":"Anthropic","key_hint":"f00d","models":["Opus 5.5","Sonnet 5.5"],"default_model":"Opus 5.5","created_at":"2026-10-01T10:00:00Z"}]""",
             "/experiments" to EnabledExperiments,
             "/conversations/$Thread" to Thread1,
@@ -244,6 +247,22 @@ class AssistantRenderTest {
     }
 
     @Test
+    fun aMentionTriggerSharesTheTableWithSchedulesAndNewOffersAScheduleOrAMention() {
+        show(Route.AssistantSettings("as1", AssistantSection.SchedulesAndActions))
+        waitFor("Someone mentions you on Stoat")
+        rule.onNodeWithText("alex on chat.example.org").assertExists()
+        rule.onNodeWithText("The message itself").assertExists()
+        snap("7.25-schedules-and-triggers")
+        rule.onNodeWithText("New").performClick()
+        rule.onNodeWithText("Mention").performClick()
+        waitFor("New mention trigger")
+        rule.onNodeWithText("Save trigger").performClick()
+        rule.waitUntil(5_000) { sent.any { it.first == "POST /api/v1/mention-triggers" } }
+
+        assertTrue(sent.first { it.first == "POST /api/v1/mention-triggers" }.second.contains("\"server_id\":\"s1\""))
+    }
+
+    @Test
     fun theActionDialog() {
         show(Route.AssistantSettings("as1", AssistantSection.SchedulesAndActions))
         waitFor("New action")
@@ -255,8 +274,9 @@ class AssistantRenderTest {
     @Test
     fun theScheduleDialogForAnAssistant() {
         show(Route.AssistantSettings("as1", AssistantSection.SchedulesAndActions))
-        waitFor("New schedule")
-        rule.onNodeWithText("New schedule").performClick()
+        waitFor("Schedules and triggers")
+        rule.onNodeWithText("New").performClick()
+        rule.onNodeWithText("Schedule").performClick()
         waitFor("Cancel")
         snap("7.14-schedule-dialog")
     }
