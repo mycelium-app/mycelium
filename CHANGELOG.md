@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.34.63
+
+- Plans show in sentence case, such as Individual instead of INDIVIDUAL, on the Usage card, the account page and Usage history.
+- Every usage window shows when it resets the same way: the hours and minutes left when it resets within a day, such as 2h 40m, the weekday up to a week away, such as Tue, and the days left beyond that, such as 8d. The tooltip gives the full date: Monthly allowance, 0% used, resets Tuesday 1 December.
+- A default login that reports no account name, such as Mistral Vibe's, shows the agent's name on the Usage card and its account page instead of "default".
+
 ## v0.34.62
 
 - The sign-in from a chat's Authentication required card names exactly what it signs in: Sign in to Claude Code as an account on a node. A chat on a node's default sign-in says so, asks for the account the chat should use, and names who was last signed in there. The card names the account and node too.
