@@ -39,7 +39,7 @@ pub fn definitions() -> Value {
         },
         {
             "name": "assistant_propose_action",
-            "description": "Propose a reusable action for this assistant, such as a prompt the person keeps asking for. The person approves or edits it before it is added to the assistant's Actions. Use {input} placeholders in the prompt for anything the person should be asked before it runs. Only an assistant's own conversation can use it.",
+            "description": "Propose a reusable action for this assistant, such as a prompt the person keeps asking for, or a change to one of its existing actions by giving action_id. The person approves or edits it before it is added to, or changed in, the assistant's Actions. Use {input} placeholders in the prompt for anything the person should be asked before it runs. Only an assistant's own conversation can use it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -61,8 +61,9 @@ pub fn definitions() -> Value {
                         },
                     },
                     "reason": {"type": "string", "description": "Why this action is worth keeping, for example the request you keep getting."},
+                    "pinned": {"type": "boolean", "description": "Pin the action above the composer. Defaults to no for a new action, and to its current setting for a change."},
+                    "action_id": {"type": "string", "description": "The id of an existing action of this assistant, to propose a change to it. Fields left out keep their current values. Proposing a new action with an existing name replies with that action's id."},
                 },
-                "required": ["name", "prompt"],
             },
         },
         {
@@ -132,6 +133,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             };
 
             match assistant_actions::propose_from_agent(state, conversation_id, &arguments).await? {
+                Ok(proposal) if proposal.action_id.is_some() => ToolReply::text(&format!("Change to \"{}\" proposed. It applies once the person approves it; do not propose it again.", proposal.name), false),
                 Ok(proposal) => ToolReply::text(&format!("Action \"{}\" proposed. It waits for the person to approve it; do not propose it again.", proposal.name), false),
                 Err(message) => ToolReply::text(&message, true),
             }

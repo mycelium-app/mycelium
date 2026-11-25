@@ -92,6 +92,9 @@ data class ActionProposal(
     val prompt: String,
     val inputs: List<ActionInput> = emptyList(),
     val reason: String = "",
+    val pinned: Boolean = false,
+    @SerialName("action_id") val actionId: String? = null,
+    val before: SaveActionRequest? = null,
     val state: String,
     @SerialName("created_at") val createdAt: String,
 )

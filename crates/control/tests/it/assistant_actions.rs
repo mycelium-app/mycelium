@@ -217,6 +217,98 @@ async fn a_proposed_action_waits_for_approval_and_can_be_edited_or_declined() {
 }
 
 #[tokio::test]
+async fn editing_an_action_keeps_its_id_so_its_schedule_runs_the_new_prompt() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let assistant = assistant_on(&server, &link).await;
+    let (_, created) = save_action(&server.user, &assistant, summary_action()).await;
+    let id = created["id"].as_str().unwrap();
+    let (_, schedule) = server.user.json(server.user.post("/api/v1/schedules").json(&json!({"assistant_id": assistant, "action_id": id, "action_inputs": {"meeting": "stand-up", "date": "2026-10-27"}, "prompt": "Summarise a meeting", "cron": "0 9 * * 1-5", "each_run": "same"}))).await;
+
+    let mut edited = summary_action();
+    edited["prompt"] = json!("Write up {meeting} on {date}.");
+    let (status, updated) = server.user.json(server.user.put(&format!("/api/v1/assistants/{assistant}/actions/{id}")).json(&edited)).await;
+    assert_eq!((status, updated["id"].clone()), (200, json!(id)), "{updated}");
+    let schedule_id = schedule["id"].as_str().unwrap();
+    server.user.json(server.user.post(&format!("/api/v1/schedules/{schedule_id}/run"))).await;
+    let (_, text) = first_prompt(&mut link).await;
+
+    assert_eq!(text, "Write up stand-up on 2026-10-27.");
+}
+
+#[tokio::test]
+async fn a_proposed_change_to_an_action_applies_in_place_only_when_approved() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let assistant = assistant_on(&server, &link).await;
+    server.user.json(server.user.post(&format!("/api/v1/assistants/{assistant}/prompt")).json(&json!({"text": "Hello"}))).await;
+    let (conversation, _) = first_prompt(&mut link).await;
+    let (_, created) = save_action(&server.user, &assistant, json!({"name": "File this note", "prompt": "File {note}", "inputs": [{"name": "note", "kind": "text"}]})).await;
+    let id = created["id"].as_str().unwrap();
+
+    let proposed = propose(&server, &mut link, conversation, json!({"action_id": id, "prompt": "File {note} and link it from today's page", "pinned": true, "reason": "You asked to pin it"})).await;
+    assert_ne!(proposed["isError"], true, "{proposed}");
+    let (_, listed) = server.user.json(server.user.get(&format!("/api/v1/assistants/{assistant}/action-proposals"))).await;
+    let proposal = &listed[0];
+    assert_eq!(
+        (proposal["action_id"].clone(), proposal["name"].clone(), proposal["pinned"].clone(), proposal["before"]["prompt"].clone(), proposal["before"]["pinned"].clone()),
+        (json!(id), json!("File this note"), json!(true), json!("File {note}"), json!(false)),
+        "{proposal}"
+    );
+    let (_, unchanged) = server.user.json(server.user.get(&format!("/api/v1/assistants/{assistant}/actions"))).await;
+    assert_eq!((unchanged[0]["prompt"].clone(), unchanged[0]["pinned"].clone()), (json!("File {note}"), json!(false)));
+
+    let proposal_id = proposal["id"].as_str().unwrap();
+    let (status, approved) = server.user.json(server.user.post(&format!("/api/v1/assistants/{assistant}/action-proposals/{proposal_id}/approve"))).await;
+    assert_eq!((status, approved["id"].clone(), approved["prompt"].clone(), approved["pinned"].clone()), (200, json!(id), json!("File {note} and link it from today's page"), json!(true)), "{approved}");
+    let (_, after) = server.user.json(server.user.get(&format!("/api/v1/assistants/{assistant}/actions"))).await;
+    assert_eq!(after.as_array().unwrap().len(), 1);
+
+    let declined_change = propose(&server, &mut link, conversation, json!({"action_id": id, "pinned": false})).await;
+    assert_ne!(declined_change["isError"], true, "{declined_change}");
+    let (_, listed) = server.user.json(server.user.get(&format!("/api/v1/assistants/{assistant}/action-proposals"))).await;
+    let waiting = listed.as_array().unwrap().iter().find(|proposal| proposal["state"] == "proposed").unwrap()["id"].as_str().unwrap().to_string();
+    server.user.json(server.user.post(&format!("/api/v1/assistants/{assistant}/action-proposals/{waiting}/decline"))).await;
+    let (_, kept) = server.user.json(server.user.get(&format!("/api/v1/assistants/{assistant}/actions"))).await;
+
+    assert_eq!(kept[0]["pinned"], json!(true));
+}
+
+#[tokio::test]
+async fn a_change_to_an_unknown_action_lists_the_actions_and_a_taken_name_gives_its_id() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let assistant = assistant_on(&server, &link).await;
+    server.user.json(server.user.post(&format!("/api/v1/assistants/{assistant}/prompt")).json(&json!({"text": "Hello"}))).await;
+    let (conversation, _) = first_prompt(&mut link).await;
+    let (_, created) = save_action(&server.user, &assistant, json!({"name": "Digest", "prompt": "Digest"})).await;
+    let id = created["id"].as_str().unwrap();
+
+    let unknown = propose(&server, &mut link, conversation, json!({"action_id": Uuid::new_v4().to_string(), "pinned": true})).await;
+    assert!(unknown["isError"] == true && text_of(&unknown).contains(&format!("Digest ({id})")), "{unknown}");
+    let taken = propose(&server, &mut link, conversation, json!({"name": "digest", "prompt": "Digest again"})).await;
+
+    assert!(taken["isError"] == true && text_of(&taken).contains(id), "{taken}");
+}
+
+#[tokio::test]
+async fn a_pinned_proposal_is_pinned_once_approved() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let assistant = assistant_on(&server, &link).await;
+    server.user.json(server.user.post(&format!("/api/v1/assistants/{assistant}/prompt")).json(&json!({"text": "Hello"}))).await;
+    let (conversation, _) = first_prompt(&mut link).await;
+
+    propose(&server, &mut link, conversation, json!({"name": "Morning tidy", "prompt": "Tidy up", "pinned": true})).await;
+    let (_, listed) = server.user.json(server.user.get(&format!("/api/v1/assistants/{assistant}/action-proposals"))).await;
+    assert_eq!(listed[0]["pinned"], json!(true), "{listed}");
+    let proposal_id = listed[0]["id"].as_str().unwrap();
+    let (_, approved) = server.user.json(server.user.post(&format!("/api/v1/assistants/{assistant}/action-proposals/{proposal_id}/approve"))).await;
+
+    assert_eq!(approved["pinned"], json!(true), "{approved}");
+}
+
+#[tokio::test]
 async fn an_action_cannot_be_proposed_outside_an_assistant_or_with_a_taken_name() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

@@ -1,5 +1,6 @@
 package mycelium.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -19,8 +21,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import mycelium.api.ActionInput
 import mycelium.api.ActionProposal
@@ -100,7 +108,7 @@ internal fun ActionChips(controls: AssistantActionControls) {
         return
     }
 
-    FlowRow(Modifier.fillMaxWidth().padding(bottom = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+    FlowRow(Modifier.fillMaxWidth().padding(top = Tokens.Space.S3, bottom = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
         for (action in pinned) {
             Row(
                 Modifier
@@ -317,6 +325,7 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
                     actions.size,
                     { row, column ->
                         val action = actions[row]
+                        val togglePin = { runner { store.api.saveAssistantAction(assistant.id, action.id, SaveActionRequest(action.name, action.prompt, action.inputs, nodeId = action.nodeId, pinned = !action.pinned)); store.refreshAssistantActions(assistant.id) } }
 
                         when (column) {
                             0 -> TableCell.Slot(action.name, if (action.builtinKey != null) 72.dp else 0.dp) {
@@ -334,7 +343,7 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
                                 Checkbox(
                                     action.pinned,
                                     "Pinned: ${action.name}",
-                                    { runner { store.api.saveAssistantAction(assistant.id, action.id, SaveActionRequest(action.name, action.prompt, action.inputs, nodeId = action.nodeId, pinned = !action.pinned)); store.refreshAssistantActions(assistant.id) } },
+                                    togglePin,
                                     checkedState = "Pinned",
                                     uncheckedState = "Not pinned",
                                 )
@@ -343,6 +352,7 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
                             else -> TableCell.Slot {
                                 RowMenu(action.name) { close ->
                                     MenuItem("Edit", onClick = { close(); editing = action }, leading = MyIcon.Pencil)
+                                    MenuItem(if (action.pinned) "Unpin" else "Pin above the composer", onClick = { close(); togglePin() }, leading = MyIcon.Pin)
 
                                     if (action.builtinKey != null) {
                                         MenuItem("Reset to default", onClick = { close(); runner { store.api.resetAssistantAction(assistant.id, action.id); store.refreshAssistantActions(assistant.id) } }, leading = MyIcon.Refresh)
@@ -430,6 +440,7 @@ internal fun ProposedActionCard(store: Store, state: AppState, proposal: ActionP
     var editing by remember(proposal.id) { mutableStateOf(false) }
     val runner = rememberAction(proposal.id)
     val waiting = proposal.state == "proposed"
+    val before = proposal.before.takeIf { proposal.actionId != null }
 
     Column(
         Modifier.fillMaxWidth().widthIn(max = Tokens.Size.Page).border(Tokens.Size.Hairline, colors.border, ControlShape).padding(Tokens.Space.S3),
@@ -437,7 +448,7 @@ internal fun ProposedActionCard(store: Store, state: AppState, proposal: ActionP
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             Icon(MyIcon.Zap, colors.textMuted, Tokens.Size.IconSm)
-            Label("Proposed an action", Modifier.weight(1f), Tokens.Type.UiStrong)
+            Label(if (before != null) "Proposed a change to an action" else "Proposed an action", Modifier.weight(1f), Tokens.Type.UiStrong)
             Label(
                 when (proposal.state) {
                     "approved" -> "Approved"
@@ -455,8 +466,18 @@ internal fun ProposedActionCard(store: Store, state: AppState, proposal: ActionP
             Label(proposal.reason, color = colors.textMuted)
         }
 
-        Label(proposal.prompt, style = Tokens.Type.Code)
-        Label("Asks for: ${if (proposal.inputs.isEmpty()) "nothing" else proposal.inputs.joinToString(", ") { "${it.name} (${it.kind})" }}. Pinned: no.", style = Tokens.Type.Meta, color = colors.textMuted)
+        if (before == null) {
+            Label(proposal.prompt, style = Tokens.Type.Code)
+            Label("Asks for: ${askedForKinds(proposal.inputs)}. Pinned: ${yesNo(proposal.pinned)}.", style = Tokens.Type.Meta, color = colors.textMuted)
+        } else {
+            Label("Prompt", style = Tokens.Type.Meta, color = colors.textMuted)
+            BasicText(
+                promptChange(before.prompt, proposal.prompt, colors.statusDone.copy(alpha = 0.18f)),
+                Modifier.fillMaxWidth().background(colors.bgPanel, BlockShape).padding(Tokens.Space.S2),
+                style = Tokens.Type.Code.copy(color = colors.text),
+            )
+            Label(changeSummary(before, proposal), style = Tokens.Type.Meta, color = colors.textMuted)
+        }
         runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         if (waiting) {
@@ -471,11 +492,38 @@ internal fun ProposedActionCard(store: Store, state: AppState, proposal: ActionP
     if (editing) {
         ActionDialog(
             "Edit action",
-            SaveActionRequest(proposal.name, proposal.prompt, proposal.inputs),
+            SaveActionRequest(proposal.name, proposal.prompt, proposal.inputs, nodeId = before?.nodeId, pinned = proposal.pinned),
             onDismiss = { editing = false },
             onSave = { request -> store.api.approveActionProposal(proposal.assistantId, proposal.id, request); store.refreshAssistantActions(proposal.assistantId) },
         )
     }
+}
+
+private fun yesNo(value: Boolean): String = if (value) "yes" else "no"
+
+private fun askedForKinds(inputs: List<ActionInput>): String = if (inputs.isEmpty()) "nothing" else inputs.joinToString(", ") { "${it.name} (${it.kind})" }
+
+internal fun promptChange(before: String, after: String, added: Color): AnnotatedString {
+    val prefix = before.commonPrefixWith(after).length
+    val suffix = before.substring(prefix).commonSuffixWith(after.substring(prefix)).length
+
+    return buildAnnotatedString {
+        append(after.substring(0, prefix))
+        withStyle(SpanStyle(textDecoration = TextDecoration.Underline, background = added)) {
+            append(after.substring(prefix, after.length - suffix))
+        }
+        append(after.substring(after.length - suffix))
+    }
+}
+
+internal fun changeSummary(before: SaveActionRequest, proposal: ActionProposal): String {
+    fun field(label: String, now: String, was: String) = if (now == was) "$label: $now, unchanged." else "$label: $now, was $was."
+
+    return listOfNotNull(
+        field("Name", proposal.name, before.name).takeIf { proposal.name != before.name },
+        field("Pinned", yesNo(proposal.pinned), yesNo(before.pinned)),
+        field("Asks for", askedForKinds(proposal.inputs), askedForKinds(before.inputs)),
+    ).joinToString(" ")
 }
 
 @Composable

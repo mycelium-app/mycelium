@@ -30,7 +30,7 @@ const INPUT_VALUE_LIMIT: usize = 60_000;
 const TODAY: &str = "today";
 pub(crate) const WELLNESS_INSTRUCTIONS: &str = "You are the Wellness assistant. You look after the person's weekly reflections, end-of-day wrap-ups and exercise reviews. Be brief, specific and kind. Write drafts in the first person, in British English. Only change files in your own storage.";
 const ACTION_COLUMNS: &str = "id, assistant_id, name, prompt, inputs, model, node_id, pinned, position, builtin_key, created_at, updated_at";
-const PROPOSAL_COLUMNS: &str = "id, assistant_id, conversation_id, name, prompt, inputs, reason, state, created_at, decided_at";
+const PROPOSAL_COLUMNS: &str = "id, assistant_id, conversation_id, name, prompt, inputs, reason, pinned, action_id, before, state, created_at, decided_at";
 
 struct Builtin {
     key: &'static str,
@@ -112,6 +112,9 @@ struct ProposalRow {
     prompt: String,
     inputs: Jsonb<Vec<ActionInput>>,
     reason: String,
+    pinned: bool,
+    action_id: Option<Uuid>,
+    before: Option<Jsonb<SaveActionRequest>>,
     state: String,
     created_at: DateTime<Utc>,
     decided_at: Option<DateTime<Utc>>,
@@ -127,6 +130,9 @@ impl ProposalRow {
             prompt: self.prompt,
             inputs: self.inputs.0,
             reason: self.reason,
+            pinned: self.pinned,
+            action_id: self.action_id,
+            before: self.before.map(|before| before.0),
             state: self.state,
             created_at: self.created_at,
             decided_at: self.decided_at,
@@ -316,11 +322,15 @@ pub async fn update(State(state): State<AppState>, user: AuthUser, Path((assista
     assistants::find_owned(&state, assistant_id, user.id).await?;
     find(&state, assistant_id, action_id).await?;
 
+    Ok(Json(save(&state, user.id, assistant_id, action_id, request).await?))
+}
+
+async fn save(state: &AppState, owner: Uuid, assistant_id: Uuid, action_id: Uuid, request: SaveActionRequest) -> ApiResult<AssistantAction> {
     let name = valid_name(&request.name)?;
     let prompt = valid_prompt(&request.prompt)?;
     let inputs = valid_inputs(request.inputs)?;
 
-    validate_place(&state, user.id, request.node_id).await?;
+    validate_place(state, owner, request.node_id).await?;
 
     let updated = sqlx::query_as::<_, ActionRow>(sqlx::AssertSqlSafe(format!(
         "update assistant_actions set name = $3, prompt = $4, inputs = $5, model = null, node_id = $6, pinned = $7, updated_at = now() where id = $1 and assistant_id = $2 returning {ACTION_COLUMNS}",
@@ -340,9 +350,9 @@ pub async fn update(State(state): State<AppState>, user: AuthUser, Path((assista
         Err(cause) => return Err(cause.into()),
     };
 
-    changed(&state, user.id, assistant_id);
+    changed(state, owner, assistant_id);
 
-    Ok(Json(row.to_proto()))
+    Ok(row.to_proto())
 }
 
 pub async fn delete(State(state): State<AppState>, user: AuthUser, Path((assistant_id, action_id)): Path<(Uuid, Uuid)>) -> ApiResult<StatusCode> {
@@ -449,7 +459,25 @@ pub async fn propose_from_agent(state: &AppState, conversation_id: Uuid, argumen
         return Ok(Err("Nothing was proposed. Only an assistant's own conversation can propose an action.".to_string()));
     };
     let text = |field: &str| arguments.get(field).and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty());
-    let (Some(name), Some(prompt)) = (text("name"), text("prompt")) else {
+    let existing = match text("action_id") {
+        Some(given) => {
+            let action = match Uuid::parse_str(given) {
+                Ok(action_id) => find(state, assistant_id, action_id).await.ok(),
+                Err(_) => None,
+            };
+            let Some(action) = action else {
+                let actions = sqlx::query_as::<_, (Uuid, String)>("select id, name from assistant_actions where assistant_id = $1 order by position, created_at, id").bind(assistant_id).fetch_all(&state.pool).await?;
+                let listed = actions.iter().map(|(id, name)| format!("{name} ({id})")).collect::<Vec<_>>().join(", ");
+
+                return Ok(Err(format!("Nothing was proposed. This assistant has no action with the id {given}. Its actions are: {listed}. Leave action_id out to propose a new action.")));
+            };
+
+            Some(action)
+        }
+        None => None,
+    };
+    let before = existing.as_ref().map(|action| SaveActionRequest { name: action.name.clone(), prompt: action.prompt.clone(), inputs: action.inputs.clone(), model: None, node_id: action.node_id, pinned: action.pinned });
+    let (Some(name), Some(prompt)) = (text("name").or(before.as_ref().map(|before| before.name.as_str())), text("prompt").or(before.as_ref().map(|before| before.prompt.as_str()))) else {
         return Ok(Err("Nothing was proposed. Give the action a name and a prompt.".to_string()));
     };
     let inputs: Vec<ActionInput> = match arguments.get("inputs") {
@@ -457,21 +485,27 @@ pub async fn propose_from_agent(state: &AppState, conversation_id: Uuid, argumen
             Ok(inputs) => inputs,
             Err(_) => return Ok(Err("Nothing was proposed. Each input needs a name, a kind (text, date or choice) and optionally options, required and default.".to_string())),
         },
-        None => Vec::new(),
+        None => before.as_ref().map(|before| before.inputs.clone()).unwrap_or_default(),
     };
+    let pinned = arguments.get("pinned").and_then(Value::as_bool).or(before.as_ref().map(|before| before.pinned)).unwrap_or(false);
     let checked = valid_name(name).and_then(|name| valid_prompt(prompt).and_then(|prompt| valid_inputs(inputs).map(|inputs| (name, prompt, inputs))));
     let (name, prompt, inputs) = match checked {
         Ok(checked) => checked,
         Err(error) => return Ok(Err(format!("Nothing was proposed. {}", error.message()))),
     };
-    let taken = sqlx::query_scalar::<_, bool>("select exists (select 1 from assistant_actions where assistant_id = $1 and lower(name) = lower($2))").bind(assistant_id).bind(&name).fetch_one(&state.pool).await?;
+    let action_id = existing.as_ref().map(|action| action.id);
+    let taken = sqlx::query_scalar::<_, Uuid>("select id from assistant_actions where assistant_id = $1 and lower(name) = lower($2) and id is distinct from $3").bind(assistant_id).bind(&name).bind(action_id).fetch_optional(&state.pool).await?;
 
-    if taken {
-        return Ok(Err(format!("Nothing was proposed. This assistant already has an action called {name}. Choose another name.")));
+    if let Some(taken) = taken {
+        return Ok(Err(format!("Nothing was proposed. This assistant already has an action called {name}. Choose another name, or give action_id {taken} to propose a change to it.")));
+    }
+
+    if before.as_ref().is_some_and(|before| before.name == name && before.prompt == prompt && before.inputs == inputs && before.pinned == pinned) {
+        return Ok(Err(format!("Nothing was proposed. The change is the same as {name} already is.")));
     }
 
     let row = sqlx::query_as::<_, ProposalRow>(sqlx::AssertSqlSafe(format!(
-        "insert into assistant_action_proposals (owner, assistant_id, conversation_id, name, prompt, inputs, reason) values ($1, $2, $3, $4, $5, $6, $7) returning {PROPOSAL_COLUMNS}",
+        "insert into assistant_action_proposals (owner, assistant_id, conversation_id, name, prompt, inputs, reason, pinned, action_id, before) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning {PROPOSAL_COLUMNS}",
     )))
     .bind(owner)
     .bind(assistant_id)
@@ -480,6 +514,9 @@ pub async fn propose_from_agent(state: &AppState, conversation_id: Uuid, argumen
     .bind(prompt)
     .bind(Jsonb(&inputs))
     .bind(text("reason").unwrap_or_default())
+    .bind(pinned)
+    .bind(action_id)
+    .bind(before.map(Jsonb))
     .fetch_one(&state.pool)
     .await?;
 
@@ -497,9 +534,12 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path((assist
 
     let request = match edited {
         Some(Json(request)) => request,
-        None => SaveActionRequest { name: found.name.clone(), prompt: found.prompt.clone(), inputs: found.inputs.0.clone(), model: None, node_id: None, pinned: false },
+        None => SaveActionRequest { name: found.name.clone(), prompt: found.prompt.clone(), inputs: found.inputs.0.clone(), model: None, node_id: found.before.as_ref().and_then(|before| before.node_id), pinned: found.pinned },
     };
-    let action = insert(&state, user.id, assistant_id, request).await?;
+    let action = match found.action_id {
+        Some(action_id) => save(&state, user.id, assistant_id, action_id, request).await?,
+        None => insert(&state, user.id, assistant_id, request).await?,
+    };
     let decided = sqlx::query_as::<_, ProposalRow>(sqlx::AssertSqlSafe(format!("update assistant_action_proposals set state = 'approved', decided_at = now() where id = $1 returning {PROPOSAL_COLUMNS}"))).bind(proposal_id).fetch_one(&state.pool).await?;
 
     publish_proposal(&state, user.id, decided);
@@ -519,7 +559,10 @@ pub async fn decline(State(state): State<AppState>, user: AuthUser, Path((assist
     let decided = sqlx::query_as::<_, ProposalRow>(sqlx::AssertSqlSafe(format!("update assistant_action_proposals set state = 'declined', decided_at = now() where id = $1 returning {PROPOSAL_COLUMNS}"))).bind(proposal_id).fetch_one(&state.pool).await?;
 
     if let Some(conversation_id) = found.conversation_id {
-        let text = format!("I declined the action you proposed, {}. Do not propose it again unless I ask.", found.name);
+        let text = match found.action_id {
+            Some(_) => format!("I declined the change you proposed to {}, so it stays as it was. Do not propose it again unless I ask.", found.before.as_ref().map_or(found.name.as_str(), |before| before.name.as_str())),
+            None => format!("I declined the action you proposed, {}. Do not propose it again unless I ask.", found.name),
+        };
 
         let _ = prompts::continue_unless_queued(&state, user.id, conversation_id, &text).await;
     }

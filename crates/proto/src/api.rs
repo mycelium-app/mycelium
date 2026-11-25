@@ -2761,6 +2761,12 @@ pub struct ActionProposal {
     #[serde(default)]
     pub inputs: Vec<ActionInput>,
     pub reason: String,
+    #[serde(default)]
+    pub pinned: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before: Option<SaveActionRequest>,
     pub state: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

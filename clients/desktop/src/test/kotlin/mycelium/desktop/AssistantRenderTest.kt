@@ -12,6 +12,11 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertTextEquals
+import io.ktor.client.engine.mock.toByteArray
 import androidx.compose.ui.unit.dp
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -64,6 +69,8 @@ private const val WellnessActions = """[
 
 private const val Proposals = """[{"id":"pp1","assistant_id":"as1","conversation_id":"$Thread","name":"Weekly digest","prompt":"List what changed this week, grouped by folder.","inputs":[{"name":"week","kind":"text","required":false}],"reason":"You asked for a weekly summary three times this month.","state":"proposed","created_at":"2026-10-27T09:00:00Z"}]"""
 
+private const val ProposedChange = """[{"id":"pp2","assistant_id":"as1","conversation_id":"$Thread","name":"Tidy inbox","prompt":"File everything in the inbox folder and tell me where it went.","inputs":[],"reason":"You asked to pin it.","pinned":true,"action_id":"x3","before":{"name":"Tidy inbox","prompt":"File everything in the inbox folder.","inputs":[],"pinned":false},"state":"proposed","created_at":"2026-10-27T09:02:00Z"}]"""
+
 private const val Changes = """[
 {"id":"ch1","conversation_id":"$Thread","kind":"create","name":"Reviewer","description":"Reads merge requests and leaves comments.","group_id":"g1","instructions":"Review each merge request for correctness first, then style.","state":"proposed","created_at":"2026-10-27T09:00:00Z"},
 {"id":"ch2","conversation_id":"$Thread","kind":"update","assistant_id":"as1","name":"Archivist","description":"Keeps the notes folder tidy.","state":"applied","created_at":"2026-10-27T09:01:00Z"}
@@ -88,13 +95,15 @@ class AssistantRenderTest {
 
     private val me = Me("u", "sam@example.com", "Sam")
     private val appearance = Appearance(true, Accent.Neutral, Accent.entries.filter { it != Accent.System }, {})
+    private val sent = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
+    private var proposals = Proposals
 
     private fun api(): MyceliumApi {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val routes = linkedMapOf(
             "/assistants/as1/actions" to ArchivistActions,
             "/assistants/wl/actions" to WellnessActions,
-            "/assistants/as1/action-proposals" to Proposals,
+            "/assistants/as1/action-proposals" to proposals,
             "/assistants/as1/files" to """[{"path":"AGENTS.md","size":60,"updated_at":"2026-10-22T10:00:00Z"}]""",
             "/assistants/as1/secrets" to """[{"name":"OUTLINE_TOKEN","description":"Read access to the wiki","state":"set"},{"name":"CALENDAR_KEY","state":"waiting"}]""",
             "/assistants/as1" to Archivist,
@@ -119,6 +128,10 @@ class AssistantRenderTest {
         )
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
+
+            if (request.method.value != "GET") {
+                sent += "${request.method.value} $path" to String(request.body.toByteArray())
+            }
             val body = routes.entries.firstOrNull { path.endsWith(it.key) }?.value ?: "{}"
 
             respond(body, HttpStatusCode.OK, json)
@@ -242,6 +255,37 @@ class AssistantRenderTest {
         show(Route.Assistant("as1"))
         waitFor("Proposed an action")
         snap("7.2-thread")
+    }
+
+    @Test
+    fun aProposedChangeNamesWhatChangesAndWhatStaysTheSame() {
+        proposals = ProposedChange
+        show(Route.Assistant("as1"))
+        waitFor("Proposed a change to an action")
+        rule.onNodeWithText("Pinned: yes, was no. Asks for: nothing, unchanged.").assertExists()
+        snap("7.23-proposed-change")
+    }
+
+    @Test
+    fun editingAProposedChangeOpensTheActionDialogWithTheChange() {
+        proposals = ProposedChange
+        show(Route.Assistant("as1"))
+        waitFor("Proposed a change to an action")
+        rule.onNodeWithText("Edit").performClick()
+        waitFor("Save action")
+        rule.onNodeWithContentDescription("Prompt").assertTextEquals("File everything in the inbox folder and tell me where it went.")
+        rule.onNodeWithContentDescription("Pin above the composer").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "On"))
+    }
+
+    @Test
+    fun theRowMenuPinsAnAction() {
+        show(Route.AssistantSettings("as1", AssistantSection.SchedulesAndActions))
+        waitFor("Tidy inbox")
+        rule.onNodeWithContentDescription("More for Tidy inbox").performClick()
+        rule.onNodeWithText("Pin above the composer").performClick()
+        rule.waitUntil(5_000) { sent.any { it.first == "PUT /api/v1/assistants/as1/actions/x3" } }
+
+        assertTrue(sent.first { it.first == "PUT /api/v1/assistants/as1/actions/x3" }.second.contains("\"pinned\":true"))
     }
 
     @Test
