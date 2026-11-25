@@ -86,7 +86,7 @@ async fn a_windows_node_joins_signs_in_and_runs_agents_found_only_on_its_own_pat
     let tools = root.path().join("agent shims");
     std::fs::create_dir(&tools).unwrap();
     let shim = tools.join("example-acp.cmd");
-    std::fs::write(&shim, "@echo off\r\nif \"%1\"==\"--version\" (echo example-acp 1.0.0 & exit /b 0)\r\npowershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"%~dp0agent.ps1\" %*\r\n").unwrap();
+    std::fs::write(&shim, "@echo off\r\nif \"%~1\"==\"--version\" (echo example-acp 1.0.0 & exit /b 0)\r\npowershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"%~dp0agent.ps1\" %*\r\n").unwrap();
     std::fs::write(tools.join("agent.ps1"), r#"
 param([string]$Expected)
 if ($Expected -ne 'fixture argument') { exit 2 }
