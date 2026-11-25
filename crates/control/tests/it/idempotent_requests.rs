@@ -49,6 +49,28 @@ async fn the_same_prompt_queued_twice_with_one_client_id_is_queued_once() {
 }
 
 #[tokio::test]
+async fn a_prompt_kept_by_the_server_before_its_delivery_failed_is_not_kept_again_on_a_retry() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, "acp-1").await;
+    link.barrier(conversation.id, 1).await;
+    let (status, attachment) = server.user.json(server.user.post(&format!("/api/v1/conversations/{}/attachments", conversation.id)).query(&[("name", "notes.txt")]).header("content-type", "text/plain").body("notes")).await;
+    assert_eq!(status, 201, "{attachment}");
+    std::fs::remove_file(server.data_dir.join("attachments").join(attachment["sha256"].as_str().unwrap())).unwrap();
+    let path = format!("/api/v1/conversations/{}/prompt", conversation.id);
+    let body = json!({"text": "read my notes", "attachments": [attachment], "client_id": Uuid::new_v4()});
+
+    let (first, answer) = post(&server, &path, body.clone()).await;
+    post(&server, &path, body).await;
+
+    let (_, queue) = server.user.json(server.user.get(&format!("/api/v1/conversations/{}/queue", conversation.id))).await;
+    assert!(first < 300, "{answer}");
+    assert_eq!(queue.as_array().unwrap().len() + user_messages(&server, conversation.id).await, 1, "{queue}");
+}
+
+#[tokio::test]
 async fn prompts_with_different_client_ids_are_both_sent() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

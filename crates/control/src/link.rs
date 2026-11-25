@@ -604,13 +604,23 @@ async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid
     if let Some(owner) = owner.filter(|_| recorded && hit_limit) {
         let window = limited_window.as_deref().unwrap_or("usage");
 
-        if crate::routing::switch_after_limit(state, owner, conversation_id, window).await {
+        if crate::routing::switch_after_limit(state, owner, conversation_id, window, resume_at).await {
             let text = format!("The usage limit was reached on {}. Continue from where you stopped.", limited_account.as_deref().unwrap_or("the account in use"));
 
             match crate::routing::carry_on(state, owner, conversation_id, &text).await {
                 Ok(()) => switched = true,
                 Err(error) => tracing::warn!("carrying on {conversation_id} after it moved account failed: {}", error.message()),
             }
+        }
+    }
+
+    if let Some(owner) = owner.filter(|_| recorded && hit_limit && !switched) {
+        match crate::routing::exhausted(state, owner, conversation_id, resume_at).await {
+            Ok(Some(message)) => {
+                record(state, node_id, conversation_id, None, EventKind::SessionNotice, json!({"setting": "usage_limit", "message": message}), None).await?;
+            }
+            Ok(None) => {}
+            Err(error) => tracing::warn!("could not say why {conversation_id} stayed at its limit: {}", error.message()),
         }
     }
 
@@ -1238,6 +1248,10 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
 
     if let Err(error) = crate::goals::turn_ended(state, conversation_id, &stop_reason).await {
         tracing::warn!("goal handling after a turn failed for {conversation_id}: {}", error.message());
+    }
+
+    if let Err(error) = crate::todos::turn_ended(state, conversation_id, &stop_reason).await {
+        tracing::warn!("could not ask {conversation_id} to update its to-do list: {}", error.message());
     }
 
     if !keeps_working && stop_reason != "cancelled" {

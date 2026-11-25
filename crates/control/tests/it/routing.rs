@@ -96,6 +96,48 @@ async fn a_usage_limit_moves_a_routed_conversation_to_the_next_best_account_and_
 }
 
 #[tokio::test]
+async fn at_a_limit_every_other_signed_in_account_of_the_agent_is_tried_before_another_agent() {
+    let server = Server::start().await;
+    server.user.json(server.user.put("/api/v1/usage-limit").json(&json!({"on_usage_limit": "ask"}))).await;
+    save_any_model(&server, json!([{"agent": "claude", "account": "sam@example.com"}, {"agent": "codex", "account": "work@example.org"}])).await;
+    let codex = mycelium_proto::conversation::LoginInfo { agent: mycelium_proto::conversation::AgentId::Codex, ..with_usage("work@example.org", 90) };
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 90), with_usage("alex@example.net", 50), codex]).await;
+    let id = running(&server, &mut link, "any_model").await;
+
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: limit_message() }).await;
+
+    assert!(matches!(next_command(&mut link).await, ControlToNode::CloseSession { .. }));
+    match next_command(&mut link).await {
+        ControlToNode::StartSession { agent, account, .. } => assert_eq!((agent, account.as_deref()), (mycelium_proto::conversation::AgentId::Claude, Some("alex@example.net"))),
+        other => panic!("expected start_session, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_account_at_its_limit_is_not_chosen_again_while_the_limit_lasts_and_the_thread_says_so() {
+    let server = Server::start().await;
+    server.user.json(server.user.put("/api/v1/usage-limit").json(&json!({"on_usage_limit": "ask"}))).await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 90), with_usage("work@example.org", 80)]).await;
+    let id = running(&server, &mut link, "claude_any").await;
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: limit_message() }).await;
+    assert!(matches!(next_command(&mut link).await, ControlToNode::CloseSession { .. }));
+    assert_eq!(started_on(&mut link).await.as_deref(), Some("work@example.org"));
+    link.start_session(id, "acp-2").await;
+    expect_prompt(&mut link).await;
+    report(&server, &mut link, vec![with_usage("sam@example.com", 90), with_usage("work@example.org", 80)], "sam@example.com", 90).await;
+
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 5, message: limit_message() }).await;
+
+    let notice = common::eventually("the notice", || async {
+        server.events(id).await.into_iter().find(|event| event["kind"] == "session_notice").map(|event| event["payload"]["message"].as_str().unwrap_or_default().to_string())
+    })
+    .await;
+    assert!(notice.starts_with("Every signed-in account for Claude Code is at its limit. The next resets at "), "{notice}");
+    let starts = server.events(id).await.iter().filter(|event| event["kind"] == "continued").count();
+    assert_eq!(starts, 1);
+}
+
+#[tokio::test]
 async fn an_account_that_signs_out_is_left_at_the_next_turn() {
     let server = Server::start().await;
     let accounts = vec![with_usage("sam@example.com", 90), with_usage("work@example.org", 40)];

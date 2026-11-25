@@ -257,6 +257,25 @@ async fn a_mode_chosen_before_the_session_starts_is_applied_when_it_does() {
 }
 
 #[tokio::test]
+async fn a_model_chosen_before_the_session_starts_is_kept_and_applied_when_it_does() {
+    let server = Server::start().await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 90)]).await;
+    let (_, created) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/work/app", "account": "sam@example.com"}))).await;
+    let id: Uuid = serde_json::from_value(created["id"].clone()).unwrap();
+    next_command(&mut link).await;
+
+    let (status, refused) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/config")).json(&json!({"model": "opus"}))).await;
+    assert_eq!(status, 204, "{refused}");
+    let models = json!({"currentModelId": "sonnet", "availableModels": [{"modelId": "sonnet", "name": "Sonnet"}, {"modelId": "opus", "name": "Opus"}]});
+    link.send(NodeToControl::SessionStarted { conversation_id: id, acp_session_id: "acp-1".into(), modes: None, models: Some(models), config_options: None }).await;
+
+    match next_command(&mut link).await {
+        ControlToNode::SetConfig { model, .. } => assert_eq!(model.as_deref(), Some("opus")),
+        other => panic!("expected set_config, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn the_conversation_shows_the_mode_the_agent_reports() {
     let server = Server::start().await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 90)]).await;

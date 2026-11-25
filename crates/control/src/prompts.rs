@@ -114,8 +114,8 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
     let from_goal = origin.as_deref() == Some(crate::goals::GOAL_ORIGIN);
     let mut message = json!({"text": text, "prompt_id": prompt_id, "attachments": attachments});
 
-    if origin.as_deref() == Some(crate::watches::EVENT_ORIGIN) {
-        message["origin"] = json!(crate::watches::EVENT_ORIGIN);
+    if let Some(marked) = origin.as_deref().filter(|origin| [crate::watches::EVENT_ORIGIN, crate::todos::TODOS_ORIGIN].contains(origin)) {
+        message["origin"] = json!(marked);
     }
 
     if from_goal {
@@ -257,8 +257,13 @@ pub async fn send_reopening(state: &AppState, owner: Uuid, id: Uuid, request: Pr
         publish_reopened(state, owner, reopened, manager);
     }
 
-    pump(state, id, false).await?;
-    publish_queue(state, owner, id).await?;
+    if let Err(error) = pump(state, id, false).await {
+        tracing::warn!("the message for {id} is queued but could not be delivered yet: {}", error.message());
+    }
+
+    if let Err(error) = publish_queue(state, owner, id).await {
+        tracing::warn!("could not publish the queue of {id}: {}", error.message());
+    }
 
     if !state.hub.is_online(row.node_id) {
         return Ok(Sent::QueuedForOfflineNode);
@@ -761,6 +766,23 @@ pub async fn set_config(state: &AppState, owner: Uuid, id: Uuid, request: Config
         let chosen = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set mode = $2 where id = $1 and acp_session_id is null returning {CONVERSATION_COLUMNS}")))
             .bind(id)
             .bind(mode)
+            .fetch_optional(&state.pool)
+            .await?;
+
+        if let Some(chosen) = chosen {
+            state.publish(Some(owner), StreamMessage::Conversation(chosen.to_proto()?));
+
+            return Ok(());
+        }
+
+        row = find_owned(&state.pool, id, owner).await?;
+    }
+
+    if row.acp_session_id.is_none() && request.config.is_none() && let Some(model) = &request.model {
+        let chosen = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set model = $2, mode = coalesce($3, mode) where id = $1 and acp_session_id is null returning {CONVERSATION_COLUMNS}")))
+            .bind(id)
+            .bind(model)
+            .bind(request.mode.as_deref())
             .fetch_optional(&state.pool)
             .await?;
 

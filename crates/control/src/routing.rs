@@ -74,8 +74,9 @@ pub fn best(candidates: &[Candidate]) -> Option<&Candidate> {
 }
 
 pub async fn candidates(state: &AppState, owner: Uuid, agent: AgentId, node_id: Option<Uuid>) -> ApiResult<Vec<Candidate>> {
-    let rows = sqlx::query_as::<_, (Uuid, String, Json<Vec<UsageWindow>>, Option<i16>)>(
-        "select l.node_id, l.account, l.usage_windows, l.usage_left from logins l join nodes n on n.id = l.node_id
+    let rows = sqlx::query_as::<_, (Uuid, String, Json<Vec<UsageWindow>>, Option<i16>, Option<DateTime<Utc>>)>(
+        "select l.node_id, l.account, l.usage_windows, l.usage_left, a.limited_until from logins l join nodes n on n.id = l.node_id
+         left join account_limits a on a.node_id = l.node_id and a.agent = l.agent and a.account = l.account and a.limited_until > now()
          where n.created_by = $1 and n.revoked_at is null and l.agent = $2 and l.state = 'signed_in' and l.account is not null and ($3::uuid is null or l.node_id = $3)
          order by l.account",
     )
@@ -86,7 +87,20 @@ pub async fn candidates(state: &AppState, owner: Uuid, agent: AgentId, node_id: 
     .await?;
     let now = Utc::now();
 
-    Ok(rows.into_iter().filter(|(node_id, _, _, _)| state.hub.is_online(*node_id)).map(|(node_id, account, windows, left)| Candidate { node_id, account, usage: usage_with_fallback(&windows.0, left, now) }).collect())
+    Ok(rows
+        .into_iter()
+        .filter(|(node_id, _, _, _, _)| state.hub.is_online(*node_id))
+        .map(|(node_id, account, windows, left, limited_until)| {
+            let mut usage = usage_with_fallback(&windows.0, left, now);
+
+            if let Some(until) = limited_until {
+                usage.limited = true;
+                usage.frees_at = usage.frees_at.into_iter().chain([until]).max();
+            }
+
+            Candidate { node_id, account, usage }
+        })
+        .collect())
 }
 
 fn any_account(agent: AgentId) -> ModelChoice {
@@ -222,7 +236,12 @@ async fn plan(state: &AppState, owner: Uuid, row: &ConversationRow, entries: &[M
         return Ok(None);
     }
 
-    for entry in entries {
+    let leaving_agent = current_agent.filter(|_| cause.is_some());
+    let same_agent = leaving_agent.map(|agent| ModelChoice { model: row.model.clone(), ..any_account(agent) });
+    let listed_first = entries.iter().filter(|entry| leaving_agent.is_some() && entry.agent == leaving_agent);
+    let others = entries.iter().filter(|entry| leaving_agent.is_none() || entry.agent != leaving_agent);
+
+    for entry in listed_first.chain(same_agent.iter()).chain(others) {
         if cause.is_none() && !repick && matches_current(entry, row) {
             return Ok(None);
         }
@@ -313,8 +332,18 @@ pub async fn before_chat_turn(state: &AppState, owner: Uuid, id: Uuid) -> ApiRes
     Ok(!crate::chats::is_chat(&after))
 }
 
-async fn record_limit(state: &AppState, owner: Uuid, id: Uuid, window: &str) -> ApiResult<()> {
+async fn record_limit(state: &AppState, owner: Uuid, id: Uuid, window: &str, until: Option<DateTime<Utc>>) -> ApiResult<()> {
     let row = find_owned(&state.pool, id, owner).await?;
+
+    if let Some(account) = &row.account {
+        sqlx::query("insert into account_limits (node_id, agent, account, limited_until) values ($1, $2, $3, coalesce($4, now() + interval '1 hour')) on conflict (node_id, agent, account) do update set limited_until = excluded.limited_until")
+            .bind(row.node_id)
+            .bind(&row.agent)
+            .bind(account)
+            .bind(until)
+            .execute(&state.pool)
+            .await?;
+    }
 
     sqlx::query(
         "update logins set usage_left = 0,
@@ -331,8 +360,8 @@ async fn record_limit(state: &AppState, owner: Uuid, id: Uuid, window: &str) -> 
     Ok(())
 }
 
-pub async fn switch_after_limit(state: &AppState, owner: Uuid, conversation_id: Uuid, window: &str) -> bool {
-    if let Err(error) = record_limit(state, owner, conversation_id, window).await {
+pub async fn switch_after_limit(state: &AppState, owner: Uuid, conversation_id: Uuid, window: &str, until: Option<DateTime<Utc>>) -> bool {
+    if let Err(error) = record_limit(state, owner, conversation_id, window, until).await {
         tracing::warn!("could not record the usage limit of {conversation_id}: {}", error.message());
     }
 
@@ -366,6 +395,34 @@ pub async fn next_free_at(state: &AppState, owner: Uuid, conversation_id: Uuid) 
     }
 
     Ok(earliest)
+}
+
+pub async fn exhausted(state: &AppState, owner: Uuid, conversation_id: Uuid, resume_at: Option<DateTime<Utc>>) -> ApiResult<Option<String>> {
+    let row = find_owned(&state.pool, conversation_id, owner).await?;
+    let Some(routing) = row.routing.as_deref().and_then(Routing::parse) else {
+        return Ok(None);
+    };
+    let mut agents: Vec<AgentId> = Vec::new();
+    let mut earliest = resume_at;
+
+    for agent in entries_of(state, owner, routing).await?.into_iter().filter_map(|entry| entry.agent) {
+        if !agents.contains(&agent) {
+            agents.push(agent);
+        }
+
+        earliest = earliest.into_iter().chain(candidates(state, owner, agent, None).await?.iter().filter_map(|candidate| candidate.usage.frees_at)).min();
+    }
+
+    let names: Vec<&str> = agents.iter().map(|agent| agent.display_name()).collect();
+    let listed = match names.as_slice() {
+        [] => return Ok(None),
+        [only] => (*only).to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    };
+    let zone = crate::wellness::zone_of(state, owner, None).await?;
+    let next = earliest.map(|at| format!(" The next resets at {}.", at.with_timezone(&zone).format("%H:%M"))).unwrap_or_default();
+
+    Ok(Some(format!("Every signed-in account for {listed} is at its limit.{next}")))
 }
 
 pub async fn carry_on(state: &AppState, owner: Uuid, id: Uuid, text: &str) -> ApiResult<()> {

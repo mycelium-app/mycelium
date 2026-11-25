@@ -231,10 +231,18 @@ pub fn login_state(home: &Path, accounts_dir: &Path, available: &[AgentInfo], us
 fn credential(home: &Path, agent: AgentId, account: &AccountHome) -> (&'static str, Option<Vec<u8>>) {
     match (agent, &account.profile) {
         (AgentId::Claude, None) => claude_credential(home),
-        (AgentId::Claude, Some(_)) => ("oauth_token", std::fs::read(account.dir.join(".credentials.json")).ok()),
-        (AgentId::Codex, _) => ("device_auth", std::fs::read(account.dir.join("auth.json")).ok()),
+        (AgentId::Claude, Some(_)) => ("oauth_token", std::fs::read(account.dir.join(".credentials.json")).ok().filter(|stored| holds_token(stored, &[&["claudeAiOauth", "accessToken"], &["claudeAiOauth", "refreshToken"]]))),
+        (AgentId::Codex, _) => ("device_auth", std::fs::read(account.dir.join("auth.json")).ok().filter(|stored| holds_token(stored, &[&["tokens", "access_token"], &["tokens", "refresh_token"], &["tokens", "id_token"], &["OPENAI_API_KEY"]]))),
         (AgentId::Vibe, profile) => ("browser", vibe_key(&account.dir, profile.is_none()).map(String::into_bytes)),
     }
+}
+
+fn holds_token(stored: &[u8], paths: &[&[&str]]) -> bool {
+    let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(stored) else {
+        return false;
+    };
+
+    paths.iter().any(|path| path.iter().fold(&parsed, |value, key| &value[*key]).as_str().is_some_and(|token| !token.is_empty()))
 }
 
 fn claude_credential(home: &Path) -> (&'static str, Option<Vec<u8>>) {
@@ -246,7 +254,7 @@ fn claude_credential(home: &Path) -> (&'static str, Option<Vec<u8>>) {
         return ("oauth_token", Some(token.into_encoded_bytes()));
     }
 
-    ("oauth_token", std::fs::read(home.join(".claude").join(".credentials.json")).ok())
+    ("oauth_token", std::fs::read(home.join(".claude").join(".credentials.json")).ok().filter(|stored| holds_token(stored, &[&["claudeAiOauth", "accessToken"], &["claudeAiOauth", "refreshToken"]])))
 }
 
 fn claude_login_ended(agent: AgentId, stored: &[u8], now_millis: i64) -> bool {
@@ -369,14 +377,14 @@ mod tests {
     }
 
     #[test]
-    fn codex_is_signed_in_when_its_auth_file_exists() {
+    fn codex_is_signed_in_when_its_auth_file_holds_a_token() {
         let home = tempfile::tempdir().unwrap();
         let available = [AgentInfo { agent: AgentId::Codex, version: None, available: true, update_available: None }];
 
         assert_eq!(login_state(home.path(), &home.path().join("accounts"), &available, &no_usage())[0].state, LoginState::SignedOut);
 
         std::fs::create_dir_all(home.path().join(".codex")).unwrap();
-        std::fs::write(home.path().join(".codex").join("auth.json"), "{}").unwrap();
+        std::fs::write(home.path().join(".codex").join("auth.json"), r#"{"tokens": {"access_token": "eyJ-example"}}"#).unwrap();
 
         assert_eq!(login_state(home.path(), &home.path().join("accounts"), &available, &no_usage())[0].state, LoginState::SignedIn);
     }
@@ -456,9 +464,9 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let accounts = home.path().join("accounts");
         write(&home.path().join(".claude.json"), r#"{"oauthAccount": {"emailAddress": "sam@example.com"}}"#);
-        write(&home.path().join(".claude").join(".credentials.json"), "{}");
+        write(&home.path().join(".claude").join(".credentials.json"), r#"{"claudeAiOauth": {"accessToken": "sk-ant-oat01-example"}}"#);
         write(&accounts.join("claude").join("work").join(".claude.json"), r#"{"oauthAccount": {"emailAddress": "work@acme.example"}}"#);
-        write(&accounts.join("claude").join("work").join(".credentials.json"), "{}");
+        write(&accounts.join("claude").join("work").join(".credentials.json"), r#"{"claudeAiOauth": {"accessToken": "sk-ant-oat01-example"}}"#);
         std::fs::create_dir_all(accounts.join("claude").join("side")).unwrap();
 
         let logins = login_state(home.path(), &accounts, &available(AgentId::Claude), &no_usage());
@@ -495,6 +503,22 @@ mod tests {
         let logins = login_state(home.path(), &accounts, &available(AgentId::Vibe), &no_usage());
         assert_eq!((logins[0].account.as_deref(), logins[0].state), (Some("default"), LoginState::SignedOut));
         assert_eq!(std::fs::read_to_string(home.path().join(".vibe").join(".env")).unwrap(), "OTHER=1\n");
+    }
+
+    #[test]
+    fn an_account_folder_whose_credentials_hold_no_token_is_signed_out() {
+        let home = tempfile::tempdir().unwrap();
+        let accounts = home.path().join("accounts");
+        write(&accounts.join("claude/account-4916/.credentials.json"), "{}");
+        write(&accounts.join("claude/work/.credentials.json"), r#"{"claudeAiOauth": {"accessToken": ""}}"#);
+        write(&accounts.join("codex/empty/auth.json"), r#"{"OPENAI_API_KEY": null, "tokens": null}"#);
+        write(&accounts.join("codex/signed/auth.json"), r#"{"tokens": {"access_token": "eyJ-example", "refresh_token": "rt-example"}}"#);
+
+        let claude = login_state(home.path(), &accounts, &available(AgentId::Claude), &no_usage());
+        let codex = login_state(home.path(), &accounts, &available(AgentId::Codex), &no_usage());
+
+        assert!(claude.iter().filter(|login| login.managed).all(|login| login.state == LoginState::SignedOut), "{claude:?}");
+        assert_eq!(codex.iter().filter(|login| login.managed).map(|login| login.state).collect::<Vec<_>>(), vec![LoginState::SignedOut, LoginState::SignedIn]);
     }
 
     #[test]
@@ -538,8 +562,8 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let accounts = home.path().join("accounts");
         write(&home.path().join(".claude.json"), r#"{"oauthAccount": {"emailAddress": "sam@example.com"}}"#);
-        write(&home.path().join(".claude").join(".credentials.json"), "{}");
-        write(&accounts.join("claude").join("work").join(".credentials.json"), "{}");
+        write(&home.path().join(".claude").join(".credentials.json"), r#"{"claudeAiOauth": {"accessToken": "sk-ant-oat01-example"}}"#);
+        write(&accounts.join("claude").join("work").join(".credentials.json"), r#"{"claudeAiOauth": {"accessToken": "sk-ant-oat01-example"}}"#);
         write(&accounts.join("codex").join("side").join("auth.json"), "{}");
 
         sign_out(home.path(), AgentId::Claude, &find_account(home.path(), &accounts, AgentId::Claude, "sam@example.com").unwrap()).unwrap();
