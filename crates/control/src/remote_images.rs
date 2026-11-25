@@ -20,6 +20,8 @@ const ADDRESS_LIMIT: usize = 2048;
 const REFUSAL_MINUTES: i64 = 10;
 const FROM_SEARCH: &str = "search_images";
 const FROM_CLICK: &str = "click";
+const ARTEFACT_PREFIX: &str = "artifact:";
+const ARTEFACT: &str = "artefact";
 
 pub struct Refusal {
     status: StatusCode,
@@ -91,6 +93,14 @@ impl Refusal {
 
     fn unavailable(host: &str) -> Refusal {
         Refusal::new(StatusCode::UNPROCESSABLE_ENTITY, "image_unavailable", host, format!("{host} did not answer."))
+    }
+
+    fn artefact_not_viewable() -> Refusal {
+        Refusal::new(StatusCode::FORBIDDEN, "image_artifact_not_viewable", ARTEFACT, "This conversation cannot view that artefact.")
+    }
+
+    fn artefact_not_drawn(message: impl Into<String>) -> Refusal {
+        Refusal::new(StatusCode::UNPROCESSABLE_ENTITY, "image_unavailable", ARTEFACT, message)
     }
 
     fn stored(&self) -> String {
@@ -424,8 +434,52 @@ async fn recorded_addresses(state: &AppState, owner: Uuid, conversation: Uuid) -
     Ok(recorded.into_iter().flat_map(|address| [Url::parse(&address).map(|parsed| parsed.to_string()).unwrap_or_default(), address]).collect())
 }
 
+async fn artefact_image(state: &AppState, owner: Uuid, conversation: Uuid, address: &str) -> Result<Response, ImageError> {
+    let reference = address.trim_start_matches(ARTEFACT_PREFIX);
+    let (id, artboard) = match reference.split_once('#') {
+        Some((id, artboard)) => (id, Some(artboard)),
+        None => (reference, None),
+    };
+    let Ok(id) = Uuid::parse_str(id) else {
+        return Err(Refusal::artefact_not_viewable().into());
+    };
+
+    if crate::artifact_access::require(state, owner, conversation, id, false).await.is_err() {
+        return Err(Refusal::artefact_not_viewable().into());
+    }
+
+    let latest = sqlx::query_as::<_, (String, i32, String)>("select a.kind, v.version, v.sha256 from artifacts a join artifact_versions v on v.artifact_id = a.id and v.version = a.latest_version where a.id = $1").bind(id).fetch_optional(&state.pool).await?;
+    let Some((kind, version, sha256)) = latest else {
+        return Err(Refusal::artefact_not_viewable().into());
+    };
+    let sha256 = match artboard {
+        None => sha256,
+        Some(wanted) if kind == "design" => match crate::snapshots::artboard_image(state, owner, id, version, &sha256, wanted).await {
+            Ok(crate::snapshots::ArtboardImage::Drawn(drawn)) => drawn,
+            Ok(crate::snapshots::ArtboardImage::NoBrowser) => return Err(Refusal::artefact_not_drawn("Mycelium has no browser to draw artboards with.").into()),
+            Ok(crate::snapshots::ArtboardImage::NotFound) => return Err(Refusal::artefact_not_drawn(format!("The design has no artboard called {wanted}.")).into()),
+            Err(error) => {
+                tracing::warn!(artifact = %id, "could not draw artboard {wanted}: {error:#}");
+
+                return Err(Refusal::artefact_not_drawn("The artboard could not be drawn.").into());
+            }
+        },
+        Some(_) => return Err(Refusal::not_image(ARTEFACT).into()),
+    };
+    let bytes = tokio::fs::read(path_of(state, &sha256)).await.map_err(|_| Refusal::unavailable(ARTEFACT))?;
+    let Some((media_type, _, _)) = sniff(&bytes) else {
+        return Err(Refusal::not_image(ARTEFACT).into());
+    };
+
+    Ok(served(bytes, &sha256, media_type))
+}
+
 pub async fn show(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Query(query): Query<Requested>) -> Result<Response, ImageError> {
     find_owned(&state.pool, id, user.id).await?;
+
+    if query.url.starts_with(ARTEFACT_PREFIX) {
+        return artefact_image(&state, user.id, id, &query.url).await;
+    }
 
     let first = requested(&query.url)?;
     let row = cached(&state, user.id, id, &query.url).await?;
@@ -458,6 +512,10 @@ pub async fn show(State(state): State<AppState>, user: AuthUser, Path(id): Path<
 
 pub async fn load_on_click(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(query): Json<Requested>) -> Result<Response, ImageError> {
     find_owned(&state.pool, id, user.id).await?;
+
+    if query.url.starts_with(ARTEFACT_PREFIX) {
+        return artefact_image(&state, user.id, id, &query.url).await;
+    }
 
     let first = requested(&query.url)?;
     let row = cached(&state, user.id, id, &query.url).await?;

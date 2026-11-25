@@ -24,6 +24,8 @@ sealed interface MarkdownBlock {
     data object Rule : MarkdownBlock
 }
 
+const val ArtefactImagePrefix = "artifact:"
+
 data class InlineImageRef(val alt: String, val url: String, val host: String, val pageUrl: String?)
 
 data class MarkdownListItem(val text: String, val checked: Boolean? = null, val children: List<MarkdownBlock> = emptyList())
@@ -46,9 +48,9 @@ private val TableDivider = Regex("^\\s*\\|?\\s*:?-+:?\\s*(\\|\\s*:?-+:?\\s*)*\\|
 private fun imageRefOf(match: MatchResult): InlineImageRef? {
     val alt = match.groupValues[1].trim()
     val url = match.groupValues[2]
-    val host = url.removePrefix("https://").takeIf { url.startsWith("https://") }?.substringBefore('/')?.substringBefore('?')?.substringBefore('#')?.substringAfterLast('@')?.substringBefore(':')
+    val host = if (url.startsWith(ArtefactImagePrefix)) "" else url.removePrefix("https://").takeIf { url.startsWith("https://") }?.substringBefore('/')?.substringBefore('?')?.substringBefore('#')?.substringAfterLast('@')?.substringBefore(':')
 
-    if (alt.isEmpty() || host.isNullOrEmpty()) {
+    if (alt.isEmpty() || host == null || (host.isEmpty() && !url.startsWith(ArtefactImagePrefix))) {
         return null
     }
 

@@ -218,6 +218,13 @@ class MarkdownTest {
     }
 
     @Test
+    fun anArtefactImageIsAnInlineImageWithNoHost() {
+        val image = (markdownBlocks("![Variant A](artifact:6f1c2d4e-0000-4000-8000-000000000001#a1)").single() as MarkdownBlock.Images).images.single()
+
+        assertEquals(Triple("Variant A", "artifact:6f1c2d4e-0000-4000-8000-000000000001#a1", ""), Triple(image.alt, image.url, image.host))
+    }
+
+    @Test
     fun anImageWithNoAltTextStaysALink() {
         assertEquals(listOf(MarkdownBlock.Paragraph("![](https://a.example.org/h.png)")), markdownBlocks("![](https://a.example.org/h.png)"))
     }

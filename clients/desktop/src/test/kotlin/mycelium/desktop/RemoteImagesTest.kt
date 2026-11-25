@@ -160,6 +160,27 @@ class RemoteImagesTest {
     }
 
     @Test
+    fun anArtefactImageLoadsAtOnceThroughTheSessionAndShowsInline() {
+        val reference = "artifact:6f1c2d4e-0000-4000-8000-000000000001#a1"
+        show("Two variants:\n\n![Variant A, the sidebar keeps its width]($reference)", store(setOf(reference)))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Variant A, the sidebar keeps its width. Open larger").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(listOf(reference), gets.toList())
+        assertEquals(emptyList(), posts.toList())
+    }
+
+    @Test
+    fun anArtefactTheConversationCannotViewShowsItsDescriptionInstead() {
+        val reference = "artifact:6f1c2d4e-0000-4000-8000-000000000002"
+        refusals[reference] = "image_artifact_not_viewable" to "This conversation cannot view that artefact."
+        show("![Variant B, the sidebar collapses]($reference)", store(emptySet()))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Not shown: This conversation cannot view that artefact.").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Variant B, the sidebar collapses").assertIsDisplayed()
+        rule.onAllNodesWithText("Open link").assertCountEquals(0)
+    }
+
+    @Test
     fun anUntrustedImageShowsAPlaceholderAndSendsNothingToLoadUntilTheButtonIsPressed() {
         show("The track itself:\n\n![$UntrustedAlt]($Untrusted)", store(emptySet()))
 

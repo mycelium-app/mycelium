@@ -8,6 +8,7 @@ mod actual;
 mod activity_sweep;
 mod action_items;
 mod api_access;
+mod artefact_images;
 mod artifacts;
 mod assistant_actions;
 mod assistants;

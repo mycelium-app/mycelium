@@ -12,13 +12,13 @@ use tokio::process::{Child, Command};
 const CHROME: &str = "/usr/bin/google-chrome";
 const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
 
-struct Browser {
-    url: String,
+pub struct Browser {
+    pub url: String,
     _process: Child,
     _profile: TempDir,
 }
 
-async fn browser() -> Option<Browser> {
+pub async fn browser() -> Option<Browser> {
     if !Path::new(CHROME).exists() {
         eprintln!("SKIPPED: {CHROME} is not installed, so there is no browser to take snapshots with.");
 

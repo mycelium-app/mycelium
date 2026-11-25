@@ -81,6 +81,45 @@ async fn snapshot(state: &AppState, browser_url: &str, id: Uuid, owner: Uuid, ki
     artifacts::republish(state, id).await.map_err(|error| anyhow::anyhow!("{}", error.message()))
 }
 
+fn artboard_of<'a>(design: &'a Value, wanted: &str) -> Option<&'a Value> {
+    let pages = design["pages"].as_array()?;
+
+    pages.iter().filter_map(|page| page["items"].as_array()).flatten().find(|item| item["type"] == "artboard" && (item["id"] == wanted || item["name"] == wanted))
+}
+
+pub enum ArtboardImage {
+    Drawn(String),
+    NoBrowser,
+    NotFound,
+}
+
+pub async fn artboard_image(state: &AppState, owner: Uuid, id: Uuid, version: i32, sha256: &str, wanted: &str) -> Result<ArtboardImage> {
+    let cached = sqlx::query_scalar::<_, String>("select sha256 from artboard_renders where artifact_id = $1 and version = $2 and artboard = $3").bind(id).bind(version).bind(wanted).fetch_optional(&state.pool).await?;
+
+    if let Some(drawn) = cached {
+        return Ok(ArtboardImage::Drawn(drawn));
+    }
+
+    let Some(browser_url) = state.config.browser_url.clone() else {
+        return Ok(ArtboardImage::NoBrowser);
+    };
+    let bytes = tokio::fs::read(attachments::path_of(state, sha256)).await.context("The version's content is not stored")?;
+    let design: Value = serde_json::from_slice(&bytes).context("The design is not JSON")?;
+    let Some(artboard) = artboard_of(&design, wanted) else {
+        return Ok(ArtboardImage::NotFound);
+    };
+    let width = (artboard["w"].as_f64().unwrap_or(DEFAULT_ARTBOARD_WIDTH).round() as i64).clamp(1, LARGEST_WIDTH);
+    let height = (artboard["h"].as_f64().unwrap_or(DEFAULT_ARTBOARD_HEIGHT).round() as i64).clamp(1, LARGEST_HEIGHT);
+    let html = artboard["html"].as_str().unwrap_or_default().to_string();
+    let _slot = SLOTS.acquire().await?;
+    let png = tokio::time::timeout(MOST_TIME, render(&browser_url, &html, width, height)).await.context("Drawing the artboard took longer than 15 seconds")??;
+    let (drawn, _, _) = attachments::store(state, owner, &png, "image/png").await.map_err(|error| anyhow::anyhow!("{}", error.message()))?;
+
+    sqlx::query("insert into artboard_renders (artifact_id, version, artboard, sha256) values ($1, $2, $3, $4) on conflict do nothing").bind(id).bind(version).bind(wanted).bind(&drawn).execute(&state.pool).await?;
+
+    Ok(ArtboardImage::Drawn(drawn))
+}
+
 async fn reachable(browser_url: &str) -> Result<String> {
     let mut url = Url::parse(browser_url).context("MYCELIUM_BROWSER_URL is not a URL")?;
 

@@ -37,6 +37,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import mycelium.state.ArtefactImagePrefix
 import mycelium.state.InlineImageRef
 import mycelium.state.ThreadImage
 import mycelium.state.remoteThreadImage
@@ -198,7 +199,7 @@ private fun OpensViewer(image: ThreadImage, focus: FocusRequester, modifier: Mod
                 opened = true
                 enlarged = true
             }
-            .semantics { contentDescription = "${image.name}, from ${image.host}. Open larger" },
+            .semantics { contentDescription = if (image.host.isNullOrEmpty()) "${image.name}. Open larger" else "${image.name}, from ${image.host}. Open larger" },
     ) {
         content()
     }
@@ -222,6 +223,10 @@ private fun LoadingTile(modifier: Modifier) {
 private fun HostLine(host: String) {
     val colors = MyTheme.colors
 
+    if (host.isEmpty()) {
+        return
+    }
+
     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
         Icon(MyIcon.Globe, colors.textMuted, Tokens.Size.IconSm)
         Label(host, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
@@ -231,6 +236,10 @@ private fun HostLine(host: String) {
 @Composable
 private fun OpenLink(url: String, modifier: Modifier = Modifier) {
     val platform = LocalPlatform.current
+
+    if (url.startsWith(ArtefactImagePrefix)) {
+        return
+    }
 
     Box(modifier) {
         MyButton({ platform?.openUrl(url) }, text = "Open link", icon = MyIcon.External, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
