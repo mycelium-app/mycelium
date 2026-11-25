@@ -100,6 +100,7 @@ pub struct Daemon {
     logins: LoginManager,
     agent_updates: crate::login::Running,
     usage: Arc<UsageCache>,
+    usage_wanted: Arc<tokio::sync::Notify>,
     terminals: TerminalManager,
     environments: EnvironmentManager,
     ssh: SshServer,
@@ -125,13 +126,20 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     let logins_accounts = accounts_dir(&config.state_dir);
     let usage = Arc::new(UsageCache::new(&options.usage_endpoint, &options.codex_usage_endpoint, &options.codex_command, USAGE_MIN_AGE).with_vibe_endpoint(&options.vibe_billing_endpoint));
     let logins_usage = usage.clone();
-    let login_report = Arc::new(move || NodeToControl::Logins { logins: login_state(&logins_home, &logins_accounts, &agents, &logins_usage) });
+    let usage_wanted = Arc::new(tokio::sync::Notify::new());
+    let wake_usage = usage_wanted.clone();
+    let login_report = Arc::new(move || {
+        wake_usage.notify_one();
+
+        NodeToControl::Logins { logins: login_state(&logins_home, &logins_accounts, &agents, &logins_usage) }
+    });
     let transcripts = TranscriptFollower::new(options.home.clone(), options.transcript_roots.clone(), config.state_dir.join("transcripts.json"), out.clone());
 
     let daemon = Arc::new(Daemon {
         logins: LoginManager::new(out.clone(), login_report),
         agent_updates: Default::default(),
         usage,
+        usage_wanted,
         terminals: TerminalManager::new(out.clone(), user_shell(), Some(&config.state_dir.join("tmux"))),
         environments: EnvironmentManager::new(out.clone(), std::env::var_os("PATH").unwrap_or_default()),
         ssh: SshServer::new(out.clone(), config.ssh_host_key_path(), options.home.clone(), user_shell()),
@@ -230,7 +238,10 @@ async fn follow_usage(daemon: Arc<Daemon>) {
     let mut ticker = tokio::time::interval(USAGE_INTERVAL);
 
     loop {
-        ticker.tick().await;
+        tokio::select! {
+            _ = ticker.tick() => {}
+            _ = daemon.usage_wanted.notified() => {}
+        }
 
         let accounts = accounts_dir(&daemon.config.state_dir);
         let folders: Vec<PathBuf> = AgentId::ALL.into_iter().flat_map(|agent| account_homes(&daemon.options.home, &accounts, agent)).map(|account| account.dir).collect();

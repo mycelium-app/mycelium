@@ -13,6 +13,7 @@ pub const CODEX_USAGE_ENDPOINT: &str = "https://chatgpt.com/backend-api/wham/usa
 pub const VIBE_BILLING_ENDPOINT: &str = "https://api.mistral.ai/v1/billing";
 const VIBE_BILLING_TIMEOUT: Duration = Duration::from_secs(3);
 const VIBE_DEFAULT_HOME: &str = ".vibe";
+const VIBE_NO_USAGE: &str = "Mistral doesn't share usage for this plan.";
 const VIBE_NO_PERMISSION: &str = "This Mistral account cannot see its usage. An organisation admin can give it the permission to see inference usage.";
 pub const USAGE_MIN_AGE: Duration = Duration::from_secs(300);
 const USAGE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -34,7 +35,13 @@ pub struct UsageCache {
     codex_command: String,
     min_age: Duration,
     http: reqwest::Client,
-    entries: Mutex<HashMap<PathBuf, (Instant, Option<Reading>)>>,
+    entries: Mutex<HashMap<PathBuf, (Instant, Option<Reading>, CredentialStamp)>>,
+}
+
+type CredentialStamp = Vec<Option<(std::time::SystemTime, u64)>>;
+
+fn credential_stamp(config_dir: &Path) -> CredentialStamp {
+    [".credentials.json", "auth.json", ".env"].iter().map(|name| std::fs::metadata(config_dir.join(name)).ok().and_then(|meta| Some((meta.modified().ok()?, meta.len())))).collect()
 }
 
 impl UsageCache {
@@ -49,7 +56,7 @@ impl UsageCache {
     }
 
     pub fn reading(&self, config_dir: &Path) -> Option<Reading> {
-        self.entries.lock().ok()?.get(config_dir).and_then(|(_, reading)| reading.clone())
+        self.entries.lock().ok()?.get(config_dir).and_then(|(_, reading, _)| reading.clone())
     }
 
     pub fn left(&self, config_dir: &Path) -> Option<u8> {
@@ -64,7 +71,8 @@ impl UsageCache {
 
     pub async fn refresh(&self, config_dirs: &[PathBuf]) {
         for dir in config_dirs {
-            let stale = self.entries.lock().is_ok_and(|entries| entries.get(dir).is_none_or(|(fetched, _)| fetched.elapsed() >= self.min_age));
+            let stamp = credential_stamp(dir);
+            let stale = self.entries.lock().is_ok_and(|entries| entries.get(dir).is_none_or(|(fetched, _, seen)| fetched.elapsed() >= self.min_age || *seen != stamp));
 
             if !stale {
                 continue;
@@ -75,7 +83,7 @@ impl UsageCache {
             let reading = fetched_reading.or_else(|| self.reading(dir));
 
             if let Ok(mut entries) = self.entries.lock() {
-                entries.insert(dir.clone(), (fetched, reading));
+                entries.insert(dir.clone(), (fetched, reading, stamp));
             }
         }
     }
@@ -121,6 +129,7 @@ impl UsageCache {
         }).collect();
         let pay_as_you_go = budget.as_ref().and_then(|budget| budget["payg_enabled"].as_bool()).or_else(|| subscription.as_ref().and_then(|subscription| subscription["vibe_payg_enabled"].as_bool())) == Some(true);
         let plan = subscription.as_ref().and_then(|subscription| subscription["plan_name"].as_str()).map(|plan| if pay_as_you_go { format!("{plan}, pay-as-you-go on") } else { plan.to_string() });
+        let usage_note = usage_note.or_else(|| (windows.is_empty() && plan.is_some()).then(|| VIBE_NO_USAGE.to_string()));
 
         if plan.is_none() && windows.is_empty() {
             return None;
@@ -297,12 +306,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_platform_without_a_vibe_budget_gets_the_plan_only() {
+    async fn a_plan_without_a_vibe_budget_says_mistral_does_not_share_its_usage() {
         let (reading, _) = vibe_reading(404).await;
         let reading = reading.unwrap();
 
         assert!(reading.windows.is_empty());
-        assert_eq!((reading.plan.as_deref(), reading.usage_note), (Some("Pro"), None));
+        assert_eq!((reading.plan.as_deref(), reading.usage_note.as_deref()), (Some("Pro"), Some("Mistral doesn't share usage for this plan.")));
+    }
+
+    #[tokio::test]
+    async fn a_vibe_account_signed_in_after_a_read_is_read_again_at_once() {
+        let endpoint = serve_billing(200, Seen::default()).await;
+        let account = tempfile::tempdir().unwrap();
+        let cache = UsageCache::new(USAGE_ENDPOINT, CODEX_USAGE_ENDPOINT, "codex", USAGE_MIN_AGE).with_vibe_endpoint(&endpoint);
+
+        cache.refresh(&[account.path().to_path_buf()]).await;
+        assert_eq!(cache.reading(account.path()), None);
+
+        std::fs::write(account.path().join(".env"), "MISTRAL_API_KEY=placeholder-vibe-key\n").unwrap();
+        cache.refresh(&[account.path().to_path_buf()]).await;
+
+        assert_eq!(cache.reading(account.path()).map(|reading| reading.windows.len()), Some(1));
     }
 
     fn account_with_token(token: &str) -> tempfile::TempDir {
@@ -512,3 +536,4 @@ mod tests {
         assert!(logins.iter().find(|login| login.account.is_none()).unwrap().windows.is_empty());
     }
 }
+
