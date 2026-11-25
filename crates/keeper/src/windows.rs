@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::io::{self, Error};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use windows_sys::Win32::Foundation::LocalFree;
@@ -83,6 +83,33 @@ impl Job {
     }
 }
 
+pub fn resolve_program(program: &str) -> Option<PathBuf> {
+    let path = Path::new(program);
+    let extensions = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+    let candidates = if path.components().count() > 1 || path.has_root() {
+        vec![path.to_path_buf()]
+    } else {
+        std::env::split_paths(&std::env::var_os("PATH")?).map(|directory| directory.join(path)).collect()
+    };
+
+    for candidate in candidates {
+        if let Some(extension) = candidate.extension() {
+            if extensions.split(';').any(|entry| entry.trim_start_matches('.').eq_ignore_ascii_case(&extension.to_string_lossy())) && candidate.is_file() {
+                return std::path::absolute(candidate).ok();
+            }
+        } else {
+            for extension in extensions.split(';').filter_map(|entry| entry.strip_prefix('.')) {
+                let path = candidate.with_extension(extension);
+                if path.is_file() {
+                    return std::path::absolute(path).ok();
+                }
+            }
+        }
+    }
+
+    None
+}
+
 pub fn run_child(command: Vec<String>) -> Result<i32> {
     let Some((program, args)) = command.split_first() else {
         bail!("Give the agent command after --.");
@@ -96,7 +123,8 @@ pub fn run_child(command: Vec<String>) -> Result<i32> {
         bail!("The keeper did not assign the agent to its job.");
     }
 
-    let status = std::process::Command::new(program).args(args).status().with_context(|| format!("start {program}"))?;
+    let resolved = resolve_program(program).unwrap_or_else(|| PathBuf::from(program));
+    let status = std::process::Command::new(resolved).args(args).status().with_context(|| format!("start {program}"))?;
 
     Ok(status.code().unwrap_or(-1))
 }

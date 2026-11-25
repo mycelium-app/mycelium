@@ -18,7 +18,7 @@ use uuid::Uuid;
 const TOKEN: &str = "fixture-node-token";
 const TIMEOUT: Duration = Duration::from_secs(30);
 
-async fn receive(socket: &mut WebSocket, wanted: impl Fn(&NodeToControl) -> bool) -> NodeToControl {
+async fn receive(socket: &mut WebSocket, mut wanted: impl FnMut(&NodeToControl) -> bool) -> NodeToControl {
     tokio::time::timeout(TIMEOUT, async {
         loop {
             if let Message::Text(text) = socket.recv().await.expect("node disconnected").unwrap() {
@@ -43,7 +43,7 @@ async fn send(socket: &mut WebSocket, message: ControlToNode) {
 }
 
 #[tokio::test]
-async fn a_windows_node_joins_and_runs_an_acp_agent_through_a_cmd_shim() {
+async fn a_windows_node_joins_signs_in_and_runs_an_acp_agent_through_cmd_shims_on_its_path() {
     let (connection, mut connections) = mpsc::unbounded_channel();
     let app = Router::new()
         .route("/api/v1/nodes/join", post(|Json(request): Json<Value>| async move {
@@ -111,8 +111,9 @@ while ($null -ne ($line = [Console]::ReadLine())) {
     }
 }
 "#).unwrap();
-    let command = format!("\"{}\" \"fixture argument\"", shim.display());
-    let mut daemon = mycelium(&config_path).args(["node", "run"]).env("MYCELIUM_CLAUDE_ACP", command)
+    std::fs::write(tools.join("claude.cmd"), "@echo off\r\necho fixture sign-in %*\r\n").unwrap();
+    let path = std::env::join_paths(std::iter::once(tools.clone()).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap()))).unwrap();
+    let mut daemon = mycelium(&config_path).args(["node", "run"]).env("PATH", path).env("MYCELIUM_CLAUDE_ACP", "example-acp \"fixture argument\"")
         .env("MYCELIUM_CODEX_ACP", "fixture-missing-codex").env("MYCELIUM_VIBE_ACP", "fixture-missing-vibe")
         .spawn().unwrap();
 
@@ -126,6 +127,21 @@ while ($null -ne ($line = [Console]::ReadLine())) {
 
     send(&mut socket, ControlToNode::CloseSession { conversation_id }).await;
     receive(&mut socket, |message| matches!(message, NodeToControl::SessionClosed { conversation_id: id } if *id == conversation_id)).await;
+
+    let login_id = Uuid::from_u128(44);
+    send(&mut socket, ControlToNode::StartLogin { login_id, agent: AgentId::Claude, method: "oauth_token".into(), account: None }).await;
+    let mut printed = String::new();
+    let finished = receive(&mut socket, |message| match message {
+        NodeToControl::LoginOutput { login_id: id, data } if *id == login_id => {
+            printed.push_str(data);
+            false
+        }
+        NodeToControl::LoginFinished { login_id: id, .. } => *id == login_id,
+        _ => false,
+    })
+    .await;
+    assert!(matches!(finished, NodeToControl::LoginFinished { ok: true, .. }), "{printed}");
+    assert!(printed.contains("fixture sign-in auth login"), "{printed}");
     let exit = std::fs::read_to_string(config.sessions_dir().join(conversation_id.to_string()).join("exit.json")).unwrap();
     assert_eq!(serde_json::from_str::<Value>(&exit).unwrap()["exit"], 1);
     daemon.kill().await.unwrap();

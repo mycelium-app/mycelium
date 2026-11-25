@@ -33,32 +33,7 @@ fn is_executable(path: &Path) -> bool {
 }
 
 #[cfg(windows)]
-pub fn resolve_program(program: &str) -> Option<PathBuf> {
-    let path = Path::new(program);
-    let extensions = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
-    let candidates = if path.components().count() > 1 || path.has_root() {
-        vec![path.to_path_buf()]
-    } else {
-        std::env::split_paths(&std::env::var_os("PATH")?).map(|directory| directory.join(path)).collect()
-    };
-
-    for candidate in candidates {
-        if let Some(extension) = candidate.extension() {
-            if extensions.split(';').any(|entry| entry.trim_start_matches('.').eq_ignore_ascii_case(&extension.to_string_lossy())) && candidate.is_file() {
-                return std::path::absolute(candidate).ok();
-            }
-        } else {
-            for extension in extensions.split(';').filter_map(|entry| entry.strip_prefix('.')) {
-                let path = candidate.with_extension(extension);
-                if path.is_file() {
-                    return std::path::absolute(path).ok();
-                }
-            }
-        }
-    }
-
-    None
-}
+pub use mycelium_keeper::windows::resolve_program;
 
 async fn report_version(program: &Path) -> Option<String> {
     let output = Command::new(program).arg("--version").stdin(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true).output();

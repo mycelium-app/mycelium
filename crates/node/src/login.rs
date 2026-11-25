@@ -97,7 +97,23 @@ pub fn run_streamed(running: &Running, id: Uuid, command: &[String], env: &[(Str
     };
 
     let pair = native_pty_system().openpty(PtySize { rows: 24, cols: 100, pixel_width: 0, pixel_height: 0 }).context("open a terminal for the command")?;
+    #[cfg(not(windows))]
     let mut builder = CommandBuilder::new(program);
+    #[cfg(windows)]
+    let mut builder = {
+        let resolved = crate::agents::resolve_program(program).unwrap_or_else(|| PathBuf::from(program));
+        let batch = resolved.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat"));
+
+        if batch {
+            let mut builder = CommandBuilder::new(std::env::var_os("ComSpec").unwrap_or_else(|| "cmd.exe".into()));
+            builder.args(["/d", "/c"]);
+            builder.arg(resolved);
+
+            builder
+        } else {
+            CommandBuilder::new(resolved)
+        }
+    };
     builder.args(args);
 
     for (name, value) in env {
