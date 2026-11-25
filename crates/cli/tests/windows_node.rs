@@ -358,3 +358,39 @@ fn an_agent_installed_as_a_uv_tool_is_upgraded_with_uv_from_its_launcher() {
 
     assert_eq!(update_command(AgentId::Vibe, "2.1.0", &launcher).unwrap(), ["uv", "tool", "upgrade", "mistral-vibe"]);
 }
+
+#[tokio::test]
+async fn a_terminal_finds_programs_on_the_nodes_own_path_and_not_its_secrets() {
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
+    use mycelium_node::terminal::{TerminalManager, user_shell};
+
+    let tools = tempfile::tempdir().unwrap();
+    std::fs::write(tools.path().join("node-only-tool.cmd"), "@echo found-on-node-path\r\n").unwrap();
+    let path = std::env::join_paths(std::iter::once(tools.path().to_path_buf()).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()))).unwrap();
+    unsafe {
+        std::env::set_var("PATH", path);
+        std::env::set_var("TERMINAL_TEST_API_TOKEN", "token-value");
+    }
+
+    let (out, mut messages) = mpsc::unbounded_channel();
+    let manager = TerminalManager::new(out, user_shell(), None);
+    let terminal_id = Uuid::from_u128(1);
+    manager.start(terminal_id, Uuid::from_u128(100), tools.path().to_str().unwrap(), 80, 24, Some("node-only-tool & echo token-[%TERMINAL_TEST_API_TOKEN%]"));
+
+    let mut seen = String::new();
+    while !seen.split("token-[").nth(1).is_some_and(|rest| rest.contains(']')) {
+        let message = tokio::time::timeout(TIMEOUT, messages.recv()).await.expect("the terminal printed nothing").expect("the terminal closed");
+        if let NodeToControl::TerminalOutput { data, .. } = message {
+            let text = String::from_utf8_lossy(&STANDARD.decode(data).unwrap()).into_owned();
+            if text.contains("\x1b[6n") {
+                manager.input(terminal_id, &STANDARD.encode("\x1b[1;1R"));
+            }
+
+            seen.push_str(&text);
+        }
+    }
+
+    assert!(seen.contains("found-on-node-path"), "{seen}");
+    assert!(seen.contains("token-[%TERMINAL_TEST_API_TOKEN%]"), "{seen}");
+}

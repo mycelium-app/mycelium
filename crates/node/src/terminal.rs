@@ -306,7 +306,9 @@ impl TerminalManager {
                 (builder, exit_source)
             }
             None => {
-                let mut builder = CommandBuilder::from_argv(self.shell_command(cwd, command).into_iter().map(Into::into).collect());
+                let shell = self.shell_command(cwd, command);
+                let mut builder = crate::login::pty_command(&shell[0]);
+                builder.args(&shell[1..]);
                 builder.cwd(cwd);
                 builder.env("TERM", "xterm-256color");
                 scrub(&mut builder);
