@@ -18,6 +18,10 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
@@ -99,6 +103,8 @@ private const val MaxCachedAttachments = 20
 private const val MaxCachedAvatars = 200
 private const val MaxCachedPreviews = 200
 private const val ConversationCachePreference = "conversation-cache"
+private const val OutboxPreference = "outbox"
+private const val Offline = "You are offline."
 
 private const val CloneWaitMillis = 600_000L
 private const val ClonePollMillis = 2_000L
@@ -159,10 +165,19 @@ class Store(
 
     init {
         val cached = cachedConversations()
+        val kept = keptOutbox()
+
+        if (kept.isNotEmpty()) {
+            mutableState.update { it.copy(outbox = kept) }
+        }
 
         if (cached.isNotEmpty()) {
             mutableState.update { it.copy(conversations = merged(it.conversations, cached)) }
             report("timing", "conversation list shown from cache", mapOf("ms" to startedAt.elapsedNow().inWholeMilliseconds, "conversations" to cached.size))
+        }
+
+        scope.launch {
+            state.map { it.outbox }.distinctUntilChanged().drop(1).collect(::keepOutbox)
         }
 
         scope.launch {
@@ -237,6 +252,7 @@ class Store(
                             attempt = 0
                             lostAt = null
                             launch { refreshOverStream() }
+                            resendOffline()
                         }.collect { message ->
                             lastHeardAt = timeSource.markNow()
                             receive(message)
@@ -500,6 +516,74 @@ class Store(
     private fun cachedConversations(): List<Conversation> =
         platform?.loadPreference(ConversationCachePreference)?.let { runCatching { MyceliumJson.decodeFromString<List<Conversation>>(it) }.getOrNull() }.orEmpty()
 
+    private fun keepOutbox(outbox: Map<String, List<Outgoing>>) {
+        val kept = outbox.mapValues { (_, waiting) -> waiting.filter { it.files.isEmpty() } }.filterValues { it.isNotEmpty() }
+
+        platform?.savePreference(OutboxPreference, MyceliumJson.encodeToString(kept))
+    }
+
+    private fun keptOutbox(): Map<String, List<Outgoing>> {
+        val stored = platform?.loadPreference(OutboxPreference) ?: return emptyMap()
+        val kept = runCatching { MyceliumJson.decodeFromString<Map<String, List<Outgoing>>>(stored) }.getOrNull().orEmpty()
+
+        return kept.mapValues { (_, waiting) -> waiting.map { it.copy(failure = it.failure ?: Offline) } }
+    }
+
+    private fun updateOutbox(change: (Map<String, List<Outgoing>>) -> Map<String, List<Outgoing>>) {
+        val updated = mutableState.updateAndGet { it.copy(outbox = change(it.outbox)) }
+
+        keepOutbox(updated.outbox)
+    }
+
+    private fun Map<String, List<Outgoing>>.replacing(target: String, clientId: String, change: (Outgoing) -> Outgoing?): Map<String, List<Outgoing>> =
+        this + (target to this[target].orEmpty().mapNotNull { if (it.clientId == clientId) change(it) else it })
+
+    private fun deliver(target: String, outgoing: Outgoing, settled: () -> Unit = {}) {
+        scope.launch {
+            try {
+                if (outgoing.assistant) {
+                    reusingIdAfterDroppedConnection { api.promptAssistant(target, outgoing.text, outgoing.spoken, outgoing.clientId, outgoing.model, outgoing.nodeId) }
+                    updateOutbox { it.replacing(target, outgoing.clientId) { null } }
+                    refreshAssistants()
+                } else {
+                    val attachments = outgoing.files.map { file -> api.uploadAttachment(target, file.name, file.mediaType, file.bytes) }
+                    val queuedNotice = reusingIdAfterDroppedConnection { api.sendPrompt(target, outgoing.text, attachments, clientId = outgoing.clientId) }
+
+                    if (queuedNotice != null) {
+                        mutableProblem.value = queuedNotice
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                val reason = (failure as? ApiException)?.message ?: Offline
+
+                updateOutbox { it.replacing(target, outgoing.clientId) { held -> held.copy(failure = reason) } }
+            } finally {
+                settled()
+            }
+        }
+    }
+
+    fun retry(target: String, clientId: String) {
+        val outgoing = state.value.outbox[target].orEmpty().firstOrNull { it.clientId == clientId } ?: return
+
+        updateOutbox { it.replacing(target, clientId) { held -> held.copy(failure = null) } }
+        deliver(target, outgoing.copy(failure = null))
+    }
+
+    fun discard(target: String, clientId: String) {
+        updateOutbox { it.replacing(target, clientId) { null }.filterValues { waiting -> waiting.isNotEmpty() } }
+    }
+
+    private fun resendOffline() {
+        for ((target, waiting) in state.value.outbox) {
+            for (outgoing in waiting.filter { it.failure == Offline }) {
+                retry(target, outgoing.clientId)
+            }
+        }
+    }
+
     suspend fun refreshNodes() {
         val nodes = api.nodes()
 
@@ -661,19 +745,10 @@ class Store(
             return
         }
 
-        val clientId = newClientId()
+        val outgoing = Outgoing(newClientId(), prompt, assistant = true, spoken = spoken, model = model, nodeId = nodeId)
 
-        mutableState.update { it.copy(sending = it.sending + (assistant.id to it.sending[assistant.id].orEmpty() + prompt)) }
-
-        act {
-            try {
-                reusingIdAfterDroppedConnection { api.promptAssistant(assistant.id, prompt, spoken, clientId, model, nodeId) }
-                refreshAssistants()
-            } finally {
-                mutableState.update { it.copy(sending = it.sending.withoutFirst(assistant.id, prompt)) }
-                sendsInFlight.update { it - sending }
-            }
-        }
+        updateOutbox { it + (assistant.id to it[assistant.id].orEmpty() + outgoing) }
+        deliver(assistant.id, outgoing) { sendsInFlight.update { it - sending } }
     }
 
     fun clearAssistant(assistant: mycelium.api.Assistant) {
@@ -1153,9 +1228,9 @@ class Store(
 
                 mutableState.update {
                     val delivered = fetched.filter { event -> event.kind == EventKinds.UserMessage }.mapNotNull { event -> (event.payload as? JsonObject)?.string("text") }
-                    val sending = delivered.fold(it.sending) { waiting, text -> waiting.withoutFirst(conversationId, text) }
+                    val outbox = delivered.fold(it.outbox) { waiting, text -> waiting.withoutFirst(conversationId, text) }
 
-                    it.copy(events = it.events + (conversationId to mergeEvents(it.events[conversationId].orEmpty(), fetched)), sending = sending)
+                    it.copy(events = it.events + (conversationId to mergeEvents(it.events[conversationId].orEmpty(), fetched)), outbox = outbox)
                 }
 
                 report("timing", "conversation opened", mapOf("ms" to openedAt.elapsedNow().inWholeMilliseconds, "request_id" to eventsRequestId, "events" to fetched.size, "reopened" to reopened))
@@ -1195,7 +1270,6 @@ class Store(
 
     fun send(conversationId: String, text: String, files: List<PickedFile> = emptyList()) {
         val prompt = text.trim()
-        val shownWhileSending = prompt.isNotEmpty()
         val sending = conversationId to "$prompt\u0000${files.joinToString { it.name }}"
         val alreadyInFlight = sendsInFlight.getAndUpdate { it + sending }
 
@@ -1203,30 +1277,10 @@ class Store(
             return
         }
 
-        val clientId = newClientId()
+        val outgoing = Outgoing(newClientId(), prompt, files = files)
 
-        if (shownWhileSending) {
-            mutableState.update { it.copy(sending = it.sending + (conversationId to it.sending[conversationId].orEmpty() + prompt)) }
-        }
-
-        act {
-            try {
-                val attachments = files.map { file -> api.uploadAttachment(conversationId, file.name, file.mediaType, file.bytes) }
-                val queuedNotice = reusingIdAfterDroppedConnection { api.sendPrompt(conversationId, prompt, attachments, clientId = clientId) }
-
-                if (queuedNotice != null) {
-                    mutableProblem.value = queuedNotice
-                }
-            } catch (failure: Exception) {
-                if (shownWhileSending) {
-                    mutableState.update { it.copy(sending = it.sending.withoutFirst(conversationId, prompt)) }
-                }
-
-                throw failure
-            } finally {
-                sendsInFlight.update { it - sending }
-            }
-        }
+        updateOutbox { it + (conversationId to it[conversationId].orEmpty() + outgoing) }
+        deliver(conversationId, outgoing) { sendsInFlight.update { it - sending } }
     }
 
     fun chooseWalkthroughScope(conversationId: String, walkthroughScope: WalkthroughScope) {

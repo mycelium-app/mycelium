@@ -110,6 +110,8 @@ data class ThreadImage(val sha256: String, val name: String, val mediaType: Stri
     val key: String get() = url ?: sha256
 }
 
+data class Delivery(val clientId: String, val failure: String?)
+
 fun remoteThreadImage(ref: InlineImageRef) = ThreadImage("", ref.alt, "", url = ref.url, host = ref.host, pageUrl = ref.pageUrl)
 
 sealed interface ThreadItem {
@@ -125,6 +127,7 @@ sealed interface ThreadItem {
         val goalWhy: String? = null,
         val spoken: Boolean = false,
         val spokenAt: String? = null,
+        val delivery: Delivery? = null,
     ) : ThreadItem
 
     data class GoalReport(override val key: String, val outcome: String, val reason: String, val at: String) : ThreadItem

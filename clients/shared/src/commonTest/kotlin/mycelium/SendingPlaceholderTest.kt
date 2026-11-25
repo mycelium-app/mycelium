@@ -20,6 +20,6 @@ class SendingPlaceholderTest {
         store.send("c1", "1p is online\n")
         val queued = QueuedPrompt("q1", "c1", 1, "1p is online", "2026-10-22T10:00:00Z")
 
-        assertEquals(emptyList(), reduce(store.state.value, StreamMessage.QueueChanged("c1", listOf(queued))).sending["c1"])
+        assertEquals(emptyList(), reduce(store.state.value, StreamMessage.QueueChanged("c1", listOf(queued))).outbox["c1"])
     }
 }

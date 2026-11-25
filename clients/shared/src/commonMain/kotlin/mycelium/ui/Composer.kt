@@ -132,7 +132,6 @@ fun Composer(
     working: Boolean,
     stopping: Boolean = false,
     queue: List<QueuedPrompt>,
-    sending: List<String>,
     onSend: (String) -> Unit,
     onStop: () -> Unit,
     onSendQueuedNow: (String) -> Unit,
@@ -601,8 +600,8 @@ fun Composer(
                     GoalAndTodoRegion(goal, todos, conversation.id, onSaveTodos = onSaveTodos)
                 }
 
-                if (queue.isNotEmpty() || sending.isNotEmpty()) {
-                    QueuedMessages(queue, sending, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onMoveQueued, onRemoveQueued)
+                if (queue.isNotEmpty()) {
+                    QueuedMessages(queue, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onMoveQueued, onRemoveQueued)
                 }
 
                 editStrip()
@@ -652,9 +651,9 @@ fun Composer(
             GoalAndTodoRegion(goal, todos, conversation.id, measured, onSaveTodos)
         }
 
-        if (queue.isNotEmpty() || sending.isNotEmpty()) {
+        if (queue.isNotEmpty()) {
             Box(measured) {
-                QueuedMessages(queue, sending, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onMoveQueued, onRemoveQueued)
+                QueuedMessages(queue, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onMoveQueued, onRemoveQueued)
             }
         }
 

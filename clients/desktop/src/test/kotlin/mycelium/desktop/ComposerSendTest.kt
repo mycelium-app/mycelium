@@ -30,7 +30,7 @@ class ComposerSendTest {
         rule.setContent {
             MyceliumTheme(true) {
                 Composer(
-                    conversation = conversation, working = false, queue = emptyList(), sending = emptyList(), onSend = { sent += it }, onStop = {},
+                    conversation = conversation, working = false, queue = emptyList(), onSend = { sent += it }, onStop = {},
                     onSendQueuedNow = {}, onEditQueued = {}, onRemoveQueued = {},
                     options = SessionOptions(emptyList(), null, emptyList(), null, emptyList()), commands = emptyList(),
                     onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },
@@ -55,7 +55,7 @@ class ComposerSendTest {
         rule.setContent {
             MyceliumTheme(true) {
                 Composer(
-                    conversation = conversation, working = true, queue = queue, sending = emptyList(), onSend = {}, onStop = {},
+                    conversation = conversation, working = true, queue = queue, onSend = {}, onStop = {},
                     onSendQueuedNow = { sentNow += it }, onEditQueued = {}, onRemoveQueued = {},
                     options = SessionOptions(emptyList(), null, emptyList(), null, emptyList()), commands = emptyList(),
                     onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },

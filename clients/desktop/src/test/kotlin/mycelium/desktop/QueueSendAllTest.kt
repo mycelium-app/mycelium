@@ -46,7 +46,7 @@ class QueueSendAllTest {
         rule.setContent {
             MyceliumTheme(true) {
                 Composer(
-                    conversation = conversation, working = true, queue = queue, sending = emptyList(), onSend = {}, onStop = {},
+                    conversation = conversation, working = true, queue = queue, onSend = {}, onStop = {},
                     onSendQueuedNow = {}, onEditQueued = {}, onRemoveQueued = {},
                     options = SessionOptions(emptyList(), null, emptyList(), null, emptyList()), commands = emptyList(),
                     onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },

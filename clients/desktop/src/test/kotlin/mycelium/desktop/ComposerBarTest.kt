@@ -96,7 +96,7 @@ class ComposerBarTest {
         rule.setContent {
             MyceliumTheme(true) {
                 Composer(
-                    conversation = conversation, working = working, queue = emptyList(), sending = emptyList(), onSend = {}, onStop = {},
+                    conversation = conversation, working = working, queue = emptyList(), onSend = {}, onStop = {},
                     onSendQueuedNow = {}, onEditQueued = {}, onRemoveQueued = {},
                     options = SessionOptions(listOf(Choice("default", "Default"), Choice("auto", "Auto")), "auto", listOf(Choice("opus", "Opus 5.5")), "opus", settings),
                     commands = emptyList(), onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },

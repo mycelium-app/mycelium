@@ -115,7 +115,7 @@ class AppInteractionTest {
         rule.setContent {
             MyceliumTheme(true) {
                 mycelium.ui.Composer(
-                    conversation = conversation, working = true, queue = emptyList(), sending = emptyList(), onSend = {}, onStop = { stopped++ },
+                    conversation = conversation, working = true, queue = emptyList(), onSend = {}, onStop = { stopped++ },
                     onSendQueuedNow = {}, onEditQueued = {}, onRemoveQueued = {},
                     options = mycelium.state.SessionOptions(emptyList(), null, emptyList(), null, emptyList()), commands = emptyList(),
                     onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },

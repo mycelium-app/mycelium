@@ -10,6 +10,7 @@ import mycelium.api.StreamMessage
 import mycelium.api.MyceliumJson
 import mycelium.api.parseStreamMessage
 import mycelium.state.AppState
+import mycelium.state.Outgoing
 import mycelium.state.TerminalChunkLimit
 import mycelium.state.agentVersion
 import mycelium.state.loginMethodName
@@ -295,17 +296,17 @@ class SendingTest {
 
     @Test
     fun aSentMessageStopsShowingAsSendingOnceTheServerRecordsIt() {
-        val state = AppState(sending = mapOf("c1" to listOf("queued")))
+        val state = AppState(outbox = mapOf("c1" to listOf(Outgoing("id1", "queued"))))
 
-        assertEquals(emptyList(), reduce(state, userMessage("queued")).sending["c1"])
+        assertEquals(emptyList(), reduce(state, userMessage("queued")).outbox["c1"])
     }
 
     @Test
     fun aMessageTheServerQueuedStopsShowingAsSendingAndTheQueueShowsIt() {
-        val state = AppState(sending = mapOf("c1" to listOf("queued")))
+        val state = AppState(outbox = mapOf("c1" to listOf(Outgoing("id1", "queued"))))
         val queued = mycelium.api.QueuedPrompt("q1", "c1", 0, "queued", "2026-10-22T10:00:00Z")
 
-        assertEquals(emptyList(), reduce(state, StreamMessage.QueueChanged("c1", listOf(queued))).sending["c1"])
+        assertEquals(emptyList(), reduce(state, StreamMessage.QueueChanged("c1", listOf(queued))).outbox["c1"])
     }
 }
 

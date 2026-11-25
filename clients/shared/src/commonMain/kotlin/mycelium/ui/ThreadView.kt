@@ -118,6 +118,7 @@ import mycelium.state.WorkflowProgress
 import mycelium.api.Attachment
 import mycelium.api.WorkflowKinds
 import mycelium.api.WorkflowStatuses
+import mycelium.state.Delivery
 import mycelium.state.ThreadImage
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -160,6 +161,7 @@ fun ThreadView(
     waitingForAnswer: Boolean = false,
     working: Boolean = false,
     lastActivityAt: String? = null,
+    outbox: OutboxControls? = null,
 ) {
     val state = rememberLazyListState()
     val loadOlder by rememberUpdatedState(onLoadOlder)
@@ -292,7 +294,7 @@ fun ThreadView(
                             )
                         } else {
                             CompositionLocalProvider(LocalImageJump provides jumpToImage, LocalImageGallery provides gallery, LocalShownImages provides shownImages, LocalPinnedKeys provides pinnedKeys) {
-                                ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) onSignIn else null, signInFor, if (index == lastFailure) onDismissFailure else null, if (index == lastFailure) limitActions else null, agent, runsOnModel, working && index == items.lastIndex)
+                                ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) onSignIn else null, signInFor, if (index == lastFailure) onDismissFailure else null, if (index == lastFailure) limitActions else null, agent, runsOnModel, working && index == items.lastIndex, outbox)
                             }
                         }
                     }
@@ -335,9 +337,9 @@ fun ThreadView(
 val LocalReadAloud = compositionLocalOf<((String) -> Unit)?> { null }
 
 @Composable
-private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?, onSignIn: (() -> Unit)?, signInFor: String?, onDismissFailure: (() -> Unit)?, limitActions: LimitActions?, agent: String, runsOnModel: Boolean, thinkingLive: Boolean) {
+private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?, onSignIn: (() -> Unit)?, signInFor: String?, onDismissFailure: (() -> Unit)?, limitActions: LimitActions?, agent: String, runsOnModel: Boolean, thinkingLive: Boolean, outbox: OutboxControls?) {
     when (item) {
-        is ThreadItem.UserMessage -> UserMessage(item.text, item.files, item.images, item.goalSentAt, item.goalNudge, item.goalWhy, item.spoken, item.spokenAt, agent)
+        is ThreadItem.UserMessage -> UserMessage(item.text, item.files, item.images, item.goalSentAt, item.goalNudge, item.goalWhy, item.spoken, item.spokenAt, agent, item.delivery, outbox)
         is ThreadItem.GoalReport -> GoalReportBlock(item, agent)
         is ThreadItem.AgentMessage -> AgentMessage(item.text)
         is ThreadItem.Thought -> if (item.finished || !thinkingLive) ThoughtSummary(item) else ThinkingBlock(item.text, item.startedAt)
@@ -418,7 +420,7 @@ private fun SwitchLine(text: String, why: String, icon: MyIcon = MyIcon.Refresh)
 }
 
 @Composable
-internal fun UserMessage(text: String, files: List<Attachment>, images: List<ThreadImage>, goalSentAt: String?, goalNudge: Int?, goalWhy: String?, spoken: Boolean, spokenAt: String?, agent: String) {
+internal fun UserMessage(text: String, files: List<Attachment>, images: List<ThreadImage>, goalSentAt: String?, goalNudge: Int?, goalWhy: String?, spoken: Boolean, spokenAt: String?, agent: String, delivery: Delivery? = null, outbox: OutboxControls? = null) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
 
@@ -427,39 +429,69 @@ internal fun UserMessage(text: String, files: List<Attachment>, images: List<Thr
             Modifier
                 .fillMaxWidth()
                 .background(colors.bgPanel, BlockShape)
-                .border(Tokens.Size.Hairline, colors.border, BlockShape)
+                .border(Tokens.Size.Hairline, if (delivery?.failure != null) colors.statusFailed else colors.border, BlockShape)
                 .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
+            verticalArrangement = Arrangement.spacedBy(if (delivery != null) Tokens.Space.S1_5 else 0.dp),
         ) {
-            if (goalSentAt != null) {
-                val sentAt = clockTime(goalSentAt) { millis -> platform?.localDateTime(millis) }
-                val sender = if (goalNudge == null) "Goal" else "Nudge $goalNudge"
+            Column(Modifier.alpha(if (delivery != null) OutgoingAlpha else 1f)) {
+                if (goalSentAt != null) {
+                    val sentAt = clockTime(goalSentAt) { millis -> platform?.localDateTime(millis) }
+                    val sender = if (goalNudge == null) "Goal" else "Nudge $goalNudge"
 
-                Label("$sender from Mycelium to ${agentName(agent)} at $sentAt", style = Tokens.Type.Meta, color = colors.textMuted)
-            }
-
-            if (spoken) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(MyIcon.Microphone, colors.textMuted, Tokens.Size.IconSm)
-                    Label(if (spokenAt != null) "Spoken at ${clockTime(spokenAt) { millis -> platform?.localDateTime(millis) }}" else "Spoken", style = Tokens.Type.Meta, color = colors.textMuted)
+                    Label("$sender from Mycelium to ${agentName(agent)} at $sentAt", style = Tokens.Type.Meta, color = colors.textMuted)
                 }
-            }
 
-            for (segment in remember(text) { parsePasted(text) }) {
-                when (segment) {
-                    is PastedSegment.Plain -> if (segment.text.isNotBlank()) {
-                        MarkdownBlocks(parsedMarkdown(segment.text.trim('\n')))
+                if (spoken) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(MyIcon.Microphone, colors.textMuted, Tokens.Size.IconSm)
+                        Label(if (spokenAt != null) "Spoken at ${clockTime(spokenAt) { millis -> platform?.localDateTime(millis) }}" else "Spoken", style = Tokens.Type.Meta, color = colors.textMuted)
                     }
-                    is PastedSegment.Pasted -> PastedMessageBlock(segment)
+                }
+
+                for (segment in remember(text) { parsePasted(text) }) {
+                    when (segment) {
+                        is PastedSegment.Plain -> if (segment.text.isNotBlank()) {
+                            MarkdownBlocks(parsedMarkdown(segment.text.trim('\n')))
+                        }
+                        is PastedSegment.Pasted -> PastedMessageBlock(segment)
+                    }
+                }
+
+                if (files.isNotEmpty() || images.isNotEmpty()) {
+                    MessageAttachments(files, images)
+                }
+
+                if (goalSentAt != null && !goalWhy.isNullOrBlank()) {
+                    Label("Why now: $goalWhy", style = Tokens.Type.Meta, color = colors.textMuted)
                 }
             }
 
-            if (files.isNotEmpty() || images.isNotEmpty()) {
-                MessageAttachments(files, images)
-            }
+            delivery?.let { DeliveryLine(it, outbox) }
+        }
+    }
+}
 
-            if (goalSentAt != null && !goalWhy.isNullOrBlank()) {
-                Label("Why now: $goalWhy", style = Tokens.Type.Meta, color = colors.textMuted)
-            }
+class OutboxControls(val retry: (String) -> Unit, val discard: (String) -> Unit)
+
+private const val OutgoingAlpha = 0.55f
+
+@Composable
+private fun DeliveryLine(delivery: Delivery, outbox: OutboxControls?) {
+    val colors = MyTheme.colors
+    val failure = delivery.failure
+
+    if (failure == null) {
+        Label("Sending", Modifier.semantics { liveRegion = LiveRegionMode.Polite }, Tokens.Type.Meta, color = colors.textMuted)
+
+        return
+    }
+
+    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+        Label("Not sent. $failure", Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite }, Tokens.Type.Meta, color = colors.statusFailed)
+
+        if (outbox != null) {
+            MyButton({ outbox.retry(delivery.clientId) }, text = "Retry", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+            MyButton({ outbox.discard(delivery.clientId) }, text = "Delete", muted = true, size = ButtonSize.Sm)
         }
     }
 }

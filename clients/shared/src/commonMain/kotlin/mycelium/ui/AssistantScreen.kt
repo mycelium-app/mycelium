@@ -34,6 +34,7 @@ import mycelium.state.modelOptions
 import mycelium.api.Conversation
 import mycelium.api.PutAssistantSecretRequest
 import mycelium.state.AppState
+import mycelium.state.Delivery
 import mycelium.state.runsOnModel
 import mycelium.state.Store
 import mycelium.state.VoiceAssistantKey
@@ -267,7 +268,7 @@ private fun ColumnScope.StartSession(store: Store, state: AppState, assistant: A
     var message by remember(assistant.id) { mutableStateOf(TextFieldValue("")) }
     var problem by remember(assistant.id) { mutableStateOf<String?>(null) }
     var missing by remember(assistant.id) { mutableStateOf<String?>(null) }
-    val waiting = state.sending[assistant.id].orEmpty()
+    val waiting = state.outbox[assistant.id].orEmpty()
     val actions = rememberAssistantActionControls(assistant, state.assistantActions[assistant.id].orEmpty(), onManageActions) { action, inputs ->
         store.act {
             store.api.runAssistantAction(assistant.id, action.id, inputs)
@@ -299,7 +300,7 @@ private fun ColumnScope.StartSession(store: Store, state: AppState, assistant: A
         message = TextFieldValue("", TextRange.Zero)
     }
 
-    ThreadView(items = waiting.mapIndexed { index, text -> ThreadItem.UserMessage("sending-$index", text) }, onAnswer = { _, _ -> }, onStopWorkflow = {}, modifier = Modifier.weight(1f), runsOnModel = false)
+    ThreadView(items = waiting.map { ThreadItem.UserMessage("outgoing:${it.clientId}", it.text, delivery = Delivery(it.clientId, it.failure)) }, outbox = OutboxControls(retry = { store.retry(assistant.id, it) }, discard = { store.discard(assistant.id, it) }), onAnswer = { _, _ -> }, onStopWorkflow = {}, modifier = Modifier.weight(1f), runsOnModel = false)
 
     Box(Modifier.fillMaxWidth().padding(Tokens.Space.S4), contentAlignment = Alignment.Center) {
         ComposerCard(

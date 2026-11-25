@@ -64,7 +64,6 @@ fun QueueEditStrip(edit: QueueEdit, onSave: () -> Unit) {
 @Composable
 fun QueuedMessages(
     queue: List<QueuedPrompt>,
-    sending: List<String>,
     onSendNow: (String) -> Unit,
     onSendAllNow: () -> Unit,
     onEdit: (QueuedPrompt) -> Unit,
@@ -104,7 +103,7 @@ fun QueuedMessages(
         ) {
             MyButton(
                 { expanded = !expanded },
-                text = "${queue.size + sending.size} queued ${if (queue.size + sending.size == 1) "message" else "messages"}",
+                text = "${queue.size} queued ${if (queue.size == 1) "message" else "messages"}",
                 description = if (expanded) "Collapse queued messages" else "Expand queued messages",
                 size = ButtonSize.Sm,
                 muted = true,
@@ -255,18 +254,5 @@ fun QueuedMessages(
             Hairline()
         }
 
-        for (text in sending) {
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(start = Tokens.Space.S3, end = Tokens.Space.S2),
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(MyIcon.Working, colors.textMuted, Tokens.Size.IconSm, Modifier.semantics { contentDescription = "Sending" })
-                MarkdownText(text, Modifier.weight(1f), maxLines = 1)
-                Label("Sending", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-            }
-
-            Hairline()
-        }
     }
 }

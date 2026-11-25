@@ -52,7 +52,6 @@ class QueuedMessagesTest {
 
     private fun show(
         touch: Boolean = false,
-        sending: List<String> = emptyList(),
         queued: List<QueuedPrompt> = queue,
         sendNow: (String) -> Unit = {},
         edit: (QueuedPrompt) -> Unit = {},
@@ -65,7 +64,7 @@ class QueuedMessagesTest {
             MyceliumTheme(true) {
                 CompositionLocalProvider(LocalPlatform provides platform, LocalTouch provides touch, LocalAttachmentBytes provides { testPng(96, 64) }) {
                     Composer(
-                        conversation = conversation, working = true, queue = queued, sending = sending, onSend = {}, onStop = {},
+                        conversation = conversation, working = true, queue = queued, onSend = {}, onStop = {},
                         onSendQueuedNow = sendNow, onEditQueued = edit, onMoveQueued = move, onRemoveQueued = remove,
                         options = SessionOptions(emptyList(), null, emptyList(), null, emptyList()), commands = emptyList(),
                         onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },
@@ -104,15 +103,6 @@ class QueuedMessagesTest {
         assertEquals(2, results.single().lineCount)
         assertTrue(results.single().multiParagraph.didExceedMaxLines)
         assertEquals(androidx.compose.ui.text.style.TextOverflow.Ellipsis, results.single().layoutInput.overflow)
-    }
-
-    @Test
-    fun sendingPreviewsRenderInlineLinks() {
-        show(queued = emptyList(), sending = listOf("[the **docs**](https://example.com/docs)"))
-
-        rule.onNode(hasAnyAncestor(hasText("the docs")) and hasClickAction(), useUnmergedTree = true).performClick()
-        assertEquals(listOf("https://example.com/docs"), platform.opened)
-        rule.onNodeWithContentDescription("Sending").assertIsDisplayed()
     }
 
     @Test

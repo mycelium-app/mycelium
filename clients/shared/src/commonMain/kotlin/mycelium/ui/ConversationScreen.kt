@@ -98,6 +98,7 @@ import mycelium.state.attachmentProblem
 import mycelium.state.hasOlderEvents
 import mycelium.state.mediaTypeOf
 import mycelium.state.AppState
+import mycelium.state.Delivery
 import mycelium.state.messageWithAnnotations
 import mycelium.state.pathWithoutLine
 import mycelium.state.parentFolder
@@ -458,7 +459,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
-    val sending = state.sending[id].orEmpty()
+    val outgoing = state.outbox[id].orEmpty()
     val deliveredPrompts = state.events[id].orEmpty().filter { it.kind == mycelium.api.EventKinds.UserMessage }.mapNotNull { event ->
         val payload = event.payload as? kotlinx.serialization.json.JsonObject
         val promptId = payload?.get("prompt_id") as? JsonPrimitive
@@ -468,8 +469,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val queue = state.queues[id].orEmpty().filterNot { it.id in deliveredPrompts }
     val starting = thread.none { it is ThreadItem.UserMessage } && !state.hasOlderEvents(id)
     val initialQueued = if (starting) queue.minByOrNull { it.position } else null
-    val goesStraight = conversation.status in setOf(ConversationStatus.Review, ConversationStatus.Done) && queue.isEmpty()
-    val delivering = sending.take(if (goesStraight || (starting && initialQueued == null)) 1 else 0)
     val unexplainedFailure = ThreadItem.Failure("failed", "The agent stopped with an error.").takeIf { conversation.status == ConversationStatus.Failed && thread.none { it is ThreadItem.Failure } }
     val initialMessage = initialQueued?.let { ThreadItem.UserMessage("queued:${it.id}", it.text, files = it.attachments) }
     val shownQueue = queue.filter { it.id != initialQueued?.id }
@@ -765,7 +764,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
                 CompositionLocalProvider(LocalResponseActions provides responses, LocalPausedWorkflow provides PausedWorkflow(conversation.agent, limitActions)) {
                     ThreadView(
-                        items = thread + listOfNotNull(unexplainedFailure) + listOfNotNull(initialMessage) + delivering.map { ThreadItem.UserMessage("sending", it) },
+                        items = thread + listOfNotNull(unexplainedFailure) + listOfNotNull(initialMessage) + outgoing.map { ThreadItem.UserMessage("outgoing:${it.clientId}", it.text, delivery = Delivery(it.clientId, it.failure)) },
+                        outbox = OutboxControls(retry = { store.retry(id, it) }, discard = { store.discard(id, it) }),
                         hasOlder = state.hasOlderEvents(id),
                         loadingOlder = id in state.loadingOlderEvents,
                         onLoadOlder = { store.act { store.loadOlder(id) } },
@@ -822,7 +822,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             working = agentWorking,
                             stopping = (stopping || closing) && !stopFailed,
                             queue = shownQueue.map { if (it.id == queueEditing?.queueId) it.copy(editing = true) else it },
-                            sending = sending.drop(delivering.size),
                             onSend = ::send,
                             pendingCitations = citations,
                             onCitationPlaced = { placed -> citations = citations - placed },

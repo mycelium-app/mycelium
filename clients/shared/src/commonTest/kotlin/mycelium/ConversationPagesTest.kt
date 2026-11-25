@@ -22,27 +22,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private class KeepingPlatform : Platform {
-    val preferences = mutableMapOf<String, String>()
-
-    override val signsInThroughTheBrowser = false
-    override val originUrl: String? = null
-
-    override fun loadConnection(): Connection? = null
-    override fun saveConnection(connection: Connection?) = Unit
-    override fun device() = DeviceInfo("test", "test", "linux", "x86_64")
-    override fun approveCode(): String? = null
-    override fun currentPath() = "/"
-    override fun navigate(url: String) = Unit
-    override fun openUrl(url: String) = Unit
-    override fun copyToClipboard(text: String) = Unit
-    override fun loadPreference(key: String): String? = preferences[key]
-
-    override fun savePreference(key: String, value: String) {
-        preferences[key] = value
-    }
-}
-
 private fun conversationJson(id: String, parent: String? = null) =
     """{"id":"$id","owner":"u","node_id":"n","agent":"claude","cwd":"/work","title":"Chat $id","status":"review","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"${parent?.let { ",\"parent_id\":\"$it\"" }.orEmpty()}}"""
 

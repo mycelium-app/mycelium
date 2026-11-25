@@ -10,6 +10,10 @@ import mycelium.api.Workflow
 import mycelium.api.WorkflowKinds
 import mycelium.api.ConversationStatus
 import kotlin.io.encoding.Base64
+import kotlinx.serialization.SerialName
+import mycelium.api.ModelChoice
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.json.JsonObject
 import mycelium.api.Event
 import mycelium.api.Goal
@@ -107,7 +111,7 @@ data class AppState(
     val environmentActions: Map<String, List<mycelium.api.EnvironmentAction>> = emptyMap(),
     val lastEnvironmentNodeId: String? = null,
     val recentEnvironmentApps: Map<String, List<String>> = emptyMap(),
-    val sending: Map<String, List<String>> = emptyMap(),
+    val outbox: Map<String, List<Outgoing>> = emptyMap(),
     val needsYouFocus: String? = null,
     val connected: Boolean = false,
     val streamOpenings: Int = 0,
@@ -155,7 +159,7 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 
         val sent = (message.event.payload as? JsonObject)?.string("text").takeIf { message.event.kind == EventKinds.UserMessage }
         val outline = outlinePageFrom(message.event)
-        val delivered = state.copy(sending = state.sending.withoutFirst(id, sent), outlinePages = if (outline != null) state.outlinePages + (id to outline) else state.outlinePages)
+        val delivered = state.copy(outbox = state.outbox.withoutFirst(id, sent), outlinePages = if (outline != null) state.outlinePages + (id to outline) else state.outlinePages)
 
         if (id in state.openedConversations) {
             delivered.copy(events = state.events + (id to mergeEvents(state.events[id].orEmpty(), listOf(message.event))))
@@ -166,11 +170,11 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 
     is StreamMessage.QueueChanged -> {
         val queued = message.queue.map { it.text }
-        val waiting = state.sending[message.conversationId].orEmpty().filterNot { it in queued }
+        val waiting = state.outbox[message.conversationId].orEmpty().filterNot { it.text in queued }
 
         state.copy(
             queues = state.queues + (message.conversationId to message.queue.sortedBy { it.position }),
-            sending = state.sending + (message.conversationId to waiting),
+            outbox = state.outbox + (message.conversationId to waiting),
         )
     }
 
@@ -451,9 +455,21 @@ fun threadSubagentsOf(conversations: Collection<Conversation>, parentId: String,
     return waiting + running + recentlyFinished
 }
 
-internal fun Map<String, List<String>>.withoutFirst(conversationId: String, text: String?): Map<String, List<String>> {
+@Serializable
+data class Outgoing(
+    @SerialName("client_id") val clientId: String,
+    val text: String,
+    val failure: String? = null,
+    val assistant: Boolean = false,
+    val spoken: Boolean = false,
+    val model: ModelChoice? = null,
+    @SerialName("node_id") val nodeId: String? = null,
+    @Transient val files: List<PickedFile> = emptyList(),
+)
+
+internal fun Map<String, List<Outgoing>>.withoutFirst(conversationId: String, text: String?): Map<String, List<Outgoing>> {
     val current = this[conversationId] ?: return this
-    val index = current.indexOf(text)
+    val index = current.indexOfFirst { it.text == text }
 
     if (index < 0) {
         return this

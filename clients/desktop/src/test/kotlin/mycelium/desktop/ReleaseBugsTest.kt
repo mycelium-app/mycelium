@@ -40,7 +40,7 @@ class ReleaseBugsTest {
             MyceliumTheme(true) {
                 Box(Modifier.width(700.dp)) {
                     Composer(
-                        conversation = conversation, working = true, queue = emptyList(), sending = emptyList(),
+                        conversation = conversation, working = true, queue = emptyList(),
                         onSend = { sent += it }, onStop = { stopped = true },
                         onSendQueuedNow = {}, onEditQueued = {}, onRemoveQueued = {},
                         options = SessionOptions(choices, "chosen", choices, "chosen", (1..5).map { Setting("s$it", "Setting $it", null, "chosen", choices) }),
