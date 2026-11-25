@@ -111,7 +111,7 @@ while ($null -ne ($line = [Console]::ReadLine())) {
     }
 }
 "#).unwrap();
-    std::fs::write(tools.join("claude.cmd"), "@echo off\r\necho fixture sign-in %*\r\n").unwrap();
+    std::fs::write(tools.join("claude.cmd"), "@echo off\r\necho fixture sign-in %*\r\necho Open https://claude.example.com/oauth?code=fixture to sign in\r\nset /p code=Paste code here: \r\necho got %code%\r\n").unwrap();
     let native = root.path().join("native tools");
     std::fs::create_dir(&native).unwrap();
     std::fs::copy(&node_exe, native.join("codex.exe")).unwrap();
@@ -134,6 +134,17 @@ while ($null -ne ($line = [Console]::ReadLine())) {
     let login_id = Uuid::from_u128(44);
     send(&mut socket, ControlToNode::StartLogin { login_id, agent: AgentId::Claude, method: "oauth_token".into(), account: None }).await;
     let mut printed = String::new();
+    receive(&mut socket, |message| match message {
+        NodeToControl::LoginOutput { login_id: id, data } if *id == login_id => {
+            printed.push_str(data);
+            printed.contains("Paste code here")
+        }
+        _ => false,
+    })
+    .await;
+    assert!(printed.contains("fixture sign-in auth login"), "{printed}");
+    assert!(printed.contains("https://claude.example.com/oauth?code=fixture"), "{printed}");
+    send(&mut socket, ControlToNode::LoginInput { login_id, text: "1234\r\n".into() }).await;
     let finished = receive(&mut socket, |message| match message {
         NodeToControl::LoginOutput { login_id: id, data } if *id == login_id => {
             printed.push_str(data);
@@ -144,7 +155,7 @@ while ($null -ne ($line = [Console]::ReadLine())) {
     })
     .await;
     assert!(matches!(finished, NodeToControl::LoginFinished { ok: true, .. }), "{printed}");
-    assert!(printed.contains("fixture sign-in auth login"), "{printed}");
+    assert!(printed.contains("got 1234"), "{printed}");
 
     let login_id = Uuid::from_u128(45);
     send(&mut socket, ControlToNode::StartLogin { login_id, agent: AgentId::Codex, method: "device_auth".into(), account: None }).await;
@@ -190,4 +201,96 @@ async fn an_update_replaces_the_executable_while_it_is_running() {
     assert!(running.try_wait().unwrap().is_none());
     running.kill().await.unwrap();
     server.abort();
+}
+
+struct SshClient;
+
+impl russh::client::Handler for SshClient {
+    type Error = russh::Error;
+
+    async fn check_server_key(&mut self, _key: &russh::keys::PublicKeyOrCertificate) -> Result<bool, Self::Error> {
+        Ok(true)
+    }
+}
+
+async fn ssh_to(server: std::sync::Arc<mycelium_node::ssh::SshServer>, mut messages: mpsc::UnboundedReceiver<NodeToControl>) -> russh::client::Handle<SshClient> {
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let session_id = Uuid::from_u128(46);
+    let (client_end, bridge_end) = tokio::io::duplex(64 * 1024);
+    let (mut bridge_reader, mut bridge_writer) = tokio::io::split(bridge_end);
+    tokio::spawn(async move {
+        while let Some(message) = messages.recv().await {
+            if let NodeToControl::SshData { data, .. } = message {
+                if bridge_writer.write_all(&STANDARD.decode(data).unwrap()).await.is_err() {
+                    break;
+                }
+            }
+        }
+    });
+    let relay = server.clone();
+    tokio::spawn(async move {
+        let mut buffer = vec![0u8; 32 * 1024];
+        while let Ok(count) = bridge_reader.read(&mut buffer).await {
+            if count == 0 {
+                break;
+            }
+
+            relay.data(session_id, &STANDARD.encode(&buffer[..count]));
+        }
+    });
+    server.open(session_id);
+
+    let mut handle = russh::client::connect_stream(std::sync::Arc::new(russh::client::Config::default()), client_end, SshClient).await.unwrap();
+    assert!(handle.authenticate_none("anyone").await.unwrap().success());
+
+    handle
+}
+
+async fn ssh_output(channel: &mut russh::Channel<russh::client::Msg>, answer_cursor_queries: bool) -> (String, Option<u32>) {
+    let mut output = Vec::new();
+    let mut status = None;
+
+    loop {
+        let message = tokio::time::timeout(TIMEOUT, channel.wait()).await.expect("the SSH command went quiet");
+        match message {
+            Some(russh::ChannelMsg::Data { data }) => {
+                if answer_cursor_queries && data.windows(4).any(|window| window == b"\x1b[6n") {
+                    channel.data(&b"\x1b[1;1R"[..]).await.unwrap();
+                }
+
+                output.extend_from_slice(&data);
+            }
+            Some(russh::ChannelMsg::ExtendedData { data, .. }) => output.extend_from_slice(&data),
+            Some(russh::ChannelMsg::ExitStatus { exit_status }) => status = Some(exit_status),
+            Some(_) => {}
+            None => break,
+        }
+    }
+
+    (String::from_utf8_lossy(&output).into_owned(), status)
+}
+
+#[tokio::test]
+async fn ssh_to_a_windows_node_runs_commands_and_an_interactive_shell() {
+    let root = tempfile::tempdir().unwrap();
+    let (out, messages) = mpsc::unbounded_channel();
+    let server = std::sync::Arc::new(mycelium_node::ssh::SshServer::new(out, root.path().join("ssh_host_key"), root.path().to_path_buf(), mycelium_node::terminal::user_shell()));
+    let handle = ssh_to(server, messages).await;
+
+    let mut command = handle.channel_open_session().await.unwrap();
+    command.exec(true, "echo fixture over ssh & exit /b 3").await.unwrap();
+    let (printed, status) = ssh_output(&mut command, false).await;
+    assert!(printed.contains("fixture over ssh"), "{printed}");
+    assert_eq!(status, Some(3));
+
+    let mut shell = handle.channel_open_session().await.unwrap();
+    shell.request_pty(true, "xterm", 100, 30, 0, 0, &[]).await.unwrap();
+    shell.request_shell(true).await.unwrap();
+    shell.data(&b"echo typed over ssh\r\nexit 4\r\n"[..]).await.unwrap();
+    let (printed, status) = ssh_output(&mut shell, true).await;
+    assert!(printed.contains("typed over ssh"), "{printed}");
+    assert_eq!(status, Some(4));
 }

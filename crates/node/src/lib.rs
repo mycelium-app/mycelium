@@ -29,7 +29,6 @@ pub mod resources;
 pub mod rfb;
 pub mod secrets_file;
 pub mod session;
-#[cfg(unix)]
 pub mod ssh;
 pub mod ssh_proxy;
 pub mod status;

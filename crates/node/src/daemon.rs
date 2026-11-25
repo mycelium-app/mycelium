@@ -9,7 +9,6 @@ use crate::link::{Backoff, Liveness, run_link};
 use crate::login::LoginManager;
 #[cfg(unix)]
 use crate::resources::Watcher;
-#[cfg(unix)]
 use crate::ssh::SshServer;
 #[cfg(unix)]
 use crate::environment::EnvironmentManager;
@@ -115,7 +114,6 @@ pub struct Daemon {
     terminals: TerminalManager,
     #[cfg(unix)]
     environments: EnvironmentManager,
-    #[cfg(unix)]
     ssh: SshServer,
     #[cfg(unix)]
     watcher: Watcher,
@@ -169,7 +167,6 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
         terminals: TerminalManager::new(out.clone(), user_shell(), tmux_dir.as_deref()),
         #[cfg(unix)]
         environments: EnvironmentManager::new(out.clone(), std::env::var_os("PATH").unwrap_or_default()),
-        #[cfg(unix)]
         ssh: SshServer::new(out.clone(), config.ssh_host_key_path(), options.home.clone(), user_shell()),
         #[cfg(unix)]
         watcher: Watcher::new(out.clone(), PathBuf::from("/proc"), watched_disks(&config.projects_root), RESOURCE_INTERVAL),
@@ -457,7 +454,6 @@ impl Daemon {
 
     pub fn on_disconnected(&self) {
         self.connected.store(false, Ordering::SeqCst);
-        #[cfg(unix)]
         self.ssh.close_all();
         self.write_status();
     }
@@ -677,18 +673,9 @@ impl Daemon {
                 let path = saved.ok().map(|path| path.display().to_string());
                 let _ = self.out.send(NodeToControl::SshTokenSaved { request_id, path });
             }
-            #[cfg(unix)]
             ControlToNode::SshOpen { session_id } => self.ssh.open(session_id),
-            #[cfg(unix)]
             ControlToNode::SshData { session_id, data } => self.ssh.data(session_id, &data),
-            #[cfg(unix)]
             ControlToNode::SshClose { session_id } => self.ssh.close(session_id),
-            #[cfg(windows)]
-            ControlToNode::SshOpen { session_id } => {
-                let _ = self.out.send(NodeToControl::SshClosed { session_id });
-            }
-            #[cfg(windows)]
-            ControlToNode::SshData { .. } | ControlToNode::SshClose { .. } => {}
             ControlToNode::Ping => {
                 let _ = self.out.send(NodeToControl::Pong);
             }
