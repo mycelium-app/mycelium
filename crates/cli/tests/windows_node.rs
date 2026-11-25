@@ -4,7 +4,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use mycelium_node::agents::{Tools, install_command, resolve_program};
+use mycelium_node::agents::{Tools, install_command, resolve_program, update_command};
 use mycelium_node::config::NodeConfig;
 use mycelium_proto::conversation::AgentId;
 use mycelium_proto::link::{ControlToNode, NodeToControl};
@@ -337,4 +337,24 @@ fn without_npm_codex_unpacks_the_node_js_zip_into_mycelium_and_installs_there() 
 
     assert!(output.status.success(), "{output:?}");
     assert_eq!(recorded_arguments(&folder), format!("install --global --prefix {} @agentclientprotocol/codex-acp@2.7.0 @openai/codex", folder.display()));
+}
+
+#[test]
+fn an_agent_installed_with_npm_updates_its_package_into_the_folder_of_its_shim() {
+    let prefix = tempfile::tempdir().unwrap();
+    let shim = prefix.path().join("claude-agent-acp.cmd");
+    std::fs::write(&shim, "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\"%_prog%\"  \"%dp0%\\node_modules\\@agentclientprotocol\\claude-agent-acp\\dist\\index.js\" %*\r\n").unwrap();
+
+    let command = update_command(AgentId::Claude, "0.108.1", &shim).unwrap();
+
+    assert_eq!(command, ["npm", "install", "--global", "--prefix", &prefix.path().display().to_string(), "@agentclientprotocol/claude-agent-acp@0.108.1"]);
+}
+
+#[test]
+fn an_agent_installed_as_a_uv_tool_is_upgraded_with_uv_from_its_launcher() {
+    let home = tempfile::tempdir().unwrap();
+    let launcher = home.path().join("vibe-acp.exe");
+    std::fs::write(&launcher, b"MZ\x90\x00launcher\x00C:\\Users\\alex\\AppData\\Roaming\\uv\\data\\tools\\mistral-vibe\\Scripts\\python.exe\x00UVUV").unwrap();
+
+    assert_eq!(update_command(AgentId::Vibe, "2.1.0", &launcher).unwrap(), ["uv", "tool", "upgrade", "mistral-vibe"]);
 }
