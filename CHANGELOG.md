@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.65
+
+- An assistant's thread starts on the node chosen in its header and the model chosen in its composer, Any node and Any model unless you change them, the same way a new conversation does. Both stay switchable afterwards, as in any conversation.
+- Assistants no longer have their own models and nodes: the Models and nodes settings page is gone, assistant_update no longer takes models or nodes, and an assistant's conversation handles usage limits the way any conversation does. Voice settings are kept.
+
 ## v0.34.64
 
 - An assistant's action row menu pins or unpins it above the composer, beside Edit.
