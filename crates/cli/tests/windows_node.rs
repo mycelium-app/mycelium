@@ -43,7 +43,7 @@ async fn send(socket: &mut WebSocket, message: ControlToNode) {
 }
 
 #[tokio::test]
-async fn a_windows_node_joins_signs_in_and_runs_an_acp_agent_through_cmd_shims_on_its_path() {
+async fn a_windows_node_joins_signs_in_and_runs_agents_found_only_on_its_own_path() {
     let (connection, mut connections) = mpsc::unbounded_channel();
     let app = Router::new()
         .route("/api/v1/nodes/join", post(|Json(request): Json<Value>| async move {
@@ -112,8 +112,11 @@ while ($null -ne ($line = [Console]::ReadLine())) {
 }
 "#).unwrap();
     std::fs::write(tools.join("claude.cmd"), "@echo off\r\necho fixture sign-in %*\r\n").unwrap();
-    let path = std::env::join_paths(std::iter::once(tools.clone()).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap()))).unwrap();
-    let mut daemon = mycelium(&config_path).args(["node", "run"]).env("PATH", path).env("MYCELIUM_CLAUDE_ACP", "example-acp \"fixture argument\"")
+    let native = root.path().join("native tools");
+    std::fs::create_dir(&native).unwrap();
+    std::fs::copy(&node_exe, native.join("codex.exe")).unwrap();
+    let path = std::env::join_paths([tools.clone(), native].into_iter().chain(std::env::split_paths(&std::env::var_os("PATH").unwrap()))).unwrap();
+    let mut daemon = mycelium(&config_path).args(["node", "run"]).env("Path", path).env("MYCELIUM_CLAUDE_ACP", "example-acp \"fixture argument\"")
         .env("MYCELIUM_CODEX_ACP", "fixture-missing-codex").env("MYCELIUM_VIBE_ACP", "fixture-missing-vibe")
         .spawn().unwrap();
 
@@ -142,6 +145,20 @@ while ($null -ne ($line = [Console]::ReadLine())) {
     .await;
     assert!(matches!(finished, NodeToControl::LoginFinished { ok: true, .. }), "{printed}");
     assert!(printed.contains("fixture sign-in auth login"), "{printed}");
+
+    let login_id = Uuid::from_u128(45);
+    send(&mut socket, ControlToNode::StartLogin { login_id, agent: AgentId::Codex, method: "device_auth".into(), account: None }).await;
+    let mut printed = String::new();
+    receive(&mut socket, |message| match message {
+        NodeToControl::LoginOutput { login_id: id, data } if *id == login_id => {
+            printed.push_str(data);
+            false
+        }
+        NodeToControl::LoginFinished { login_id: id, .. } => *id == login_id,
+        _ => false,
+    })
+    .await;
+    assert!(!printed.contains("Could not start") && printed.contains("unrecognized subcommand"), "an .exe found only on the node's Path did not start: {printed}");
     let exit = std::fs::read_to_string(config.sessions_dir().join(conversation_id.to_string()).join("exit.json")).unwrap();
     assert_eq!(serde_json::from_str::<Value>(&exit).unwrap()["exit"], 1);
     daemon.kill().await.unwrap();

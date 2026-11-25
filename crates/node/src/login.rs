@@ -104,7 +104,7 @@ pub fn run_streamed(running: &Running, id: Uuid, command: &[String], env: &[(Str
         let resolved = crate::agents::resolve_program(program).unwrap_or_else(|| PathBuf::from(program));
         let batch = resolved.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat"));
 
-        if batch {
+        let mut builder = if batch {
             let mut builder = CommandBuilder::new(std::env::var_os("ComSpec").unwrap_or_else(|| "cmd.exe".into()));
             builder.args(["/d", "/c"]);
             builder.arg(resolved);
@@ -112,7 +112,13 @@ pub fn run_streamed(running: &Running, id: Uuid, command: &[String], env: &[(Str
             builder
         } else {
             CommandBuilder::new(resolved)
+        };
+
+        for (name, value) in std::env::vars_os() {
+            builder.env(name, value);
         }
+
+        builder
     };
     builder.args(args);
 
