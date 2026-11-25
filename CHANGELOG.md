@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.69
+
+- Install puts Claude Code, Codex or Mistral Vibe on a Windows node. It uses the node's npm when it has one, otherwise downloads Node.js into Mycelium's own folder first, and installs uv with astral's Windows installer for Mistral Vibe. Tested on Windows 11 ARM64.
+- Update on a Windows node still cannot tell how an agent installed through npm got there, and says so.
+
 ## v0.34.68
 
 - Accounts and Nodes are one settings page, Accounts and nodes. Both tables list nodes in the same order, fill the page width and scroll sideways in a narrow window with the first column kept in view, and never cut a version, usage or button short.
