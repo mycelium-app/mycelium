@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.70
+
+- Update on a Windows node finds how each agent was installed, through npm's .cmd shims or uv's launcher, and updates it in place. Tested on Windows 11 ARM64.
+
 ## v0.34.69
 
 - Install puts Claude Code, Codex or Mistral Vibe on a Windows node. It uses the node's npm when it has one, otherwise downloads Node.js into Mycelium's own folder first, and installs uv with astral's Windows installer for Mistral Vibe. Tested on Windows 11 ARM64.
