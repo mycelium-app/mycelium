@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.73
+
+- When a tool call fails, Mycelium brings the agent what earlier conversations remembered about it, without the agent asking: the memories that mention the command's programs or hosts, or the tool's name, ranked by the error text.
+- recall finds a memory that matches only some of the query's words, ranked by how many match, and returns the best matches from every group, each marked with its group. Pass groups to limit the search.
+
 ## v0.34.72
 
 - Built-in terminals on a Windows node run cmd.exe and find agents and tools on the node's own Path, such as Node.js and the agents Install put in Mycelium's folder. Secrets stay out of them. Tested on Windows 11 ARM64.
