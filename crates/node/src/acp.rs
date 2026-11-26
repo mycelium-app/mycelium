@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use uuid::Uuid;
 
 const METHOD_NOT_FOUND: i64 = -32601;
+const MISTRAL_VIBE_TAKES_HTTP_MCP_UNADVERTISED: &str = "@mistralai/mistral-vibe";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum ResumeKind {
@@ -675,7 +676,7 @@ impl SessionState {
                 self.resume_kind = resume_kind_of(&result);
                 self.prompt_capabilities = PromptCapabilities::from_initialize(&result);
                 self.steering = result["_meta"]["steering"]["supported"].as_bool() == Some(true);
-                self.http_mcp = result["agentCapabilities"]["mcpCapabilities"]["http"].as_bool() == Some(true);
+                self.http_mcp = result["agentCapabilities"]["mcpCapabilities"]["http"].as_bool() == Some(true) || result["agentInfo"]["name"] == MISTRAL_VIBE_TAKES_HTTP_MCP_UNADVERTISED;
 
                 Vec::new()
             }
@@ -869,6 +870,17 @@ mod tests {
         state.on_live();
 
         let actions = state.on_entry(1, Direction::In, json!({"jsonrpc": "2.0", "id": 1, "result": {"agentCapabilities": {"mcpCapabilities": {"http": true}}}}));
+
+        let frames = sent_frames(&actions);
+        assert_eq!(frames[0]["params"]["mcpServers"], json!([{"type": "http", "name": "mycelium"}]));
+    }
+
+    #[test]
+    fn mistral_vibe_gets_the_mycelium_mcp_server_although_it_does_not_advertise_http() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        state.on_live();
+
+        let actions = state.on_entry(1, Direction::In, json!({"jsonrpc": "2.0", "id": 1, "result": {"agentCapabilities": {"loadSession": true}, "agentInfo": {"name": "@mistralai/mistral-vibe", "version": "3.1.3"}}}));
 
         let frames = sent_frames(&actions);
         assert_eq!(frames[0]["params"]["mcpServers"], json!([{"type": "http", "name": "mycelium"}]));
