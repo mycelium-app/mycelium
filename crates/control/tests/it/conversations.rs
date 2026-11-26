@@ -710,6 +710,77 @@ async fn assert_turn_not_cancelled(server: &Server, link: &mut NodeLink, id: Uui
 }
 
 #[tokio::test]
+async fn a_failed_command_shows_the_running_turn_the_memories_about_its_program_once() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", STEERING_NODE).await;
+    let id = started_conversation(&server, &mut link, Some("read the kubeconfig")).await;
+    next_but_git(&mut link).await;
+    sqlx::query("insert into memories (text, scopes, created_by, owner) values ('op can''t reach the desktop app; prefix PATH=/run/wrappers/bin', '{global}', 'someone', (select id from users limit 1))").execute(&server.pool).await.unwrap();
+    let fail = |seq: i64, call: &str| NodeToControl::AcpUpdate { conversation_id: id, seq, update: json!({"sessionId": "acp-1", "update": {"sessionUpdate": "tool_call_update", "toolCallId": call, "status": "failed"}}) };
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 3, update: json!({"sessionId": "acp-1", "update": {"sessionUpdate": "tool_call", "toolCallId": "t1", "kind": "execute", "rawInput": {"command": "KUBECONFIG=/tmp/k op read op://infra/kube/config > /tmp/k"}}}) }).await;
+    link.send(fail(4, "t1")).await;
+    let text = answer_steer(&mut link, "injected").await;
+
+    assert!(text.contains("`op`") && text.contains("prefix PATH=/run/wrappers/bin"), "{text}");
+    common::eventually("the memories to be recorded in the conversation", || async {
+        let events = server.events(id).await;
+
+        events.iter().any(|event| event["kind"] == "user_message" && event["payload"]["origin"] == "memory").then_some(())
+    }).await;
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 5, update: json!({"sessionId": "acp-1", "update": {"sessionUpdate": "tool_call", "toolCallId": "t2", "kind": "execute", "rawInput": {"command": "op whoami"}}}) }).await;
+    link.send(fail(6, "t2")).await;
+    assert_turn_not_cancelled(&server, &mut link, id).await;
+}
+
+#[tokio::test]
+async fn a_failed_command_puts_the_memory_about_its_host_and_error_first() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", STEERING_NODE).await;
+    let id = started_conversation(&server, &mut link, Some("check the box")).await;
+    next_but_git(&mut link).await;
+    for text in ["ssh keys are loaded by the agent at login", "ssh to atlas.example.com resets the connection unless it goes through the jump host"] {
+        sqlx::query("insert into memories (text, scopes, created_by, owner) values ($1, '{global}', 'someone', (select id from users limit 1))").bind(text).execute(&server.pool).await.unwrap();
+    }
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 3, update: json!({"sessionId": "acp-1", "update": {"sessionUpdate": "tool_call", "toolCallId": "t1", "kind": "execute", "rawInput": {"command": "ssh atlas.example.com uptime"}}}) }).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 4, update: json!({"sessionId": "acp-1", "update": {"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "failed", "content": [{"type": "content", "content": {"type": "text", "text": "Connection reset by peer"}}]}}) }).await;
+    let text = answer_steer(&mut link, "injected").await;
+
+    let jump = text.find("jump host").expect(&text);
+    let keys = text.find("loaded by the agent").expect(&text);
+    assert!(jump < keys, "{text}");
+}
+
+#[tokio::test]
+async fn a_failed_tool_call_shows_the_memories_about_its_tool() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", STEERING_NODE).await;
+    let id = started_conversation(&server, &mut link, Some("deploy the app")).await;
+    next_but_git(&mut link).await;
+    sqlx::query("insert into memories (text, scopes, created_by, owner) values ('coolify rejects a domain without the apps suffix with a bare Validation failed', '{global}', 'someone', (select id from users limit 1))").execute(&server.pool).await.unwrap();
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 3, update: json!({"sessionId": "acp-1", "update": {"sessionUpdate": "tool_call", "toolCallId": "t1", "kind": "other", "title": "mcp__mycelium__coolify__create_app", "rawInput": {"name": "garden"}}}) }).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 4, update: json!({"sessionId": "acp-1", "update": {"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "failed", "content": [{"type": "content", "content": {"type": "text", "text": "Validation failed"}}]}}) }).await;
+    let text = answer_steer(&mut link, "injected").await;
+
+    assert!(text.contains("apps suffix"), "{text}");
+}
+
+#[tokio::test]
+async fn a_failed_command_with_no_memories_about_it_leaves_the_turn_alone() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", STEERING_NODE).await;
+    let id = started_conversation(&server, &mut link, Some("build it")).await;
+    next_but_git(&mut link).await;
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 3, update: json!({"sessionId": "acp-1", "update": {"sessionUpdate": "tool_call", "toolCallId": "t1", "kind": "execute", "rawInput": {"command": "cargo build"}}}) }).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 4, update: json!({"sessionId": "acp-1", "update": {"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "failed"}}) }).await;
+    assert_turn_not_cancelled(&server, &mut link, id).await;
+}
+
+#[tokio::test]
 async fn send_now_on_a_steering_node_injects_into_the_running_turn_instead_of_stopping_it() {
     let server = Server::start().await;
     let mut link = server.online_node_as("laptop", STEERING_NODE).await;

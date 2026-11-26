@@ -141,15 +141,37 @@ async fn remember_refuses_empty_text_and_bad_params_are_json_rpc_errors() {
     assert_eq!(memories, json!([]));
 }
 
+const OP_MEMORY: &str = "op can't reach the desktop app; prefix PATH=/run/wrappers/bin";
+
+async fn remember_in_group(server: &Server, group: &str, text: &str) {
+    let group_id: Uuid = sqlx::query_scalar("insert into groups (name, owner) values ($1, (select id from users limit 1)) returning id").bind(group).fetch_one(&server.pool).await.unwrap();
+    sqlx::query("insert into memories (text, scopes, created_by, owner) values ($1, $2, 'someone', (select id from users limit 1))").bind(text).bind(vec![format!("group:{group_id}")]).execute(&server.pool).await.unwrap();
+}
+
 #[tokio::test]
-async fn recall_only_sees_global_memories() {
+async fn a_descriptive_query_finds_a_memory_in_another_group_that_matches_only_some_of_its_words() {
     let server = Server::start().await;
     let (_, token) = server.join("node", "laptop").await;
-    sqlx::query("insert into memories (text, scopes, created_by, owner) values ('Only for the payments group', '{group:payments}', 'someone', (select id from users limit 1))").execute(&server.pool).await.unwrap();
+    remember_in_group(&server, "Infrastructure", OP_MEMORY).await;
 
-    let body = call(&server, &token, None, "recall", json!({"query": "payments"})).await;
+    for query in ["1password op CLI connection reset kubeconfig", "op"] {
+        let found = text_of(&call(&server, &token, None, "recall", json!({"query": query})).await);
 
-    assert_eq!(text_of(&body), "No memories match that query.");
+        assert!(found.contains(OP_MEMORY), "{query}: {found}");
+        assert!(found.contains("scope=\"group:Infrastructure\""), "{query}: {found}");
+    }
+}
+
+#[tokio::test]
+async fn recall_ranks_the_memory_matching_the_most_words_first() {
+    let server = Server::start().await;
+    let (_, token) = server.join("node", "laptop").await;
+    call(&server, &token, None, "remember", json!({"text": "The staging database listens on port 5433"})).await;
+    call(&server, &token, None, "remember", json!({"text": "The staging site is behind a password"})).await;
+
+    let found = text_of(&call(&server, &token, None, "recall", json!({"query": "staging database port", "limit": 1})).await);
+
+    assert!(found.contains("port 5433") && !found.contains("password"), "{found}");
 }
 
 #[tokio::test]

@@ -15,7 +15,7 @@ mod inbox;
 mod instructions;
 mod integration_tools;
 mod learning;
-mod memory;
+pub(crate) mod memory;
 mod outline;
 mod project_icon;
 mod projects;

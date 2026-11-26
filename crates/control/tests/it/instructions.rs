@@ -415,7 +415,7 @@ async fn an_idle_session_on_an_older_revision_is_reloaded_before_the_next_prompt
 }
 
 #[tokio::test]
-async fn memories_remembered_into_the_group_are_recalled_only_by_its_projects() {
+async fn memories_remembered_into_the_group_are_marked_with_it_when_recalled_elsewhere() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let group = create_group(&server, "slop").await;
@@ -449,7 +449,7 @@ async fn memories_remembered_into_the_group_are_recalled_only_by_its_projects() 
 
     assert!(stored.starts_with("Remembered as"), "{stored}");
     assert!(inside.contains("slop pipeline"), "{inside}");
-    assert!(elsewhere.starts_with("No memories match that query.\n1 more match in other groups (slop) left out."), "{elsewhere}");
+    assert!(elsewhere.contains("slop pipeline") && elsewhere.contains("scope=\"group:slop\""), "{elsewhere}");
     assert_eq!(is_error, json!(true), "{ungrouped}");
     let (_, memories) = server.user.json(server.user.get("/api/v1/memories")).await;
     assert_eq!(memories[0]["scopes"], json!([format!("group:{group}")]));
@@ -762,8 +762,11 @@ async fn recall_names_what_other_groups_hold_and_groups_reaches_into_them() {
     let (own, _) = tool(&server, &token, in_work, "recall", json!({"query": "immich"})).await;
     let (unknown, is_error) = tool(&server, &token, in_slop, "recall", json!({"query": "immich", "groups": ["nobody"]})).await;
 
-    assert!(default.contains("Slop uses an immich mirror") && !default.contains("pinned release"), "{default}");
-    assert!(default.contains("2 more matches in other groups (work) left out"), "{default}");
+    let (limited, _) = tool(&server, &token, in_slop, "recall", json!({"query": "immich", "groups": ["slop"]})).await;
+
+    assert!(default.contains("Slop uses an immich mirror") && default.contains("pinned release") && !default.contains("left out"), "{default}");
+    assert!(limited.contains("Slop uses an immich mirror") && !limited.contains("pinned release"), "{limited}");
+    assert!(limited.contains("2 more matches in other groups (work) left out"), "{limited}");
     assert!(named.contains("pinned release") && !named.contains("left out"), "{named}");
     assert!(everywhere.contains("pinned release") && !everywhere.contains("left out"), "{everywhere}");
     assert!(own.contains("pinned release") && !own.contains("left out"), "{own}");

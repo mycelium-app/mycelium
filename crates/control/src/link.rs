@@ -987,6 +987,16 @@ impl UpdateBatch {
 
         for (event, update) in stored {
             state.publish(Some(row.owner), StreamMessage::Event(event));
+
+            if update["update"]["sessionUpdate"] == "tool_call_update" && update["update"]["status"] == "failed" {
+                let (state, owner, failed) = (state.clone(), row.owner, update["update"].clone());
+                tokio::spawn(async move {
+                    if let Err(error) = crate::memories::after_failed_tool_call(&state, owner, node_id, conversation_id, &failed).await {
+                        tracing::warn!("could not show {conversation_id} the memories about its failed tool call: {}", error.message());
+                    }
+                });
+            }
+
             after_update(state, node_id, conversation_id, update).await?;
         }
 

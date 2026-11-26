@@ -274,13 +274,18 @@ repo; for Codex the daemon adds the layer when it starts the session, through `C
 rich Markdown), switched per user in Settings, Instructions.
 
 **Memory.** Every memory has a scope: global, or one or more groups. Global memories stay the
-common case: anything true of the tools, the host or the agents themselves. A scope decides what a
-session sees by default, not what it may read:
+common case: anything true of the tools, the host or the agents themselves. A scope says where a
+memory is kept, not who may read it:
 
-- `recall` searches global memories and the session's own group, and names how many matches it
-  left out in other groups, so the agent knows when to look further.
-- `recall(query, groups: [...])` or `groups: all` reaches into other groups. A `slop` session
-  bumping an immich dependency can ask `work` what it learned about `@immich/ui`.
+- `recall` ranks memories by how many of the query's words they match and returns the best from
+  every group, each marked with its scope, so a descriptive query still finds the memory that
+  holds its key word.
+- `recall(query, groups: [...])` limits the search to the session's own group, the global
+  memories and the groups named, and names how many matches it left out elsewhere.
+- Agents rarely recall on their own when something fails, so Mycelium brings the memory to them:
+  when a tool call fails in a running turn, it steers the turn with the memories that mention the
+  command's programs or hosts (or the tool's name), ranked by the error text, once per memory
+  per conversation.
 - `remember` defaults to the session's group, so a finding about a work dependency stays in `work`;
   a session with no group remembers globally, and `scope: "global"` saves globally on purpose.
   Widening a memory to more groups, or to global, is a deliberate step, the operator's from the UI.
