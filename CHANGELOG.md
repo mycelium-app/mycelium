@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.74
+
+- Mistral Vibe conversations get the Mycelium MCP server, and with it the Mycelium tools and every enabled integration's tools, as Claude Code and Codex conversations do.
+
 ## v0.34.73
 
 - When a tool call fails, Mycelium brings the agent what earlier conversations remembered about it, without the agent asking: the memories that mention the command's programs or hosts, or the tool's name, ranked by the error text.
