@@ -781,6 +781,21 @@ async fn a_failed_command_with_no_memories_about_it_leaves_the_turn_alone() {
 }
 
 #[tokio::test]
+async fn a_failed_file_edit_or_everyday_command_is_not_searched_by_its_title() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", STEERING_NODE).await;
+    let id = started_conversation(&server, &mut link, Some("edit it")).await;
+    next_but_git(&mut link).await;
+    sqlx::query("insert into memories (text, scopes, created_by, owner) values ('Write to tmp with sleep and tail on the garden kotlin tests', '{global}', 'someone', (select id from users limit 1))").execute(&server.pool).await.unwrap();
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 3, update: json!({"sessionId": "acp-1", "update": {"sessionUpdate": "tool_call", "toolCallId": "t1", "kind": "edit", "title": "Write /tmp/garden/src/test/kotlin/GardenTest.kt"}}) }).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 4, update: json!({"sessionId": "acp-1", "update": {"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "failed"}}) }).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 5, update: json!({"sessionId": "acp-1", "update": {"sessionUpdate": "tool_call", "toolCallId": "t2", "kind": "execute", "title": "sleep 60; tail -5 /tmp/garden.log"}}) }).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 6, update: json!({"sessionId": "acp-1", "update": {"sessionUpdate": "tool_call_update", "toolCallId": "t2", "status": "failed"}}) }).await;
+    assert_turn_not_cancelled(&server, &mut link, id).await;
+}
+
+#[tokio::test]
 async fn send_now_on_a_steering_node_injects_into_the_running_turn_instead_of_stopping_it() {
     let server = Server::start().await;
     let mut link = server.online_node_as("laptop", STEERING_NODE).await;

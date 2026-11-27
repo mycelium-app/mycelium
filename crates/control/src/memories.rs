@@ -427,9 +427,12 @@ pub async fn after_failed_tool_call(state: &AppState, owner: Uuid, node_id: Uuid
     let calls: Vec<&Value> = earlier.iter().chain(std::iter::once(update)).collect();
     let command = calls.iter().rev().find_map(|call| command_of(&call["rawInput"]));
     let title = calls.iter().rev().find_map(|call| call["title"].as_str()).unwrap_or_default();
-    let subjects = match &command {
-        Some(command) => programs_in(command).into_iter().chain(hosts_in(command)).collect::<Vec<String>>(),
-        None => words_of(title).into_iter().filter(|word| word != "mcp").collect(),
+    let kind = calls.iter().rev().find_map(|call| call["kind"].as_str()).unwrap_or("other");
+    let command = command.or_else(|| (kind == "execute").then(|| title.to_string()));
+    let subjects = match (&command, kind) {
+        (Some(command), _) => programs_in(command).into_iter().chain(hosts_in(command)).collect::<Vec<String>>(),
+        (None, "other") => words_of(title).into_iter().filter(|word| word != "mcp").collect(),
+        (None, _) => Vec::new(),
     };
 
     if subjects.is_empty() {
