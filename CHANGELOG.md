@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.34.78
+
+- The node binary for macOS on Apple silicon, mycelium-macos-arm64, is published: install it with install.sh. It is unsigned for now.
+- The memories shown after a failed command skip the lines of a heredoc and the arguments of wrappers such as timeout.
+
 ## v0.34.77
 
 - Terminals on a Windows node start their shell. Windows' console asks the terminal where its cursor is and waits for the answer, which Mycelium's terminal now gives. Tested on Windows 11 ARM64.
