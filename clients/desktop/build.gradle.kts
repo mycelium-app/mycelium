@@ -104,6 +104,10 @@ compose.desktop {
             packageVersion = System.getenv("MYCELIUM_VERSION")?.removePrefix("v") ?: "1.0.0"
             System.getenv("MYCELIUM_JBR_HOME")?.let { javaHome = it }
             modules("jcef", "jdk.unsupported", "java.desktop")
+            macOS {
+                bundleID = "app.mycelium.desktop"
+                packageVersion = "1.0.0"
+            }
         }
     }
 }

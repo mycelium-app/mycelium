@@ -28,6 +28,7 @@ pub fn asset_name(os: &str, arch: &str) -> Result<String> {
     match (os, arch) {
         ("linux", "x86_64") => Ok("mycelium-linux-x86_64".into()),
         ("windows", "aarch64") => Ok("mycelium-windows-arm64.exe".into()),
+        ("macos", "aarch64") => Ok("mycelium-macos-arm64".into()),
         _ => Err(anyhow!("No build for {os} {arch}")),
     }
 }
@@ -118,10 +119,11 @@ mod tests {
     }
 
     #[test]
-    fn only_linux_x86_64_and_windows_arm64_have_a_build() {
+    fn only_linux_x86_64_windows_arm64_and_macos_arm64_have_a_build() {
         assert_eq!(asset_name("linux", "x86_64").unwrap(), "mycelium-linux-x86_64");
         assert_eq!(asset_name("windows", "aarch64").unwrap(), "mycelium-windows-arm64.exe");
         assert_eq!(asset_name("windows", "x86_64").unwrap_err().to_string(), "No build for windows x86_64");
-        assert_eq!(asset_name("macos", "aarch64").unwrap_err().to_string(), "No build for macos aarch64");
+        assert_eq!(asset_name("macos", "aarch64").unwrap(), "mycelium-macos-arm64");
+        assert_eq!(asset_name("macos", "x86_64").unwrap_err().to_string(), "No build for macos x86_64");
     }
 }

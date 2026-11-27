@@ -50,11 +50,14 @@ install_binary() {
     [ -f "$MYCELIUM_BINARY" ] || fail "MYCELIUM_BINARY points at $MYCELIUM_BINARY, which is not a file."
     source_binary="$MYCELIUM_BINARY"
   else
-    [ "$os-$arch" = "linux-x86_64" ] || fail "Published builds are for Linux x86_64 only. On $os $arch, build Mycelium from source or use the Nix package, then run this again with MYCELIUM_BINARY set to the binary."
+    case "$os-$arch" in
+      linux-x86_64) asset=mycelium-linux-x86_64 ;;
+      darwin-aarch64) asset=mycelium-macos-arm64 ;;
+      *) fail "Published builds are for Linux x86_64 and macOS on Apple silicon only. On $os $arch, build Mycelium from source or use the Nix package, then run this again with MYCELIUM_BINARY set to the binary." ;;
+    esac
     command -v curl >/dev/null 2>&1 || fail "curl is required. Install curl and run this again."
     command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || fail "sha256sum or shasum is required."
     tag="$(curl -fsSL "$LATEST")" || fail "could not read $LATEST. Check your network connection."
-    asset="mycelium-$os-$arch"
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
     curl -fsSL -o "$tmp/$asset" "$RELEASES/$tag/$asset" || fail "could not download $RELEASES/$tag/$asset. There may be no build for $os $arch."
