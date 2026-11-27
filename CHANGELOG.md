@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.34.79
+
+- Discord and Stoat mentions are routed by ordered rules on the integration page: each rule says which server (or any server) and which people (or everyone) it takes, and sends the message to an assistant or starts a conversation with an agent in a project. The first rule that matches wins, and anything no rule takes is ignored. Add a rule with Add rule, open one to edit it in place, and reorder by dragging or with Move up and Move down in its menu. An account's single assistant from before becomes one rule for any server and everyone.
+- An assistant's Schedules and triggers lists the mention rules that send to it; they are edited on the integration page.
+- The memories shown after a failed call are no longer looked up by a file path or by everyday commands such as sleep and tail.
+
 ## v0.34.78
 
 - The node binary for macOS on Apple silicon, mycelium-macos-arm64, is published: install it with install.sh. It is unsigned for now.
