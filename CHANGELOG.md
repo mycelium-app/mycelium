@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.76
+
+- Includes everything in v0.34.75, which was not published: Maven Central's rate limit turned its client build away, so client builds now download from Google's mirror of Maven Central first.
+
 ## v0.34.75
 
 - macOS on Apple silicon: `install.sh` installs the node on a Mac, which then updates itself, and the desktop app ships as mycelium-desktop-macos-arm64.dmg. Both are unsigned for now. If macOS says the app is damaged or cannot be opened, clear the quarantine flag after copying it to Applications: `xattr -dr com.apple.quarantine /Applications/mycelium.app`. Wake word listening is not available on macOS yet.
