@@ -967,8 +967,20 @@ class MyceliumApi(
 
     suspend fun mentionTriggers(): List<MentionTrigger> = call("/mention-triggers") { client.get(it) { authorise() } }.body()
 
-    suspend fun createMentionTrigger(request: CreateMentionTriggerRequest): MentionTrigger =
+    suspend fun createMentionTrigger(request: SaveMentionTriggerRequest): MentionTrigger =
         call("/mention-triggers") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun mentionPlaces(integration: String): List<MentionPlace> =
+        call("/mention-triggers/places") { client.get(it) { authorise(); parameter("integration", integration) } }.body()
+
+    suspend fun mentionPeople(integration: String, guildId: String?, query: String): List<MentionPerson> =
+        call("/mention-triggers/people") { client.get(it) { authorise(); parameter("integration", integration); guildId?.let { guild -> parameter("guild", guild) }; parameter("query", query) } }.body()
+
+    suspend fun saveMentionTrigger(id: String, request: SaveMentionTriggerRequest): MentionTrigger =
+        call("/mention-triggers/$id") { client.put(it) { authorise(); json(request) } }.body()
+
+    suspend fun orderMentionTriggers(request: OrderMentionTriggersRequest): List<MentionTrigger> =
+        call("/mention-triggers/order") { client.put(it) { authorise(); json(request) } }.body()
 
     suspend fun deleteMentionTrigger(id: String) {
         call("/mention-triggers/$id") { client.delete(it) { authorise() } }

@@ -1066,14 +1066,35 @@ class Store(
         mutableState.update { it.copy(mentionTriggers = triggers) }
     }
 
-    suspend fun sendMentions(serverId: String, assistantId: String?) {
-        val current = state.value.mentionTriggers.firstOrNull { it.serverId == serverId }
+    suspend fun addMentionRule(request: mycelium.api.SaveMentionTriggerRequest): mycelium.api.MentionTrigger {
+        val created = api.createMentionTrigger(request)
 
-        when {
-            assistantId != null -> api.createMentionTrigger(mycelium.api.CreateMentionTriggerRequest(serverId, assistantId))
-            current != null -> api.deleteMentionTrigger(current.id)
+        refreshMentionTriggers()
+
+        return created
+    }
+
+    suspend fun saveMentionRule(id: String, request: mycelium.api.SaveMentionTriggerRequest) {
+        api.saveMentionTrigger(id, request)
+        refreshMentionTriggers()
+    }
+
+    suspend fun moveMentionRule(integration: String, id: String, to: Int) {
+        val ids = state.value.mentionTriggers.filter { it.integration == integration }.sortedBy { it.position }.map { it.id }.toMutableList()
+
+        if (id !in ids) {
+            return
         }
 
+        ids.remove(id)
+        ids.add(to.coerceIn(0, ids.size), id)
+        val ordered = api.orderMentionTriggers(mycelium.api.OrderMentionTriggersRequest(integration, ids))
+
+        mutableState.update { it.copy(mentionTriggers = ordered) }
+    }
+
+    suspend fun removeMentionRule(id: String) {
+        api.deleteMentionTrigger(id)
         refreshMentionTriggers()
     }
 

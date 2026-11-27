@@ -65,25 +65,58 @@ async fn fake_discord(messages: Vec<Value>) -> (String, Arc<Gateway>) {
     let router = Router::new()
         .route("/users/@me", get(|| async { Json(json!({"id": BOT, "username": "mycelium-bot"})) }))
         .route("/gateway/bot", get(gateway_url))
+        .route("/users/@me/guilds", get(|| async { Json(json!([{"id": "70", "name": "Kestrel Labs"}, {"id": "71", "name": "Allotment"}])) }))
+        .route("/guilds/{id}/members/search", get(|| async { Json(json!([{"user": {"id": SAM, "username": "sam", "global_name": "Sam"}}, {"user": {"id": ALEX, "username": "alex"}, "nick": "Alex"}, {"user": {"id": BOT, "username": "mycelium-bot", "bot": true}}])) }))
         .route("/channels/{id}/messages", get(|| async { Json(json!([{"id": "90", "channel_id": "20", "timestamp": "2026-11-13T19:00:00Z", "author": {"username": "alex", "global_name": "Alex"}, "content": "Rain later?"}])) }))
         .with_state(gateway.clone());
 
     (serve(router).await, gateway)
 }
 
-async fn trigger_setup(messages: Vec<Value>, senders: Vec<&str>) -> (Server, NodeLink, Arc<Gateway>) {
+async fn discord_setup(messages: Vec<Value>) -> (Server, NodeLink, Arc<Gateway>, Value) {
     let server = Server::start_with(|config| config.scheduler_tick = Duration::from_millis(50)).await;
     let mut link = server.online_node("laptop").await;
     continue_elsewhere::allow_any_model_on(&server, &mut link).await;
     let (base, gateway) = fake_discord(messages).await;
     let (status, integration) = server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Discord", "kind": "discord", "url": base, "account": "Sam", "bearer_token": TOKEN}))).await;
     assert_eq!(status, 201, "{integration}");
-    let (status, assistant) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "Garden helper", "instructions": "Be brief."}))).await;
+
+    (server, link, gateway, integration)
+}
+
+async fn assistant(server: &Server, name: &str) -> Value {
+    let (status, assistant) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": name, "instructions": "Be brief."}))).await;
     assert_eq!(status, 201, "{assistant}");
-    let (status, trigger) = server.user.json(server.user.post("/api/v1/mention-triggers").json(&json!({"server_id": integration["id"], "assistant_id": assistant["id"], "senders": senders}))).await;
-    assert_eq!(status, 201, "{trigger}");
+
+    assistant
+}
+
+async fn add_rule(server: &Server, rule: Value) -> Value {
+    let (status, created) = server.user.json(server.user.post("/api/v1/mention-triggers").json(&rule)).await;
+    assert_eq!(status, 201, "{created}");
+
+    created
+}
+
+async fn trigger_setup(messages: Vec<Value>, senders: Vec<&str>) -> (Server, NodeLink, Arc<Gateway>) {
+    let (server, link, gateway, _) = discord_setup(messages).await;
+    let assistant = assistant(&server, "Garden helper").await;
+    add_rule(&server, json!({"integration": "discord", "assistant_id": assistant["id"], "senders": senders})).await;
 
     (server, link, gateway)
+}
+
+async fn started_conversation(server: &Server, link: &mut NodeLink) -> (Option<uuid::Uuid>, Option<uuid::Uuid>, String) {
+    let conversation = loop {
+        if let ControlToNode::StartSession { conversation_id, .. } = link.next().await {
+            break conversation_id;
+        }
+    };
+    link.start_session(conversation, "acp-garden").await;
+    let prompt = link.expect_prompt().await.1;
+    let (assistant_id, project_id) = sqlx::query_as::<_, (Option<uuid::Uuid>, Option<uuid::Uuid>)>("select assistant_id, project_id from conversations where id = $1").bind(conversation).fetch_one(&server.pool).await.unwrap();
+
+    (assistant_id, project_id, prompt)
 }
 
 async fn first_prompt(link: &mut NodeLink) -> String {
@@ -124,17 +157,105 @@ async fn a_stoat_account_signed_in_as_the_person_takes_a_trigger() {
 }
 
 #[tokio::test]
-async fn an_account_goes_to_one_assistant_so_choosing_another_moves_it() {
-    let (server, _link, _gateway) = trigger_setup(Vec::new(), Vec::new()).await;
-    let (_, before) = server.user.json(server.user.get("/api/v1/mention-triggers")).await;
-    let (status, other) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "Release captain", "instructions": "Be brief."}))).await;
-    assert_eq!(status, 201, "{other}");
+async fn the_first_rule_that_matches_decides_and_later_rules_are_not_woken() {
+    let messages = vec![message("105", (ALEX, "Alex"), "@bot is the shed locked?", true)];
+    let (server, mut link, _gateway, _) = discord_setup(messages).await;
+    let (captain, helper) = (assistant(&server, "Release captain").await, assistant(&server, "Garden helper").await);
+    add_rule(&server, json!({"integration": "discord", "guild_id": "70", "guild_name": "Kestrel Labs", "senders": [SAM], "sender_names": ["Sam"], "assistant_id": captain["id"]})).await;
+    add_rule(&server, json!({"integration": "discord", "guild_id": "70", "guild_name": "Kestrel Labs", "assistant_id": helper["id"]})).await;
+    add_rule(&server, json!({"integration": "discord", "assistant_id": captain["id"]})).await;
 
-    let (status, moved) = server.user.json(server.user.post("/api/v1/mention-triggers").json(&json!({"server_id": before[0]["server_id"], "assistant_id": other["id"]}))).await;
-    let (_, after) = server.user.json(server.user.get("/api/v1/mention-triggers")).await;
+    let (assistant_id, _, prompt) = started_conversation(&server, &mut link).await;
 
-    assert_eq!(status, 201, "{moved}");
-    assert_eq!((after.as_array().unwrap().len(), after[0]["assistant_id"].clone()), (1, other["id"].clone()));
+    assert_eq!(assistant_id.map(|id| id.to_string()), helper["id"].as_str().map(str::to_string), "{prompt}");
+    let woken: i64 = sqlx::query_scalar("select count(*) from conversations where assistant_id is not null").fetch_one(&server.pool).await.unwrap();
+    assert_eq!(woken, 1);
+}
+
+#[tokio::test]
+async fn a_rule_sending_to_an_agent_starts_a_conversation_in_its_project() {
+    let messages = vec![message("106", (SAM, "Sam"), "@bot the build is red", true)];
+    let (server, mut link, _gateway, _) = discord_setup(messages).await;
+    let user = server.user.clone();
+    let node_id = link.id;
+    let creating = tokio::spawn(async move { user.json(user.post("/api/v1/projects").json(&json!({"node_id": node_id, "path": "/work/harbour"}))).await });
+    let request_id = match link.next().await {
+        ControlToNode::Git { request_id, .. } => request_id,
+        other => panic!("expected project registration, got {other:?}"),
+    };
+    link.send(mycelium_proto::link::NodeToControl::GitResult { request_id, ok: true, output: json!({"path": "/work/harbour"}), error: None }).await;
+    let (status, project) = creating.await.unwrap();
+    assert_eq!(status, 201, "{project}");
+    add_rule(&server, json!({"integration": "discord", "project_id": project["id"], "agent": "claude"})).await;
+
+    let (assistant_id, project_id, prompt) = started_conversation(&server, &mut link).await;
+
+    assert_eq!((assistant_id, project_id.map(|id| id.to_string())), (None, project["id"].as_str().map(str::to_string)));
+    assert!(prompt.contains("Sam mentioned the bot on Discord") && prompt.contains("the build is red"), "{prompt}");
+}
+
+#[tokio::test]
+async fn rules_keep_the_order_they_are_given_and_new_rules_go_last() {
+    let (server, _link, _gateway, _) = discord_setup(Vec::new()).await;
+    let helper = assistant(&server, "Garden helper").await;
+    let first = add_rule(&server, json!({"integration": "discord", "assistant_id": helper["id"]})).await;
+    let second = add_rule(&server, json!({"integration": "discord", "guild_id": "70", "assistant_id": helper["id"]})).await;
+    assert_eq!((first["position"].clone(), second["position"].clone()), (json!(0), json!(1)));
+
+    let (status, ordered) = server.user.json(server.user.put("/api/v1/mention-triggers/order").json(&json!({"integration": "discord", "ids": [second["id"], first["id"]]}))).await;
+    let (partial, _) = server.user.json(server.user.put("/api/v1/mention-triggers/order").json(&json!({"integration": "discord", "ids": [first["id"]]}))).await;
+
+    assert_eq!(status, 200, "{ordered}");
+    assert_eq!((ordered[0]["id"].clone(), ordered[1]["id"].clone()), (second["id"].clone(), first["id"].clone()));
+    assert_eq!(partial, 400);
+}
+
+#[tokio::test]
+async fn an_open_rule_can_be_changed_in_place() {
+    let (server, _link, _gateway, _) = discord_setup(Vec::new()).await;
+    let helper = assistant(&server, "Garden helper").await;
+    let rule = add_rule(&server, json!({"integration": "discord", "assistant_id": helper["id"]})).await;
+
+    let (status, changed) = server.user.json(server.user.put(&format!("/api/v1/mention-triggers/{}", rule["id"].as_str().unwrap())).json(&json!({"integration": "discord", "guild_id": "70", "guild_name": "Kestrel Labs", "senders": [SAM], "sender_names": ["Sam"], "assistant_id": helper["id"]}))).await;
+
+    assert_eq!(status, 200, "{changed}");
+    assert_eq!((changed["guild_name"].clone(), changed["sender_names"].clone(), changed["position"].clone()), (json!("Kestrel Labs"), json!(["Sam"]), json!(0)));
+}
+
+#[tokio::test]
+async fn the_servers_and_their_people_are_listed_to_choose_from() {
+    let (server, _link, _gateway, _) = discord_setup(Vec::new()).await;
+
+    let (status, places) = server.user.json(server.user.get("/api/v1/mention-triggers/places?integration=discord")).await;
+    let (_, people) = server.user.json(server.user.get("/api/v1/mention-triggers/people?integration=discord&guild=70&query=a")).await;
+
+    assert_eq!(status, 200, "{places}");
+    assert_eq!(places.as_array().unwrap().iter().map(|place| place["name"].clone()).collect::<Vec<_>>(), vec![json!("Allotment"), json!("Kestrel Labs")]);
+    assert_eq!(people, json!([{"id": ALEX, "name": "Alex"}, {"id": SAM, "name": "Sam"}]));
+}
+
+#[tokio::test]
+async fn an_accounts_single_assistant_becomes_one_rule_for_any_server_and_everyone() {
+    let (server, _link, _gateway, integration) = discord_setup(Vec::new()).await;
+    let helper = assistant(&server, "Garden helper").await;
+    let pool = &server.pool;
+    sqlx::raw_sql(
+        "drop table mention_triggers;
+         create table mention_triggers (id uuid primary key default gen_random_uuid(), owner uuid not null references users(id) on delete cascade, server_id uuid not null references chat_tool_servers(id) on delete cascade, assistant_id uuid not null references assistants(id) on delete cascade, channels text[] not null default '{}', senders text[] not null default '{}', created_at timestamptz not null default now());
+         create index mention_triggers_server on mention_triggers (server_id);
+         create unique index mention_triggers_one_per_account on mention_triggers (server_id);",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("insert into mention_triggers (owner, server_id, assistant_id) values ((select owner from chat_tool_servers where id = $1), $1, $2)").bind(integration["id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap()).bind(helper["id"].as_str().unwrap().parse::<uuid::Uuid>().unwrap()).execute(pool).await.unwrap();
+
+    sqlx::raw_sql(include_str!("../../migrations/0206_mention_rules.sql")).execute(pool).await.unwrap();
+
+    let (_, rules) = server.user.json(server.user.get("/api/v1/mention-triggers")).await;
+    assert_eq!(rules.as_array().unwrap().len(), 1);
+    let rule = &rules[0];
+    assert_eq!((rule["integration"].clone(), rule["position"].clone(), rule["server_id"].clone(), rule["guild_id"].clone(), rule["senders"].clone(), rule["assistant_id"].clone()), (json!("discord"), json!(0), Value::Null, Value::Null, json!([]), helper["id"].clone()));
 }
 
 #[tokio::test]
@@ -158,9 +279,8 @@ async fn a_direct_message_to_the_persons_own_stoat_account_reaches_the_assistant
     let (base, _stoat) = fake_stoat::fake_stoat().await;
     let (status, integration) = server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Stoat", "kind": "stoat", "url": base, "bearer_token": fake_stoat::TOKEN, "settings": {"token_kind": "user"}}))).await;
     assert_eq!(status, 201, "{integration}");
-    let (_, assistant) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "Garden helper", "instructions": "Be brief."}))).await;
-    let (status, trigger) = server.user.json(server.user.post("/api/v1/mention-triggers").json(&json!({"server_id": integration["id"], "assistant_id": assistant["id"]}))).await;
-    assert_eq!(status, 201, "{trigger}");
+    let assistant = assistant(&server, "Garden helper").await;
+    add_rule(&server, json!({"integration": "stoat", "server_id": integration["id"], "assistant_id": assistant["id"]})).await;
 
     let prompt = first_prompt(&mut link).await;
 

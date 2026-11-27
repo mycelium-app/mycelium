@@ -107,6 +107,34 @@ fn listed(body: &Value) -> Vec<Value> {
     body.as_array().into_iter().flatten().flat_map(|entry| entry.as_array().cloned().unwrap_or_else(|| vec![entry.clone()])).collect()
 }
 
+pub async fn servers(http: &reqwest::Client, credentials: &Credentials) -> Result<Vec<(String, String)>, String> {
+    let body = send(request(http, credentials, reqwest::Method::GET, "users/@me/guilds")).await?;
+
+    Ok(body.as_array().into_iter().flatten().filter_map(|server| Some((server["id"].as_str()?.to_string(), server["name"].as_str().unwrap_or_default().to_string()))).collect())
+}
+
+pub async fn members(http: &reqwest::Client, credentials: &Credentials, server: &str, query: &str) -> Result<Vec<(String, String)>, String> {
+    if !server.bytes().all(|byte| byte.is_ascii_digit()) || server.len() > SNOWFLAKE_LENGTH {
+        return Err("Give the server's id, digits only.".to_string());
+    }
+
+    let path = format!("guilds/{server}/members/search?{}", url::form_urlencoded::Serializer::new(String::new()).append_pair("query", query).append_pair("limit", "10").finish());
+    let body = send(request(http, credentials, reqwest::Method::GET, &path)).await?;
+
+    Ok(body
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|member| member["user"]["bot"] != true)
+        .filter_map(|member| {
+            let user = &member["user"];
+            let name = member["nick"].as_str().or_else(|| user["global_name"].as_str()).or_else(|| user["username"].as_str())?;
+
+            Some((user["id"].as_str()?.to_string(), name.to_string()))
+        })
+        .collect())
+}
+
 pub async fn call(http: &reqwest::Client, credentials: &Credentials, tool: &str, arguments: &Value) -> CallOutput {
     let outcome = match tool {
         "list_servers" => send(request(http, credentials, reqwest::Method::GET, "users/@me/guilds"))

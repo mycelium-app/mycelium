@@ -245,6 +245,31 @@ async fn servers(http: &reqwest::Client, credentials: &Credentials) -> Result<Va
     Ok(json!({"servers": listed, "direct_channels": direct}))
 }
 
+pub async fn server_names(http: &reqwest::Client, credentials: &Credentials) -> Result<Vec<(String, String)>, String> {
+    let listed = servers(http, credentials).await?;
+
+    Ok(listed["servers"].as_array().into_iter().flatten().filter_map(|server| Some((server["id"].as_str()?.to_string(), server["name"].as_str().unwrap_or_default().to_string()))).collect())
+}
+
+pub async fn members(http: &reqwest::Client, credentials: &Credentials, server: &str) -> Result<Vec<(String, String)>, String> {
+    let server = identifier(&json!({"server": server}), "server")?;
+    let body = send(request(http, credentials, reqwest::Method::GET, &format!("servers/{server}/members"))).await?;
+    let nicknames: HashMap<&str, &str> = body["members"].as_array().into_iter().flatten().filter_map(|member| Some((member["_id"]["user"].as_str()?, member["nickname"].as_str()?))).collect();
+
+    Ok(body["users"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|user| user["bot"].is_null())
+        .filter_map(|user| {
+            let id = user["_id"].as_str()?;
+            let name = nicknames.get(id).map(|name| name.to_string()).or_else(|| user_name(user).as_str().map(str::to_string))?;
+
+            Some((id.to_string(), name))
+        })
+        .collect())
+}
+
 async fn run(http: &reqwest::Client, credentials: &Credentials, tool: &str, arguments: &Value) -> Result<Value, String> {
     match tool {
         "list_servers" => servers(http, credentials).await,

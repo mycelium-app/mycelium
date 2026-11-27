@@ -160,12 +160,39 @@ data class PatchAssistantRequest(
 @Serializable
 data class MentionTrigger(
     val id: String,
-    @SerialName("server_id") val serverId: String,
-    @SerialName("assistant_id") val assistantId: String,
+    val integration: String = "discord",
+    val position: Int = 0,
+    @SerialName("server_id") val serverId: String? = null,
+    @SerialName("guild_id") val guildId: String? = null,
+    @SerialName("guild_name") val guildName: String? = null,
+    @SerialName("assistant_id") val assistantId: String? = null,
+    @SerialName("project_id") val projectId: String? = null,
+    val agent: String? = null,
     val channels: List<String> = emptyList(),
     val senders: List<String> = emptyList(),
+    @SerialName("sender_names") val senderNames: List<String> = emptyList(),
     @SerialName("created_at") val createdAt: String,
 )
 
 @Serializable
-data class CreateMentionTriggerRequest(@SerialName("server_id") val serverId: String, @SerialName("assistant_id") val assistantId: String)
+data class SaveMentionTriggerRequest(
+    val integration: String,
+    @SerialName("server_id") val serverId: String? = null,
+    @SerialName("guild_id") val guildId: String? = null,
+    @SerialName("guild_name") val guildName: String? = null,
+    @SerialName("assistant_id") val assistantId: String? = null,
+    @SerialName("project_id") val projectId: String? = null,
+    val agent: String? = null,
+    val channels: List<String> = emptyList(),
+    val senders: List<String> = emptyList(),
+    @SerialName("sender_names") val senderNames: List<String> = emptyList(),
+)
+
+@Serializable
+data class OrderMentionTriggersRequest(val integration: String, val ids: List<String>)
+
+@Serializable
+data class MentionPlace(val id: String, val name: String, @SerialName("server_id") val serverId: String)
+
+@Serializable
+data class MentionPerson(val id: String, val name: String)

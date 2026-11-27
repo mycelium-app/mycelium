@@ -1193,21 +1193,61 @@ pub struct PatchProjectRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MentionTrigger {
     pub id: Uuid,
-    pub server_id: Uuid,
-    pub assistant_id: Uuid,
+    pub integration: String,
+    pub position: i32,
+    pub server_id: Option<Uuid>,
+    pub guild_id: Option<String>,
+    pub guild_name: Option<String>,
+    pub assistant_id: Option<Uuid>,
+    pub project_id: Option<Uuid>,
+    pub agent: Option<String>,
     pub channels: Vec<String>,
     pub senders: Vec<String>,
+    pub sender_names: Vec<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CreateMentionTriggerRequest {
-    pub server_id: Uuid,
-    pub assistant_id: Uuid,
+    #[serde(default)]
+    pub integration: Option<String>,
+    #[serde(default)]
+    pub server_id: Option<Uuid>,
+    #[serde(default)]
+    pub guild_id: Option<String>,
+    #[serde(default)]
+    pub guild_name: Option<String>,
+    #[serde(default)]
+    pub assistant_id: Option<Uuid>,
+    #[serde(default)]
+    pub project_id: Option<Uuid>,
+    #[serde(default)]
+    pub agent: Option<String>,
     #[serde(default)]
     pub channels: Vec<String>,
     #[serde(default)]
     pub senders: Vec<String>,
+    #[serde(default)]
+    pub sender_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderMentionTriggersRequest {
+    pub integration: String,
+    pub ids: Vec<Uuid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MentionPlace {
+    pub id: String,
+    pub name: String,
+    pub server_id: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MentionPerson {
+    pub id: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
