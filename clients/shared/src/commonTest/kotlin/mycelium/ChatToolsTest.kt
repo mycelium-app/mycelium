@@ -48,6 +48,17 @@ class ChatToolsTest {
     }
 
     @Test
+    fun aClaudeMcpCallTitledWithItsServerIsNamedByItsToolName() {
+        val thread = buildThread(listOf(
+            update(1, """{"sessionUpdate":"tool_call","toolCallId":"t1","name":"mcp__mycelium__futo_outline__fetch","title":"mycelium: futo_outline__fetch","kind":"other","status":"in_progress","rawInput":{"id":"doc-1"}}"""),
+            update(2, """{"sessionUpdate":"tool_call_update","toolCallId":"t1","name":"mcp__mycelium__futo_outline__fetch","title":"mycelium: futo_outline__fetch","status":"completed"}"""),
+        ))
+        val call = assertIs<ThreadItem.ToolCall>(thread.single())
+
+        assertEquals(ChatToolName("mycelium", "futo_outline__fetch"), chatToolName(call.title))
+    }
+
+    @Test
     fun codexMcpArgumentsAndOpaqueResultsAreReadFromTheirAdapterEnvelope() {
         val thread = buildThread(
             listOf(

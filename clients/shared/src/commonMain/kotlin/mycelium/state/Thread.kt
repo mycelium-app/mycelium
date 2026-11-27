@@ -443,9 +443,12 @@ private fun appendAgentText(items: MutableList<ThreadItem>, key: String, text: S
     items += ThreadItem.AgentMessage(key, text)
 }
 
+private fun toolTitle(update: JsonObject): String? =
+    update.string("name")?.takeIf { it == "functions.exec" || it.startsWith("mcp__") } ?: update.string("title")
+
 private fun toolCallFrom(key: String, update: JsonObject): ThreadItem.ToolCall {
     val kind = update.string("kind") ?: "other"
-    val title = update.string("name")?.takeIf { it == "functions.exec" } ?: update.string("title") ?: kind
+    val title = toolTitle(update) ?: kind
 
     return ThreadItem.ToolCall(
         key = key,
@@ -470,7 +473,7 @@ private fun mergeToolUpdate(items: MutableList<ThreadItem>, update: JsonObject) 
     }
 
     val current = items[index] as ThreadItem.ToolCall
-    val title = update.string("name")?.takeIf { it == "functions.exec" } ?: update.string("title") ?: current.title
+    val title = toolTitle(update) ?: current.title
     val argument = toolArgument(update, title)
     val namesInput = argument != title || current.argument == current.title
 
