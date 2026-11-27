@@ -1,5 +1,5 @@
 use mycelium_proto::link::{BrowserAction, BrowserControl};
-use nix::fcntl::{FcntlArg, OFlag, fcntl};
+use nix::fcntl::{FcntlArg, fcntl};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -109,10 +109,11 @@ pub struct BrowserPipes {
 impl CdpPipe {
     pub fn open() -> Result<(CdpPipe, BrowserEnds), String> {
         let unavailable = |error: std::io::Error| format!("The environment could not open a private channel to the browser: {error}.");
-        let (browser_input, node_output) = nix::unistd::pipe2(OFlag::O_CLOEXEC).map_err(|error| unavailable(error.into()))?;
-        let (node_input, browser_output) = nix::unistd::pipe2(OFlag::O_CLOEXEC).map_err(|error| unavailable(error.into()))?;
-        let sender = pipe::Sender::from_owned_fd(node_output).map_err(unavailable)?;
-        let receiver = pipe::Receiver::from_owned_fd(node_input).map_err(unavailable)?;
+        let (browser_input, node_output) = std::io::pipe().map_err(unavailable)?;
+        let (node_input, browser_output) = std::io::pipe().map_err(unavailable)?;
+        let (browser_input, browser_output) = (OwnedFd::from(browser_input), OwnedFd::from(browser_output));
+        let sender = pipe::Sender::from_owned_fd(OwnedFd::from(node_output)).map_err(unavailable)?;
+        let receiver = pipe::Receiver::from_owned_fd(OwnedFd::from(node_input)).map_err(unavailable)?;
         let ends = Ends { sender, receiver, buffer: Vec::new(), next_id: 0 };
 
         Ok((CdpPipe { ends: tokio::sync::Mutex::new(ends) }, BrowserEnds { input: browser_input, output: browser_output }))
