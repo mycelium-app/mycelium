@@ -298,7 +298,9 @@ fn bank_name_taken() -> ApiError {
 }
 
 const COMMAND_WRAPPERS: [&str; 8] = ["sudo", "env", "time", "nohup", "exec", "command", "heavy", "timeout"];
-const COMMAND_BUILTINS: [&str; 8] = ["cd", "echo", "export", "true", "false", "set", "test", "printf"];
+const COMMAND_BUILTINS: [&str; 28] = [
+    "cd", "echo", "export", "true", "false", "set", "test", "printf", "grep", "rg", "head", "tail", "sed", "awk", "cat", "ls", "find", "sort", "uniq", "wc", "cut", "tr", "xargs", "tee", "sleep", "mkdir", "rm", "cp",
+];
 const FAILED_COMMAND_MEMORIES: i64 = 3;
 const FAILURE_TEXT_LIMIT: usize = 2000;
 const FAILURE_RANKING_WORDS: usize = 40;
@@ -307,18 +309,35 @@ pub const MEMORY_ORIGIN: &str = "memory";
 pub fn programs_in(command: &str) -> Vec<String> {
     let mut programs: Vec<String> = Vec::new();
 
-    for segment in command.split(['&', '|', ';', '\n', '(', ')', '`']) {
+    for segment in unquoted_segments(command) {
         let program = segment
             .split_whitespace()
             .find(|word| !word.contains('=') && !COMMAND_WRAPPERS.contains(word) && !word.starts_with('-'))
             .map(|word| word.rsplit(['/', '\\']).next().unwrap_or(word).trim_matches(['"', '\'']).to_string());
 
-        if let Some(program) = program.filter(|program| !program.is_empty() && !COMMAND_BUILTINS.contains(&program.as_str()) && !programs.contains(program)) {
+        if let Some(program) = program.filter(|program| program.starts_with(char::is_alphabetic) && !COMMAND_BUILTINS.contains(&program.as_str()) && !programs.contains(program)) {
             programs.push(program);
         }
     }
 
     programs
+}
+
+fn unquoted_segments(command: &str) -> Vec<String> {
+    let mut segments = vec![String::new()];
+    let mut quote: Option<char> = None;
+
+    for character in command.chars() {
+        match (quote, character) {
+            (Some(open), _) if character == open => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(character),
+            (None, '&' | '|' | ';' | '\n' | '(' | ')' | '`') => segments.push(String::new()),
+            (None, _) => segments.last_mut().expect("segments start with one").push(character),
+        }
+    }
+
+    segments
 }
 
 fn command_of(input: &Value) -> Option<String> {
@@ -470,8 +489,10 @@ mod tests {
     #[test]
     fn the_programs_of_a_command_skip_assignments_wrappers_paths_and_builtins() {
         assert_eq!(programs_in("PATH=/run/wrappers/bin:$PATH op read op://infra/kube"), ["op"]);
-        assert_eq!(programs_in("cd /srv && sudo /usr/bin/kubectl get pods | grep web"), ["kubectl", "grep"]);
+        assert_eq!(programs_in("cd /srv && sudo /usr/bin/kubectl get pods | grep web"), ["kubectl"]);
         assert_eq!(programs_in("heavy mise exec -- cargo test"), ["mise"]);
         assert!(programs_in("echo done").is_empty());
+        assert_eq!(programs_in("gh auth status 2>&1 | grep -vi token"), ["gh"]);
+        assert_eq!(programs_in(r#"grep -nE "TargetFormat|macOS|Darwin" build.gradle.kts | head -20; op read 'op://a|b'"#), ["op"]);
     }
 }
