@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.77
+
+- Terminals on a Windows node start their shell. Windows' console asks the terminal where its cursor is and waits for the answer, which Mycelium's terminal now gives. Tested on Windows 11 ARM64.
+
 ## v0.34.76
 
 - Includes everything in v0.34.75, which was not published: Maven Central's rate limit turned its client build away, so client builds now download from Google's mirror of Maven Central first.
