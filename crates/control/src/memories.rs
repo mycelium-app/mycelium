@@ -309,10 +309,10 @@ pub const MEMORY_ORIGIN: &str = "memory";
 pub fn programs_in(command: &str) -> Vec<String> {
     let mut programs: Vec<String> = Vec::new();
 
-    for segment in unquoted_segments(command) {
+    for segment in unquoted_segments(&without_heredocs(command)) {
         let program = segment
             .split_whitespace()
-            .find(|word| !word.contains('=') && !COMMAND_WRAPPERS.contains(word) && !word.starts_with('-'))
+            .find(|word| !word.contains('=') && !COMMAND_WRAPPERS.contains(word) && !word.starts_with(['-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9']))
             .map(|word| word.rsplit(['/', '\\']).next().unwrap_or(word).trim_matches(['"', '\'']).to_string());
 
         if let Some(program) = program.filter(|program| program.starts_with(char::is_alphabetic) && !COMMAND_BUILTINS.contains(&program.as_str()) && !programs.contains(program)) {
@@ -321,6 +321,26 @@ pub fn programs_in(command: &str) -> Vec<String> {
     }
 
     programs
+}
+
+fn without_heredocs(command: &str) -> String {
+    let mut kept: Vec<&str> = Vec::new();
+    let mut ending: Option<String> = None;
+
+    for line in command.lines() {
+        if let Some(marker) = &ending {
+            if line.trim() == marker {
+                ending = None;
+            }
+
+            continue;
+        }
+
+        kept.push(line);
+        ending = line.split_once("<<").map(|(_, rest)| rest.trim_start_matches('-').trim().split_whitespace().next().unwrap_or_default().trim_matches(['\'', '"']).to_string()).filter(|marker| !marker.is_empty());
+    }
+
+    kept.join("\n")
 }
 
 fn unquoted_segments(command: &str) -> Vec<String> {
@@ -493,6 +513,7 @@ mod tests {
         assert_eq!(programs_in("heavy mise exec -- cargo test"), ["mise"]);
         assert!(programs_in("echo done").is_empty());
         assert_eq!(programs_in("gh auth status 2>&1 | grep -vi token"), ["gh"]);
+        assert_eq!(programs_in("cat > /tmp/run.sh <<'EOF'\nGet-Process mycelium | Format-Table\nEOF\nchmod +x /tmp/run.sh; timeout 120 ssh atlas.example.com"), ["chmod", "ssh"]);
         assert_eq!(programs_in(r#"grep -nE "TargetFormat|macOS|Darwin" build.gradle.kts | head -20; op read 'op://a|b'"#), ["op"]);
     }
 }
