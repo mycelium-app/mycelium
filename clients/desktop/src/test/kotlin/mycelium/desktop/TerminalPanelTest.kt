@@ -38,6 +38,7 @@ import mycelium.api.MyceliumApi
 import mycelium.api.MyceliumJson
 import mycelium.state.AppState
 import mycelium.state.Store
+import mycelium.state.TerminalFeed
 import mycelium.ui.LocalPlatform
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.TerminalPanel
@@ -150,6 +151,22 @@ class TerminalPanelTest {
         repeat(5) { scene.render(it * 16_000_000L + 1_000_000_000L) }
         state = AppState(exitedTerminals = setOf("t1"))
         waitFor(scene, "the panel to ask to close") { closed }
+        scene.close()
+    }
+
+    @Test
+    fun aWindowsConsoleAskingWhereTheCursorIsGetsAnAnswerSoItStartsTheShell() {
+        val conversation = MyceliumJson.decodeFromString(Conversation.serializer(), ConversationJson)
+        val store = store()
+        var state by mutableStateOf(AppState())
+        val scene = ImageComposeScene(600, 700, Density(1f)) {
+            MyceliumTheme(true) { TerminalPanel(store, state, conversation, Modifier.width(440.dp).fillMaxHeight()) }
+        }
+
+        waitFor(scene, "the terminal to start") { requests.any { it == "POST /api/v1/conversations/c1/terminal" } }
+        repeat(5) { scene.render(it * 16_000_000L + 1_000_000_000L) }
+        state = AppState(terminalOutput = mapOf("t1" to TerminalFeed().with(Base64.getEncoder().encodeToString("\u001b[6n".toByteArray()))))
+        waitFor(scene, "the cursor position to be sent") { typedInput() == "\u001b[1;1R" }
         scene.close()
     }
 

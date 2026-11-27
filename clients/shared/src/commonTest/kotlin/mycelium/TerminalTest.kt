@@ -28,6 +28,15 @@ class TerminalTest {
     }
 
     @Test
+    fun aCursorPositionQueryIsAnsweredOnceWithTheCursorAndAStatusQueryWithOk() {
+        val terminal = Terminal(80, 24)
+        terminal.feed("ab\r\ncd\u001b[6n\u001b[5n")
+
+        assertEquals("\u001b[2;3R\u001b[0n", terminal.takeReplies())
+        assertEquals("", terminal.takeReplies())
+    }
+
+    @Test
     fun printableTextAndLineEndingsFillTheGrid() {
         val screen = terminal(output = "hello\r\nworld")
 

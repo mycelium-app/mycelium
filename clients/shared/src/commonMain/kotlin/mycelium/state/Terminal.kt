@@ -91,6 +91,7 @@ class Terminal(columns: Int, rows: Int) {
     private var ignoredSequence = false
     private var utf8Pending = 0
     private var utf8Value = 0
+    private val replies = StringBuilder()
 
     private val grid: Array<Array<Cell>>
         get() = if (alternateScreen) alternate else main
@@ -108,6 +109,8 @@ class Terminal(columns: Int, rows: Int) {
     }
 
     fun feed(text: String) = feed(text.encodeToByteArray())
+
+    fun takeReplies(): String = replies.toString().also { replies.clear() }
 
     fun resize(columns: Int, rows: Int) {
         val newColumns = columns.coerceAtLeast(1)
@@ -290,6 +293,10 @@ class Terminal(columns: Int, rows: Int) {
             'm' -> selectGraphics(values)
             's' -> saved = SavedCursor(cursorRow, cursorColumn, style, wrapPending)
             'u' -> restoreCursor(saved)
+            'n' -> when (first) {
+                5 -> replies.append("\u001b[0n")
+                6 -> replies.append("\u001b[${cursorRow + 1};${cursorColumn + 1}R")
+            }
         }
     }
 

@@ -353,6 +353,7 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
 
             emulator.feed(Base64.decode(scrollback.scrollback))
             current?.after(scrollback.offset)?.forEach { emulator.feed(it) }
+            emulator.takeReplies()
             consumed[0] = current?.received ?: 0
             replayed = true
             revision++
@@ -363,6 +364,11 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
         if (feed != null && replayed) {
             feed.after(scrollback?.offset ?: 0, consumed[0]).forEach { emulator.feed(it) }
             consumed[0] = feed.received
+            val replies = emulator.takeReplies()
+
+            if (id != null && replies.isNotEmpty()) {
+                store.typeIntoTerminal(id, replies)
+            }
             revision++
         }
     }
