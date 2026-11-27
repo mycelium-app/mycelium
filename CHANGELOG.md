@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.34.75
+
+- macOS on Apple silicon: `install.sh` installs the node on a Mac, which then updates itself, and the desktop app ships as mycelium-desktop-macos-arm64.dmg. Both are unsigned for now. If macOS says the app is damaged or cannot be opened, clear the quarantine flag after copying it to Applications: `xattr -dr com.apple.quarantine /Applications/mycelium.app`. Wake word listening is not available on macOS yet.
+- MCP tool calls from newer Claude adapters name their server once in the conversation, as a tool card again.
+- The memories shown after a failed command ignore quoted text such as grep patterns and everyday utilities such as grep and head, so they are about the program that failed.
+- Releases no longer carry Docker build records, and the ones on earlier releases are removed.
+
 ## v0.34.74
 
 - Mistral Vibe conversations get the Mycelium MCP server, and with it the Mycelium tools and every enabled integration's tools, as Claude Code and Codex conversations do.
