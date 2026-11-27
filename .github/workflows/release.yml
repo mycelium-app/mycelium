@@ -13,6 +13,8 @@ concurrency:
 
 env:
   MYCELIUM_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.1' }}
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
+  DOCKER_BUILD_SUMMARY: "false"
 
 jobs:
   binary:
@@ -77,6 +79,70 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-node
+          path: dist/
+
+  macos-node:
+    name: macOS arm64 node binary
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build
+        run: |
+          rust_version=$(awk -F '"' '$1 == "rust = " { print $2 }' mise.toml)
+          rustup toolchain install "$rust_version" --profile minimal --target aarch64-apple-darwin
+          export RUSTUP_TOOLCHAIN="$rust_version"
+          export CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS="--remap-path-prefix=$PWD=/src/mycelium --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}/registry/src=/src/cargo"
+          cargo build --release --locked --package mycelium-cli --target aarch64-apple-darwin
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp target/aarch64-apple-darwin/release/mycelium dist/mycelium-macos-arm64
+          cd dist && shasum -a 256 mycelium-macos-arm64 | cut -d' ' -f1 > mycelium-macos-arm64.sha256
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-node
+          path: dist/
+
+  macos-desktop:
+    name: macOS arm64 desktop client
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        with:
+          install_args: java
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: ${{ github.ref_type == 'tag' }}
+
+      - name: Build
+        working-directory: clients
+        run: |
+          export MYCELIUM_JBR_HOME="$JAVA_HOME"
+          ../ci/annotate-failure.sh "macOS desktop build" ./gradlew --no-daemon --configuration-cache :desktop:packageDmg
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp clients/desktop/build/compose/binaries/main/dmg/*.dmg dist/mycelium-desktop-macos-arm64.dmg
+          cd dist && shasum -a 256 mycelium-desktop-macos-arm64.dmg | cut -d' ' -f1 > mycelium-desktop-macos-arm64.dmg.sha256
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-desktop
           path: dist/
 
   desktop-web:
@@ -388,7 +454,7 @@ jobs:
   release:
     name: GitHub release
     if: github.ref_type == 'tag'
-    needs: [binary, windows-node, desktop-web, sign-android, image, agent-image, local-speech-image, flake]
+    needs: [binary, windows-node, macos-node, macos-desktop, desktop-web, sign-android, image, agent-image, local-speech-image, flake]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -419,3 +485,11 @@ jobs:
             --title "mycelium $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
           ci/annotate-failure.sh Publish gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false \
             --latest="$([ "$GITHUB_REF_NAME" = "$newest" ] && echo true || echo false)"
+
+      - name: Remove Docker build records from published releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[].assets[] | select(.name | endswith(".dockerbuild")) | .id' |
+            while read -r asset; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset"; done
