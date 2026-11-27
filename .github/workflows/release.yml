@@ -97,7 +97,7 @@ jobs:
           rustup toolchain install "$rust_version" --profile minimal --target aarch64-apple-darwin
           export RUSTUP_TOOLCHAIN="$rust_version"
           export CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS="--remap-path-prefix=$PWD=/src/mycelium --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}/registry/src=/src/cargo"
-          cargo build --release --locked --package mycelium-cli --target aarch64-apple-darwin
+          ci/annotate-failure.sh "macOS node build" cargo build --release --locked --package mycelium-cli --target aarch64-apple-darwin
 
       - name: Package
         run: |
@@ -453,7 +453,11 @@ jobs:
 
   release:
     name: GitHub release
-    if: github.ref_type == 'tag'
+    if: >-
+      always() && github.ref_type == 'tag'
+      && needs.binary.result == 'success' && needs.windows-node.result == 'success' && needs.desktop-web.result == 'success'
+      && needs.sign-android.result == 'success' && needs.image.result == 'success' && needs.agent-image.result == 'success'
+      && needs.local-speech-image.result == 'success' && needs.flake.result == 'success'
     needs: [binary, windows-node, macos-node, macos-desktop, desktop-web, sign-android, image, agent-image, local-speech-image, flake]
     runs-on: ubuntu-24.04
     permissions:

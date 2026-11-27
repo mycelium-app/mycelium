@@ -13,6 +13,7 @@ status=${PIPESTATUS[0]}
 
 if [ "$status" -ne 0 ]; then
   reason=$(awk '/What went wrong:/ {on=1; next} /^\* Try:/ {on=0} on' "$output")
+  [ -n "$reason" ] || reason=$(awk '/^error(\[|:)/ {on=1} on' "$output" | head -n 60)
   [ -n "$reason" ] || reason=$(tail -n 40 "$output")
   reason=$(printf '%s' "$reason" | head -c 3000 | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN {ORS="%0A"} {print}')
   printf '::error title=%s::%s\n' "$title" "$reason"
