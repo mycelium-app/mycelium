@@ -31,6 +31,12 @@ pub enum StreamMessage {
     },
     Workflow { workflow: Workflow },
     Schedule(Schedule),
+    VirtualChat(crate::api::VirtualChat),
+    VirtualMessage(crate::api::VirtualMessage),
+    VirtualMessageRemoved {
+        chat_id: Uuid,
+        message_id: Uuid,
+    },
     Assistant(Assistant),
     AssistantActionsChanged {
         assistant_id: Uuid,

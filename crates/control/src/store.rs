@@ -366,7 +366,7 @@ pub async fn highest_node_seqs(pool: &PgPool, conversation_ids: &[Uuid]) -> sqlx
 
 pub async fn queue_of(pool: &PgPool, conversation_id: Uuid) -> sqlx::Result<Vec<QueuedPrompt>> {
     let rows = sqlx::query_as::<_, (Uuid, i32, String, sqlx::types::Json<Vec<Attachment>>, bool, chrono::DateTime<chrono::Utc>)>(
-        "select id, position, text, attachments, editing, created_at from queued_prompts where conversation_id = $1 order by position",
+        "select id, position, text, attachments, editing, created_at from queued_prompts where conversation_id = $1 and origin is distinct from 'virtual_chat' order by position",
     )
     .bind(conversation_id)
     .fetch_all(pool)
@@ -382,20 +382,18 @@ pub async fn publish_queue(state: &AppState, owner: Uuid, conversation_id: Uuid)
     Ok(())
 }
 
-pub async fn enqueue(tx: &mut sqlx::PgConnection, conversation_id: Uuid, text: &str, attachments: &[Attachment], origin: Option<&str>) -> sqlx::Result<()> {
-    sqlx::query("insert into queued_prompts (conversation_id, position, text, attachments, origin) select $1, coalesce(max(position), 0) + 1, $2, $3, $4 from queued_prompts where conversation_id = $1")
+pub async fn enqueue(tx: &mut sqlx::PgConnection, conversation_id: Uuid, text: &str, attachments: &[Attachment], origin: Option<&str>) -> sqlx::Result<Uuid> {
+    sqlx::query_scalar("insert into queued_prompts (conversation_id, position, text, attachments, origin) select $1, coalesce(max(position), 0) + 1, $2, $3, $4 from queued_prompts where conversation_id = $1 returning id")
         .bind(conversation_id)
         .bind(text)
         .bind(sqlx::types::Json(attachments))
         .bind(origin)
-        .execute(tx)
-        .await?;
-
-    Ok(())
+        .fetch_one(tx)
+        .await
 }
 
 pub async fn merge_queue(tx: &mut sqlx::PgConnection, conversation_id: Uuid) -> sqlx::Result<Option<Uuid>> {
-    let rows = sqlx::query_as::<_, (Uuid, String, sqlx::types::Json<Vec<Attachment>>)>("select id, text, attachments from queued_prompts where conversation_id = $1 and not editing order by position for update")
+    let rows = sqlx::query_as::<_, (Uuid, String, sqlx::types::Json<Vec<Attachment>>)>("select id, text, attachments from queued_prompts where conversation_id = $1 and not editing and origin is distinct from 'virtual_chat' order by position for update")
         .bind(conversation_id)
         .fetch_all(&mut *tx)
         .await?;
@@ -408,14 +406,14 @@ pub async fn merge_queue(tx: &mut sqlx::PgConnection, conversation_id: Uuid) -> 
         let text = rows.iter().map(|(_, text, _)| text.as_str()).filter(|text| !text.is_empty()).collect::<Vec<_>>().join("\n\n");
         let attachments: Vec<Attachment> = rows.iter().flat_map(|(_, _, attachments)| attachments.0.clone()).collect();
 
-        sqlx::query("update queued_prompts set text = $2, attachments = $3, origin = case when exists (select 1 from queued_prompts where conversation_id = $4 and not editing and origin is null) and exists (select 1 from queued_prompts where conversation_id = $4 and not editing and origin = 'event') then null else (select origin from queued_prompts where conversation_id = $4 and origin is not null order by position limit 1) end where id = $1")
+        sqlx::query("update queued_prompts set text = $2, attachments = $3, origin = case when exists (select 1 from queued_prompts where conversation_id = $4 and not editing and origin is null) and exists (select 1 from queued_prompts where conversation_id = $4 and not editing and origin = 'event') then null else (select origin from queued_prompts where conversation_id = $4 and origin is not null and origin <> 'virtual_chat' order by position limit 1) end where id = $1")
             .bind(first_id)
             .bind(text)
             .bind(sqlx::types::Json(attachments))
             .bind(conversation_id)
             .execute(&mut *tx)
             .await?;
-        sqlx::query("delete from queued_prompts where conversation_id = $1 and id <> $2 and not editing").bind(conversation_id).bind(first_id).execute(&mut *tx).await?;
+        sqlx::query("delete from queued_prompts where conversation_id = $1 and id <> $2 and not editing and origin is distinct from 'virtual_chat'").bind(conversation_id).bind(first_id).execute(&mut *tx).await?;
     }
 
     Ok(Some(*first_id))

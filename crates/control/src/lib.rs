@@ -127,6 +127,7 @@ mod actual;
 mod local_speech;
 mod paperless;
 mod mention_triggers;
+mod virtual_chats;
 mod message_paging;
 mod paging;
 mod stoat;
@@ -381,6 +382,11 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/projects", get(projects::list).post(projects::create))
         .route("/api/v1/projects/{id}", patch(projects::patch).delete(projects::remove))
         .route("/api/v1/mention-triggers", get(mention_triggers::list).post(mention_triggers::create))
+        .route("/api/v1/assistants/{id}/virtual-chats", get(virtual_chats::list).post(virtual_chats::create))
+        .route("/api/v1/virtual-chats/{id}", patch(virtual_chats::update))
+        .route("/api/v1/virtual-chats/{id}/todos", put(virtual_chats::save_todos))
+        .route("/api/v1/virtual-chats/{id}/messages", get(virtual_chats::list_messages).post(virtual_chats::create_message))
+        .route("/api/v1/virtual-chats/{id}/messages/{message_id}", delete(virtual_chats::delete_message))
         .route("/api/v1/mention-triggers/order", put(mention_triggers::update_order))
         .route("/api/v1/mention-triggers/places", get(mention_triggers::list_places))
         .route("/api/v1/mention-triggers/people", get(mention_triggers::list_people))

@@ -61,6 +61,7 @@ mod mcp_live_tools;
 mod mcp_sessions;
 mod memory;
 mod mention_triggers;
+mod virtual_chats;
 mod message_proposals;
 mod moves;
 mod node_link;

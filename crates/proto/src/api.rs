@@ -3477,3 +3477,51 @@ pub struct SpeechRequest {
 pub struct SpeechVoices {
     pub voices: Vec<String>,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VirtualChat {
+    pub id: Uuid,
+    pub assistant_id: Uuid,
+    pub title: String,
+    pub description: Option<String>,
+    pub closed: bool,
+    pub unread: bool,
+    pub todos: serde_json::Value,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VirtualMessage {
+    pub id: Uuid,
+    pub chat_id: Uuid,
+    pub from_person: bool,
+    pub text: String,
+    #[serde(default)]
+    pub attachments: Vec<crate::conversation::Attachment>,
+    pub sending: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateVirtualChatRequest {
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PatchVirtualChatRequest {
+    #[serde(default)]
+    pub closed: Option<bool>,
+    #[serde(default)]
+    pub read: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SendVirtualMessageRequest {
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub attachments: Vec<crate::conversation::Attachment>,
+}

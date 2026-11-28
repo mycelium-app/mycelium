@@ -8,7 +8,7 @@ pub fn definitions() -> Value {
     json!([
         {
             "name": "set_todos",
-            "description": "Set this conversation's to-do list, shown to the person above the message box and handed to whoever continues the conversation. Send the whole list every time: it replaces the previous one. Keep one item in_progress while you work and mark items completed as you finish them.",
+            "description": "Set this conversation's to-do list, shown to the person above the message box and handed to whoever continues the conversation. Send the whole list every time: it replaces the previous one. Keep one item in_progress while you work and mark items completed as you finish them. An assistant can give each of its virtual chats a list of its own with chat.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -25,6 +25,7 @@ pub fn definitions() -> Value {
                             "required": ["content", "status"],
                         },
                     },
+                    "chat": {"type": "string", "description": "Set the to-do list of this assistant's virtual chat with this id or name instead of this conversation's own."},
                 },
                 "required": ["todos"],
             },
@@ -48,6 +49,18 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
         };
 
         entries.push(entry);
+    }
+
+    if let Some(named) = arguments.get("chat").and_then(Value::as_str).map(str::trim).filter(|named| !named.is_empty()) {
+        return Ok(match super::virtual_chats::resolve(&caller, named).await? {
+            Ok((owner, chat)) => {
+                let count = entries.len();
+                crate::virtual_chats::set_todos(caller.state, owner, chat.id, entries).await?;
+
+                ToolReply::text(&format!("To-do list of the virtual chat {} set with {count} items.", chat.title), false)
+            }
+            Err(reason) => ToolReply::text(&format!("Nothing was set. {reason}"), true),
+        });
     }
 
     let Some((conversation, _)) = caller.conversation().await? else {

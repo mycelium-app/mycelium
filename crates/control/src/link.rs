@@ -1260,6 +1260,10 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
         tracing::warn!("goal handling after a turn failed for {conversation_id}: {}", error.message());
     }
 
+    if let Err(error) = crate::virtual_chats::turn_ended(state, conversation_id).await {
+        tracing::warn!("could not give the virtual chats of {conversation_id} the turn's answer: {}", error.message());
+    }
+
     if let Err(error) = crate::todos::turn_ended(state, conversation_id, &stop_reason).await {
         tracing::warn!("could not ask {conversation_id} to update its to-do list: {}", error.message());
     }

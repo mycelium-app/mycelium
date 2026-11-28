@@ -25,6 +25,7 @@ mod server_tools;
 mod ssh_access;
 mod terminals;
 mod todos;
+mod virtual_chats;
 mod traces;
 mod workflows;
 
@@ -84,6 +85,7 @@ enum Area {
     Terminals,
     Inbox,
     Feed,
+    VirtualChats,
 }
 
 fn area_of(tool: &str) -> Option<Area> {
@@ -114,6 +116,7 @@ fn area_of(tool: &str) -> Option<Area> {
         "terminal_list" | "terminal_read" | "terminal_type" => Some(Area::Terminals),
         "list_needs_you" | "resolve_needs_you" | "focus_needs_you" => Some(Area::Inbox),
         "post_to_feed" => Some(Area::Feed),
+        "post_virtual_message" | "list_virtual_chats" | "read_virtual_chat" | "create_virtual_chat" => Some(Area::VirtualChats),
         name if name.contains("__") => Some(Area::ServerTools),
         _ => None,
     }
@@ -148,6 +151,7 @@ async fn call_area(area: Area, call: ToolCall<'_>) -> ApiResult<ToolReply> {
         Area::Terminals => terminals::call(call).await,
         Area::Inbox => inbox::call(call).await,
         Area::Feed => feed::call(call).await,
+        Area::VirtualChats => virtual_chats::call(call).await,
     }
 }
 
@@ -186,7 +190,7 @@ fn tool_text(text: &str, is_error: bool) -> Value {
     json!({"content": [{"type": "text", "text": text}], "isError": is_error})
 }
 
-const READ_ONLY_TOOLS: [&str; 24] = [
+const READ_ONLY_TOOLS: [&str; 26] = [
     "find_integration_tools",
     "list_places",
     "get_workflow",
@@ -211,6 +215,8 @@ const READ_ONLY_TOOLS: [&str; 24] = [
     "terminal_list",
     "terminal_read",
     "list_needs_you",
+    "list_virtual_chats",
+    "read_virtual_chat",
 ];
 
 pub fn tool_definitions() -> Value {
@@ -227,6 +233,7 @@ pub fn tool_definitions() -> Value {
         client_events::definitions(),
         traces::definitions(),
         todos::definitions(),
+        virtual_chats::definitions(),
         project_icon::definitions(),
         projects::definitions(),
         outline::definitions(),

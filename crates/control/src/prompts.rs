@@ -114,7 +114,7 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
     let from_goal = origin.as_deref() == Some(crate::goals::GOAL_ORIGIN);
     let mut message = json!({"text": text, "prompt_id": prompt_id, "attachments": attachments});
 
-    if let Some(marked) = origin.as_deref().filter(|origin| [crate::watches::EVENT_ORIGIN, crate::todos::TODOS_ORIGIN].contains(origin)) {
+    if let Some(marked) = origin.as_deref().filter(|origin| [crate::watches::EVENT_ORIGIN, crate::todos::TODOS_ORIGIN, crate::virtual_chats::VIRTUAL_ORIGIN].contains(origin)) {
         message["origin"] = json!(marked);
     }
 
@@ -139,6 +139,7 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         .fetch_one(&mut *tx)
         .await?;
     tx.commit().await?;
+    crate::virtual_chats::delivered(state, owner, prompt_id).await;
 
     if let Some((instructions, env, agent)) = session {
         if let Err(error) = state.add_session(node_id, conversation_id).await {
@@ -485,7 +486,7 @@ pub async fn send_now(State(state): State<AppState>, user: AuthUser, Path((id, q
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn send_queued_now(state: &AppState, owner: Uuid, id: Uuid, queue_id: Uuid) -> ApiResult<()> {
+pub(crate) async fn send_queued_now(state: &AppState, owner: Uuid, id: Uuid, queue_id: Uuid) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
     let row = lock_owned(&mut tx, id, owner).await?;
     let moved = sqlx::query(
@@ -582,8 +583,16 @@ async fn record_injected(state: &AppState, owner: Uuid, id: Uuid, queue_id: Uuid
     let mut tx = state.pool.begin().await?;
     let taken = sqlx::query_scalar::<_, Uuid>("delete from queued_prompts where id = $1 and conversation_id = $2 returning id").bind(queue_id).bind(id).fetch_optional(&mut *tx).await?;
     let prompt_id = taken.unwrap_or_else(Uuid::new_v4);
-    let event = append_event(&mut tx, id, EventKind::UserMessage, &json!({"text": text, "prompt_id": prompt_id, "attachments": attachments}), None).await?;
+    let origin = sqlx::query_scalar::<_, String>("select 'virtual_chat' from virtual_messages where queue_id = $1").bind(queue_id).fetch_optional(&mut *tx).await?;
+    let mut message = json!({"text": text, "prompt_id": prompt_id, "attachments": attachments});
+
+    if let Some(origin) = origin {
+        message["origin"] = json!(origin);
+    }
+
+    let event = append_event(&mut tx, id, EventKind::UserMessage, &message, None).await?;
     tx.commit().await?;
+    crate::virtual_chats::delivered(state, owner, queue_id).await;
 
     if let Some(event) = event {
         state.publish(Some(owner), StreamMessage::Event(event));
