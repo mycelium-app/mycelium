@@ -914,6 +914,30 @@ async fn an_agent_reads_a_layer_and_proposes_an_edit_that_waits_and_is_streamed(
 }
 
 #[tokio::test]
+async fn a_small_edit_is_applied_to_the_revision_read_and_a_missing_repeated_or_stale_one_is_refused() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    save(&server, "global", "# Rules\n- Be brief.\n- Be kind.\n- Be kind.").await;
+    expect_instructions(&mut link).await;
+    let conversation = conversation_with_session(&server, &mut link, "/anywhere").await;
+    let (read, _) = tool(&server, &token, conversation, "get_instructions", json!({})).await;
+    let revision = revision_in(&read);
+    let edit = |old: &str, new: &str, base: &str| json!({"edits": [{"old_text": old, "new_text": new}], "base_revision": base, "reason": "\"keep it short\""});
+
+    let (missing, missing_error) = propose(&server, &token, conversation, edit("- Be loud.", "- Be quiet.", &revision)).await;
+    let (repeated, repeated_error) = propose(&server, &token, conversation, edit("- Be kind.", "- Be gentle.", &revision)).await;
+    let (stale, stale_error) = propose(&server, &token, conversation, edit("- Be brief.", "- Be very brief.", "an-old-revision")).await;
+    let (applied, applied_error) = propose(&server, &token, conversation, edit("- Be brief.", "- Be very brief.", &revision)).await;
+
+    assert_eq!((missing_error, repeated_error, stale_error, applied_error), (json!(true), json!(true), json!(true), json!(false)), "{missing} {repeated} {stale} {applied}");
+    assert!(missing.contains("is not in the text") && repeated.contains("appears 2 times") && stale.contains("not an-old-revision"), "{missing} {repeated} {stale}");
+    let listed = proposals(&server).await;
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!(listed[0]["text"], json!("# Rules\n- Be very brief.\n- Be kind.\n- Be kind."));
+}
+
+#[tokio::test]
 async fn a_proposal_defaults_to_the_conversations_group_and_global_must_be_asked_for() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
