@@ -305,6 +305,7 @@ data class QueuedPrompt(
     @SerialName("created_at") val createdAt: String,
     val attachments: List<Attachment> = emptyList(),
     val editing: Boolean = false,
+    val origin: String? = null,
 )
 
 @Serializable

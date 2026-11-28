@@ -359,6 +359,7 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
         is ThreadItem.ResponseEdit -> ResponseEditorCard(item)
         is ThreadItem.TurnEnd -> Unit
         is ThreadItem.Worked -> WorkedLine(item)
+        is ThreadItem.FinalReply -> VirtualBubble(LocalVirtualSpeaker.current, item.text)
         is ThreadItem.Failure -> if (item.limit != null) {
             UsageLimitCard(item.limit, agent, limitActions, item.message.removePrefix("Internal error: "))
         } else if (item.signInRequired && onSignIn != null && onDismissFailure != null) {

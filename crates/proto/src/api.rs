@@ -407,6 +407,8 @@ pub struct PromptRequest {
     pub model: Option<ModelChoice>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node_id: Option<Uuid>,
+    #[serde(skip)]
+    pub origin: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

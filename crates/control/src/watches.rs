@@ -48,7 +48,7 @@ pub async fn deliver(state: &AppState, owner: Uuid, watch: Uuid, watcher: Uuid, 
     let watcher = match crate::assistants::earlier_session_of(state, watcher).await? {
         Some((_, Some(current))) => current,
         Some((assistant_id, None)) => {
-            let woken = crate::assistants::wake(state, owner, assistant_id, mycelium_proto::api::PromptRequest { text, ..Default::default() }, &crate::assistants::StartOverrides::default()).await;
+            let woken = crate::assistants::wake(state, owner, assistant_id, mycelium_proto::api::PromptRequest { text, origin: Some(EVENT_ORIGIN.to_string()), ..Default::default() }, &crate::assistants::StartOverrides::default()).await;
 
             if let Err(error) = woken {
                 sqlx::query("delete from watch_notifications where watch_id = $1 and key = $2").bind(watch).bind(key).execute(&state.pool).await?;

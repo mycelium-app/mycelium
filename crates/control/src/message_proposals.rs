@@ -9,6 +9,8 @@ use mycelium_proto::api::{MessageProposal, MessageProposalState, PromptRequest};
 use mycelium_proto::stream::StreamMessage;
 use uuid::Uuid;
 
+pub const RELAY_ORIGIN: &str = "relay";
+
 const LISTED: i64 = 100;
 
 fn proposal_columns() -> String {
@@ -194,7 +196,7 @@ async fn start_assistant_chat(state: &AppState, owner: Uuid, conversation_id: Uu
 
     let source = sqlx::query_scalar::<_, String>("select coalesce((select a.name from assistants a where a.conversation_id = s.id), s.title) from conversations s where s.id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     let text = format!("From {}:\n\n{message}", label(conversation_id, &source));
-    let woken = crate::assistants::wake(state, owner, assistant_id, PromptRequest { text, ..Default::default() }, &crate::assistants::StartOverrides::default()).await;
+    let woken = crate::assistants::wake(state, owner, assistant_id, PromptRequest { text, origin: Some(RELAY_ORIGIN.to_string()), ..Default::default() }, &crate::assistants::StartOverrides::default()).await;
     let conversation = match woken {
         Ok(conversation) => conversation,
         Err(error) => return Ok(Err(format!("Nothing was proposed. {}", error.message()))),
@@ -250,7 +252,7 @@ async fn approve_and_send(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<
     let source = found.source_title.as_deref().map(|title| label(found.conversation_id.unwrap_or_default(), title)).unwrap_or_else(|| "another conversation".to_string());
     let text = format!("From {source}:\n\n{}", found.message);
     let manager = found.conversation_id.filter(|_| found.target_archived);
-    let queued = prompts::send_reopening(state, owner, found.target_id, PromptRequest { text, ..Default::default() }, None, manager).await;
+    let queued = prompts::send_reopening(state, owner, found.target_id, PromptRequest { text, origin: Some(RELAY_ORIGIN.to_string()), ..Default::default() }, None, manager).await;
 
     if queued.is_ok()
         && let Some(source_id) = found.conversation_id

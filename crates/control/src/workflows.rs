@@ -14,6 +14,8 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+pub const WORKFLOW_ORIGIN: &str = "workflow";
+
 const COLUMNS: &str = "id,owner,parent_id,conversation_id,title,status,plan,steps,round,output,kind,created_at,updated_at,ended_at,started_by,project_id,end_reason,rerun_of,decisions,phases,run_id";
 
 const AGENT_RUN: &str = "agent_run";
@@ -485,6 +487,7 @@ async fn notify_parent(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()>
             parent,
             PromptRequest {
                 text,
+                origin: Some(WORKFLOW_ORIGIN.to_string()),
                 ..Default::default()
             },
         )
@@ -691,6 +694,7 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
                     conversation,
                     PromptRequest {
                         text,
+                        origin: Some(WORKFLOW_ORIGIN.to_string()),
                         ..Default::default()
                     },
                 )

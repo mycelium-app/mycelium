@@ -365,14 +365,14 @@ pub async fn highest_node_seqs(pool: &PgPool, conversation_ids: &[Uuid]) -> sqlx
 }
 
 pub async fn queue_of(pool: &PgPool, conversation_id: Uuid) -> sqlx::Result<Vec<QueuedPrompt>> {
-    let rows = sqlx::query_as::<_, (Uuid, i32, String, sqlx::types::Json<Vec<Attachment>>, bool, chrono::DateTime<chrono::Utc>)>(
-        "select id, position, text, attachments, editing, created_at from queued_prompts where conversation_id = $1 and origin is distinct from 'virtual_chat' order by position",
+    let rows = sqlx::query_as::<_, (Uuid, i32, String, sqlx::types::Json<Vec<Attachment>>, bool, Option<String>, chrono::DateTime<chrono::Utc>)>(
+        "select id, position, text, attachments, editing, origin, created_at from queued_prompts where conversation_id = $1 and origin is distinct from 'virtual_chat' order by position",
     )
     .bind(conversation_id)
     .fetch_all(pool)
     .await?;
 
-    Ok(rows.into_iter().map(|(id, position, text, attachments, editing, created_at)| QueuedPrompt { id, conversation_id, position, text, attachments: attachments.0, editing, created_at }).collect())
+    Ok(rows.into_iter().map(|(id, position, text, attachments, editing, origin, created_at)| QueuedPrompt { id, conversation_id, position, text, attachments: attachments.0, editing, origin, created_at }).collect())
 }
 
 pub async fn publish_queue(state: &AppState, owner: Uuid, conversation_id: Uuid) -> ApiResult<()> {

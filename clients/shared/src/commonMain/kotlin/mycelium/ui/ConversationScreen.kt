@@ -9,6 +9,7 @@ import mycelium.api.ModelChoice
 import mycelium.state.sessionOpenOn
 import mycelium.state.awaitingPickUp
 import mycelium.state.virtualModeOf
+import mycelium.state.queueShown
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.seconds
 import mycelium.api.Routing
@@ -473,7 +474,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val initialQueued = if (starting) queue.minByOrNull { it.position } else null
     val unexplainedFailure = ThreadItem.Failure("failed", "The agent stopped with an error.").takeIf { conversation.status == ConversationStatus.Failed && thread.none { it is ThreadItem.Failure } }
     val initialMessage = initialQueued?.let { ThreadItem.UserMessage("queued:${it.id}", it.text, files = it.attachments) }
-    val shownQueue = queue.filter { it.id != initialQueued?.id }
+    val shownQueue = queueShown(queue, id in state.virtualModes).filter { it.id != initialQueued?.id }
     val parksMessages = agentWorking || shownQueue.isNotEmpty()
     val parked = if (parksMessages) pending else emptyList()
     val outgoing = if (parksMessages) emptyList() else pending

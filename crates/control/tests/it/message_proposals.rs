@@ -127,6 +127,21 @@ async fn a_target_can_be_named_by_its_id() {
 }
 
 #[tokio::test]
+async fn a_relayed_message_is_marked_as_coming_from_mycelium_not_the_person() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let source = working_conversation(&server, &mut link, "Plan the release").await;
+    let target = working_conversation(&server, &mut link, "Fix billing export").await;
+    propose(&server, &link, source, "Fix billing export").await;
+    let id = proposals(&server).await[0]["id"].as_str().unwrap().to_string();
+
+    server.user.json(server.user.post(&format!("/api/v1/message-proposals/{id}/approve"))).await;
+
+    let origin: Option<String> = sqlx::query_scalar("select origin from queued_prompts where conversation_id = $1").bind(target).fetch_one(&server.pool).await.unwrap();
+    assert_eq!(origin.as_deref(), Some("relay"));
+}
+
+#[tokio::test]
 async fn approving_queues_the_message_on_the_target_prefixed_with_the_source_title() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

@@ -114,7 +114,7 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
     let from_goal = origin.as_deref() == Some(crate::goals::GOAL_ORIGIN);
     let mut message = json!({"text": text, "prompt_id": prompt_id, "attachments": attachments});
 
-    if let Some(marked) = origin.as_deref().filter(|origin| [crate::watches::EVENT_ORIGIN, crate::todos::TODOS_ORIGIN, crate::virtual_chats::VIRTUAL_ORIGIN].contains(origin)) {
+    if let Some(marked) = origin.as_deref() {
         message["origin"] = json!(marked);
     }
 
@@ -218,6 +218,8 @@ pub async fn send_from(state: &AppState, owner: Uuid, id: Uuid, request: PromptR
 }
 
 pub async fn send_reopening(state: &AppState, owner: Uuid, id: Uuid, request: PromptRequest, origin: Option<&str>, manager: Option<Uuid>) -> ApiResult<Sent> {
+    let origin = origin.map(str::to_string).or_else(|| request.origin.clone());
+    let origin = origin.as_deref();
     let text = request.text.trim();
 
     if text.is_empty() && request.attachments.is_empty() {
@@ -581,9 +583,9 @@ pub(crate) async fn send_queued_now(state: &AppState, owner: Uuid, id: Uuid, que
 
 async fn record_injected(state: &AppState, owner: Uuid, id: Uuid, queue_id: Uuid, text: &str, attachments: &[Attachment]) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
-    let taken = sqlx::query_scalar::<_, Uuid>("delete from queued_prompts where id = $1 and conversation_id = $2 returning id").bind(queue_id).bind(id).fetch_optional(&mut *tx).await?;
-    let prompt_id = taken.unwrap_or_else(Uuid::new_v4);
-    let origin = sqlx::query_scalar::<_, String>("select 'virtual_chat' from virtual_messages where queue_id = $1").bind(queue_id).fetch_optional(&mut *tx).await?;
+    let taken = sqlx::query_as::<_, (Uuid, Option<String>)>("delete from queued_prompts where id = $1 and conversation_id = $2 returning id, origin").bind(queue_id).bind(id).fetch_optional(&mut *tx).await?;
+    let prompt_id = taken.as_ref().map(|(prompt_id, _)| *prompt_id).unwrap_or_else(Uuid::new_v4);
+    let origin = taken.and_then(|(_, origin)| origin);
     let mut message = json!({"text": text, "prompt_id": prompt_id, "attachments": attachments});
 
     if let Some(origin) = origin {

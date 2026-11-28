@@ -21,6 +21,8 @@ use mycelium_proto::stream::StreamMessage;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
+pub const SCHEDULE_ORIGIN: &str = "schedule";
+
 const SCHEDULE_COLUMNS: &str = "id, owner, node_id, agent, cwd, project_id, prompt, cron, each_run, paused, time_zone, proposed, conversation_id, next_run_at, last_run_at, last_conversation_id, created_at, assistant_id, action_id, action_inputs, account, routing, model";
 const RUN_COLUMNS: &str = "id, schedule_id, ran_at, outcome, reason, conversation_id";
 const DUE_BATCH: i64 = 20;
@@ -560,7 +562,7 @@ async fn start_run(state: &AppState, row: &ScheduleRow) -> ApiResult<Uuid> {
             return Ok(woken.id);
         }
 
-        let woken = assistants::wake(state, row.owner, assistant_id, PromptRequest { text: row.prompt.clone(), ..Default::default() }, &StartOverrides::default()).await?;
+        let woken = assistants::wake(state, row.owner, assistant_id, PromptRequest { text: row.prompt.clone(), origin: Some(SCHEDULE_ORIGIN.to_string()), ..Default::default() }, &StartOverrides::default()).await?;
 
         return Ok(woken.id);
     }
@@ -585,7 +587,7 @@ async fn start_run(state: &AppState, row: &ScheduleRow) -> ApiResult<Uuid> {
     };
 
     if let Some(conversation_id) = reusable {
-        let queued = prompts::send(state, row.owner, conversation_id, PromptRequest { text: row.prompt.clone(), ..Default::default() }).await;
+        let queued = prompts::send(state, row.owner, conversation_id, PromptRequest { text: row.prompt.clone(), origin: Some(SCHEDULE_ORIGIN.to_string()), ..Default::default() }).await;
 
         match queued {
             Ok(_) => return Ok(conversation_id),

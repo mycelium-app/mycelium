@@ -137,6 +137,7 @@ sealed interface ThreadItem {
         val spokenAt: String? = null,
         val delivery: Delivery? = null,
         val waiting: Boolean = false,
+        val fromMycelium: Boolean = false,
     ) : ThreadItem
 
     data class GoalReport(override val key: String, val outcome: String, val reason: String, val at: String) : ThreadItem
@@ -192,6 +193,8 @@ sealed interface ThreadItem {
     data class TurnEnd(override val key: String, val stopReason: String) : ThreadItem
 
     data class Worked(override val key: String, val tools: Int, val expanded: Boolean) : ThreadItem
+
+    data class FinalReply(override val key: String, val text: String) : ThreadItem
 
     data class Failure(override val key: String, val message: String, val limit: UsageLimitNote? = null, val signInRequired: Boolean = false) : ThreadItem
 
@@ -346,7 +349,7 @@ private fun userMessageFrom(key: String, payload: JsonObject): ThreadItem.UserMe
 
     val fromGoal = payload.string("origin") == "goal"
 
-    return ThreadItem.UserMessage(key, payload.string("text") ?: "", files, pictures.map { ThreadImage(it.sha256, it.name, it.mediaType) }, goalSentAt, payload.int("nudge")?.takeIf { fromGoal && it > 0 }, payload.string("why").takeIf { fromGoal }, payload.boolean("spoken") == true, payload.string("spoken_at"))
+    return ThreadItem.UserMessage(key, payload.string("text") ?: "", files, pictures.map { ThreadImage(it.sha256, it.name, it.mediaType) }, goalSentAt, payload.int("nudge")?.takeIf { fromGoal && it > 0 }, payload.string("why").takeIf { fromGoal }, payload.boolean("spoken") == true, payload.string("spoken_at"), fromMycelium = payload.string("origin") != null)
 }
 
 private fun withSameImagesMarked(items: List<ThreadItem>): List<ThreadItem> {
@@ -876,37 +879,62 @@ fun virtualModeOf(items: List<ThreadItem>, on: Boolean, expanded: Set<String>): 
 
     val shown = mutableListOf<ThreadItem>()
     val run = mutableListOf<ThreadItem>()
+    var posted = false
+    var reply: ThreadItem.AgentMessage? = null
+    var replyShown = false
 
     fun flush() {
-        val worked = run.filter { it !is ThreadItem.TurnEnd }
-
-        if (worked.isNotEmpty()) {
-            val key = "worked:${worked.first().key}"
+        if (run.isNotEmpty()) {
+            val key = "worked:${run.first().key}"
             val open = key in expanded
 
-            shown += ThreadItem.Worked(key, worked.count { it is ThreadItem.ToolCall }, open)
+            shown += ThreadItem.Worked(key, run.count { it is ThreadItem.ToolCall }, open)
 
             if (open) {
-                shown += worked
+                shown += run
+                replyShown = replyShown || run.any { it == reply }
             }
         }
 
-        shown += run.filterIsInstance<ThreadItem.TurnEnd>()
         run.clear()
     }
 
     for (item in items) {
-        val kept = when (item) {
-            is ThreadItem.UserMessage, is ThreadItem.Permission, is ThreadItem.Failure -> true
-            is ThreadItem.ToolCall -> virtualPost(item)?.let { it.chat == null } == true
-            else -> false
-        }
+        when {
+            item is ThreadItem.UserMessage && !item.fromMycelium || item is ThreadItem.Permission || item is ThreadItem.Failure -> {
+                flush()
+                shown += item
+            }
 
-        if (kept) {
-            flush()
-            shown += item
-        } else {
-            run += item
+            item is ThreadItem.ToolCall && virtualPost(item)?.chat == null && virtualPost(item) != null -> {
+                flush()
+                shown += item
+                posted = true
+            }
+
+            item is ThreadItem.TurnEnd -> {
+                flush()
+                val answer = reply
+
+                if (!posted && answer != null && !replyShown) {
+                    shown += ThreadItem.FinalReply("reply:${answer.key}", answer.text)
+                }
+
+                shown += item
+                posted = false
+                reply = null
+                replyShown = false
+            }
+
+            else -> {
+                run += item
+
+                when (item) {
+                    is ThreadItem.AgentMessage -> if (item.text.isNotBlank()) reply = item
+                    is ThreadItem.ToolCall -> reply = null
+                    else -> {}
+                }
+            }
         }
     }
 
@@ -914,3 +942,5 @@ fun virtualModeOf(items: List<ThreadItem>, on: Boolean, expanded: Set<String>): 
 
     return shown
 }
+
+fun queueShown(queue: List<mycelium.api.QueuedPrompt>, virtualMode: Boolean): List<mycelium.api.QueuedPrompt> = if (virtualMode) queue.filter { it.origin == null } else queue

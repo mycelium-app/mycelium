@@ -259,6 +259,8 @@ pub struct QueuedPrompt {
     pub attachments: Vec<Attachment>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub editing: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 

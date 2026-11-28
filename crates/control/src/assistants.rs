@@ -473,7 +473,7 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
                         Some(ModelChoice { agent: Some(agent), model, any_model: false, .. }) => (agent, None, model, Some(Routing::for_agent(agent))),
                         _ => (AgentId::Claude, None, None, Some(Routing::AnyModel)),
                     };
-                    let first = Some(text.to_string()).filter(|_| request.attachments.is_empty());
+                    let first = Some(text.to_string()).filter(|_| request.attachments.is_empty() && request.origin.is_none());
                     let started = CreateConversationRequest { mode: None, config: None, node_id, agent, account, cwd: folder_of(id), project_id: None, branch: None, worktree_path: None, title: None, prompt: first.clone(), parent_id: None, side_kind: None, model, routing, client_id: None };
                     let started = conversations::start_for(state, owner, started, Some(id), false).await?;
 

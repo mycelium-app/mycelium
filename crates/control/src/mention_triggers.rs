@@ -16,6 +16,8 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
+pub const MENTION_ORIGIN: &str = "mention";
+
 const COLUMNS: &str = "id, integration, position, server_id, guild_id, guild_name, assistant_id, project_id, agent, channels, senders, sender_names, created_at";
 const CONTEXT_MESSAGES: u64 = 10;
 const RETRY_AFTER: Duration = Duration::from_secs(15);
@@ -525,7 +527,7 @@ async fn route(state: &AppState, row: &ServerRow, credentials: &Credentials, men
     );
 
     let delivered = match (rule.assistant_id, rule.project_id, rule.agent.as_deref()) {
-        (Some(assistant_id), _, _) => assistants::wake(state, owner, assistant_id, PromptRequest { text, ..Default::default() }, &StartOverrides::default()).await.map(|_| ()),
+        (Some(assistant_id), _, _) => assistants::wake(state, owner, assistant_id, PromptRequest { text, origin: Some(MENTION_ORIGIN.to_string()), ..Default::default() }, &StartOverrides::default()).await.map(|_| ()),
         (None, Some(project_id), Some(agent)) => start_agent(state, owner, project_id, agent, format!("{} on {platform}", mention.author), text).await,
         _ => Ok(()),
     };

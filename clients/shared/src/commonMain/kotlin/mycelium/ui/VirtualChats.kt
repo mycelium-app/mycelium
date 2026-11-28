@@ -80,7 +80,7 @@ private const val VirtualTintAlpha = 0.14f
 @Composable
 internal fun WorkedLine(item: mycelium.state.ThreadItem.Worked) {
     val toggle = LocalWorkToggle.current
-    val words = "Worked, ${item.tools} ${if (item.tools == 1) "tool" else "tools"}"
+    val words = if (item.tools == 0) "Worked" else "Worked, ${item.tools} ${if (item.tools == 1) "tool" else "tools"}"
 
     MyButton({ toggle(item.key) }, text = words, icon = if (item.expanded) MyIcon.ChevronDown else MyIcon.ChevronRight, size = ButtonSize.Sm, muted = true, stateDescription = if (item.expanded) "Expanded" else "Collapsed")
 }
