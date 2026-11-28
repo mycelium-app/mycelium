@@ -9,6 +9,11 @@ use std::time::Duration;
 use uuid::Uuid;
 
 const PUBLISHING_ROUTES: &[&str] = &[
+    "POST /api/v1/assistants/{id}/virtual-chats",
+    "PATCH /api/v1/virtual-chats/{id}",
+    "PUT /api/v1/virtual-chats/{id}/todos",
+    "POST /api/v1/virtual-chats/{id}/messages",
+    "DELETE /api/v1/virtual-chats/{id}/messages/{message_id}",
     "POST /api/v1/projects/{id}/find-icon",
     "POST /api/v1/projects/{id}/avatar",
     "PATCH /api/v1/projects/{id}",
@@ -135,6 +140,8 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/client-events",
     "POST /api/v1/mention-triggers",
     "DELETE /api/v1/mention-triggers/{id}",
+    "PUT /api/v1/mention-triggers/{id}",
+    "PUT /api/v1/mention-triggers/order",
     "POST /api/v1/mcp-session-tokens/revoke",
     "POST /api/v1/nodes/join-tokens",
     "PUT /api/v1/agent-settings",

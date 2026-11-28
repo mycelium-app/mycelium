@@ -36,14 +36,26 @@ pub fn definitions() -> Value {
         },
         {
             "name": "create_virtual_chat",
-            "description": "Open a new virtual chat under this assistant for a topic of its own, so it does not get lost among the others. The person approves it on a card first. It appears under the assistant in their sidebar; they stay where they are.",
+            "description": "Open a new virtual chat under this assistant for a topic of its own, so it does not get lost among the others. It appears under the assistant in the person's sidebar; they stay where they are.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "title": {"type": "string", "description": "A short name for the topic."},
                     "description": {"type": "string", "description": "One sentence on what the chat is for."},
+                    "message": {"type": "string", "description": "The chat's first message, in Markdown, posted as post_virtual_message would."},
                 },
                 "required": ["title"],
+            },
+        },
+        {
+            "name": "close_virtual_chat",
+            "description": "Close one of this assistant's virtual chats once its topic is settled. It stays under the assistant marked Closed, and opens again when anyone writes in it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "chat": {"type": "string", "description": "The virtual chat's id or exact name."},
+                },
+                "required": ["chat"],
             },
         },
     ])
@@ -126,13 +138,27 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 return Ok(ToolReply::text(NOT_AN_ASSISTANT, true));
             };
 
-            if let Err(reason) = super::approval::approved_or_granted(&caller, "create_virtual_chat", &arguments).await? {
-                return Ok(ToolReply::text(&reason, true));
-            }
-
             let chat = crate::virtual_chats::create_for(caller.state, owner, assistant_id, title, field("description")).await?;
 
+            if let Some(message) = field("message") {
+                crate::virtual_chats::post(caller.state, owner, chat.id, message).await?;
+            }
+
             Ok(ToolReply::text(&format!("Opened the virtual chat {} ({}). Post to it with post_virtual_message.", chat.title, chat.id), false))
+        }
+        "close_virtual_chat" => {
+            let Some(named) = field("chat") else {
+                return Ok(ToolReply::invalid("close_virtual_chat needs chat, the id or name of a virtual chat."));
+            };
+
+            match resolve(&caller, named).await? {
+                Ok((owner, chat)) => {
+                    crate::virtual_chats::close(caller.state, owner, chat.id, true).await?;
+
+                    Ok(ToolReply::text(&format!("Closed the virtual chat {}. It opens again when anyone writes in it.", chat.title), false))
+                }
+                Err(reason) => Ok(ToolReply::text(&format!("Nothing was closed. {reason}"), true)),
+            }
         }
         _ => Ok(ToolReply::invalid("Unknown virtual chat tool.")),
     }

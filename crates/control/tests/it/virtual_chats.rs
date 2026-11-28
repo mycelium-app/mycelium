@@ -112,31 +112,55 @@ async fn the_model_lists_its_chats_and_reads_one_chats_history() {
 }
 
 #[tokio::test]
-async fn creating_a_chat_asks_first_and_approving_for_the_session_stops_asking() {
+async fn the_model_opens_a_chat_without_asking_and_can_send_its_first_message_with_it() {
     let rig = rig(STEERING_NODE).await;
-    let host = rig.host;
-    let server = &rig.server;
-    let answer = |option: &'static str| async move {
-        let request_id = common::eventually("the approval card", || async {
-            let events = server.events(host).await;
-            let asked: Vec<String> = events.iter().filter(|event| event["kind"] == "permission_request").filter_map(|event| event["payload"]["request_id"].as_str().map(str::to_string)).collect();
-            let answered: Vec<String> = events.iter().filter(|event| event["kind"] == "permission_resolved").filter_map(|event| event["payload"]["request_id"].as_str().map(str::to_string)).collect();
 
-            asked.into_iter().find(|id| !answered.contains(id))
-        })
-        .await;
-        server.user.json(server.user.post(&format!("/api/v1/conversations/{host}/permission")).json(&json!({"request_id": request_id, "option_id": option}))).await;
+    let opened = rig.tool("create_virtual_chat", json!({"title": "Decision needed: SSH cap", "message": "Which cap, **a**, b or c?"})).await;
+    let empty = rig.tool("create_virtual_chat", json!({"title": "Calendar pinned row"})).await;
+
+    assert!(text_of(&opened).starts_with("Opened the virtual chat Decision needed: SSH cap"), "{opened}");
+    assert!(text_of(&empty).starts_with("Opened the virtual chat Calendar pinned row"), "{empty}");
+    let asked = rig.server.events(rig.host).await.iter().filter(|event| event["kind"] == "permission_request").count();
+    assert_eq!(asked, 0);
+    let (_, chats) = rig.server.user.json(rig.server.user.get(&format!("/api/v1/assistants/{}/virtual-chats", rig.assistant))).await;
+    let first = rig.messages(&chats[0]).await;
+    assert_eq!((first.len(), first[0]["text"].clone()), (1, json!("Which cap, **a**, b or c?")));
+    assert!(rig.messages(&chats[1]).await.is_empty());
+}
+
+#[tokio::test]
+async fn the_model_closes_a_chat_and_the_person_writing_in_it_opens_it_again() {
+    let rig = rig(STEERING_NODE).await;
+    let chat = rig.chat("Decision needed: SSH cap").await;
+
+    let closed = rig.tool("close_virtual_chat", json!({"chat": "Decision needed: SSH cap"})).await;
+    let (_, after_close) = rig.server.user.json(rig.server.user.get(&format!("/api/v1/assistants/{}/virtual-chats", rig.assistant))).await;
+    rig.say(&chat, "one more thing").await;
+    let (_, after_writing) = rig.server.user.json(rig.server.user.get(&format!("/api/v1/assistants/{}/virtual-chats", rig.assistant))).await;
+
+    assert_eq!(closed["isError"], json!(false), "{closed}");
+    assert_eq!((after_close[0]["closed"].clone(), after_writing[0]["closed"].clone()), (json!(true), json!(false)));
+}
+
+#[tokio::test]
+async fn a_message_waits_for_a_running_tool_call_to_finish_before_it_is_steered_in() {
+    let mut rig = rig(STEERING_NODE).await;
+    let chat = rig.chat("Discord routing rules").await;
+    rig.link.send(NodeToControl::AcpUpdate { conversation_id: rig.host, seq: 2, update: json!({"update": {"sessionUpdate": "tool_call", "toolCallId": "post-1", "title": "mcp__mycelium__post_virtual_message", "kind": "other", "status": "in_progress"}}) }).await;
+    common::eventually("the tool call to be recorded", || async {
+        rig.server.events(rig.host).await.iter().any(|event| event["payload"]["update"]["toolCallId"] == "post-1").then_some(())
+    })
+    .await;
+
+    rig.say(&chat, "can the fallback be any server?").await;
+    let early = tokio::time::timeout(std::time::Duration::from_millis(800), next_but_git(&mut rig.link)).await;
+    rig.link.send(NodeToControl::AcpUpdate { conversation_id: rig.host, seq: 3, update: json!({"update": {"sessionUpdate": "tool_call_update", "toolCallId": "post-1", "status": "completed"}}) }).await;
+    let ControlToNode::Steer { text, .. } = next_but_git(&mut rig.link).await else {
+        panic!("expected a steer");
     };
 
-    let (declined, ()) = tokio::join!(rig.tool("create_virtual_chat", json!({"title": "Sedge emoji grid"})), answer("deny"));
-    let (opened, ()) = tokio::join!(rig.tool("create_virtual_chat", json!({"title": "Sedge emoji grid"})), answer("always"));
-    let again = rig.tool("create_virtual_chat", json!({"title": "Calendar pinned row"})).await;
-
-    assert_eq!(declined["isError"], json!(true), "{declined}");
-    assert!(text_of(&opened).starts_with("Opened the virtual chat Sedge emoji grid"), "{opened}");
-    assert!(text_of(&again).starts_with("Opened the virtual chat Calendar pinned row"), "{again}");
-    let (_, chats) = rig.server.user.json(rig.server.user.get(&format!("/api/v1/assistants/{}/virtual-chats", rig.assistant))).await;
-    assert_eq!(chats.as_array().unwrap().iter().map(|chat| chat["title"].clone()).collect::<Vec<_>>(), vec![json!("Sedge emoji grid"), json!("Calendar pinned row")]);
+    assert!(early.is_err(), "the steer came while the tool call was running: {early:?}");
+    assert!(text.starts_with("can the fallback be any server?"), "{text}");
 }
 
 #[tokio::test]
@@ -212,4 +236,25 @@ async fn closing_keeps_the_chat_and_writing_in_it_opens_it_again() {
     let (_, chats) = rig.server.user.json(rig.server.user.get(&format!("/api/v1/assistants/{}/virtual-chats", rig.assistant))).await;
 
     assert_eq!((closed["closed"].clone(), chats[0]["closed"].clone()), (json!(true), json!(false)));
+}
+
+#[tokio::test]
+async fn a_new_chat_and_a_message_in_it_are_streamed() {
+    let rig = rig(STEERING_NODE).await;
+    let mut stream = rig.server.user.stream().await;
+
+    let chat = rig.chat("Mac mini install").await;
+    rig.tool("post_virtual_message", json!({"chat": chat["id"], "text": "Is the disk wiped?"})).await;
+
+    let streamed_chat = stream.until(|message| match message {
+        mycelium_proto::stream::StreamMessage::VirtualChat(chat) => Some(chat),
+        _ => None,
+    })
+    .await;
+    let streamed_message = stream.until(|message| match message {
+        mycelium_proto::stream::StreamMessage::VirtualMessage(message) => Some(message),
+        _ => None,
+    })
+    .await;
+    assert_eq!((streamed_chat.title.as_str(), streamed_message.text.as_str()), ("Mac mini install", "Is the disk wiped?"));
 }

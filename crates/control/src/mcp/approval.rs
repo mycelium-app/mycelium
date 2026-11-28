@@ -18,23 +18,3 @@ pub async fn approved(caller: &Caller<'_>, tool: &str, input: &Value) -> ApiResu
         Ok(Err(format!("Nothing was done. {}", chat_tools::DECLINED_TEXT)))
     }
 }
-
-pub async fn approved_or_granted(caller: &Caller<'_>, tool: &str, input: &Value) -> ApiResult<Result<(), String>> {
-    let Some(conversation_id) = caller.conversation_id().await? else {
-        return Ok(Err("Nothing was done. This needs the person's approval, and approvals are asked in a conversation. Call it from inside one.".to_string()));
-    };
-
-    if !chat_tools::granting_requests(caller.state, conversation_id, tool).await?.is_empty() {
-        return Ok(Ok(()));
-    }
-
-    let owner = caller.owner().await?;
-    let approval = Approval { title: tool, input, server: "Mycelium", account: None, filter: None, edits_by_setting: false, once_only: false };
-    let answered = chat_tools::request_approval(caller.state, owner, conversation_id, &Uuid::new_v4().to_string(), &approval).await?;
-
-    if chat_tools::is_approved(&answered) {
-        Ok(Ok(()))
-    } else {
-        Ok(Err(format!("Nothing was done. {}", chat_tools::DECLINED_TEXT)))
-    }
-}

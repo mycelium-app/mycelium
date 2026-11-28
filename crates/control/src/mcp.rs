@@ -116,7 +116,7 @@ fn area_of(tool: &str) -> Option<Area> {
         "terminal_list" | "terminal_read" | "terminal_type" => Some(Area::Terminals),
         "list_needs_you" | "resolve_needs_you" | "focus_needs_you" => Some(Area::Inbox),
         "post_to_feed" => Some(Area::Feed),
-        "post_virtual_message" | "list_virtual_chats" | "read_virtual_chat" | "create_virtual_chat" => Some(Area::VirtualChats),
+        "post_virtual_message" | "list_virtual_chats" | "read_virtual_chat" | "create_virtual_chat" | "close_virtual_chat" => Some(Area::VirtualChats),
         name if name.contains("__") => Some(Area::ServerTools),
         _ => None,
     }

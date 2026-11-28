@@ -120,7 +120,7 @@ pub async fn update(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     chat(&state, user.id, id).await?;
 
     if let Some(closed) = request.closed {
-        sqlx::query("update virtual_chats set closed_at = case when $2 then coalesce(closed_at, now()) end, updated_at = now() where id = $1").bind(id).bind(closed).execute(&state.pool).await?;
+        close(&state, user.id, id, closed).await?;
     }
 
     if request.read {
@@ -128,6 +128,12 @@ pub async fn update(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     }
 
     Ok(Json(publish_chat(&state, user.id, id).await?))
+}
+
+pub async fn close(state: &AppState, owner: Uuid, id: Uuid, closed: bool) -> ApiResult<VirtualChat> {
+    sqlx::query("update virtual_chats set closed_at = case when $2 then coalesce(closed_at, now()) end, updated_at = now() where id = $1").bind(id).bind(closed).execute(&state.pool).await?;
+
+    publish_chat(state, owner, id).await
 }
 
 pub async fn save_todos(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<SaveTodosRequest>) -> ApiResult<Json<VirtualChat>> {
@@ -257,11 +263,48 @@ async fn deliver(state: &AppState, owner: Uuid, host: Uuid, queue_id: Uuid) {
         let state = state.clone();
 
         tokio::spawn(async move {
+            if !after_running_tools(&state, host, queue_id).await {
+                return;
+            }
+
             if let Err(error) = crate::prompts::send_queued_now(&state, owner, host, queue_id).await {
                 tracing::info!("a virtual chat message for {host} waits for the turn to end: {}", error.message());
             }
         });
     }
+}
+
+const TOOL_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
+const TOOL_WAIT_LIMIT: u32 = 7200;
+
+async fn after_running_tools(state: &AppState, host: Uuid, queue_id: Uuid) -> bool {
+    for _ in 0..TOOL_WAIT_LIMIT {
+        let (queued, running) = sqlx::query_as::<_, (bool, bool)>(
+            "select exists (select 1 from queued_prompts where id = $2),
+                    exists (select 1 from events s where s.conversation_id = $1 and s.kind = 'acp_update' and s.payload->'update'->>'sessionUpdate' = 'tool_call'
+                              and coalesce(s.payload->'update'->>'status', 'pending') not in ('completed', 'failed')
+                              and s.seq > coalesce((select max(seq) from events where conversation_id = $1 and kind = 'turn_end'), 0)
+                              and not exists (select 1 from events d where d.conversation_id = $1 and d.kind = 'acp_update' and d.payload->'update'->>'sessionUpdate' = 'tool_call_update'
+                                                and d.payload->'update'->>'toolCallId' = s.payload->'update'->>'toolCallId' and d.payload->'update'->>'status' in ('completed', 'failed')))",
+        )
+        .bind(host)
+        .bind(queue_id)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap_or((false, false));
+
+        if !queued {
+            return false;
+        }
+
+        if !running {
+            return true;
+        }
+
+        tokio::time::sleep(TOOL_WAIT).await;
+    }
+
+    true
 }
 
 pub async fn delivered(state: &AppState, owner: Uuid, queue_id: Uuid) {
