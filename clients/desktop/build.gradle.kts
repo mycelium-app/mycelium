@@ -43,7 +43,13 @@ val downloadWakeAssets = tasks.register("downloadWakeAssets") {
             if (!target.exists() || sha256(target) != source.second) {
                 val partial = File(directory, "$name.partial")
 
-                URI(source.first).toURL().openStream().use { input -> partial.outputStream().use { input.copyTo(it) } }
+                var backoff = 10_000L
+
+                while (runCatching { URI(source.first).toURL().openStream().use { input -> partial.outputStream().use { input.copyTo(it) } } }.isFailure) {
+                    check(backoff <= 90_000L) { "$name could not be downloaded from ${source.first}" }
+                    Thread.sleep(backoff)
+                    backoff *= 3
+                }
 
                 check(sha256(partial) == source.second) { "$name does not match its pinned checksum" }
                 partial.renameTo(target)
