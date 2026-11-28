@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.34.82
+
+- Virtual mode shows only what you wrote: messages Mycelium sends on your behalf (failed-call memories, messages relayed from other conversations, schedules, workflows, mentions and wake-ups) fold into the turn's Worked line, and the queue above the message box lists only what you typed; the others are still delivered. A turn that sent no virtual message shows its last reply as one, so every answer is visible without opening the turn.
+- An agent opens a virtual chat without asking first, and can give it its first message in the same call. It can also close a chat once its topic is settled; writing in it opens it again.
+- A message written in a virtual chat while a tool is running waits for that tool to finish before it reaches the agent, so it no longer makes the running call fail.
+- propose_instructions_edit also takes small edits, the exact old text and its replacement, applied to the revision the agent read.
+- SSH access can be asked for up to 24 hours. More than 4 hours needs a reason for the length, shown on the card.
+
 ## v0.34.81
 
 - Virtual chats: an assistant keeps each topic in a chat of its own, listed under it in the sidebar, while one session answers them all. Each virtual chat has its own messages, attachments and to-do list. Write in one with New virtual chat or from the assistant's menu; the assistant can open one too, after you approve it. A message sent while the assistant is busy is read mid-turn: until then it shows Sending, and Cancel puts it back in the message box. Closing a chat keeps it under the assistant as Closed, and writing in it opens it again.
