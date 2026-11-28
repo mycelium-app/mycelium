@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.34.81
+
+- Virtual chats: an assistant keeps each topic in a chat of its own, listed under it in the sidebar, while one session answers them all. Each virtual chat has its own messages, attachments and to-do list. Write in one with New virtual chat or from the assistant's menu; the assistant can open one too, after you approve it. A message sent while the assistant is busy is read mid-turn: until then it shows Sending, and Cancel puts it back in the message box. Closing a chat keeps it under the assistant as Closed, and writing in it opens it again.
+- Virtual messages: an agent can send you a message with post_virtual_message, to a virtual chat or shown in the conversation it came from as a bubble in the assistant's colour. When a turn started in a virtual chat ends without one, its final text goes to that chat.
+- Virtual mode, in any conversation's More menu, shows only your messages and virtual messages; everything else in a turn folds into one line that opens in place.
+
 ## v0.34.80
 
 - Includes everything in v0.34.79, which was not published: GitHub refused one of the desktop client's wake word downloads during its build. That download now tries again after 10, 30 and 90 seconds before the build gives up.
