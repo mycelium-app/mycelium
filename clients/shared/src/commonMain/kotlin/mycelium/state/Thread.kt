@@ -191,6 +191,8 @@ sealed interface ThreadItem {
 
     data class TurnEnd(override val key: String, val stopReason: String) : ThreadItem
 
+    data class Worked(override val key: String, val tools: Int, val expanded: Boolean) : ThreadItem
+
     data class Failure(override val key: String, val message: String, val limit: UsageLimitNote? = null, val signInRequired: Boolean = false) : ThreadItem
 
     data class Workflow(override val key: String, val progress: WorkflowProgress) : ThreadItem
@@ -306,7 +308,7 @@ class ThreadBuilder {
         val key = "e${event.seq}"
 
         when (event.kind) {
-            EventKinds.UserMessage -> items += userMessageFrom(key, payload)
+            EventKinds.UserMessage -> if (payload.string("origin") != VirtualChatOrigin) items += userMessageFrom(key, payload)
             EventKinds.AcpUpdate -> applyUpdate(items, key, payload, event.createdAt)
             EventKinds.PermissionRequest -> requestPermission(items, permissionFrom(key, payload))
             EventKinds.PermissionResolved -> resolvePermission(items, payload.string("request_id"))
@@ -598,7 +600,7 @@ private fun unfenced(text: String): String {
     return fence.groupValues[1]
 }
 
-private fun planEntries(update: JsonObject): List<PlanEntry> =
+fun planEntries(update: JsonObject): List<PlanEntry> =
     (update["entries"] as? JsonArray).orEmpty().mapNotNull { element ->
         val entry = element as? JsonObject ?: return@mapNotNull null
 
@@ -850,3 +852,65 @@ private fun JsonObject.int(key: String): Int? = string(key)?.toIntOrNull()
 private fun JsonObject.boolean(key: String): Boolean? = string(key)?.toBooleanStrictOrNull()
 
 private fun JsonObject.contentText(): String = (this["content"] as? JsonObject)?.string("text") ?: ""
+
+const val VirtualChatOrigin = "virtual_chat"
+
+private val virtualMessageTool = Regex("mycelium[_.:/ -]+post_virtual_message\\b", RegexOption.IGNORE_CASE)
+
+data class VirtualPost(val text: String, val chat: String?)
+
+fun virtualPost(call: ThreadItem.ToolCall): VirtualPost? {
+    if (!virtualMessageTool.containsMatchIn(call.title)) {
+        return null
+    }
+
+    val text = call.input?.string("text")?.takeIf { it.isNotBlank() } ?: return null
+
+    return VirtualPost(text, call.input.string("chat")?.takeIf { it.isNotBlank() })
+}
+
+fun virtualModeOf(items: List<ThreadItem>, on: Boolean, expanded: Set<String>): List<ThreadItem> {
+    if (!on) {
+        return items
+    }
+
+    val shown = mutableListOf<ThreadItem>()
+    val run = mutableListOf<ThreadItem>()
+
+    fun flush() {
+        val worked = run.filter { it !is ThreadItem.TurnEnd }
+
+        if (worked.isNotEmpty()) {
+            val key = "worked:${worked.first().key}"
+            val open = key in expanded
+
+            shown += ThreadItem.Worked(key, worked.count { it is ThreadItem.ToolCall }, open)
+
+            if (open) {
+                shown += worked
+            }
+        }
+
+        shown += run.filterIsInstance<ThreadItem.TurnEnd>()
+        run.clear()
+    }
+
+    for (item in items) {
+        val kept = when (item) {
+            is ThreadItem.UserMessage, is ThreadItem.Permission, is ThreadItem.Failure -> true
+            is ThreadItem.ToolCall -> virtualPost(item)?.let { it.chat == null } == true
+            else -> false
+        }
+
+        if (kept) {
+            flush()
+            shown += item
+        } else {
+            run += item
+        }
+    }
+
+    flush()
+
+    return shown
+}

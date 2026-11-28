@@ -194,6 +194,8 @@ sealed interface Route {
 
     data class Assistant(val id: String) : Route
 
+    data class VirtualChat(val assistantId: String, val chatId: String) : Route
+
     data object NewAssistant : Route
 
     data class AssistantSettings(val id: String, val section: AssistantSection = AssistantSection.Identity) : Route
@@ -677,10 +679,18 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
                     is Route.Artefact -> ArtefactFullView(store, state, platform, route.id, onBack = { onRoute(Route.Artifacts) }, onOpenNodes = { openNodes(null) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenProjects = { onRoute(Route.Archive) })
                     Route.Assistants, Route.NewAssistant -> AssistantsScreen(store, state, onOpen = { onRoute(Route.Assistant(it.id)) }, onSettings = { onRoute(Route.AssistantSettings(it.id)) }, onNew = { onRoute(Route.NewAssistant) }, creating = route == Route.NewAssistant, onCloseNew = { onRoute(Route.Assistants) })
                     is Route.Assistant -> AssistantScreen(store, state, route.id, onOpenSettings = { onRoute(Route.AssistantSettings(route.id)) }, onManageActions = { onRoute(Route.AssistantSettings(route.id, AssistantSection.SchedulesAndActions)) }, onBack = { onRoute(Route.Assistants) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) })
+                    is Route.VirtualChat -> VirtualChatScreen(store, state, route.assistantId, route.chatId, onBack = { onRoute(Route.Assistant(route.assistantId)) })
                     is Route.AssistantSettings -> AssistantSettingsScreen(store, state, route.id, route.section, onDone = { onRoute(Route.Assistants) }, onBack = { onRoute(Route.Assistant(route.id)) })
                     Route.Activity -> ActivityScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
                     Route.UsageHistory -> UsageHistoryScreen(store)
                     Route.Settings -> CompositionLocalProvider(LocalOpenConversation provides { onRoute(Route.Chat(it)) }) { key(settingsRequest) { SettingsScreen(store, me, store.api.baseUrl, startOn = settingsStart, startGroup = settingsGroup, startGroupTab = settingsGroupTab, startIntegration = settingsIntegration, startNode = settingsNode, onSignOut = onSignOut) } }
+                }
+
+                state.newVirtualChatFor?.let { state.assistants[it] }?.let { assistant ->
+                    NewVirtualChatDialog(store, assistant, onDismiss = { store.askNewVirtualChat(null) }, onCreated = { chat ->
+                        store.askNewVirtualChat(null)
+                        onRoute(Route.VirtualChat(assistant.id, chat.id))
+                    })
                 }
             }
         }

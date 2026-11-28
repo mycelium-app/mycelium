@@ -89,6 +89,11 @@ data class AppState(
     val forgeRevision: Int = 0,
     val chatToolServers: List<mycelium.api.ChatToolServer> = emptyList(),
     val mentionTriggers: List<mycelium.api.MentionTrigger> = emptyList(),
+    val virtualChats: Map<String, mycelium.api.VirtualChat> = emptyMap(),
+    val virtualModes: Set<String> = emptySet(),
+    val newVirtualChatFor: String? = null,
+    val expandedWork: Set<String> = emptySet(),
+    val virtualMessages: Map<String, List<mycelium.api.VirtualMessage>> = emptyMap(),
     val apps: List<mycelium.api.AppSummary>? = null,
     val events: Map<String, List<Event>> = emptyMap(),
     val outlinePages: Map<String, OutlinePage> = emptyMap(),
@@ -203,6 +208,9 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.FeedPosted -> state.copy(feedPosts = mergedFeed(listOf(message.post), state.feedPosts))
 
     is StreamMessage.ScheduleRemoved -> state.copy(schedules = state.schedules - message.scheduleId)
+    is StreamMessage.VirtualChatChanged -> state.copy(virtualChats = state.virtualChats + (message.chat.id to message.chat))
+    is StreamMessage.VirtualMessageChanged -> state.withVirtualMessage(message.message)
+    is StreamMessage.VirtualMessageRemoved -> state.copy(virtualMessages = state.virtualMessages + (message.chatId to state.virtualMessages[message.chatId].orEmpty().filter { it.id != message.messageId }))
 
     is StreamMessage.ArtifactChanged ->
         state.copy(artifacts = if (message.deleted) state.artifacts - message.artifact.id else state.artifacts + (message.artifact.id to message.artifact))
@@ -478,3 +486,12 @@ internal fun Map<String, List<Outgoing>>.withoutFirst(conversationId: String, te
 
     return this + (conversationId to current.filterIndexed { position, _ -> position != index })
 }
+
+fun AppState.withVirtualMessage(message: mycelium.api.VirtualMessage): AppState {
+    val current = virtualMessages[message.chatId] ?: return this
+    val kept = current.filter { it.id != message.id } + message
+
+    return copy(virtualMessages = virtualMessages + (message.chatId to kept.sortedBy { it.createdAt }))
+}
+
+fun AppState.virtualChatsOf(assistantId: String): List<mycelium.api.VirtualChat> = virtualChats.values.filter { it.assistantId == assistantId }.sortedBy { it.createdAt }

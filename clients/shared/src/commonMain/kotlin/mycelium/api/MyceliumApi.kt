@@ -965,6 +965,26 @@ class MyceliumApi(
         call("/schedules/$id") { client.delete(it) { authorise() } }
     }
 
+    suspend fun virtualChats(assistantId: String): List<VirtualChat> = call("/assistants/$assistantId/virtual-chats") { client.get(it) { authorise() } }.body()
+
+    suspend fun createVirtualChat(assistantId: String, title: String): VirtualChat =
+        call("/assistants/$assistantId/virtual-chats") { client.post(it) { authorise(); json(CreateVirtualChatRequest(title)) } }.body()
+
+    suspend fun patchVirtualChat(id: String, request: PatchVirtualChatRequest): VirtualChat =
+        call("/virtual-chats/$id") { client.patch(it) { authorise(); json(request) } }.body()
+
+    suspend fun saveVirtualChatTodos(id: String, request: SaveTodosRequest): VirtualChat =
+        call("/virtual-chats/$id/todos") { client.put(it) { authorise(); json(request) } }.body()
+
+    suspend fun virtualMessages(id: String): List<VirtualMessage> = call("/virtual-chats/$id/messages") { client.get(it) { authorise() } }.body()
+
+    suspend fun sendVirtualMessage(id: String, request: SendVirtualMessageRequest): VirtualMessage =
+        call("/virtual-chats/$id/messages") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun cancelVirtualMessage(id: String, messageId: String) {
+        call("/virtual-chats/$id/messages/$messageId") { client.delete(it) { authorise() } }
+    }
+
     suspend fun mentionTriggers(): List<MentionTrigger> = call("/mention-triggers") { client.get(it) { authorise() } }.body()
 
     suspend fun createMentionTrigger(request: SaveMentionTriggerRequest): MentionTrigger =

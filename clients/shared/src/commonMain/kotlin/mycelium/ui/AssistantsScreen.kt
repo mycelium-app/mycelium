@@ -107,6 +107,7 @@ internal fun AssistantMenuItems(store: Store, state: AppState, assistant: Assist
     val conversation = assistant.conversationId?.let { state.conversations[it] }
 
     MenuItem(if (assistant.pinnedAt == null) "Pin" else "Unpin", onClick = { close(); store.act { store.patchAssistant(assistant, PatchAssistantRequest(pinned = assistant.pinnedAt == null)) } }, leading = MyIcon.Pin)
+    MenuItem("New virtual chat", onClick = { close(); store.askNewVirtualChat(assistant.id) }, leading = MyIcon.Plus)
 
     if (conversation != null && conversation.sessionOpenOn(state.nodes[conversation.nodeId])) {
         MenuItem("Close session", onClick = { close(); store.act { store.api.closeSession(conversation.id) } }, leading = MyIcon.Stop)
@@ -138,8 +139,14 @@ internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, 
         }
     }
 
-    items(assistants, key = { "assistant-${it.id}" }) { assistant ->
+    for (assistant in assistants) {
+    item(key = "assistant-${assistant.id}") {
         val menu = rememberRowMenuState()
+
+        LaunchedEffect(assistant.id) {
+            store.act { store.refreshVirtualChats(assistant.id) }
+        }
+
         val groupName = assistant.groupId?.takeIf { showGroup }?.let { state.groups[it]?.name }
         val shownName = listOfNotNull(groupName, assistant.name).joinToString(" ")
         val pingHeld = store.wellness.holdsPings(LocalHoursView.current?.closed(assistant.groupId) == true)
@@ -186,6 +193,9 @@ internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, 
                 AssistantMenuItems(store, state, assistant, close, onSettings = { onRoute(Route.AssistantSettings(assistant.id)) })
             }
         }
+    }
+
+    virtualChatItems(state, assistant, route, onRoute, onNew = { store.askNewVirtualChat(assistant.id) })
     }
 
     item(key = "assistants-gap") {

@@ -1060,6 +1060,62 @@ class Store(
         shareChatToolServers(servers)
     }
 
+    fun askNewVirtualChat(assistantId: String?) {
+        mutableState.update { it.copy(newVirtualChatFor = assistantId) }
+    }
+
+    fun toggleVirtualMode(conversationId: String) {
+        mutableState.update { it.copy(virtualModes = if (conversationId in it.virtualModes) it.virtualModes - conversationId else it.virtualModes + conversationId) }
+    }
+
+    fun toggleWork(key: String) {
+        mutableState.update { it.copy(expandedWork = if (key in it.expandedWork) it.expandedWork - key else it.expandedWork + key) }
+    }
+
+    suspend fun refreshVirtualChats(assistantId: String) {
+        val chats = api.virtualChats(assistantId)
+
+        mutableState.update { state -> state.copy(virtualChats = state.virtualChats.filterValues { it.assistantId != assistantId } + chats.associateBy { it.id }) }
+    }
+
+    suspend fun createVirtualChat(assistantId: String, title: String): mycelium.api.VirtualChat {
+        val chat = api.createVirtualChat(assistantId, title)
+
+        mutableState.update { it.copy(virtualChats = it.virtualChats + (chat.id to chat)) }
+
+        return chat
+    }
+
+    suspend fun closeVirtualChat(id: String, closed: Boolean) {
+        val chat = api.patchVirtualChat(id, mycelium.api.PatchVirtualChatRequest(closed = closed))
+
+        mutableState.update { it.copy(virtualChats = it.virtualChats + (chat.id to chat)) }
+    }
+
+    suspend fun readVirtualChat(id: String) {
+        val messages = api.virtualMessages(id)
+        val chat = api.patchVirtualChat(id, mycelium.api.PatchVirtualChatRequest(read = true))
+
+        mutableState.update { it.copy(virtualChats = it.virtualChats + (chat.id to chat), virtualMessages = it.virtualMessages + (id to messages)) }
+    }
+
+    suspend fun sendVirtualMessage(id: String, text: String, attachments: List<mycelium.api.Attachment>) {
+        val message = api.sendVirtualMessage(id, mycelium.api.SendVirtualMessageRequest(text, attachments))
+
+        mutableState.update { it.withVirtualMessage(message) }
+    }
+
+    suspend fun cancelVirtualMessage(id: String, messageId: String) {
+        api.cancelVirtualMessage(id, messageId)
+        mutableState.update { it.copy(virtualMessages = it.virtualMessages + (id to it.virtualMessages[id].orEmpty().filter { message -> message.id != messageId })) }
+    }
+
+    suspend fun saveVirtualChatTodos(id: String, todos: List<mycelium.api.TodoItem>) {
+        val chat = api.saveVirtualChatTodos(id, mycelium.api.SaveTodosRequest(todos, tellAgent = false))
+
+        mutableState.update { it.copy(virtualChats = it.virtualChats + (chat.id to chat)) }
+    }
+
     suspend fun refreshMentionTriggers() {
         val triggers = api.mentionTriggers()
 

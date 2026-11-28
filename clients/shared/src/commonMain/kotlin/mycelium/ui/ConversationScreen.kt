@@ -8,6 +8,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import mycelium.api.ModelChoice
 import mycelium.state.sessionOpenOn
 import mycelium.state.awaitingPickUp
+import mycelium.state.virtualModeOf
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.seconds
 import mycelium.api.Routing
@@ -691,6 +692,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     watchStatus = { watched -> state.conversations[watched]?.status },
                     onOpenWatch = onOpenConversation,
                     onStopWatch = { watch -> store.act { api.deleteWatch(watch.id) } },
+                    virtualMode = id in state.virtualModes,
+                    onVirtualMode = { store.toggleVirtualMode(id) },
                 )
 
                 if (elsewhere != null) {
@@ -767,9 +770,9 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
                 conversation.snoozedUntil?.let { until -> SnoozedLine(until, onWake = { store.snooze(conversation, null) }) }
 
-                CompositionLocalProvider(LocalResponseActions provides responses, LocalPausedWorkflow provides PausedWorkflow(conversation.agent, limitActions)) {
+                CompositionLocalProvider(LocalResponseActions provides responses, LocalPausedWorkflow provides PausedWorkflow(conversation.agent, limitActions), LocalWorkToggle provides store::toggleWork, LocalVirtualSpeaker provides state.assistants.values.firstOrNull { it.conversationId == id }) {
                     ThreadView(
-                        items = awaitingPickUp(thread, agentWorking) + listOfNotNull(unexplainedFailure) + listOfNotNull(initialMessage) + outgoing.map { ThreadItem.UserMessage("outgoing:${it.clientId}", it.text, delivery = Delivery(it.clientId, it.failure)) },
+                        items = virtualModeOf(awaitingPickUp(thread, agentWorking), id in state.virtualModes, state.expandedWork) + listOfNotNull(unexplainedFailure) + listOfNotNull(initialMessage) + outgoing.map { ThreadItem.UserMessage("outgoing:${it.clientId}", it.text, delivery = Delivery(it.clientId, it.failure)) },
                         outbox = outboxControls,
                         hasOlder = state.hasOlderEvents(id),
                         loadingOlder = id in state.loadingOlderEvents,
@@ -1039,6 +1042,8 @@ private fun ConversationHeader(
     watchStatus: (String) -> ConversationStatus?,
     onOpenWatch: (String) -> Unit,
     onStopWatch: (Watch) -> Unit,
+    virtualMode: Boolean,
+    onVirtualMode: () -> Unit,
 ) {
     val colors = MyTheme.colors
     var confirmingDelete by remember(conversation.id) { mutableStateOf(false) }
@@ -1205,6 +1210,8 @@ private fun ConversationHeader(
                     if (ideInMore && ide != null) {
                         MenuItem("Open in ${ide.main.label}", onClick = { menuOpen = false; ideMenuOpen = true }, hint = ide.where, leading = MyIcon.Code)
                     }
+
+                    MenuItem("Virtual mode", onClick = { menuOpen = false; onVirtualMode() }, checked = virtualMode, leading = MyIcon.Chat, description = "Virtual mode: ${if (virtualMode) "on" else "off"}")
 
                     if (slots != null) {
                         slots.menu { menuOpen = false }

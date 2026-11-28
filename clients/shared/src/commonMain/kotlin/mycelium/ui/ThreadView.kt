@@ -1,5 +1,7 @@
 package mycelium.ui
 
+import mycelium.state.virtualPost
+
 import androidx.compose.foundation.background
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -356,6 +358,7 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
         is ThreadItem.Permission -> ToolApprovalCard(item, onAnswer)
         is ThreadItem.ResponseEdit -> ResponseEditorCard(item)
         is ThreadItem.TurnEnd -> Unit
+        is ThreadItem.Worked -> WorkedLine(item)
         is ThreadItem.Failure -> if (item.limit != null) {
             UsageLimitCard(item.limit, agent, limitActions, item.message.removePrefix("Internal error: "))
         } else if (item.signInRequired && onSignIn != null && onDismissFailure != null) {
@@ -1081,6 +1084,13 @@ private fun ToolCall(call: ThreadItem.ToolCall, chat: Boolean) {
 
     if (diff != null && call.kind == "edit") {
         DiffCard(diff, call.status)
+        return
+    }
+
+    val posted = virtualPost(call)
+
+    if (posted != null && posted.chat == null) {
+        VirtualBubble(LocalVirtualSpeaker.current, posted.text)
         return
     }
 

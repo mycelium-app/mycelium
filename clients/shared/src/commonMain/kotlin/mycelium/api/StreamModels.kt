@@ -41,6 +41,12 @@ sealed interface StreamMessage {
 
     data class ScheduleRemoved(val scheduleId: String) : StreamMessage
 
+    data class VirtualChatChanged(val chat: VirtualChat) : StreamMessage
+
+    data class VirtualMessageChanged(val message: VirtualMessage) : StreamMessage
+
+    data class VirtualMessageRemoved(val chatId: String, val messageId: String) : StreamMessage
+
     data class ArtifactChanged(val artifact: Artifact, val deleted: Boolean = false) : StreamMessage
 
     data class ArtifactCommentAdded(val artifactId: String) : StreamMessage
@@ -142,6 +148,9 @@ fun parseStreamMessage(text: String): StreamMessage? {
         "feed_post" -> StreamMessage.FeedPosted(MyceliumJson.decodeFromJsonElement(InboxPost.serializer(), element))
         "schedule" -> StreamMessage.ScheduleChanged(MyceliumJson.decodeFromJsonElement(Schedule.serializer(), element))
         "schedule_removed" -> StreamMessage.ScheduleRemoved(element.requireString("schedule_id"))
+        "virtual_chat" -> StreamMessage.VirtualChatChanged(MyceliumJson.decodeFromJsonElement(VirtualChat.serializer(), element))
+        "virtual_message" -> StreamMessage.VirtualMessageChanged(MyceliumJson.decodeFromJsonElement(VirtualMessage.serializer(), element))
+        "virtual_message_removed" -> StreamMessage.VirtualMessageRemoved(element.requireString("chat_id"), element.requireString("message_id"))
         "artifact" -> StreamMessage.ArtifactChanged(
             MyceliumJson.decodeFromJsonElement(Artifact.serializer(), element),
             deleted = (element["deleted"] as? JsonPrimitive)?.contentOrNull == "true",
