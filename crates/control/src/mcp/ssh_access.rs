@@ -12,8 +12,9 @@ pub fn definitions() -> Value {
                 "type": "object",
                 "properties": {
                     "node": {"type": "string", "description": "The node to reach: its name or id."},
-                    "minutes": {"type": "number", "description": "How long the access lasts, 5 to 240. Defaults to 30."},
+                    "minutes": {"type": "number", "description": "How long the access lasts, 5 to 1440 (24 hours). Defaults to 30. More than 240 needs longer_because."},
                     "reason": {"type": "string", "description": "A short reason the person should approve it."},
+                    "longer_because": {"type": "string", "description": "Required for more than 240 minutes: why the work needs more than 4 hours. Shown on the card."},
                 },
                 "required": ["node", "reason"],
             },
@@ -41,7 +42,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
     };
     let minutes = arguments.get("minutes").and_then(Value::as_i64);
 
-    Ok(match ssh_access::request(state, conversation_id, node_name, minutes, reason).await? {
+    Ok(match ssh_access::request(state, conversation_id, node_name, minutes, reason, arguments.get("longer_because").and_then(Value::as_str)).await? {
         Ok(request) => ToolReply::text(&format!("Waiting for the person to approve SSH access to {} (request {}).", request.node_name, request.id), false),
         Err(message) => ToolReply::text(&message, true),
     })

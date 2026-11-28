@@ -22,7 +22,8 @@ use uuid::Uuid;
 
 const DEFAULT_MINUTES: i64 = 30;
 const MIN_MINUTES: i64 = 5;
-const MAX_MINUTES: i64 = 240;
+const MAX_MINUTES: i64 = 1440;
+const UNEXPLAINED_MINUTES: i64 = 240;
 const LISTED: i64 = 100;
 const TOKEN_PREFIX: &str = "myc_ssh_";
 const PERSON_TOKEN_MINUTES: i64 = 10;
@@ -119,12 +120,20 @@ fn publish(state: &AppState, owner: Uuid, row: RequestRow) -> SshAccessRequest {
     request
 }
 
-pub async fn request(state: &AppState, conversation_id: Uuid, node: &str, minutes: Option<i64>, reason: &str) -> ApiResult<Result<SshAccessRequest, String>> {
+pub async fn request(state: &AppState, conversation_id: Uuid, node: &str, minutes: Option<i64>, reason: &str, longer_because: Option<&str>) -> ApiResult<Result<SshAccessRequest, String>> {
     let minutes = minutes.unwrap_or(DEFAULT_MINUTES);
 
     if !(MIN_MINUTES..=MAX_MINUTES).contains(&minutes) {
-        return Ok(Err(format!("Nothing was requested. minutes is {MIN_MINUTES} to {MAX_MINUTES}.")));
+        return Ok(Err(format!("Nothing was requested. minutes is {MIN_MINUTES} to {MAX_MINUTES}, which is 24 hours.")));
     }
+
+    let longer_because = longer_because.map(str::trim).filter(|why| !why.is_empty());
+    let reason = match (minutes > UNEXPLAINED_MINUTES, longer_because) {
+        (true, None) => return Ok(Err(format!("Nothing was requested. Access for more than {UNEXPLAINED_MINUTES} minutes needs longer_because: why the work needs more than 4 hours."))),
+        (true, Some(why)) => format!("{reason}\n\nLonger than 4 hours because: {why}"),
+        (false, _) => reason.to_string(),
+    };
+    let reason = reason.as_str();
 
     let node = node.trim();
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;

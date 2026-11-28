@@ -152,7 +152,7 @@ async fn a_request_names_a_node_and_waits_for_the_person() {
 async fn a_bad_duration_an_unknown_node_or_no_reason_is_refused_and_records_nothing() {
     let fixture = fixture().await;
 
-    for arguments in [json!({"node": "target", "minutes": 4, "reason": "r"}), json!({"node": "target", "minutes": 241, "reason": "r"}), json!({"node": "nowhere", "reason": "r"}), json!({"node": "target", "reason": " "}), json!({"node": " ", "reason": "r"})] {
+    for arguments in [json!({"node": "target", "minutes": 4, "reason": "r"}), json!({"node": "target", "minutes": 241, "reason": "r"}), json!({"node": "target", "minutes": 1441, "reason": "r", "longer_because": "a long build"}), json!({"node": "nowhere", "reason": "r"}), json!({"node": "target", "reason": " "}), json!({"node": " ", "reason": "r"})] {
         let result = tool(&fixture.server, &fixture.agent_node, fixture.conversation, "request_ssh_access", arguments.clone()).await;
 
         assert_eq!(result["isError"], true, "{arguments}: {result}");
@@ -160,6 +160,18 @@ async fn a_bad_duration_an_unknown_node_or_no_reason_is_refused_and_records_noth
     }
 
     assert_eq!(requests(&fixture.server).await.len(), 0);
+}
+
+#[tokio::test]
+async fn a_request_of_up_to_a_day_with_a_reason_for_the_length_is_asked_and_shows_that_reason() {
+    let fixture = fixture().await;
+
+    let result = tool(&fixture.server, &fixture.agent_node, fixture.conversation, "request_ssh_access", json!({"node": "target", "minutes": 1440, "reason": "Test the installer", "longer_because": "The self-update check waits for the next release"})).await;
+
+    assert_eq!(result["isError"], json!(false), "{result}");
+    let listed = requests(&fixture.server).await;
+    assert_eq!(listed[0]["minutes"], json!(1440));
+    assert_eq!(listed[0]["reason"], json!("Test the installer\n\nLonger than 4 hours because: The self-update check waits for the next release"));
 }
 
 #[tokio::test]
